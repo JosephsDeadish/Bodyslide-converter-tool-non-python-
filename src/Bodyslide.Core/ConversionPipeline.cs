@@ -208,6 +208,7 @@ internal static class NifGeometrySignatureReader
     private const int MinPlausibleVertexCount = 256;
     private const int MaxPlausibleVertexCount = 250_000;
     private const float MaxPlausibleCoordinateValue = 8192f;
+    private const int HeuristicScanByteLimit = 64 * 1024;
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
 
@@ -260,6 +261,11 @@ internal static class NifGeometrySignatureReader
             return null;
         }
 
+        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return null;
+        }
+
         var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
         if (embeddedMarkerOffset >= 0)
         {
@@ -268,11 +274,6 @@ internal static class NifGeometrySignatureReader
             {
                 return embeddedSignature;
             }
-        }
-
-        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
-        {
-            return null;
         }
 
         return TryReadHeuristicVertexBlock(bytes);
@@ -293,8 +294,9 @@ internal static class NifGeometrySignatureReader
     private static MeshGeometrySignature? TryReadHeuristicVertexBlock(byte[] bytes)
     {
         MeshGeometrySignature? best = null;
+        var scanLimit = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
 
-        for (var offset = 0; offset <= bytes.Length - sizeof(int); offset += sizeof(int))
+        for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
             if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
@@ -1811,6 +1813,8 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             var normalizedHeight = (vertex.Z - signature.MinZ) / signature.Height;
             var lateralSpread = Math.Abs(vertex.X - centerX) / signature.Width;
 
+            // These normalized height bands approximate common humanoid proportions after the
+            // mesh bounds are projected into 0..1 space (feet near 0, shoulders/head near 1).
             AddIfInRange(scores, "shoulders", normalizedHeight, 0.82, 1.01);
             AddIfInRange(scores, "chest", normalizedHeight, 0.56, 0.82);
             AddIfInRange(scores, "waist", normalizedHeight, 0.40, 0.60);
