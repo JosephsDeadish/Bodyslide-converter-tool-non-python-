@@ -51,6 +51,12 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 ```
 
+## GitHub Actions (manual build)
+
+This repository now includes `.github/workflows/manual-build.yml` with a **manual** trigger only (`workflow_dispatch`), so builds are run when you explicitly start them from Actions.
+
+For approval-gated runs, configure required reviewers on the `manual-build-approval` environment in repository settings. The workflow builds the solution, optionally runs tests, publishes the standalone app, and uploads it as an artifact.
+
 ## Deformation profiles
 
 Pass `--profile <name>` to scale regional morphs toward or away from the neutral body shape. The amplifier scales `(value − 1)` so a value of 1.0 (no change) is always preserved.

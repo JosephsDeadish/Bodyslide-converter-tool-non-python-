@@ -1,0 +1,59 @@
+name: Manual Build and Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        required: true
+        default: Release
+        type: choice
+        options:
+          - Release
+          - Debug
+      run_tests:
+        description: Run test suite
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build standalone app
+    runs-on: ubuntu-latest
+    environment: manual-build-approval
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Build
+        run: dotnet build BodyslideConverter.slnx --configuration ${{ inputs.configuration }} --no-restore
+
+      - name: Test
+        if: ${{ inputs.run_tests }}
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration ${{ inputs.configuration }} --no-build
+
+      - name: Publish standalone app
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration ${{ inputs.configuration }} --no-build --output artifacts/standalone
+
+      - name: Upload standalone artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bodyslide-standalone-${{ inputs.configuration }}
+          path: artifacts/standalone
