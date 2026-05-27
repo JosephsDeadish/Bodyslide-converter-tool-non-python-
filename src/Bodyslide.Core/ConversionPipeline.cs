@@ -67,6 +67,16 @@ public sealed record MeshDependencyMapEntry(
     IReadOnlyList<string> BodyReferences,
     IReadOnlyList<string> PluginMeshReferences);
 
+/// <summary>
+/// Records per-pose clipping risk for each tested animation pose.
+/// High-risk regions are body areas that exceeded the stress threshold in at least one pose.
+/// </summary>
+public sealed record PoseSimulationResult(
+    IReadOnlyList<string> TestedPoses,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> PoseClippingRisk,
+    IReadOnlyList<string> HighRiskRegions,
+    int TotalPosesAtRisk);
+
 public static class PresetCatalog
 {
     private static readonly Dictionary<string, ConversionPreset> Presets = new(StringComparer.OrdinalIgnoreCase)
