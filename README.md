@@ -18,5 +18,5 @@ This repository now contains a standalone .NET solution that bundles a full conv
 ## Run
 
 ```bash
-dotnet run --project /tmp/workspace/JosephsDeadish/Bodyslide-converter-tool-non-python-/src/Bodyslide.Standalone -- "<armor path>" "<target body>" "<optional output directory>"
+dotnet run --project src/Bodyslide.Standalone -- "<armor path>" "<target body>" "<optional output directory>"
 ```

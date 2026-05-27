@@ -10,25 +10,32 @@ public sealed class ConversionOrchestratorTests
         var inputFile = Path.GetTempFileName();
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var exporter = new TestExporter();
+        Directory.CreateDirectory(outputDirectory);
 
-        var orchestrator = new ConversionOrchestrator(
-            new TestImporter(),
-            new TestDetector(),
-            new TestAnalyzer(),
-            new TestConverter(),
-            new TestWeightTransfer(),
-            new TestMorphGenerator(),
-            new TestPhysicsSupport(),
-            exporter);
+        try
+        {
+            var orchestrator = new ConversionOrchestrator(
+                new TestImporter(),
+                new TestDetector(),
+                new TestAnalyzer(),
+                new TestConverter(),
+                new TestWeightTransfer(),
+                new TestMorphGenerator(),
+                new TestPhysicsSupport(),
+                exporter);
 
-        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
-        Assert.True(result.Success);
-        Assert.Equal(outputDirectory, result.OutputDirectory);
-        Assert.Equal(outputDirectory, exporter.ExportPath);
-        Assert.Contains(result.Steps, s => s.StartsWith("mesh-converted:", StringComparison.Ordinal));
-
-        File.Delete(inputFile);
+            Assert.True(result.Success);
+            Assert.Equal(outputDirectory, result.OutputDirectory);
+            Assert.Equal(outputDirectory, exporter.ExportPath);
+            Assert.Contains(result.Steps, s => s.StartsWith("mesh-converted:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -46,6 +53,23 @@ public sealed class ConversionOrchestratorTests
 
         await Assert.ThrowsAsync<FileNotFoundException>(() =>
             orchestrator.ConvertAsync(new ConversionRequest(Path.Combine(Path.GetTempPath(), "missing-input.nif"), "UNP")));
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_ThrowsWhenOutputDirectoryIsInvalid()
+    {
+        var inputFile = Path.GetTempFileName();
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                orchestrator.ConvertAsync(new ConversionRequest(inputFile, "UNP", "invalid\0path")));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+        }
     }
 
     private sealed class TestImporter : IArmorImportService
