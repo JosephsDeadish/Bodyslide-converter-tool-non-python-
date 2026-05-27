@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Bodyslide.Core;
 
-public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false);
+public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false, string? DeformationProfile = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, IReadOnlyList<string> BodyReferenceFiles, string? TemporaryWorkspace = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
@@ -19,6 +19,11 @@ public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, b
 public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetSkeleton, IReadOnlyList<SkeletonBoneMapping> BoneMappings, IReadOnlyList<string> UnsupportedBones);
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
+
+public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml);
+public sealed record TextureSummary(int TotalCount, IReadOnlyList<string> DiffuseFiles, IReadOnlyList<string> NormalFiles, IReadOnlyList<string> MissingNormals);
+public sealed record PluginArmorAddon(string RecordType, IReadOnlyList<string> DetectedMeshPaths);
+public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
 
 public static class PresetCatalog
 {
@@ -198,7 +203,7 @@ public interface ICageGenerationService
 
 public interface IMeshConversionService
 {
-    Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, CancellationToken cancellationToken);
+    Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken);
 }
 
 public interface IWeightTransferService
@@ -249,8 +254,29 @@ public interface IExportService
         PhysicsConfig physics,
         ClippingReport clipping,
         CorrectionResult correction,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis,
+        TextureSummary textureSummary,
         IReadOnlyList<string> steps,
         CancellationToken cancellationToken);
+}
+
+public interface IBodySlideProjectService
+{
+    /// <summary>Generates a BodySlide .osp project file for the converted armor targeting a specific body.</summary>
+    Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken);
+}
+
+public interface ITextureAnalysisService
+{
+    /// <summary>Analyses DDS texture files for normal map coverage and reports missing normal maps.</summary>
+    Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken);
+}
+
+public interface IPluginAnalysisService
+{
+    /// <summary>Scans .esp/.esm/.esl plugin files for ArmorAddon mesh path references and generates patch guidance.</summary>
+    Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken);
 }
 
 public sealed class ConversionOrchestrator(
@@ -266,6 +292,9 @@ public sealed class ConversionOrchestrator(
     IClippingDetectionService clippingDetector,
     IAutoCorrectionService autoCorrection,
     IPhysicsSupportService physicsSupport,
+    IBodySlideProjectService bodySlideProjectService,
+    ITextureAnalysisService textureAnalysisService,
+    IPluginAnalysisService pluginAnalysisService,
     IExportService exporter)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
@@ -291,8 +320,26 @@ public sealed class ConversionOrchestrator(
 
         try
         {
+            var deformationProfile = normalized.Preset?.DeformationProfile ?? normalized.Request.DeformationProfile;
+            if (!string.IsNullOrWhiteSpace(deformationProfile))
+            {
+                steps.Add($"deformation-profile:{deformationProfile}");
+            }
+
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
+
+            var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
+            if (textureSummary.MissingNormals.Count > 0)
+            {
+                steps.Add($"textures:missing-normals={textureSummary.MissingNormals.Count}");
+            }
+
+            var pluginAnalysis = await pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken);
+            if (pluginAnalysis.ScannedPlugins.Count > 0)
+            {
+                steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
+            }
 
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
@@ -308,7 +355,7 @@ public sealed class ConversionOrchestrator(
             var cage = await cageGenerator.BuildAsync(analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"cage:{cage.Mode}");
 
-            var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, cancellationToken);
+            var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, cancellationToken);
             steps.Add($"mesh-converted:{converted.Strategy}");
 
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, cancellationToken);
@@ -333,7 +380,10 @@ public sealed class ConversionOrchestrator(
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
             steps.Add($"physics:{physics.Profile}");
 
-            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, steps, cancellationToken);
+            var bodySlideProject = await bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
+            steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
+
+            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, steps, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
             return new ConversionResult(true, export.OutputDirectory, steps, export.OutputFiles);
@@ -398,6 +448,9 @@ public static class StandaloneConversionModules
             new BasicClippingDetectionService(),
             new BasicAutoCorrectionService(),
             new BasicPhysicsSupportService(),
+            new BodySlideOspProjectService(),
+            new BasicTextureAnalysisService(),
+            new BasicPluginAnalysisService(),
             new LocalExportService());
 }
 
@@ -585,7 +638,7 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
 
 internal sealed class StrategyMeshConversionService : IMeshConversionService
 {
-    public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, CancellationToken cancellationToken)
+    public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken)
     {
         var strategy = analysis.MeshType switch
         {
@@ -598,12 +651,13 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         };
 
         var baseField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        var profileField = DeformationProfileModifier.Apply(baseField, deformationProfile);
         var regionalMorphing = analysis.MeshType switch
         {
-            "plate" => ApplyRigidityConstraints(baseField),
-            "cloth" => ApplySoftClothAmplification(baseField),
-            "physics-enabled" => ApplySoftClothAmplification(baseField),
-            _ => baseField
+            "plate" => ApplyRigidityConstraints(profileField),
+            "cloth" => ApplySoftClothAmplification(profileField),
+            "physics-enabled" => ApplySoftClothAmplification(profileField),
+            _ => profileField
         };
 
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, regionalMorphing));
@@ -841,6 +895,304 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
     }
 }
 
+/// <summary>
+/// Scales each regional morph factor toward or away from 1.0 using a named deformation profile amplifier.
+/// </summary>
+public static class DeformationProfileModifier
+{
+    // Amount to amplify the body transformation delta (value - 1) for each profile.
+    private static readonly IReadOnlyDictionary<string, double> ProfileAmplifiers =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["curvy"]    = 1.15,
+            ["slim"]     = 0.82,
+            ["petite"]   = 0.75,
+            ["athletic"] = 1.08,
+            ["muscular"] = 1.25,
+            ["lean"]     = 0.88
+        };
+
+    public static IReadOnlyDictionary<string, double> Apply(IReadOnlyDictionary<string, double> field, string? profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile) || !ProfileAmplifiers.TryGetValue(profile, out var amplifier))
+        {
+            return field;
+        }
+
+        return field.ToDictionary(
+            pair => pair.Key,
+            pair => 1.0 + ((pair.Value - 1.0) * amplifier),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Returns all supported profile names in alphabetical order.</summary>
+    public static IReadOnlyList<string> All => ProfileAmplifiers.Keys.Order(StringComparer.OrdinalIgnoreCase).ToList();
+}
+
+/// <summary>
+/// Generates a BodySlide .osp project XML file for the converted armor.
+/// The OSP file contains standard slider definitions for the target body type.
+/// </summary>
+internal sealed class BodySlideOspProjectService : IBodySlideProjectService
+{
+    // Standard BodySlide sliders per target body family.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodySliders =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"]  = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
+            ["3BA"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
+            ["BHUNP"] = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
+            ["UNP"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
+            ["HIMBO"] = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
+            ["SAM"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+            ["SOS"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+            ["TBD"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
+            ["UBE"]   = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs"]
+        };
+
+    private static readonly IReadOnlyDictionary<string, string> BodyOutputPaths =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HIMBO"] = @"meshes\actors\character\character assets male\",
+            ["SAM"]   = @"meshes\actors\character\character assets male\",
+            ["SOS"]   = @"meshes\actors\character\character assets male\"
+        };
+
+    private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "HIMBO", "SAM", "SOS"
+    };
+
+    public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
+    {
+        var rawName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "ConvertedArmor";
+        var projectName = new string(rawName.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ').ToArray()).Trim();
+        if (string.IsNullOrWhiteSpace(projectName)) projectName = "ConvertedArmor";
+
+        var sliders = BodySliders.TryGetValue(targetBody, out var bodySliders)
+            ? bodySliders
+            : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
+
+        BodyOutputPaths.TryGetValue(targetBody, out var outputPath);
+        outputPath ??= @"meshes\actors\character\character assets\";
+
+        var isMale = MaleBodies.Contains(targetBody);
+        var gender = isMale ? "male" : "female";
+        var outputFile0 = isMale ? "malebody_0.nif" : "femalebody_0.nif";
+        var outputFile1 = isMale ? "malebody_1.nif" : "femalebody_1.nif";
+
+        var shapeDataFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
+        var sourceFile = $@"{shapeDataFolder}\{projectName}.nif";
+
+        var ospXml = BuildOspXml(projectName, sliders, shapeDataFolder, sourceFile, outputPath, gender, outputFile0, outputFile1);
+
+        return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml));
+    }
+
+    private static string BuildOspXml(
+        string projectName,
+        IReadOnlyList<string> sliders,
+        string setFolder,
+        string sourceFile,
+        string outputPath,
+        string gender,
+        string outputFile0,
+        string outputFile1)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<SliderSetInfo version=\"1\">");
+        sb.AppendLine($"    <SliderSet name=\"{Escape(projectName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
+        sb.AppendLine($"        <SetFolder>{Escape(setFolder)}</SetFolder>");
+        sb.AppendLine($"        <SourceFile>{Escape(sourceFile)}</SourceFile>");
+        sb.AppendLine($"        <OutputPath>{Escape(outputPath)}</OutputPath>");
+        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(outputFile0)}</OutputFile>");
+        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(outputFile1)}</OutputFile>");
+
+        foreach (var slider in sliders)
+        {
+            sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
+            sb.AppendLine("            <Low value=\"0\" />");
+            sb.AppendLine("            <High value=\"100\" />");
+            sb.AppendLine("        </Slider>");
+        }
+
+        sb.AppendLine("    </SliderSet>");
+        sb.AppendLine("</SliderSetInfo>");
+        return sb.ToString();
+    }
+
+    // Minimal XML attribute/content escaping for values embedded in the OSP document.
+    private static string Escape(string value) =>
+        value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+}
+
+/// <summary>
+/// Analyses DDS texture files by reading magic bytes and categorising diffuse vs. normal maps.
+/// Reports diffuse textures that have no matching _n normal map in the set.
+/// </summary>
+internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
+{
+    // DDS magic: "DDS " = 0x44 0x44 0x53 0x20
+    private static readonly byte[] DdsMagic = [0x44, 0x44, 0x53, 0x20];
+
+    public async Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
+    {
+        var diffuseFiles = new List<string>();
+        var normalFiles = new List<string>();
+        var missingNormals = new List<string>();
+
+        foreach (var texturePath in armor.TextureFiles)
+        {
+            if (!File.Exists(texturePath)) continue;
+            if (!Path.GetExtension(texturePath).Equals(".dds", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!await IsValidDdsAsync(texturePath, cancellationToken)) continue;
+
+            var fileName = Path.GetFileName(texturePath);
+            var baseName = Path.GetFileNameWithoutExtension(texturePath);
+
+            if (baseName.EndsWith("_n", StringComparison.OrdinalIgnoreCase) ||
+                baseName.EndsWith("_normal", StringComparison.OrdinalIgnoreCase))
+            {
+                normalFiles.Add(fileName);
+            }
+            else
+            {
+                diffuseFiles.Add(fileName);
+            }
+        }
+
+        foreach (var diffuse in diffuseFiles)
+        {
+            var baseName = Path.GetFileNameWithoutExtension(diffuse);
+            var expectedNormal = baseName + "_n.dds";
+            if (!normalFiles.Any(n => n.Equals(expectedNormal, StringComparison.OrdinalIgnoreCase)))
+            {
+                missingNormals.Add(diffuse);
+            }
+        }
+
+        return new TextureSummary(armor.TextureFiles.Count, diffuseFiles, normalFiles, missingNormals);
+    }
+
+    private static async Task<bool> IsValidDdsAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var header = new byte[4];
+            await using var stream = File.OpenRead(path);
+            var read = await stream.ReadAsync(header.AsMemory(0, 4), cancellationToken);
+            return read == 4 && header.SequenceEqual(DdsMagic);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// Scans .esp/.esm/.esl plugin files for NIF mesh path references and generates guidance
+/// on which ArmorAddon records need to be updated to point at the converted meshes.
+/// </summary>
+internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
+{
+    private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
+
+    // Regex matches paths like "meshes/armor/iron/ironarmor_0.nif"
+    private static readonly System.Text.RegularExpressions.Regex MeshPathPattern =
+        new(@"meshes[\\/][^\x00""<>|?*\x01-\x1F]{1,260}\.nif",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    {
+        var pluginFiles = new List<string>();
+
+        if (Directory.Exists(armor.SourcePath))
+        {
+            pluginFiles.AddRange(Directory.GetFiles(armor.SourcePath, "*.*", SearchOption.AllDirectories)
+                .Where(f => PluginExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+        }
+        else if (File.Exists(armor.SourcePath) &&
+                 PluginExtensions.Contains(Path.GetExtension(armor.SourcePath), StringComparer.OrdinalIgnoreCase))
+        {
+            pluginFiles.Add(armor.SourcePath);
+        }
+
+        var armorAddons = new List<PluginArmorAddon>();
+
+        foreach (var pluginFile in pluginFiles)
+        {
+            var addons = await ScanPluginForMeshPathsAsync(pluginFile, cancellationToken);
+            armorAddons.AddRange(addons);
+        }
+
+        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count);
+        return new PluginAnalysisResult(
+            pluginFiles.Select(f => Path.GetFileName(f) ?? f).ToList(),
+            armorAddons,
+            guidance);
+    }
+
+    private async Task<IReadOnlyList<PluginArmorAddon>> ScanPluginForMeshPathsAsync(string pluginPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
+            // Read the binary as Latin-1 so all byte values survive the round-trip.
+            var content = System.Text.Encoding.Latin1.GetString(bytes);
+
+            var meshPaths = MeshPathPattern.Matches(content)
+                .Select(m => m.Value.Replace('\\', '/'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (meshPaths.Count == 0) return [];
+
+            var recordType = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
+            return [new PluginArmorAddon(recordType, meshPaths)];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+    }
+
+    private static string BuildPatchGuidance(IReadOnlyList<PluginArmorAddon> addons, string targetBody, int pluginCount)
+    {
+        if (pluginCount == 0)
+        {
+            return $"No plugin files found. Add the converted meshes to an existing .esp or create a new patch plugin targeting {targetBody}.";
+        }
+
+        if (addons.Count == 0)
+        {
+            return $"Scanned {pluginCount} plugin file(s) — no mesh path references detected. Verify ArmorAddon (ARMA) records manually in xEdit.";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Found {addons.Count} plugin record(s) with mesh paths. Update each ArmorAddon (ARMA) record to reference the converted {targetBody} meshes:");
+        foreach (var addon in addons)
+        {
+            sb.AppendLine($"  Plugin: {addon.RecordType}");
+            foreach (var path in addon.DetectedMeshPaths.Take(10))
+            {
+                sb.AppendLine($"    {path}  →  [replace with {targetBody} converted path]");
+            }
+
+            if (addon.DetectedMeshPaths.Count > 10)
+            {
+                sb.AppendLine($"    ... and {addon.DetectedMeshPaths.Count - 10} more path(s)");
+            }
+        }
+
+        return sb.ToString().Trim();
+    }
+}
+
 internal sealed class LocalExportService : IExportService
 {
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
@@ -852,6 +1204,9 @@ internal sealed class LocalExportService : IExportService
         PhysicsConfig physics,
         ClippingReport clipping,
         CorrectionResult correction,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis,
+        TextureSummary textureSummary,
         IReadOnlyList<string> steps,
         CancellationToken cancellationToken)
     {
@@ -878,6 +1233,9 @@ internal sealed class LocalExportService : IExportService
             Physics = physics,
             Clipping = clipping,
             Correction = correction,
+            BodySlide = new { bodySlideProject.ProjectName, bodySlideProject.TargetBody, SliderCount = bodySlideProject.Sliders.Count },
+            Plugins = new { ScannedCount = pluginAnalysis.ScannedPlugins.Count, AddonCount = pluginAnalysis.ArmorAddons.Count },
+            Textures = new { textureSummary.TotalCount, DiffuseCount = textureSummary.DiffuseFiles.Count, NormalCount = textureSummary.NormalFiles.Count, MissingNormals = textureSummary.MissingNormals },
             Steps = steps
         };
 
@@ -899,6 +1257,31 @@ internal sealed class LocalExportService : IExportService
         var physicsPath = Path.Combine(outputDirectory, "physics.json");
         await File.WriteAllTextAsync(physicsPath, JsonSerializer.Serialize(physics, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(physicsPath);
+
+        // Write the BodySlide project .osp file for use with the BodySlide application.
+        var ospPath = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}.osp");
+        await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
+        outputFiles.Add(ospPath);
+
+        // Write plugin patch guidance when plugins were found.
+        if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+        {
+            var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            await File.WriteAllTextAsync(pluginPatchPath,
+                JsonSerializer.Serialize(pluginAnalysis, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(pluginPatchPath);
+        }
+
+        // Write texture summary when textures are present.
+        if (textureSummary.TotalCount > 0)
+        {
+            var textureSummaryPath = Path.Combine(outputDirectory, "texture-summary.json");
+            await File.WriteAllTextAsync(textureSummaryPath,
+                JsonSerializer.Serialize(textureSummary, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(textureSummaryPath);
+        }
 
         var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
         var previewPayload = new

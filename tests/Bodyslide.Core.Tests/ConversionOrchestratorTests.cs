@@ -256,6 +256,167 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("UNP Athletic", presets);
     }
 
+    [Fact]
+    public async Task ConvertAsync_StepsIncludeBodySlideStep()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(new TestExporter());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.StartsWith("bodyslide:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDeformationProfile_StepRecordsProfile()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(new TestExporter());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory, DeformationProfile: "curvy"));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("deformation-profile:curvy", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesOspFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            Assert.NotNull(ospFile);
+            var ospContent = await File.ReadAllTextAsync(ospFile);
+            Assert.Contains("<SliderSetInfo", ospContent, StringComparison.Ordinal);
+            Assert.Contains("<Slider name=", ospContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("curvy", 1.15)]
+    [InlineData("slim", 0.82)]
+    [InlineData("petite", 0.75)]
+    [InlineData("muscular", 1.25)]
+    public void DeformationProfileModifier_ScalesDeltaCorrectly(string profile, double amplifier)
+    {
+        // Base chest delta = 0.08 (value 1.08 - 1.0).  After applying amplifier: 1 + (0.08 * amplifier).
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.08 };
+        var result = DeformationProfileModifier.Apply(field, profile);
+
+        var expected = 1.0 + (0.08 * amplifier);
+        Assert.Equal(expected, result["chest"], precision: 10);
+    }
+
+    [Fact]
+    public void DeformationProfileModifier_UnknownProfile_ReturnsUnchangedField()
+    {
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.08 };
+        var result = DeformationProfileModifier.Apply(field, "unknown-profile");
+        Assert.Equal(1.08, result["chest"]);
+    }
+
+    [Fact]
+    public void DeformationProfileModifier_All_ContainsExpectedProfiles()
+    {
+        var profiles = DeformationProfileModifier.All.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("curvy", profiles);
+        Assert.Contains("slim", profiles);
+        Assert.Contains("petite", profiles);
+        Assert.Contains("muscular", profiles);
+        Assert.Contains("lean", profiles);
+        Assert.Contains("athletic", profiles);
+    }
+
+    [Fact]
+    public async Task BodySlideOspProjectService_GeneratesValidXmlForFemaleBody()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            Assert.NotNull(ospFile);
+            var ospXml = await File.ReadAllTextAsync(ospFile);
+            Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
+            Assert.Contains("femalebody_0.nif", ospXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideOspProjectService_GeneratesValidXmlForMaleBody()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "HIMBO", outputDirectory));
+
+            Assert.True(result.Success);
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            Assert.NotNull(ospFile);
+            var ospXml = await File.ReadAllTextAsync(ospFile);
+            Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
+            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("malebody_1.nif", ospXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     private static ConversionOrchestrator BuildTestOrchestrator(IExportService? exporter = null) =>
         new(
             new TestImporter(),
@@ -270,6 +431,9 @@ public sealed class ConversionOrchestratorTests
             new TestClippingDetector(),
             new TestAutoCorrection(),
             new TestPhysicsSupport(),
+            new TestBodySlideProjectService(),
+            new TestTextureAnalysisService(),
+            new TestPluginAnalysisService(),
             exporter ?? new TestExporter());
 
     private sealed class TestImporter : IArmorImportService
@@ -298,7 +462,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestConverter : IMeshConversionService
     {
-        public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, CancellationToken cancellationToken) =>
+        public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken) =>
             Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { { "chest", 1.0 } }));
     }
 
@@ -344,6 +508,24 @@ public sealed class ConversionOrchestratorTests
             Task.FromResult(new PhysicsConfig(physicsProfile));
     }
 
+    private sealed class TestBodySlideProjectService : IBodySlideProjectService
+    {
+        public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new BodySlideProject("TestArmor", targetBody, ["Belly", "Butt"], "<SliderSetInfo />"));
+    }
+
+    private sealed class TestTextureAnalysisService : ITextureAnalysisService
+    {
+        public Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken) =>
+            Task.FromResult(new TextureSummary(0, [], [], []));
+    }
+
+    private sealed class TestPluginAnalysisService : IPluginAnalysisService
+    {
+        public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new PluginAnalysisResult([], [], "no plugins"));
+    }
+
     private sealed class TestExporter : IExportService
     {
         public string? ExportPath { get; private set; }
@@ -357,6 +539,9 @@ public sealed class ConversionOrchestratorTests
             PhysicsConfig physics,
             ClippingReport clipping,
             CorrectionResult correction,
+            BodySlideProject bodySlideProject,
+            PluginAnalysisResult pluginAnalysis,
+            TextureSummary textureSummary,
             IReadOnlyList<string> steps,
             CancellationToken cancellationToken)
         {

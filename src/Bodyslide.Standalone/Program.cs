@@ -11,13 +11,25 @@ if (args.Contains("--list-presets", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--list-profiles", StringComparer.OrdinalIgnoreCase))
+{
+    Console.WriteLine("Available deformation profiles:");
+    foreach (var profile in DeformationProfileModifier.All)
+    {
+        Console.WriteLine($" - {profile}");
+    }
+
+    return;
+}
+
 if (!TryParseRequest(args, out var request, out var error))
 {
     Console.WriteLine(error);
     Console.WriteLine("Usage:");
     Console.WriteLine("  Bodyslide.Standalone <armor path> <target body> [output directory]");
-    Console.WriteLine("  Bodyslide.Standalone --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--output-zip]");
+    Console.WriteLine("  Bodyslide.Standalone --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--output-zip]");
     Console.WriteLine("  Bodyslide.Standalone --list-presets");
+    Console.WriteLine("  Bodyslide.Standalone --list-profiles");
     return;
 }
 
@@ -51,6 +63,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("target", out var target);
     parsed.TryGetValue("output", out var output);
     parsed.TryGetValue("preset", out var preset);
+    parsed.TryGetValue("profile", out var profile);
     var outputZip = parsed.ContainsKey("output-zip");
 
     if (string.IsNullOrWhiteSpace(input))
@@ -65,7 +78,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         return false;
     }
 
-    request = new ConversionRequest(input, target ?? string.Empty, output, preset, outputZip);
+    request = new ConversionRequest(input, target ?? string.Empty, output, preset, outputZip, profile);
     return true;
 }
 
