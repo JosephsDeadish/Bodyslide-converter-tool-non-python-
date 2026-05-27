@@ -141,7 +141,7 @@ public sealed class ConversionOrchestratorTests
     private sealed class TestImporter : IArmorImportService
     {
         public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken) =>
-            Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], []));
+            Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
     }
 
     private sealed class TestDetector : IBodyDetectionService
@@ -165,7 +165,7 @@ public sealed class ConversionOrchestratorTests
     private sealed class TestConverter : IMeshConversionService
     {
         public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, CancellationToken cancellationToken) =>
-            Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { ["chest"] = 1.0 }));
+            Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { { "chest", 1.0 } }));
     }
 
     private sealed class TestWeightTransfer : IWeightTransferService
@@ -183,7 +183,7 @@ public sealed class ConversionOrchestratorTests
     private sealed class TestClippingDetector : IClippingDetectionService
     {
         public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
-            Task.FromResult(new ClippingReport(false, ["thighs"]));
+            Task.FromResult(new ClippingReport(false, ["thighs"], ["pose-simulation"]));
     }
 
     private sealed class TestAutoCorrection : IAutoCorrectionService

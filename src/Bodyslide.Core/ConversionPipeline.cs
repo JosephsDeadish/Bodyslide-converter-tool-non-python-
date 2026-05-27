@@ -5,14 +5,14 @@ namespace Bodyslide.Core;
 
 public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
-public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, string? TemporaryWorkspace = null);
+public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, IReadOnlyList<string> BodyReferenceFiles, string? TemporaryWorkspace = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount);
 public sealed record DeformationCage(string Mode);
 public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred);
 public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
-public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions);
+public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 public sealed record CorrectionResult(bool Applied, string Method);
 public sealed record PhysicsConfig(string Profile);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
@@ -211,7 +211,7 @@ public sealed class ConversionOrchestrator(
         try
         {
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
-            steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count}");
+            steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
 
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
@@ -346,8 +346,18 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
         var textureFiles = EnumerateFiles(sourcePath, [".dds", ".png", ".tga"]);
         var physicsFiles = EnumerateFiles(sourcePath, [".xml", ".hkx"]);
+        var bodyReferenceFiles = EnumerateFiles(sourcePath, [".tri", ".osp", ".nif"])
+            .Where(path =>
+            {
+                var fileName = Path.GetFileNameWithoutExtension(path);
+                return !string.IsNullOrWhiteSpace(fileName) &&
+                    (fileName.Contains("body", StringComparison.OrdinalIgnoreCase) ||
+                    fileName.Contains("reference", StringComparison.OrdinalIgnoreCase) ||
+                    fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase));
+            })
+            .ToList();
 
-        return Task.FromResult(new ImportedArmor(sourcePath, meshFiles, textureFiles, physicsFiles, temporaryWorkspace));
+        return Task.FromResult(new ImportedArmor(sourcePath, meshFiles, textureFiles, physicsFiles, bodyReferenceFiles, temporaryWorkspace));
     }
 
     private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions)
@@ -368,6 +378,11 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
+    private const double MeshTokenWeight = 0.5;
+    private const double TextureTokenWeight = 0.3;
+    private const double PhysicsTokenWeight = 0.1;
+    private const double PhysicsExpectationBoostValue = 0.1;
+
     public Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
@@ -415,8 +430,14 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             evidence.Add($"physics:{physicsHitRatio:P0}");
         }
 
-        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 0.1 : 0;
-        var score = Math.Clamp((meshHitRatio * 0.5) + (textureHitRatio * 0.3) + (physicsHitRatio * 0.1) + physicsExpectationBoost, 0, 1);
+        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
+        var score = Math.Clamp(
+            (meshHitRatio * MeshTokenWeight) +
+            (textureHitRatio * TextureTokenWeight) +
+            (physicsHitRatio * PhysicsTokenWeight) +
+            physicsExpectationBoost,
+            0,
+            1);
         return (template, score, evidence);
     }
 
@@ -448,7 +469,11 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         var physicsEnabled = armor.PhysicsFiles.Count > 0 ||
             fileNames.Any(name => name.Contains("smp") || name.Contains("cbpc"));
 
-        return Task.FromResult(new MeshAnalysis(meshType, physicsEnabled, armor.MeshFiles.Count));
+        var finalMeshType = physicsEnabled && meshType is "cloth" or "skin-tight"
+            ? "physics-enabled"
+            : meshType;
+
+        return Task.FromResult(new MeshAnalysis(finalMeshType, physicsEnabled, armor.MeshFiles.Count));
     }
 }
 
@@ -459,6 +484,7 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
         var mode = analysis.MeshType switch
         {
             "plate" => "rigid-regional-cage",
+            "physics-enabled" => "physics-stabilized-cage",
             "cloth" => "smooth-adaptive-cage",
             "skin-tight" => "body-field-cage",
             _ => "hybrid-cage"
@@ -475,6 +501,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var strategy = analysis.MeshType switch
         {
             "cloth" => "cage+shrinkwrap+curvature-preserve",
+            "physics-enabled" => "cage+smooth-projection+physics-stabilized",
             "plate" => "cage+rigid-islands+normal-preservation",
             "leather" => "cage+local-cluster-smoothing",
             "skin-tight" => "body-transform-field",
@@ -486,6 +513,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         {
             "plate" => ApplyRigidityConstraints(baseField),
             "cloth" => ApplySoftClothAmplification(baseField),
+            "physics-enabled" => ApplySoftClothAmplification(baseField),
             _ => baseField
         };
 
@@ -525,12 +553,17 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
         {
             "plate" => new[] { "shoulders", "armpits" },
             "cloth" => new[] { "thighs", "butt" },
+            "physics-enabled" => new[] { "breasts", "thighs", "butt", "armpits" },
             "skin-tight" => new[] { "breasts", "thighs", "butt" },
             _ => new[] { "armpits", "thighs" }
         };
 
-        var hasClipping = mesh.MeshType is "cloth" or "skin-tight";
-        return Task.FromResult(new ClippingReport(hasClipping, riskRegions));
+        var detectionMethods = mesh.MeshType is "physics-enabled" or "skin-tight"
+            ? new[] { "pose-simulation", "animation-stress", "voxel-penetration" }
+            : new[] { "pose-simulation", "animation-stress" };
+
+        var hasClipping = mesh.MeshType is "cloth" or "skin-tight" or "physics-enabled";
+        return Task.FromResult(new ClippingReport(hasClipping, riskRegions, detectionMethods));
     }
 }
 
@@ -581,7 +614,8 @@ internal sealed class LocalExportService : IExportService
                 armor.SourcePath,
                 MeshCount = armor.MeshFiles.Count,
                 TextureCount = armor.TextureFiles.Count,
-                PhysicsCount = armor.PhysicsFiles.Count
+                PhysicsCount = armor.PhysicsFiles.Count,
+                BodyReferenceCount = armor.BodyReferenceFiles.Count
             },
             Analysis = analysis,
             Converted = mesh,
@@ -610,6 +644,20 @@ internal sealed class LocalExportService : IExportService
         var physicsPath = Path.Combine(outputDirectory, "physics.json");
         await File.WriteAllTextAsync(physicsPath, JsonSerializer.Serialize(physics, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(physicsPath);
+
+        var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
+        var previewPayload = new
+        {
+            Mode = "placeholder",
+            Captures = new[]
+            {
+                "front",
+                "side",
+                "back"
+            }
+        };
+        await File.WriteAllTextAsync(previewPath, JsonSerializer.Serialize(previewPayload, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        outputFiles.Add(previewPath);
 
         var logPath = Path.Combine(outputDirectory, "conversion.log");
         await File.WriteAllLinesAsync(logPath, steps, cancellationToken);

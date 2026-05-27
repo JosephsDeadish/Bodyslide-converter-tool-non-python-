@@ -12,6 +12,7 @@ This repository contains a standalone .NET conversion tool that bundles core con
 - physics profile generation
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
+- preview metadata output (`preview-renders.json`) for downstream rendering integration
 
 ## Projects
 
