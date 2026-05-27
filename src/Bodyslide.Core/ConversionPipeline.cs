@@ -14,7 +14,18 @@ public sealed record WeightedMesh(string MeshType, string WeightProfile, bool Ph
 public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 public sealed record CorrectionResult(bool Applied, string Method);
-public sealed record PhysicsConfig(string Profile);
+public sealed record PhysicsConfig(string Profile, string? CbpcConfigXml = null, string? SmpConfigXml = null);
+public sealed record VanillaArmorEntry(
+    string Name,
+    IReadOnlyList<string> MeshFileTokens,
+    string SourceBody,
+    IReadOnlyList<string> RegionSlots,
+    string RecommendedProfile);
+public sealed record VoxelCollisionResult(
+    bool HasPenetrations,
+    IReadOnlyList<string> AffectedRegions,
+    IReadOnlyDictionary<string, double> PushOutMagnitudes,
+    int GridResolution);
 public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, bool IsPhysicsBone);
 public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetSkeleton, IReadOnlyList<SkeletonBoneMapping> BoneMappings, IReadOnlyList<string> UnsupportedBones);
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
@@ -285,6 +296,23 @@ public interface IPluginAnalysisService
     Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken);
 }
 
+public interface IVanillaArmorLookupService
+{
+    /// <summary>Tries to match a mesh file name against the vanilla armor static database.</summary>
+    bool TryLookup(string meshFileName, out VanillaArmorEntry? entry);
+
+    IReadOnlyList<VanillaArmorEntry> All { get; }
+}
+
+public interface IVoxelCollisionService
+{
+    /// <summary>
+    /// Computes voxel-grid penetration between the converted mesh and the target body,
+    /// returning push-out magnitudes per body region.
+    /// </summary>
+    Task<VoxelCollisionResult> ComputeAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken);
+}
+
 public sealed class ConversionOrchestrator(
     IArmorImportService importer,
     IBodyDetectionService bodyDetector,
@@ -301,6 +329,8 @@ public sealed class ConversionOrchestrator(
     IBodySlideProjectService bodySlideProjectService,
     ITextureAnalysisService textureAnalysisService,
     IPluginAnalysisService pluginAnalysisService,
+    IVanillaArmorLookupService vanillaArmorLookup,
+    IVoxelCollisionService voxelCollision,
     IExportService exporter)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
@@ -334,6 +364,14 @@ public sealed class ConversionOrchestrator(
 
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
+
+            // Vanilla armor database lookup — enriches detection with known region maps.
+            var vanillaEntry = armor.MeshFiles
+                .Select(mesh => vanillaArmorLookup.TryLookup(Path.GetFileName(mesh), out var entry) ? entry : null)
+                .FirstOrDefault(entry => entry is not null);
+            steps.Add(vanillaEntry is not null
+                ? $"vanilla-armor:{vanillaEntry.Name},profile={vanillaEntry.RecommendedProfile},slots={vanillaEntry.RegionSlots.Count}"
+                : "vanilla-armor:unknown");
 
             var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
             if (textureSummary.MissingNormals.Count > 0)
@@ -381,6 +419,13 @@ public sealed class ConversionOrchestrator(
 
             var correction = await autoCorrection.CorrectAsync(converted, clipping, cancellationToken);
             steps.Add($"correction:{(correction.Applied ? correction.Method : "not-required")}");
+
+            // Voxel collision offset pass — detects body/armor penetrations using a
+            // simplified voxel grid and computes per-region push-out magnitudes.
+            var voxelResult = await voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
+            steps.Add(voxelResult.HasPenetrations
+                ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
+                : "voxel-collision:none");
 
             var physicsProfile = normalized.Preset?.PhysicsProfile ?? "smp+cbpc";
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
@@ -484,6 +529,8 @@ public static class StandaloneConversionModules
             new BodySlideOspProjectService(),
             new BasicTextureAnalysisService(),
             new BasicPluginAnalysisService(),
+            new VanillaArmorLookupService(),
+            new SimplifiedVoxelCollisionService(),
             new LocalExportService());
 }
 
@@ -758,8 +805,108 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 
 internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 {
-    public Task<PhysicsConfig> BuildAsync(WeightedMesh mesh, string targetBody, string physicsProfile, CancellationToken cancellationToken) =>
-        Task.FromResult(new PhysicsConfig(physicsProfile));
+    private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "HIMBO", "SAM", "SOS"
+    };
+
+    public Task<PhysicsConfig> BuildAsync(WeightedMesh mesh, string targetBody, string physicsProfile, CancellationToken cancellationToken)
+    {
+        var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
+        var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
+        var isMale  = MaleBodies.Contains(targetBody);
+
+        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale) : null;
+        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale) : null;
+
+        return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
+    }
+
+    private static string BuildCbpcXml(bool isMale)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<CBPCConfig version=\"1\">");
+        if (isMale)
+        {
+            sb.AppendLine("  <PecPhysics>");
+            sb.AppendLine("    <Stiffness>0.88</Stiffness>");
+            sb.AppendLine("    <Damping>0.62</Damping>");
+            sb.AppendLine("    <Gravity>0.04</Gravity>");
+            sb.AppendLine("    <MaxOffset>0.06</MaxOffset>");
+            sb.AppendLine("  </PecPhysics>");
+            sb.AppendLine("  <BellyPhysics>");
+            sb.AppendLine("    <Stiffness>0.92</Stiffness>");
+            sb.AppendLine("    <Damping>0.65</Damping>");
+            sb.AppendLine("    <Gravity>0.03</Gravity>");
+            sb.AppendLine("    <MaxOffset>0.04</MaxOffset>");
+            sb.AppendLine("  </BellyPhysics>");
+        }
+        else
+        {
+            sb.AppendLine("  <BreastPhysics>");
+            sb.AppendLine("    <Stiffness>0.90</Stiffness>");
+            sb.AppendLine("    <Damping>0.60</Damping>");
+            sb.AppendLine("    <Gravity>0.05</Gravity>");
+            sb.AppendLine("    <MaxOffset>0.08</MaxOffset>");
+            sb.AppendLine("  </BreastPhysics>");
+            sb.AppendLine("  <ButtPhysics>");
+            sb.AppendLine("    <Stiffness>0.85</Stiffness>");
+            sb.AppendLine("    <Damping>0.55</Damping>");
+            sb.AppendLine("    <Gravity>0.06</Gravity>");
+            sb.AppendLine("    <MaxOffset>0.06</MaxOffset>");
+            sb.AppendLine("  </ButtPhysics>");
+            sb.AppendLine("  <BellyPhysics>");
+            sb.AppendLine("    <Stiffness>0.92</Stiffness>");
+            sb.AppendLine("    <Damping>0.65</Damping>");
+            sb.AppendLine("    <Gravity>0.03</Gravity>");
+            sb.AppendLine("    <MaxOffset>0.04</MaxOffset>");
+            sb.AppendLine("  </BellyPhysics>");
+        }
+
+        sb.AppendLine("</CBPCConfig>");
+        return sb.ToString();
+    }
+
+    private static string BuildSmpXml(string targetBody, bool isMale)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
+        if (isMale)
+        {
+            sb.AppendLine("  <bone name=\"NPC L Pec\" mass=\"2.5\" stiffness=\"0.85\" damping=\"0.60\">");
+            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.15\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC R Pec\" mass=\"2.5\" stiffness=\"0.85\" damping=\"0.60\">");
+            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.15\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"0.90\" damping=\"0.65\">");
+            sb.AppendLine("    <angularLimit min=\"-8\" max=\"8\" restitution=\"0.10\" />");
+            sb.AppendLine("  </bone>");
+        }
+        else
+        {
+            sb.AppendLine("  <bone name=\"NPC L Breast01\" mass=\"2.0\" stiffness=\"0.80\" damping=\"0.50\">");
+            sb.AppendLine("    <angularLimit min=\"-20\" max=\"20\" restitution=\"0.20\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC R Breast01\" mass=\"2.0\" stiffness=\"0.80\" damping=\"0.50\">");
+            sb.AppendLine("    <angularLimit min=\"-20\" max=\"20\" restitution=\"0.20\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"0.90\" damping=\"0.60\">");
+            sb.AppendLine("    <angularLimit min=\"-10\" max=\"10\" restitution=\"0.10\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC L Butt\" mass=\"1.8\" stiffness=\"0.75\" damping=\"0.55\">");
+            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.20\" />");
+            sb.AppendLine("  </bone>");
+            sb.AppendLine("  <bone name=\"NPC R Butt\" mass=\"1.8\" stiffness=\"0.75\" damping=\"0.55\">");
+            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.20\" />");
+            sb.AppendLine("  </bone>");
+        }
+
+        sb.AppendLine("</system>");
+        return sb.ToString();
+    }
 }
 
 /// <summary>
@@ -1299,6 +1446,22 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllTextAsync(physicsPath, JsonSerializer.Serialize(physics, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(physicsPath);
 
+        // Write CBPC physics config XML when present.
+        if (!string.IsNullOrWhiteSpace(physics.CbpcConfigXml))
+        {
+            var cbpcPath = Path.Combine(outputDirectory, "cbpc-config.xml");
+            await File.WriteAllTextAsync(cbpcPath, physics.CbpcConfigXml, cancellationToken);
+            outputFiles.Add(cbpcPath);
+        }
+
+        // Write SMP physics config XML when present.
+        if (!string.IsNullOrWhiteSpace(physics.SmpConfigXml))
+        {
+            var smpPath = Path.Combine(outputDirectory, "smp-config.xml");
+            await File.WriteAllTextAsync(smpPath, physics.SmpConfigXml, cancellationToken);
+            outputFiles.Add(smpPath);
+        }
+
         // Write the BodySlide project .osp file for use with the BodySlide application.
         var ospPath = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}.osp");
         await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
@@ -1446,5 +1609,148 @@ internal sealed class LocalExportService : IExportService
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vanilla Armor Static Database
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Static database of canonical vanilla Skyrim armor entries used to pre-populate
+/// region maps and recommended deformation profiles without requiring user input.
+/// </summary>
+internal static class VanillaArmorDatabase
+{
+    public static readonly IReadOnlyList<VanillaArmorEntry> Entries =
+    [
+        new("Iron Armor",             ["ironarmor", "ironplate"],                    "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "curvy"),
+        new("Iron Helmet",            ["ironhelmet"],                                "Vanilla", ["42:Circlet"],                     "curvy"),
+        new("Steel Armor",            ["steelarmor", "steelplate"],                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Steel Helmet",           ["steelhelmet"],                               "Vanilla", ["42:Circlet"],                     "athletic"),
+        new("Steel Plate Armor",      ["steelplatearmor"],                           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Dwarven Armor",          ["dwarvenarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Dwarven Helmet",         ["dwarvenhelmet"],                             "Vanilla", ["42:Circlet"],                     "athletic"),
+        new("Elven Armor",            ["elvenarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Elven Helmet",           ["elvenhelmet"],                               "Vanilla", ["42:Circlet"],                     "slim"),
+        new("Elven Gilded Armor",     ["elvengildedarmor"],                          "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Glass Armor",            ["glassarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Glass Helmet",           ["glasshelmet"],                               "Vanilla", ["42:Circlet"],                     "slim"),
+        new("Ebony Armor",            ["ebonyarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Ebony Helmet",           ["ebonyhelmet"],                               "Vanilla", ["42:Circlet"],                     "muscular"),
+        new("Daedric Armor",          ["daedricarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Daedric Helmet",         ["daedrichelmet"],                             "Vanilla", ["42:Circlet"],                     "muscular"),
+        new("Dragonplate Armor",      ["dragonplatearmor", "dragonplate"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Dragonscale Armor",      ["dragonscalearmor", "dragonscale"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Leather Armor",          ["leatherarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Hide Armor",             ["hidearmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Studded Armor",          ["studdedarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Imperial Light Armor",   ["imperiallightarmor", "imperiallight"],       "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Imperial Heavy Armor",   ["imperialheavyarmor", "imperialheavy"],       "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Stormcloak Cuirass",     ["stormcloakcuirass", "stormcloak"],           "Vanilla", ["32:Body"],                        "athletic"),
+        new("Ancient Nord Armor",     ["ancientswordsman", "ancientnord"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Forsworn Armor",         ["forswornarmor", "forsworn"],                 "Vanilla", ["32:Body"],                        "curvy"),
+        new("Fur Armor",              ["furarmor"],                                  "Vanilla", ["32:Body"],                        "slim"),
+        new("Mage Robes",             ["magescholarsrobe", "magerobe", "collegerobe"], "Vanilla", ["32:Body"],                     "slim"),
+        new("Thieves Guild Armor",    ["thievesguildarmor", "tgarmor"],              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Dark Brotherhood Armor", ["dbrobes", "darkbrotherhood"],               "Vanilla", ["32:Body"],                        "slim"),
+        new("Nightingale Armor",      ["nightingalearmor", "nightingale"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Blades Armor",           ["bladearmor", "bladesamurai"],                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Guard Armor",            ["guardarmor", "guardcuirass"],                "Vanilla", ["32:Body"],                        "athletic"),
+    ];
+}
+
+/// <summary>
+/// Looks up a mesh file name against the vanilla armor static database.
+/// Strips weight suffixes (_0/_1) before matching tokens.
+/// </summary>
+internal sealed class VanillaArmorLookupService : IVanillaArmorLookupService
+{
+    public IReadOnlyList<VanillaArmorEntry> All => VanillaArmorDatabase.Entries;
+
+    public bool TryLookup(string meshFileName, out VanillaArmorEntry? entry)
+    {
+        var baseName = Path.GetFileNameWithoutExtension(meshFileName) ?? string.Empty;
+
+        // Strip weight variant suffixes so "ironarmor_0.nif" matches the "ironarmor" token.
+        if (baseName.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            baseName.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName[..^2];
+        }
+
+        foreach (var candidate in VanillaArmorDatabase.Entries)
+        {
+            if (candidate.MeshFileTokens.Any(token =>
+                baseName.Contains(token, StringComparison.OrdinalIgnoreCase)))
+            {
+                entry = candidate;
+                return true;
+            }
+        }
+
+        entry = null;
+        return false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simplified Voxel Collision Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Approximates voxel-grid penetration between the converted armor and the target body.
+/// <para>
+/// Each body region (chest, waist, pelvis, legs, shoulders) is modelled as a uniform
+/// voxel grid. A vertex is considered to be penetrating when the applied regional
+/// morph factor causes the body to expand beyond a mesh-type-specific threshold.
+/// The push-out magnitude is the excess scaled by the grid resolution.
+/// </para>
+/// </summary>
+internal sealed class SimplifiedVoxelCollisionService : IVoxelCollisionService
+{
+    private const int GridResolution = 8;
+
+    // Penetration threshold by mesh type: factor above which a region is considered
+    // to have body vertices overlapping the armor after conversion.
+    private static readonly IReadOnlyDictionary<string, double> PenetrationThresholds =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["plate"]           = 1.10, // Rigid armor needs substantial expansion to penetrate
+            ["leather"]         = 1.07,
+            ["cloth"]           = 1.04, // Soft materials clip at much smaller deltas
+            ["skin-tight"]      = 1.03,
+            ["physics-enabled"] = 1.04,
+            ["mixed"]           = 1.06
+        };
+
+    public Task<VoxelCollisionResult> ComputeAsync(
+        ImportedArmor armor,
+        ConvertedMesh mesh,
+        string targetBody,
+        CancellationToken cancellationToken)
+    {
+        PenetrationThresholds.TryGetValue(mesh.MeshType, out var threshold);
+        threshold = threshold == 0 ? 1.06 : threshold;
+
+        var affectedRegions = new List<string>();
+        var pushOutMagnitudes = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+        {
+            if (morphFactor <= threshold) continue;
+
+            // Push-out magnitude: excess above threshold scaled by grid resolution
+            // so the value is expressed in voxel cell units (0 = no push-out needed).
+            var pushOut = Math.Round((morphFactor - threshold) * GridResolution, 4);
+            affectedRegions.Add(region);
+            pushOutMagnitudes[region] = pushOut;
+        }
+
+        return Task.FromResult(new VoxelCollisionResult(
+            affectedRegions.Count > 0,
+            affectedRegions,
+            pushOutMagnitudes,
+            GridResolution));
     }
 }

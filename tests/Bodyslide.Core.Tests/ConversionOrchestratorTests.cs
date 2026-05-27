@@ -501,6 +501,8 @@ public sealed class ConversionOrchestratorTests
             new TestBodySlideProjectService(),
             new TestTextureAnalysisService(),
             new TestPluginAnalysisService(),
+            new TestVanillaArmorLookup(),
+            new TestVoxelCollision(),
             exporter ?? new TestExporter());
 
     private sealed class TestImporter : IArmorImportService
@@ -593,6 +595,23 @@ public sealed class ConversionOrchestratorTests
             Task.FromResult(new PluginAnalysisResult([], [], "no plugins"));
     }
 
+    private sealed class TestVanillaArmorLookup : IVanillaArmorLookupService
+    {
+        public IReadOnlyList<VanillaArmorEntry> All => [];
+
+        public bool TryLookup(string meshFileName, out VanillaArmorEntry? entry)
+        {
+            entry = null;
+            return false;
+        }
+    }
+
+    private sealed class TestVoxelCollision : IVoxelCollisionService
+    {
+        public Task<VoxelCollisionResult> ComputeAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 8));
+    }
+
     private sealed class TestExporter : IExportService
     {
         public string? ExportPath { get; private set; }
@@ -615,6 +634,289 @@ public sealed class ConversionOrchestratorTests
             ExportPath = request.OutputDirectory ?? throw new InvalidOperationException("Output should be provided for this test.");
             Directory.CreateDirectory(ExportPath);
             return Task.FromResult<(string, IReadOnlyList<string>)>((ExportPath, []));
+        }
+    }
+}
+
+public sealed class VanillaArmorLookupTests
+{
+    [Fact]
+    public void TryLookup_KnownIronArmorMesh_ReturnsEntry()
+    {
+        var service = new VanillaArmorLookupService();
+
+        var found = service.TryLookup("ironarmor_0.nif", out var entry);
+
+        Assert.True(found);
+        Assert.NotNull(entry);
+        Assert.Equal("Iron Armor", entry!.Name);
+        Assert.Equal("Vanilla", entry.SourceBody);
+        Assert.Contains("32:Body", entry.RegionSlots);
+    }
+
+    [Fact]
+    public void TryLookup_KnownIronArmorMesh_WeightSuffixStripped()
+    {
+        var service = new VanillaArmorLookupService();
+
+        var found0 = service.TryLookup("ironarmor_0.nif", out var entry0);
+        var found1 = service.TryLookup("ironarmor_1.nif", out var entry1);
+
+        Assert.True(found0);
+        Assert.True(found1);
+        Assert.Equal(entry0!.Name, entry1!.Name);
+    }
+
+    [Fact]
+    public void TryLookup_UnknownMesh_ReturnsFalse()
+    {
+        var service = new VanillaArmorLookupService();
+
+        var found = service.TryLookup("modded_fancy_armor.nif", out var entry);
+
+        Assert.False(found);
+        Assert.Null(entry);
+    }
+
+    [Fact]
+    public void All_ContainsCoreVanillaArmors()
+    {
+        var service = new VanillaArmorLookupService();
+        var names = service.All.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("Iron Armor",      names);
+        Assert.Contains("Daedric Armor",   names);
+        Assert.Contains("Glass Armor",     names);
+        Assert.Contains("Nightingale Armor", names);
+        Assert.Contains("Mage Robes",      names);
+    }
+
+    [Theory]
+    [InlineData("steelarmor_0.nif",       "Steel Armor")]
+    [InlineData("daedricarmor_0.nif",     "Daedric Armor")]
+    [InlineData("glassarmor_1.nif",       "Glass Armor")]
+    [InlineData("nightingalearmor_0.nif", "Nightingale Armor")]
+    public void TryLookup_KnownArmorVariants_ReturnsCorrectEntry(string meshFile, string expectedName)
+    {
+        var service = new VanillaArmorLookupService();
+
+        var found = service.TryLookup(meshFile, out var entry);
+
+        Assert.True(found);
+        Assert.Equal(expectedName, entry!.Name);
+    }
+}
+
+public sealed class VoxelCollisionTests
+{
+    [Fact]
+    public async Task ComputeAsync_PhysicsEnabledMeshWithHighMorphs_DetectsPenetrations()
+    {
+        var service = new SimplifiedVoxelCollisionService();
+        var armor = new ImportedArmor("/tmp/armor.nif", ["/tmp/armor.nif"], [], [], []);
+        // cloth mesh with chest morph above the soft threshold of 1.04
+        var mesh = new ConvertedMesh("cloth", "cage+shrinkwrap", 1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.09, ["waist"] = 0.95 });
+
+        var result = await service.ComputeAsync(armor, mesh, "3BA", CancellationToken.None);
+
+        Assert.True(result.HasPenetrations);
+        Assert.Contains("chest", result.AffectedRegions);
+        Assert.True(result.PushOutMagnitudes["chest"] > 0);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_PlateArmorWithLowMorphs_NoPenetrations()
+    {
+        var service = new SimplifiedVoxelCollisionService();
+        var armor = new ImportedArmor("/tmp/armor.nif", ["/tmp/armor.nif"], [], [], []);
+        // plate mesh; all morphs below the plate threshold of 1.10
+        var mesh = new ConvertedMesh("plate", "cage+rigid-islands", 1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.04, ["shoulders"] = 1.06 });
+
+        var result = await service.ComputeAsync(armor, mesh, "CBBE", CancellationToken.None);
+
+        Assert.False(result.HasPenetrations);
+        Assert.Empty(result.AffectedRegions);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_ReturnsExpectedGridResolution()
+    {
+        var service = new SimplifiedVoxelCollisionService();
+        var armor = new ImportedArmor("/tmp/armor.nif", ["/tmp/armor.nif"], [], [], []);
+        var mesh = new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double>());
+
+        var result = await service.ComputeAsync(armor, mesh, "UNP", CancellationToken.None);
+
+        Assert.Equal(8, result.GridResolution);
+    }
+
+    [Fact]
+    public async Task ComputeAsync_PushOutMagnitude_ScalesWithExcess()
+    {
+        var service = new SimplifiedVoxelCollisionService();
+        var armor = new ImportedArmor("/tmp/armor.nif", ["/tmp/armor.nif"], [], [], []);
+        // cloth threshold is 1.04; morphFactor = 1.08 → excess = 0.04 → pushOut = 0.04 * 8 = 0.32
+        var mesh = new ConvertedMesh("cloth", "cage+shrinkwrap", 1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"] = 1.08 });
+
+        var result = await service.ComputeAsync(armor, mesh, "3BA", CancellationToken.None);
+
+        Assert.True(result.HasPenetrations);
+        Assert.True(result.PushOutMagnitudes["chest"] > 0 && result.PushOutMagnitudes["chest"] < 1.0);
+    }
+}
+
+public sealed class PhysicsXmlTests
+{
+    [Fact]
+    public async Task BuildAsync_CbpcProfile_GeneratesCbpcXml()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("cloth", "default", true);
+
+        var config = await service.BuildAsync(mesh, "3BA", "smp+cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.CbpcConfigXml);
+        Assert.Contains("<CBPCConfig", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.Contains("<BreastPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SmpProfile_GeneratesSmpXml()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("cloth", "default", true);
+
+        var config = await service.BuildAsync(mesh, "3BA", "smp+cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("<system name=", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MaleBody_GeneratesMalePecXml()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("mixed", "default", false);
+
+        var config = await service.BuildAsync(mesh, "HIMBO", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("NPC L Pec", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CbpcOnlyProfile_NoSmpXml()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("cloth", "default", true);
+
+        var config = await service.BuildAsync(mesh, "UNP", "cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.CbpcConfigXml);
+        Assert.Null(config.SmpConfigXml);
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesCbpcAndSmpFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cloth_robe.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class VanillaArmorPipelineTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_VanillaLookupStepPresent()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "ironarmor_0.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var vanillaStep = result.Steps.FirstOrDefault(s => s.StartsWith("vanilla-armor:", StringComparison.Ordinal));
+            Assert.NotNull(vanillaStep);
+            Assert.DoesNotContain("unknown", vanillaStep, StringComparison.Ordinal);
+            Assert.Contains("Iron Armor", vanillaStep, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_UnknownArmorReportsUnknown()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "modded_custom_gear.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("vanilla-armor:unknown", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_VoxelCollisionStepPresent()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.StartsWith("voxel-collision:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 }
