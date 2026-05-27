@@ -71,6 +71,7 @@ Each successful conversion produces the following files in the output directory:
 | `<ArmorName>.nif` | Converted mesh |
 | `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
+| `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
 | `plugin-patches.json` | Mesh path references found in sidecar plugins + patch guidance |
 | `texture-summary.json` | Texture audit: DDS count, missing normal maps, unrecognised files |
 | `preview-renders.json` | Preview metadata for downstream rendering integration |

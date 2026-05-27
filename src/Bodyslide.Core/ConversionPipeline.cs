@@ -24,6 +24,12 @@ public sealed record BodySlideProject(string ProjectName, string TargetBody, IRe
 public sealed record TextureSummary(int TotalCount, IReadOnlyList<string> DiffuseFiles, IReadOnlyList<string> NormalFiles, IReadOnlyList<string> MissingNormals);
 public sealed record PluginArmorAddon(string RecordType, IReadOnlyList<string> DetectedMeshPaths);
 public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
+public sealed record MeshDependencyMapEntry(
+    string Mesh,
+    IReadOnlyList<string> Textures,
+    IReadOnlyList<string> PhysicsFiles,
+    IReadOnlyList<string> BodyReferences,
+    IReadOnlyList<string> PluginMeshReferences);
 
 public static class PresetCatalog
 {
@@ -1277,6 +1283,14 @@ internal sealed class LocalExportService : IExportService
             cancellationToken);
         outputFiles.Add(convertedMeshListPath);
 
+        var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
+        var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
+        await File.WriteAllTextAsync(
+            dependencyMapPath,
+            JsonSerializer.Serialize(dependencyMap, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(dependencyMapPath);
+
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
         await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(morphs, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(morphPath);
@@ -1383,5 +1397,54 @@ internal sealed class LocalExportService : IExportService
             .ToArray());
 
         return string.IsNullOrWhiteSpace(sanitized) ? "unknown" : sanitized;
+    }
+
+    private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(ImportedArmor armor, PluginAnalysisResult pluginAnalysis)
+    {
+        var pluginMeshReferences = pluginAnalysis.ArmorAddons
+            .SelectMany(addon => addon.DetectedMeshPaths)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return armor.MeshFiles
+            .Select(mesh =>
+            {
+                var meshFileName = Path.GetFileName(mesh) ?? mesh;
+                var meshToken = NormalizeMeshToken(meshFileName);
+
+                var textures = ResolveRelatedFiles(armor.TextureFiles, meshToken);
+                var physicsFiles = ResolveRelatedFiles(armor.PhysicsFiles, meshToken);
+                var bodyReferences = ResolveRelatedFiles(armor.BodyReferenceFiles, meshToken);
+
+                var matchedPluginPaths = pluginMeshReferences
+                    .Where(path => Path.GetFileName(path).Contains(meshFileName, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return new MeshDependencyMapEntry(
+                    meshFileName,
+                    textures,
+                    physicsFiles,
+                    bodyReferences,
+                    matchedPluginPaths);
+            })
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ResolveRelatedFiles(IReadOnlyList<string> files, string meshToken)
+    {
+        return files
+            .Where(file => Path.GetFileNameWithoutExtension(file).Contains(meshToken, StringComparison.OrdinalIgnoreCase))
+            .Select(file => Path.GetFileName(file) ?? file)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeMeshToken(string meshFileName)
+    {
+        var token = Path.GetFileNameWithoutExtension(meshFileName) ?? meshFileName;
+        return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+            ? token[..^2]
+            : token;
     }
 }

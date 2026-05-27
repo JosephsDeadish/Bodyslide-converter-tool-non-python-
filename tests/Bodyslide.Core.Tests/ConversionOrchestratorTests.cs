@@ -153,6 +153,45 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesDependencyMap()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+
+        var mesh0 = Path.Combine(inputDirectory, "cuirass_0.nif");
+        var mesh1 = Path.Combine(inputDirectory, "cuirass_1.nif");
+        await File.WriteAllTextAsync(mesh0, "mesh");
+        await File.WriteAllTextAsync(mesh1, "mesh");
+        await File.WriteAllBytesAsync(Path.Combine(inputDirectory, "cuirass.dds"), [0x44, 0x44, 0x53, 0x20]);
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "cuirass.xml"), "<physics/>");
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "cuirass_reference.tri"), "ref");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
+            Assert.True(File.Exists(dependencyMapPath));
+
+            var mapContent = await File.ReadAllTextAsync(dependencyMapPath);
+            Assert.Contains("\"Mesh\": \"cuirass_0.nif\"", mapContent, StringComparison.Ordinal);
+            Assert.Contains("\"Mesh\": \"cuirass_1.nif\"", mapContent, StringComparison.Ordinal);
+            Assert.Contains("cuirass.dds", mapContent, StringComparison.Ordinal);
+            Assert.Contains("cuirass.xml", mapContent, StringComparison.Ordinal);
+            Assert.Contains("cuirass_reference.tri", mapContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_StepsIncludeSkeletonAndPartitions()
     {
         var inputFile = Path.GetTempFileName();
