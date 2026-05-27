@@ -547,7 +547,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 {
     public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
-        var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path).ToLowerInvariant()).ToList();
+        var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
 
         var meshType = fileNames.Any(name => name.Contains("plate") || name.Contains("cuirass") || name.Contains("pauldron")) ? "plate" :
             fileNames.Any(name => name.Contains("leather") || name.Contains("hide")) ? "leather" :
