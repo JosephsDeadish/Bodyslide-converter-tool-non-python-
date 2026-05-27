@@ -38,19 +38,19 @@ jobs:
       - name: Test
         run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
 
-      - name: Build standalone app package
-        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --no-build --output artifacts/standalone
+      - name: Build standalone Linux executable package
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime linux-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/linux-x64
 
       - name: Zip standalone app
         run: |
           cd artifacts
-          zip -r slidesmith-linux-release.zip standalone
+          zip -r slidesmith-linux-x64-release.zip linux-x64
 
       - name: Upload standalone zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-linux-release-zip
-          path: artifacts/slidesmith-linux-release.zip
+          name: slidesmith-linux-x64-release-zip
+          path: artifacts/slidesmith-linux-x64-release.zip
 
   package-windows-on-merge:
     name: Package Windows app on merge branch
@@ -74,8 +74,8 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
-      - name: Build Windows app files (.exe + dependencies)
-        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
+      - name: Build Windows executable package
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/win-x64
 
       - name: Zip Windows app
         run: Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/slidesmith-win-x64-release.zip
@@ -108,8 +108,8 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
-      - name: Build Windows app files (.exe + dependencies)
-        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
+      - name: Build Windows executable package
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/win-x64
 
       - name: Zip Windows app
         run: Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
