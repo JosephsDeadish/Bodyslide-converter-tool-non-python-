@@ -45,6 +45,9 @@ public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetS
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 
+/// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
+public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
+
 public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml);
 public sealed record TextureSummary(
     int TotalCount,
@@ -283,7 +286,7 @@ public interface ICageGenerationService
 
 public interface IMeshConversionService
 {
-    Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken);
+    Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken);
 }
 
 public interface IWeightTransferService
@@ -376,6 +379,15 @@ public interface IVoxelCollisionService
     Task<VoxelCollisionResult> ComputeAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken);
 }
 
+public interface IArmorRegionBindingService
+{
+    /// <summary>
+    /// Identifies which body regions (chest, waist, pelvis, legs, shoulders, arms, etc.) the armor
+    /// primarily covers by scoring physics-file bone names and mesh filename keywords.
+    /// </summary>
+    Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken);
+}
+
 public sealed class ConversionOrchestrator(
     IArmorImportService importer,
     IBodyDetectionService bodyDetector,
@@ -394,6 +406,7 @@ public sealed class ConversionOrchestrator(
     IPluginAnalysisService pluginAnalysisService,
     IVanillaArmorLookupService vanillaArmorLookup,
     IVoxelCollisionService voxelCollision,
+    IArmorRegionBindingService armorRegionBinder,
     IExportService exporter)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
@@ -465,6 +478,13 @@ public sealed class ConversionOrchestrator(
                 ? $"vanilla-armor:{vanillaEntry.Name},profile={vanillaEntry.RecommendedProfile},slots={vanillaEntry.RegionSlots.Count}"
                 : "vanilla-armor:unknown");
 
+            // Auto-apply the vanilla armor's recommended deformation profile when none was explicitly provided.
+            if (vanillaEntry is not null && string.IsNullOrWhiteSpace(deformationProfile))
+            {
+                deformationProfile = vanillaEntry.RecommendedProfile;
+                steps.Add($"vanilla-profile:{deformationProfile}");
+            }
+
             var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
             if (textureSummary.MissingNormals.Count > 0)
             {
@@ -494,10 +514,19 @@ public sealed class ConversionOrchestrator(
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
             steps.Add($"mesh-type:{analysis.MeshType}");
 
+            var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
+            steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
+
             var cage = await cageGenerator.BuildAsync(analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"cage:{cage.Mode}");
 
-            var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, cancellationToken);
+            var sourceBodyForDelta = detectedBody.Body;
+            if (!string.Equals(sourceBodyForDelta, normalized.Request.TargetBody, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add($"conversion-delta:{sourceBodyForDelta}→{normalized.Request.TargetBody}");
+            }
+
+            var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, sourceBodyForDelta, cancellationToken);
             if (cachedEntry is not null && cachedEntry.RegionalMorphing.Count > 0)
             {
                 var mergedMorphing = converted.RegionalMorphing.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -613,16 +642,46 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var rootOutput = request.OutputDirectory ??
             Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
 
-        var results = new List<ConversionResult>(meshFiles.Count);
+        var resultsWithPaths = new List<(string MeshFile, ConversionResult Result)>(meshFiles.Count);
         foreach (var meshFile in meshFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var perArmorOutput = Path.Combine(rootOutput, Path.GetFileNameWithoutExtension(meshFile));
             var perArmorRequest = request with { InputPath = meshFile, OutputDirectory = perArmorOutput };
-            results.Add(await orchestrator.ConvertAsync(perArmorRequest, cancellationToken));
+            resultsWithPaths.Add((meshFile, await orchestrator.ConvertAsync(perArmorRequest, cancellationToken)));
         }
 
-        return results;
+        await WriteBatchReportAsync(resultsWithPaths, request.TargetBody, rootOutput, cancellationToken);
+
+        return resultsWithPaths.Select(x => x.Result).ToList();
+    }
+
+    private static async Task WriteBatchReportAsync(
+        IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
+        string targetBody,
+        string rootOutput,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(rootOutput);
+
+        var report = new
+        {
+            TargetBody = targetBody,
+            TotalCount = resultsWithPaths.Count,
+            SuccessCount = resultsWithPaths.Count(r => r.Result.Success),
+            FailedCount = resultsWithPaths.Count(r => !r.Result.Success),
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Results = resultsWithPaths.Select(r => new
+            {
+                MeshFile = Path.GetFileName(r.MeshFile),
+                r.Result.OutputDirectory,
+                r.Result.Success,
+                StepCount = r.Result.Steps.Count,
+            }).ToList(),
+        };
+
+        var reportJson = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(Path.Combine(rootOutput, "batch-report.json"), reportJson, cancellationToken);
     }
 }
 
@@ -647,6 +706,7 @@ public static class StandaloneConversionModules
             new BasicPluginAnalysisService(),
             new VanillaArmorLookupService(),
             new SimplifiedVoxelCollisionService(),
+            new BasicArmorRegionBindingService(),
             new LocalExportService());
 }
 
@@ -947,7 +1007,7 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
 
 internal sealed class StrategyMeshConversionService : IMeshConversionService
 {
-    public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken)
+    public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
         var strategy = analysis.MeshType switch
         {
@@ -959,7 +1019,21 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             _ => "hybrid-cage-deformation"
         };
 
-        var baseField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        // Compute a relative source→target delta when sourceBody is provided.
+        // When source == target the delta is 1.0 per region (no-op). When source differs from target
+        // only the directional difference is applied rather than the full target field.
+        IReadOnlyDictionary<string, double> baseField;
+        if (!string.IsNullOrWhiteSpace(sourceBody))
+        {
+            var sourceField = BodyTransformationFieldCatalog.Resolve(sourceBody);
+            var targetField = BodyTransformationFieldCatalog.Resolve(targetBody);
+            baseField = ComputeSourceTargetDelta(sourceField, targetField);
+        }
+        else
+        {
+            baseField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        }
+
         var profileField = DeformationProfileModifier.Apply(baseField, deformationProfile);
         var regionalMorphing = analysis.MeshType switch
         {
@@ -971,6 +1045,20 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, regionalMorphing));
     }
+
+    /// <summary>
+    /// Computes the per-region relative delta (targetFactor / sourceFactor) between two body
+    /// transformation fields. A delta of 1.0 means no change; > 1.0 means expansion; &lt; 1.0 means contraction.
+    /// </summary>
+    private static IReadOnlyDictionary<string, double> ComputeSourceTargetDelta(
+        IReadOnlyDictionary<string, double> sourceField,
+        IReadOnlyDictionary<string, double> targetField) =>
+        targetField.ToDictionary(
+            pair => pair.Key,
+            pair => sourceField.TryGetValue(pair.Key, out var src) && src > 0
+                ? pair.Value / src
+                : pair.Value,
+            StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, double> ApplyRigidityConstraints(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 0.45), StringComparer.OrdinalIgnoreCase);
@@ -1315,6 +1403,130 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
             .ToList();
 
         return Task.FromResult(new PartitionRebuildingResult(true, partitionLabels, removedSlots));
+    }
+}
+
+/// <summary>
+/// Detects which body regions an armor piece covers by combining physics-file bone name scoring
+/// with mesh filename keyword analysis. Bone names always take precedence when present.
+/// </summary>
+internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingService
+{
+    // Maps bone name substrings (case-insensitive) to the body regions they indicate.
+    private static readonly (string BoneToken, string Region)[] BoneRegionRules =
+    [
+        ("Breast",    "chest"),
+        ("Belly",     "belly"),
+        ("Butt",      "pelvis"),
+        ("Spine2",    "chest"),
+        ("Spine1",    "waist"),
+        ("Spine",     "chest"),
+        ("Pelvis",    "pelvis"),
+        ("Thigh",     "legs"),
+        ("Calf",      "legs"),
+        ("Foot",      "legs"),
+        ("Toe",       "legs"),
+        ("UpperArm",  "arms"),
+        ("ForeArm",   "arms"),
+        ("Hand",      "arms"),
+        ("Clavicle",  "shoulders"),
+        ("Neck",      "shoulders"),
+        ("Head",      "shoulders"),
+    ];
+
+    // Maps filename keyword substrings to regions (checked when bone names are unavailable).
+    private static readonly (string FileToken, string Region)[] FileRegionRules =
+    [
+        ("cuirass",     "chest"),
+        ("breastplate", "chest"),
+        ("chestplate",  "chest"),
+        ("torso",       "chest"),
+        ("robe",        "chest"),
+        ("gauntlet",    "arms"),
+        ("glove",       "arms"),
+        ("forearm",     "arms"),
+        ("bracer",      "arms"),
+        ("sabatons",    "legs"),
+        ("greave",      "legs"),
+        ("boot",        "legs"),
+        ("legging",     "legs"),
+        ("trouser",     "legs"),
+        ("pauldron",    "shoulders"),
+        ("spaulder",    "shoulders"),
+        ("shoulder",    "shoulders"),
+        ("helm",        "shoulders"),
+        ("hood",        "shoulders"),
+        ("crown",       "shoulders"),
+        ("skirt",       "pelvis"),
+        ("kilt",        "pelvis"),
+        ("loincloth",   "pelvis"),
+        ("pelvis",      "pelvis"),
+        ("body",        "chest"),
+    ];
+
+    public Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken)
+    {
+        // Phase 1: score regions from physics file content (bone names).
+        var boneScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var physicsFile in armor.PhysicsFiles)
+        {
+            if (!File.Exists(physicsFile))
+            {
+                continue;
+            }
+
+            try
+            {
+                var content = File.ReadAllText(physicsFile);
+                foreach (var (boneToken, region) in BoneRegionRules)
+                {
+                    if (content.Contains(boneToken, StringComparison.OrdinalIgnoreCase))
+                    {
+                        boneScores[region] = boneScores.GetValueOrDefault(region) + 2;
+                    }
+                }
+            }
+            catch (IOException) { /* skip unreadable files */ }
+        }
+
+        if (boneScores.Count > 0)
+        {
+            var regions = boneScores
+                .OrderByDescending(p => p.Value)
+                .Select(p => p.Key)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(4)
+                .ToList();
+            return Task.FromResult(new ArmorRegionBinding(regions, "bone-names"));
+        }
+
+        // Phase 2: fall back to filename keyword scoring.
+        var fileScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            var name = Path.GetFileNameWithoutExtension(meshFile).ToLowerInvariant();
+            foreach (var (fileToken, region) in FileRegionRules)
+            {
+                if (name.Contains(fileToken, StringComparison.OrdinalIgnoreCase))
+                {
+                    fileScores[region] = fileScores.GetValueOrDefault(region) + 1;
+                }
+            }
+        }
+
+        if (fileScores.Count > 0)
+        {
+            var regions = fileScores
+                .OrderByDescending(p => p.Value)
+                .Select(p => p.Key)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(4)
+                .ToList();
+            return Task.FromResult(new ArmorRegionBinding(regions, "filename-keywords"));
+        }
+
+        // Phase 3: default — full-body coverage when no signals are available.
+        return Task.FromResult(new ArmorRegionBinding(["chest", "waist", "pelvis", "legs"], "default-full-body"));
     }
 }
 

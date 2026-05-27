@@ -564,6 +564,7 @@ public sealed class ConversionOrchestratorTests
             new TestPluginAnalysisService(),
             new TestVanillaArmorLookup(),
             new TestVoxelCollision(),
+            new TestArmorRegionBindingService(),
             exporter ?? new TestExporter());
 
     private sealed class TestImporter : IArmorImportService
@@ -592,7 +593,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestConverter : IMeshConversionService
     {
-        public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, CancellationToken cancellationToken) =>
+        public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken) =>
             Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { { "chest", 1.0 } }));
     }
 
@@ -671,6 +672,12 @@ public sealed class ConversionOrchestratorTests
     {
         public Task<VoxelCollisionResult> ComputeAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
             Task.FromResult(new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 8));
+    }
+
+    private sealed class TestArmorRegionBindingService : IArmorRegionBindingService
+    {
+        public Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken) =>
+            Task.FromResult(new ArmorRegionBinding(["chest", "waist"], "test-stub"));
     }
 
     private sealed class TestExporter : IExportService
@@ -1788,6 +1795,279 @@ public sealed class BodyTypeCatalogTests
         foreach (var body in BodyTypeCatalog.All)
         {
             Assert.NotEmpty(body.DetectionTokens);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vanilla profile auto-apply tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class VanillaProfileAutoApplyTests
+{
+    [Fact]
+    public async Task ConvertAsync_VanillaArmorDetected_AppliesRecommendedProfileWhenNoneProvided()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        // ironarmor is in the vanilla armor database with profile=curvy
+        var inputFile = Path.Combine(workingDirectory, "ironarmor_0.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var profileStep = result.Steps.FirstOrDefault(s => s.StartsWith("vanilla-profile:", StringComparison.Ordinal));
+            Assert.NotNull(profileStep);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_ExplicitProfileProvided_OverridesVanillaProfile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "ironarmor_0.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "CBBE", outputDirectory, DeformationProfile: "slim"));
+
+            Assert.True(result.Success);
+            // Explicit slim profile should appear; vanilla-profile step should NOT appear
+            var vanillaProfileStep = result.Steps.FirstOrDefault(s => s.StartsWith("vanilla-profile:", StringComparison.Ordinal));
+            Assert.Null(vanillaProfileStep);
+            Assert.Contains(result.Steps, s => s.Contains("slim", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Source→target delta conversion tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class SourceTargetDeltaTests
+{
+    [Fact]
+    public async Task ConvertAsync_DifferentSourceAndTarget_EmitsDeltaStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        // cuirass → meshAnalysis will classify it and body detection will assign a source body
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            // Use SourceBodyOverride to guarantee different source and target bodies
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "3BA", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            var deltaStep = result.Steps.FirstOrDefault(s => s.StartsWith("conversion-delta:", StringComparison.Ordinal));
+            Assert.NotNull(deltaStep);
+            Assert.Contains("CBBE", deltaStep, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("3BA",  deltaStep, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_SameSourceAndTarget_DeltaIsNeutral()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor   = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage     = new DeformationCage("hybrid-cage");
+
+        // CBBE→CBBE: delta should be 1.0 per region (no change).
+        var result = await service.ConvertAsync(armor, analysis, cage, "CBBE", null, "CBBE", CancellationToken.None);
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        foreach (var region in cbbeField.Keys)
+        {
+            if (result.RegionalMorphing.TryGetValue(region, out var v))
+            {
+                Assert.Equal(1.0, v, precision: 6);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_DifferentBodies_DeltaIsRelative()
+    {
+        var service  = new StrategyMeshConversionService();
+        var armor    = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage     = new DeformationCage("hybrid-cage");
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        var unpField  = BodyTransformationFieldCatalog.Resolve("UNP");
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "UNP", null, "CBBE", CancellationToken.None);
+
+        // Verify at least one region shows the expected delta (targetValue / sourceValue)
+        var region = "chest";
+        Assert.True(cbbeField.ContainsKey(region) && unpField.ContainsKey(region));
+        var expectedDelta = unpField[region] / cbbeField[region];
+        Assert.Equal(expectedDelta, result.RegionalMorphing[region], precision: 5);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Armor region binding tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class ArmorRegionBindingTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_EmitsRegionsStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var regionsStep = result.Steps.FirstOrDefault(s => s.StartsWith("regions:", StringComparison.Ordinal));
+            Assert.NotNull(regionsStep);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("cuirass.nif",   "chest")]
+    [InlineData("boots.nif",     "legs")]
+    [InlineData("gauntlets.nif", "arms")]
+    [InlineData("helmet.nif",    "shoulders")]
+    public async Task BasicArmorRegionBindingService_FilenameHints_DetectsCorrectRegion(string fileName, string expectedRegion)
+    {
+        var workingDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDir);
+        var filePath = Path.Combine(workingDir, fileName);
+        await File.WriteAllTextAsync(filePath, "mesh");
+
+        try
+        {
+            var service  = new BasicArmorRegionBindingService();
+            var armor    = new ImportedArmor(filePath, [filePath], [], [], []);
+            var analysis = new MeshAnalysis("leather", false, 1);
+
+            var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+            Assert.Contains(expectedRegion, binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicArmorRegionBindingService_NoSignals_DefaultsToFullBodyRegions()
+    {
+        var service  = new BasicArmorRegionBindingService();
+        var armor    = new ImportedArmor("xyz.nif", ["xyz.nif"], [], [], []);
+        var analysis = new MeshAnalysis("mixed", false, 1);
+
+        var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+        Assert.Equal("default-full-body", binding.DetectionMethod);
+        Assert.NotEmpty(binding.CoveredRegions);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch report tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class BatchReportTests
+{
+    [Fact]
+    public async Task BatchConvert_Directory_WritesBatchReportJson()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "armor1.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "armor2.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, r => Assert.True(r.Success));
+
+            var reportPath = Path.Combine(outputDirectory, "batch-report.json");
+            Assert.True(File.Exists(reportPath), "batch-report.json was not written.");
+
+            var content = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"TotalCount\"",   content, StringComparison.Ordinal);
+            Assert.Contains("\"SuccessCount\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"TargetBody\"",   content, StringComparison.Ordinal);
+            Assert.Contains("\"CBBE\"",         content, StringComparison.Ordinal);
+            Assert.Contains("\"Results\"",      content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_Directory_ReportCountsMatchResults()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "a.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "b.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "c.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            var reportPath = Path.Combine(outputDirectory, "batch-report.json");
+            var content = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"TotalCount\": 3",   content, StringComparison.Ordinal);
+            Assert.Contains("\"SuccessCount\": 3", content, StringComparison.Ordinal);
+            Assert.Contains("\"FailedCount\": 0",  content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 }

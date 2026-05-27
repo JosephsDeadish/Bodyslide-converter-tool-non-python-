@@ -117,6 +117,10 @@ Implemented from issue scope:
 - **output `.nif` file(s)** written to the output directory; `_0`/`_1` weight variant pairs detected and written as matched pairs
 - **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
 - **`--list-bodies` flag** to enumerate all supported body types with detection tokens
+- **source→target relative delta conversion** — `StrategyMeshConversionService` now computes `targetField[region] / sourceField[region]` per region so converting e.g. CBBE→UNP applies only the directional difference rather than the full UNP field; emits `conversion-delta:CBBE→UNP` step
+- **vanilla recommended profile auto-apply** — when the vanilla armor database identifies a match and no explicit `--profile` was provided, its `RecommendedProfile` is automatically applied (emits `vanilla-profile:<name>` step)
+- **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step
+- **batch summary report** — converting a directory or `.zip` now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
 
 Still partial / placeholder versus full issue vision:
 - live preview rendering is metadata-only (enriched with mesh type, regional morphs, physics nodes, and per-view slider hints — no actual 3D render)
