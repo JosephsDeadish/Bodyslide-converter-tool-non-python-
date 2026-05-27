@@ -1,6 +1,6 @@
-# Bodyslide Converter Tool (Standalone, C#)
+# SlideSmith (Standalone, C#)
 
-This repository contains a standalone .NET conversion tool that bundles core conversion stages into one app:
+This repository contains the SlideSmith standalone .NET conversion tool (current version `0.1`) that bundles core conversion stages into one app:
 
 - import scan (single `.nif`, armor folder, or zipped archive)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback)
@@ -32,6 +32,9 @@ This repository contains a standalone .NET conversion tool that bundles core con
 ## Run
 
 ```bash
+# build executable (SlideSmith.exe on Windows publish output)
+dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false
+
 # simple positional mode
 dotnet run --project src/Bodyslide.Standalone -- "<armor path>" "<target body>" "<optional output directory>"
 
@@ -57,7 +60,7 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, and publish a Linux standalone artifact.
-- **Push to `main`/`master` (post-merge):** publish and upload Windows app files (`.exe` + dependencies) as `bodyslide-standalone-win-x64-release`.
+- **Push to `main`/`master` (post-merge):** publish and upload Windows app files (`SlideSmith.exe` + dependencies) as `slidesmith-win-x64-release`.
 - **Pull requests:** includes an approval-gated Windows publish job (`pr-build-approval`) so you can approve packaging on each small PR session before merge.
 
 To require manual approval in PR builds, set required reviewers for the `pr-build-approval` environment in repository settings.
@@ -91,8 +94,23 @@ Each successful conversion produces the following files in the output directory:
 | `texture-summary.json` | Texture audit: DDS count, missing normal maps, unrecognised files |
 | `preview-renders.json` | Preview metadata for downstream rendering integration |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
+| `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
 When a matching cache entry exists in the selected output folder for the same armor mesh + target body, the converter now reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps.
+
+## Issue #2 progress comparison
+
+Implemented from issue scope:
+- import scan across single mesh, folder, and zip archive
+- body detection, mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
+- plugin scan, texture summary, vanilla armor lookup, voxel collision pass, BodySlide OSP output, learning cache reuse
+- automatic CI builds with PR approval-gated Windows packaging and merge-time Windows `.exe` artifact publishing
+- FOMOD metadata output (`fomod/ModuleConfig.xml`, `fomod/info.xml`)
+
+Still partial / placeholder versus full issue vision:
+- live preview rendering is metadata-only placeholder
+- plugin editing is guidance output (not direct ESP mutation)
+- deformation/physics logic is rule-based simulation, not full geometry/animation engine
 
 ## Current built-in presets
 

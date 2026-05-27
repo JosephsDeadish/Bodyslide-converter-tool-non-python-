@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security;
 using System.Text.Json;
 
 namespace Bodyslide.Core;
@@ -1576,6 +1577,22 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllLinesAsync(logPath, steps, cancellationToken);
         outputFiles.Add(logPath);
 
+        var fomodDirectory = Path.Combine(outputDirectory, "fomod");
+        Directory.CreateDirectory(fomodDirectory);
+        var fomodModuleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
+        var fomodInfoPath = Path.Combine(fomodDirectory, "info.xml");
+        var packageName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmith Package";
+        await File.WriteAllTextAsync(
+            fomodModuleConfigPath,
+            BuildFomodModuleConfigXml(packageName, request.TargetBody, bodySlideProject.ProjectName),
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            fomodInfoPath,
+            BuildFomodInfoXml(packageName),
+            cancellationToken);
+        outputFiles.Add(fomodModuleConfigPath);
+        outputFiles.Add(fomodInfoPath);
+
         var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
         var cache = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
         var cacheKey = ConversionLearningCache.BuildCacheKey(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown", request.TargetBody);
@@ -1655,6 +1672,59 @@ internal sealed class LocalExportService : IExportService
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    private static string BuildFomodModuleConfigXml(string packageName, string targetBody, string bodySlideProjectName)
+    {
+        var safePackage = XmlEscape(packageName);
+        var safeTargetBody = XmlEscape(targetBody);
+        var safeProjectName = XmlEscape(bodySlideProjectName);
+
+        return $$"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+              <moduleName>{{safePackage}} - SlideSmith Conversion</moduleName>
+              <installSteps order="Explicit">
+                <installStep name="Target Body">
+                  <optionalFileGroups order="Explicit">
+                    <group name="Body">
+                      <plugins order="Explicit">
+                        <plugin name="{{safeTargetBody}}">
+                          <description>Generated conversion output for {{safeTargetBody}} with BodySlide project {{safeProjectName}}.</description>
+                          <files />
+                          <conditionFlags />
+                          <typeDescriptor>
+                            <type name="Required" />
+                          </typeDescriptor>
+                        </plugin>
+                      </plugins>
+                    </group>
+                  </optionalFileGroups>
+                </installStep>
+              </installSteps>
+            </config>
+            """;
+    }
+
+    private static string BuildFomodInfoXml(string packageName)
+    {
+        var safePackage = XmlEscape(packageName);
+
+        return $$"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <fomod>
+              <Name>{{safePackage}} - SlideSmith</Name>
+              <Author>SlideSmith</Author>
+              <Version MachineVersion="0.1">0.1</Version>
+              <Website></Website>
+              <Description>Auto-generated FOMOD metadata for SlideSmith conversion output.</Description>
+            </fomod>
+            """;
+    }
+
+    private static string XmlEscape(string value)
+    {
+        return SecurityElement.Escape(value) ?? string.Empty;
     }
 }
 

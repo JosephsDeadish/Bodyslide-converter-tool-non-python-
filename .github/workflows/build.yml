@@ -1,4 +1,4 @@
-name: Build and Test
+name: Build and Test SlideSmith
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
       - name: Upload standalone artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bodyslide-standalone-linux-release
+          name: slidesmith-linux-release
           path: artifacts/standalone
 
   publish-windows-on-merge:
@@ -75,7 +75,7 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bodyslide-standalone-win-x64-release
+          name: slidesmith-win-x64-release
           path: artifacts/win-x64
 
   publish-windows-on-pr-approval:
@@ -107,5 +107,5 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bodyslide-standalone-win-x64-pr-${{ github.event.pull_request.number }}
+          name: slidesmith-win-x64-pr-${{ github.event.pull_request.number }}
           path: artifacts/win-x64

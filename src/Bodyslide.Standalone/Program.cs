@@ -26,10 +26,10 @@ if (!TryParseRequest(args, out var request, out var error))
 {
     Console.WriteLine(error);
     Console.WriteLine("Usage:");
-    Console.WriteLine("  Bodyslide.Standalone <armor path> <target body> [output directory]");
-    Console.WriteLine("  Bodyslide.Standalone --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--output-zip]");
-    Console.WriteLine("  Bodyslide.Standalone --list-presets");
-    Console.WriteLine("  Bodyslide.Standalone --list-profiles");
+    Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--output-zip]");
+    Console.WriteLine("  SlideSmith --list-presets");
+    Console.WriteLine("  SlideSmith --list-profiles");
     return;
 }
 

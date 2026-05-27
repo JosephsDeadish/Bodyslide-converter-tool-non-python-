@@ -423,6 +423,38 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesFomodMetadataFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var fomodDirectory = Path.Combine(outputDirectory, "fomod");
+            var moduleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
+            var infoPath = Path.Combine(fomodDirectory, "info.xml");
+            Assert.True(File.Exists(moduleConfigPath));
+            Assert.True(File.Exists(infoPath));
+
+            var moduleConfig = await File.ReadAllTextAsync(moduleConfigPath);
+            var infoXml = await File.ReadAllTextAsync(infoPath);
+            Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("curvy", 1.15)]
     [InlineData("slim", 0.82)]
