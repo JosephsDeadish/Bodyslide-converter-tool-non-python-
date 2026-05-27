@@ -165,6 +165,23 @@ internal sealed record BodySignatureTemplate(
     int VertexCountMin = 0,
     int VertexCountMax = 0);
 
+internal readonly record struct MeshVertex(float X, float Y, float Z);
+
+internal sealed record MeshGeometrySignature(
+    int VertexCount,
+    IReadOnlyList<MeshVertex> SampleVertices,
+    float MinX,
+    float MaxX,
+    float MinY,
+    float MaxY,
+    float MinZ,
+    float MaxZ)
+{
+    public float Width => MaxX - MinX;
+    public float Depth => MaxY - MinY;
+    public float Height => MaxZ - MinZ;
+}
+
 internal static class VanillaBodySignatureDatabase
 {
     // Typical vertex counts per body type are well-known in the modding community.
@@ -183,6 +200,176 @@ internal static class VanillaBodySignatureDatabase
         new("SOS",   ["sos", "soslight"],         ["malebody"],                    ["smp"],      6100, 6500),
         new("UBE",   ["ube"],                     ["femalebody"],                  [],           6800, 7200)
     ];
+}
+
+internal static class NifGeometrySignatureReader
+{
+    private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
+    private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
+
+    public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
+    {
+        MeshGeometrySignature? best = null;
+
+        foreach (var meshFile in meshFiles
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var signature = TryRead(meshFile);
+            if (signature is null)
+            {
+                continue;
+            }
+
+            if (best is null || signature.VertexCount > best.VertexCount)
+            {
+                best = signature;
+            }
+        }
+
+        return best;
+    }
+
+    public static MeshGeometrySignature? TryRead(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(meshFile);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        if (bytes.Length < 32)
+        {
+            return null;
+        }
+
+        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
+        if (embeddedMarkerOffset >= 0)
+        {
+            var embeddedSignature = TryReadEmbeddedVertexBlock(bytes, embeddedMarkerOffset);
+            if (embeddedSignature is not null)
+            {
+                return embeddedSignature;
+            }
+        }
+
+        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return null;
+        }
+
+        return TryReadHeuristicVertexBlock(bytes);
+    }
+
+    private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
+    {
+        var countOffset = markerOffset + EmbeddedVertexMarker.Length;
+        if (countOffset + sizeof(int) > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertexCount = BitConverter.ToInt32(bytes, countOffset);
+        return BuildSignature(bytes, countOffset + sizeof(int), vertexCount);
+    }
+
+    private static MeshGeometrySignature? TryReadHeuristicVertexBlock(byte[] bytes)
+    {
+        MeshGeometrySignature? best = null;
+
+        for (var offset = 0; offset <= bytes.Length - sizeof(int); offset += sizeof(int))
+        {
+            var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+            if (candidateVertexCount is < 256 or > 250_000)
+            {
+                continue;
+            }
+
+            var candidate = BuildSignature(bytes, offset + sizeof(int), candidateVertexCount);
+            if (candidate is null)
+            {
+                continue;
+            }
+
+            if (best is null || candidate.VertexCount > best.VertexCount)
+            {
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    private static MeshGeometrySignature? BuildSignature(byte[] bytes, int vertexDataOffset, int vertexCount)
+    {
+        if (vertexCount <= 0)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * 12;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var sampleStride = Math.Max(1, vertexCount / 256);
+        var sampleVertices = new List<MeshVertex>(Math.Min(vertexCount, 256));
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var minZ = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
+        var maxZ = float.MinValue;
+
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * 12);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+
+            if (!IsPlausibleCoordinate(x) || !IsPlausibleCoordinate(y) || !IsPlausibleCoordinate(z))
+            {
+                return null;
+            }
+
+            minX = Math.Min(minX, x);
+            minY = Math.Min(minY, y);
+            minZ = Math.Min(minZ, z);
+            maxX = Math.Max(maxX, x);
+            maxY = Math.Max(maxY, y);
+            maxZ = Math.Max(maxZ, z);
+
+            if (index % sampleStride == 0 || sampleVertices.Count < 24)
+            {
+                sampleVertices.Add(new MeshVertex(x, y, z));
+            }
+        }
+
+        if ((maxX - minX) < 0.001f || (maxZ - minZ) < 0.001f)
+        {
+            return null;
+        }
+
+        return new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ);
+    }
+
+    private static bool IsPlausibleCoordinate(float value) =>
+        float.IsFinite(value) && Math.Abs(value) <= 8192f;
 }
 
 internal static class BodyTransformationFieldCatalog
@@ -872,11 +1059,12 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
-    private const double MeshTokenWeight = 0.45;
-    private const double TextureTokenWeight = 0.25;
+    private const double MeshTokenWeight = 0.35;
+    private const double TextureTokenWeight = 0.20;
     private const double PhysicsTokenWeight = 0.10;
     private const double PhysicsExpectationBoostValue = 0.10;
     private const double BoneSignatureWeight = 0.10;
+    private const double VertexCountWeight = 0.15;
 
     // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
@@ -895,12 +1083,14 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+        var geometrySignature = NifGeometrySignatureReader.TryReadBest(
+            armor.MeshFiles.Concat(armor.BodyReferenceFiles.Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))));
 
         // Read physics file contents once for bone signature matching.
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, physicsContents))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, physicsContents, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -937,7 +1127,8 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<string> meshNames,
         IReadOnlyList<string> textureNames,
         IReadOnlyList<string> physicsNames,
-        string physicsContents)
+        string physicsContents,
+        MeshGeometrySignature? geometrySignature)
     {
         var evidence = new List<string>();
 
@@ -971,16 +1162,48 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
         }
 
+        double vertexSignatureScore = 0;
+        if (geometrySignature is not null)
+        {
+            vertexSignatureScore = ScoreVertexCount(template, geometrySignature.VertexCount);
+            if (vertexSignatureScore > 0)
+            {
+                evidence.Add($"verts:{geometrySignature.VertexCount}");
+            }
+        }
+
         var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
         var score = Math.Clamp(
             (meshHitRatio * MeshTokenWeight) +
             (textureHitRatio * TextureTokenWeight) +
             (physicsHitRatio * PhysicsTokenWeight) +
             (boneSignatureScore * BoneSignatureWeight) +
+            (vertexSignatureScore * VertexCountWeight) +
             physicsExpectationBoost,
             0,
             1);
         return (template, score, evidence);
+    }
+
+    private static double ScoreVertexCount(BodySignatureTemplate template, int vertexCount)
+    {
+        if (template.VertexCountMin <= 0 || template.VertexCountMax <= template.VertexCountMin || vertexCount <= 0)
+        {
+            return 0;
+        }
+
+        if (vertexCount >= template.VertexCountMin && vertexCount <= template.VertexCountMax)
+        {
+            return 1.0;
+        }
+
+        var distance = vertexCount < template.VertexCountMin
+            ? template.VertexCountMin - vertexCount
+            : vertexCount - template.VertexCountMax;
+        var tolerance = Math.Max(128, (template.VertexCountMax - template.VertexCountMin) / 3);
+        return distance >= tolerance
+            ? 0
+            : Math.Round(1.0 - ((double)distance / tolerance), 4);
     }
 
     private static double MatchRatio(IReadOnlyList<string> fileNames, IReadOnlyList<string> tokens)
@@ -1531,7 +1754,15 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "bone-names"));
         }
 
-        // Phase 2: fall back to filename keyword scoring.
+        // Phase 2: use sampled mesh geometry when readable to infer coverage by vertical band
+        // and lateral spread rather than relying on filenames alone.
+        var geometryBinding = TryBindFromGeometry(armor.MeshFiles);
+        if (geometryBinding is not null)
+        {
+            return Task.FromResult(geometryBinding);
+        }
+
+        // Phase 3: fall back to filename keyword scoring.
         var fileScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var meshFile in armor.MeshFiles)
         {
@@ -1556,8 +1787,70 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "filename-keywords"));
         }
 
-        // Phase 3: default — full-body coverage when no signals are available.
+        // Phase 4: default — full-body coverage when no signals are available.
         return Task.FromResult(new ArmorRegionBinding(["chest", "waist", "pelvis", "legs"], "default-full-body"));
+    }
+
+    private static ArmorRegionBinding? TryBindFromGeometry(IReadOnlyList<string> meshFiles)
+    {
+        var signature = NifGeometrySignatureReader.TryReadBest(meshFiles);
+        if (signature is null || signature.SampleVertices.Count == 0 || signature.Height <= 0.001f || signature.Width <= 0.001f)
+        {
+            return null;
+        }
+
+        var centerX = (signature.MinX + signature.MaxX) / 2f;
+        var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var vertex in signature.SampleVertices)
+        {
+            var normalizedHeight = (vertex.Z - signature.MinZ) / signature.Height;
+            var lateralSpread = Math.Abs(vertex.X - centerX) / signature.Width;
+
+            AddIfInRange(scores, "shoulders", normalizedHeight, 0.82, 1.01);
+            AddIfInRange(scores, "chest", normalizedHeight, 0.56, 0.82);
+            AddIfInRange(scores, "waist", normalizedHeight, 0.40, 0.60);
+            AddIfInRange(scores, "pelvis", normalizedHeight, 0.24, 0.44);
+            AddIfInRange(scores, "thighs", normalizedHeight, 0.12, 0.32);
+            AddIfInRange(scores, "calves", normalizedHeight, 0.00, 0.18);
+            AddIfInRange(scores, "legs", normalizedHeight, 0.00, 0.34);
+
+            if (normalizedHeight >= 0.36 && normalizedHeight <= 0.82 && lateralSpread >= 0.34)
+            {
+                scores["arms"] = scores.GetValueOrDefault("arms") + 2;
+            }
+
+            if (normalizedHeight >= 0.56 && normalizedHeight <= 0.76 && lateralSpread >= 0.18)
+            {
+                scores["breasts"] = scores.GetValueOrDefault("breasts") + 1;
+            }
+        }
+
+        if (scores.Count == 0)
+        {
+            return null;
+        }
+
+        var minimumHits = Math.Max(3, signature.SampleVertices.Count / 18);
+        var regions = scores
+            .Where(pair => pair.Value >= minimumHits)
+            .OrderByDescending(pair => pair.Value)
+            .Select(pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+
+        return regions.Count == 0
+            ? null
+            : new ArmorRegionBinding(regions, "spatial-geometry");
+    }
+
+    private static void AddIfInRange(Dictionary<string, int> scores, string region, double value, double minInclusive, double maxInclusive)
+    {
+        if (value >= minInclusive && value <= maxInclusive)
+        {
+            scores[region] = scores.GetValueOrDefault(region) + 1;
+        }
     }
 }
 

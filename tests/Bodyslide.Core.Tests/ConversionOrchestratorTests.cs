@@ -718,6 +718,49 @@ public sealed class ConversionOrchestratorTests
     }
 }
 
+internal static class SyntheticNifTestData
+{
+    public static IReadOnlyList<(float X, float Y, float Z)> CreateBodyVertices(int vertexCount)
+    {
+        var vertices = new List<(float X, float Y, float Z)>(vertexCount);
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var t = vertexCount == 1 ? 0f : (float)index / (vertexCount - 1);
+            var x = ((index % 17) - 8) * 0.02f;
+            var y = ((index % 11) - 5) * 0.015f;
+            var z = t * 1.75f;
+            vertices.Add((x, y, z));
+        }
+
+        return vertices;
+    }
+
+    public static IReadOnlyList<(float X, float Y, float Z)> CreateUpperBodyArmorVertices() =>
+    [
+        (-0.12f,  0.00f, 1.08f), (-0.08f,  0.02f, 1.12f), ( 0.08f,  0.02f, 1.12f), ( 0.12f,  0.00f, 1.08f),
+        (-0.35f,  0.01f, 1.00f), (-0.42f, -0.01f, 0.94f), ( 0.35f,  0.01f, 1.00f), ( 0.42f, -0.01f, 0.94f),
+        (-0.10f, -0.02f, 0.92f), (-0.06f,  0.01f, 0.86f), ( 0.06f,  0.01f, 0.86f), ( 0.10f, -0.02f, 0.92f),
+        (-0.04f,  0.00f, 0.74f), ( 0.04f,  0.00f, 0.74f), (-0.02f,  0.00f, 0.66f), ( 0.02f,  0.00f, 0.66f)
+    ];
+
+    public static async Task WriteAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("VERT"));
+        writer.Write(vertices.Count);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // New-feature tests (NIF output, --source override, weight-pair output)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1417,6 +1460,31 @@ public sealed class BodySignatureVertexCountTests
             Assert.True(t.VertexCountMax > t.VertexCountMin, $"{t.Body} VertexCountMax must exceed Min.");
         });
     }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_UsesGeometryVertexCountEvidence()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mystery_body.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteAsync(meshPath, SyntheticNifTestData.CreateBodyVertices(6942));
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("CBBE", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.Equals("verts:6942", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
 
 public sealed class PreviewMetadataTests
@@ -2012,6 +2080,33 @@ public sealed class ArmorRegionBindingTests
 
         Assert.Equal("default-full-body", binding.DetectionMethod);
         Assert.NotEmpty(binding.CoveredRegions);
+    }
+
+    [Fact]
+    public async Task BasicArmorRegionBindingService_GeometryFallbackDetectsSpatialRegions()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mysteryarmor.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteAsync(meshPath, SyntheticNifTestData.CreateUpperBodyArmorVertices());
+
+            var service = new BasicArmorRegionBindingService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var analysis = new MeshAnalysis("mixed", false, 1);
+
+            var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+            Assert.Equal("spatial-geometry", binding.DetectionMethod);
+            Assert.Contains("chest", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("arms", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 }
 
