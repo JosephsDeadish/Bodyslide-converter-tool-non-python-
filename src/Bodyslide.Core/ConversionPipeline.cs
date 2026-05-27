@@ -955,51 +955,64 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
         var isMale  = MaleBodies.Contains(targetBody);
 
-        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale) : null;
-        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale) : null;
+        // Derive mesh-type-aware stiffness and offset multipliers.
+        // Cloth and physics-enabled meshes allow more movement; rigid plate restricts it.
+        var (stiffnessMult, offsetMult) = mesh.MeshType switch
+        {
+            "cloth"           => (0.85, 1.25),
+            "physics-enabled" => (1.00, 1.00),
+            "skin-tight"      => (0.95, 0.90),
+            "leather"         => (1.05, 0.85),
+            "plate"           => (1.12, 0.70),
+            _                 => (1.00, 1.00)
+        };
+
+        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, stiffnessMult, offsetMult) : null;
+        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, stiffnessMult, offsetMult) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
 
-    private static string BuildCbpcXml(bool isMale)
+    private static string BuildCbpcXml(bool isMale, double stiffnessMult, double offsetMult)
     {
+        static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CBPCConfig version=\"1\">");
         if (isMale)
         {
             sb.AppendLine("  <PecPhysics>");
-            sb.AppendLine("    <Stiffness>0.88</Stiffness>");
+            sb.AppendLine($"    <Stiffness>{F(0.88 * stiffnessMult)}</Stiffness>");
             sb.AppendLine("    <Damping>0.62</Damping>");
             sb.AppendLine("    <Gravity>0.04</Gravity>");
-            sb.AppendLine("    <MaxOffset>0.06</MaxOffset>");
+            sb.AppendLine($"    <MaxOffset>{F(0.06 * offsetMult)}</MaxOffset>");
             sb.AppendLine("  </PecPhysics>");
             sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine("    <Stiffness>0.92</Stiffness>");
+            sb.AppendLine($"    <Stiffness>{F(0.92 * stiffnessMult)}</Stiffness>");
             sb.AppendLine("    <Damping>0.65</Damping>");
             sb.AppendLine("    <Gravity>0.03</Gravity>");
-            sb.AppendLine("    <MaxOffset>0.04</MaxOffset>");
+            sb.AppendLine($"    <MaxOffset>{F(0.04 * offsetMult)}</MaxOffset>");
             sb.AppendLine("  </BellyPhysics>");
         }
         else
         {
             sb.AppendLine("  <BreastPhysics>");
-            sb.AppendLine("    <Stiffness>0.90</Stiffness>");
+            sb.AppendLine($"    <Stiffness>{F(0.90 * stiffnessMult)}</Stiffness>");
             sb.AppendLine("    <Damping>0.60</Damping>");
             sb.AppendLine("    <Gravity>0.05</Gravity>");
-            sb.AppendLine("    <MaxOffset>0.08</MaxOffset>");
+            sb.AppendLine($"    <MaxOffset>{F(0.08 * offsetMult)}</MaxOffset>");
             sb.AppendLine("  </BreastPhysics>");
             sb.AppendLine("  <ButtPhysics>");
-            sb.AppendLine("    <Stiffness>0.85</Stiffness>");
+            sb.AppendLine($"    <Stiffness>{F(0.85 * stiffnessMult)}</Stiffness>");
             sb.AppendLine("    <Damping>0.55</Damping>");
             sb.AppendLine("    <Gravity>0.06</Gravity>");
-            sb.AppendLine("    <MaxOffset>0.06</MaxOffset>");
+            sb.AppendLine($"    <MaxOffset>{F(0.06 * offsetMult)}</MaxOffset>");
             sb.AppendLine("  </ButtPhysics>");
             sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine("    <Stiffness>0.92</Stiffness>");
+            sb.AppendLine($"    <Stiffness>{F(0.92 * stiffnessMult)}</Stiffness>");
             sb.AppendLine("    <Damping>0.65</Damping>");
             sb.AppendLine("    <Gravity>0.03</Gravity>");
-            sb.AppendLine("    <MaxOffset>0.04</MaxOffset>");
+            sb.AppendLine($"    <MaxOffset>{F(0.04 * offsetMult)}</MaxOffset>");
             sb.AppendLine("  </BellyPhysics>");
         }
 
@@ -1007,39 +1020,40 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return sb.ToString();
     }
 
-    private static string BuildSmpXml(string targetBody, bool isMale)
+    private static string BuildSmpXml(string targetBody, bool isMale, double stiffnessMult, double offsetMult)
     {
+        static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
         if (isMale)
         {
-            sb.AppendLine("  <bone name=\"NPC L Pec\" mass=\"2.5\" stiffness=\"0.85\" damping=\"0.60\">");
-            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.15\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Pec\" mass=\"2.5\" stiffness=\"{F(0.85 * stiffnessMult)}\" damping=\"0.60\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.15\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC R Pec\" mass=\"2.5\" stiffness=\"0.85\" damping=\"0.60\">");
-            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.15\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Pec\" mass=\"2.5\" stiffness=\"{F(0.85 * stiffnessMult)}\" damping=\"0.60\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.15\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"0.90\" damping=\"0.65\">");
-            sb.AppendLine("    <angularLimit min=\"-8\" max=\"8\" restitution=\"0.10\" />");
+            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"{F(0.90 * stiffnessMult)}\" damping=\"0.65\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-8 * offsetMult)}\" max=\"{F(8 * offsetMult)}\" restitution=\"0.10\" />");
             sb.AppendLine("  </bone>");
         }
         else
         {
-            sb.AppendLine("  <bone name=\"NPC L Breast01\" mass=\"2.0\" stiffness=\"0.80\" damping=\"0.50\">");
-            sb.AppendLine("    <angularLimit min=\"-20\" max=\"20\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Breast01\" mass=\"2.0\" stiffness=\"{F(0.80 * stiffnessMult)}\" damping=\"0.50\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-20 * offsetMult)}\" max=\"{F(20 * offsetMult)}\" restitution=\"0.20\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC R Breast01\" mass=\"2.0\" stiffness=\"0.80\" damping=\"0.50\">");
-            sb.AppendLine("    <angularLimit min=\"-20\" max=\"20\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Breast01\" mass=\"2.0\" stiffness=\"{F(0.80 * stiffnessMult)}\" damping=\"0.50\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-20 * offsetMult)}\" max=\"{F(20 * offsetMult)}\" restitution=\"0.20\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"0.90\" damping=\"0.60\">");
-            sb.AppendLine("    <angularLimit min=\"-10\" max=\"10\" restitution=\"0.10\" />");
+            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"{F(0.90 * stiffnessMult)}\" damping=\"0.60\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-10 * offsetMult)}\" max=\"{F(10 * offsetMult)}\" restitution=\"0.10\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC L Butt\" mass=\"1.8\" stiffness=\"0.75\" damping=\"0.55\">");
-            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Butt\" mass=\"1.8\" stiffness=\"{F(0.75 * stiffnessMult)}\" damping=\"0.55\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.20\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine("  <bone name=\"NPC R Butt\" mass=\"1.8\" stiffness=\"0.75\" damping=\"0.55\">");
-            sb.AppendLine("    <angularLimit min=\"-15\" max=\"15\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Butt\" mass=\"1.8\" stiffness=\"{F(0.75 * stiffnessMult)}\" damping=\"0.55\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.20\" />");
             sb.AppendLine("  </bone>");
         }
 
@@ -1635,8 +1649,16 @@ internal sealed class LocalExportService : IExportService
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
             var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody);
+            var patchOutput = new
+            {
+                pluginAnalysis.ScannedPlugins,
+                pluginAnalysis.ArmorAddons,
+                pluginAnalysis.PatchGuidance,
+                ProposedPatchSteps = proposedSteps
+            };
             await File.WriteAllTextAsync(pluginPatchPath,
-                JsonSerializer.Serialize(pluginAnalysis, new JsonSerializerOptions { WriteIndented = true }),
+                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
                 cancellationToken);
             outputFiles.Add(pluginPatchPath);
         }
@@ -1654,12 +1676,19 @@ internal sealed class LocalExportService : IExportService
         var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
         var previewPayload = new
         {
-            Mode = "placeholder",
+            Mode = "metadata-only",
+            TargetBody = request.TargetBody,
+            SourceMeshCount = armor.MeshFiles.Count,
+            MeshType = analysis.MeshType,
+            PhysicsEnabled = analysis.PhysicsEnabled,
+            RegionalMorphing = mesh.RegionalMorphing,
+            ActivePhysicsNodes = ExtractPhysicsNodeNames(physics),
+            SupportedSliders = bodySlideProject.Sliders,
             Captures = new[]
             {
-                "front",
-                "side",
-                "back"
+                new { View = "front", Region = "torso-front", PrimarySliders = GetCaptureSliders("front", bodySlideProject.Sliders) },
+                new { View = "side",  Region = "torso-side",  PrimarySliders = GetCaptureSliders("side",  bodySlideProject.Sliders) },
+                new { View = "back",  Region = "torso-back",  PrimarySliders = GetCaptureSliders("back",  bodySlideProject.Sliders) }
             }
         };
         await File.WriteAllTextAsync(previewPath, JsonSerializer.Serialize(previewPayload, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
@@ -1842,6 +1871,111 @@ internal sealed class LocalExportService : IExportService
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    // ── Preview helpers ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Extracts SMP bone names from <c>smp-config.xml</c> using a lightweight regex scan.
+    /// Falls back to a set of standard CBPC node names when only the CBPC profile is active.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractPhysicsNodeNames(PhysicsConfig physics)
+    {
+        var nodes = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(physics.SmpConfigXml))
+        {
+            var bonePattern = new System.Text.RegularExpressions.Regex(
+                @"<bone\s+name=""([^""]+)""",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+            foreach (System.Text.RegularExpressions.Match m in bonePattern.Matches(physics.SmpConfigXml))
+            {
+                var name = m.Groups[1].Value;
+                if (!nodes.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    nodes.Add(name);
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(physics.CbpcConfigXml))
+        {
+            // CBPC-only — return well-known CBPC node labels derived from the XML elements present.
+            var elementPattern = new System.Text.RegularExpressions.Regex(
+                @"<(\w+Physics)>",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+            foreach (System.Text.RegularExpressions.Match m in elementPattern.Matches(physics.CbpcConfigXml))
+            {
+                var label = m.Groups[1].Value;
+                if (!nodes.Contains(label, StringComparer.OrdinalIgnoreCase))
+                {
+                    nodes.Add(label);
+                }
+            }
+        }
+
+        return nodes;
+    }
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> CaptureSliderMap =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["front"] = ["Belly", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "Chest", "Body"],
+            ["side"]  = ["Belly", "Butt", "HipWidth", "Thighs", "Legs"],
+            ["back"]  = ["Butt", "Calves", "Thighs", "Legs", "Shoulders"]
+        };
+
+    /// <summary>
+    /// Returns sliders from the project that are relevant to the given capture view angle,
+    /// preserving only those that exist in the project's slider list.
+    /// </summary>
+    private static IReadOnlyList<string> GetCaptureSliders(string view, IReadOnlyList<string> projectSliders)
+    {
+        if (!CaptureSliderMap.TryGetValue(view, out var candidates))
+        {
+            return [];
+        }
+
+        return candidates
+            .Where(s => projectSliders.Contains(s, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    // ── Plugin guidance helpers ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a structured list of per-mesh xEdit patch steps from the plugin analysis result.
+    /// Each step identifies the plugin, the detected mesh path, the proposed action, and the
+    /// converted mesh placement note — without directly editing the ESP binary.
+    /// </summary>
+    private static IReadOnlyList<object> BuildProposedPatchSteps(PluginAnalysisResult pluginAnalysis, string targetBody)
+    {
+        var steps = new List<object>();
+
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            foreach (var meshPath in addon.DetectedMeshPaths)
+            {
+                // Armor meshes keep the same relative path after conversion —
+                // the converted NIF replaces the file at the same game-data location.
+                var normalised = meshPath.Replace('\\', '/');
+                steps.Add(new
+                {
+                    Plugin = addon.RecordType,
+                    RecordType = "ArmorAddon (ARMA)",
+                    OriginalMeshPath = normalised,
+                    ProposedMeshPath = normalised,
+                    PlacementNote = $"Copy the {targetBody}-converted NIF to this same path in your game data folder.",
+                    XEditAction = "Open in xEdit → locate ARMA record → verify Worn Armor mesh path matches the converted file location.",
+                    Tool = "xEdit"
+                });
+            }
+        }
+
+        return steps;
     }
 
     private static string BuildFomodModuleConfigXml(string packageName, string targetBody, string bodySlideProjectName)

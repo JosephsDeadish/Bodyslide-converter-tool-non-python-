@@ -1399,3 +1399,219 @@ public sealed class BodySignatureVertexCountTests
         });
     }
 }
+
+public sealed class PreviewMetadataTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_PreviewIsMetadataOnly()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
+            Assert.True(File.Exists(previewPath));
+
+            var content = await File.ReadAllTextAsync(previewPath);
+            Assert.Contains("\"metadata-only\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"TargetBody\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"MeshType\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"RegionalMorphing\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"ActivePhysicsNodes\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"SupportedSliders\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"Captures\"", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_PreviewCaptures_ContainThreeAnnotatedViews()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-renders.json"));
+
+            Assert.Contains("\"front\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"side\"",  content, StringComparison.Ordinal);
+            Assert.Contains("\"back\"",  content, StringComparison.Ordinal);
+            Assert.Contains("\"Region\"",        content, StringComparison.Ordinal);
+            Assert.Contains("\"PrimarySliders\"", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_PreviewPhysicsNodes_PresentWhenSmpEnabled()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cloth_robe.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-renders.json"));
+
+            // 3BA uses smp+cbpc so SMP nodes (NPC L Breast01 etc.) should appear.
+            Assert.Contains("NPC L Breast01", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class PluginPatchGuidanceTests
+{
+    [Fact]
+    public async Task PluginPatches_ContainsProposedPatchSteps_WhenPluginFound()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        // Write a minimal ESP-like file containing a NIF mesh path so the scanner picks it up.
+        var espPath = Path.Combine(workingDirectory, "TestMod.esp");
+        // The ESP content contains an ASCII NIF path that the regex will match.
+        var espBytes = System.Text.Encoding.Latin1.GetBytes(
+            "HEADR\0\0\0meshes/armor/iron/ironarmor_0.nif\0");
+        await File.WriteAllBytesAsync(espPath, espBytes);
+
+        var nifPath = Path.Combine(workingDirectory, "ironarmor_0.nif");
+        await File.WriteAllTextAsync(nifPath, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            Assert.True(File.Exists(patchPath));
+
+            var content = await File.ReadAllTextAsync(patchPath);
+            Assert.Contains("\"ProposedPatchSteps\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"XEditAction\"",        content, StringComparison.Ordinal);
+            Assert.Contains("\"PlacementNote\"",      content, StringComparison.Ordinal);
+            Assert.Contains("xEdit",                  content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class PhysicsMeshTypeTuningTests
+{
+    [Theory]
+    [InlineData("cloth",           "BreastPhysics", true)]   // cloth → lower stiffness → value < 0.90
+    [InlineData("plate",          "BreastPhysics", false)]   // plate → higher stiffness → value > 0.90
+    [InlineData("physics-enabled","BreastPhysics", false)]   // physics-enabled → default 0.90
+    public async Task BuildAsync_MeshTypeTuning_AdjustsStiffness(
+        string meshType, string xmlElement, bool expectSofterThanDefault)
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(meshType, "default", true);
+
+        var config = await service.BuildAsync(mesh, "CBBE", "smp+cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.CbpcConfigXml);
+        var stiffnessPattern = new System.Text.RegularExpressions.Regex(
+            $@"<{xmlElement}>\s*<Stiffness>([0-9.]+)</Stiffness>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        var match = stiffnessPattern.Match(config.CbpcConfigXml);
+        Assert.True(match.Success, $"Could not find stiffness inside <{xmlElement}> in CBPC XML.");
+
+        var stiffness = double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        const double defaultBreastStiffness = 0.90;
+
+        if (expectSofterThanDefault)
+        {
+            Assert.True(stiffness < defaultBreastStiffness,
+                $"{meshType} stiffness {stiffness} should be < {defaultBreastStiffness}");
+        }
+        else if (meshType == "plate")
+        {
+            Assert.True(stiffness > defaultBreastStiffness,
+                $"{meshType} stiffness {stiffness} should be > {defaultBreastStiffness}");
+        }
+        else
+        {
+            Assert.Equal(defaultBreastStiffness, stiffness, precision: 10);
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_ClothMesh_SmpAngularLimitLargerThanPlate()
+    {
+        var service = new BasicPhysicsSupportService();
+        var clothMesh = new WeightedMesh("cloth", "default", true);
+        var plateMesh = new WeightedMesh("plate", "default", false);
+
+        var clothConfig = await service.BuildAsync(clothMesh, "3BA", "smp",  CancellationToken.None);
+        var plateConfig = await service.BuildAsync(plateMesh, "3BA", "smp",  CancellationToken.None);
+
+        Assert.NotNull(clothConfig.SmpConfigXml);
+        Assert.NotNull(plateConfig.SmpConfigXml);
+
+        var maxPattern = new System.Text.RegularExpressions.Regex(
+            @"NPC L Breast01.*?max=""([0-9.]+)""",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        var clothMax = double.Parse(maxPattern.Match(clothConfig.SmpConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+        var plateMax = double.Parse(maxPattern.Match(plateConfig.SmpConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.True(clothMax > plateMax,
+            $"Cloth max angular limit ({clothMax}) should exceed plate ({plateMax})");
+    }
+
+    [Fact]
+    public async Task BuildAsync_MalePhysicsWithMeshTuning_StillContainsPecNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+
+        foreach (var meshType in new[] { "cloth", "plate", "mixed" })
+        {
+            var mesh   = new WeightedMesh(meshType, "default", false);
+            var config = await service.BuildAsync(mesh, "HIMBO", "smp", CancellationToken.None);
+
+            Assert.NotNull(config.SmpConfigXml);
+            Assert.Contains("NPC L Pec",     config.SmpConfigXml, StringComparison.Ordinal);
+            Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
+        }
+    }
+}

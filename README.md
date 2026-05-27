@@ -94,9 +94,9 @@ Each successful conversion produces the following files in the output directory:
 | `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
-| `plugin-patches.json` | Mesh path references found in sidecar plugins + patch guidance |
+| `plugin-patches.json` | Detected mesh paths from sidecar plugins + structured xEdit patch guidance (`ProposedPatchSteps` with per-mesh actions, no ESP is written) |
 | `texture-summary.json` | Texture audit: DDS count, missing normal maps, unrecognised files |
-| `preview-renders.json` | Preview metadata for downstream rendering integration |
+| `preview-renders.json` | Metadata-only preview descriptor: target body, mesh type, regional morph values, active physics nodes, slider list, and per-view capture hints (no actual render) |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
 | `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
@@ -115,9 +115,9 @@ Implemented from issue scope:
 - **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
 
 Still partial / placeholder versus full issue vision:
-- live preview rendering is metadata-only placeholder
-- plugin editing is guidance output (not direct ESP mutation)
-- deformation/physics logic is rule-based simulation, not full geometry/animation engine
+- live preview rendering is metadata-only (enriched with mesh type, regional morphs, physics nodes, and per-view slider hints — no actual 3D render)
+- plugin editing is guidance output (not direct ESP mutation) — structured `ProposedPatchSteps` with per-mesh xEdit instructions are generated but no binary ESP is written
+- deformation/physics logic is rule-based with mesh-type-aware parameter tuning (cloth→softer, plate→stiffer), not a full geometry/animation engine
 
 ## Current built-in presets
 
