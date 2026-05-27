@@ -6,13 +6,14 @@ on:
       - main
       - master
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build standalone app
+  verify:
+    name: Restore, build, test
     runs-on: ubuntu-latest
 
     steps:
@@ -43,5 +44,68 @@ jobs:
       - name: Upload standalone artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bodyslide-standalone-release
+          name: bodyslide-standalone-linux-release
           path: artifacts/standalone
+
+  publish-windows-on-merge:
+    name: Publish Windows app on merge branch
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: windows-latest
+    needs: verify
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Publish Windows app files (.exe + dependencies)
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bodyslide-standalone-win-x64-release
+          path: artifacts/win-x64
+
+  publish-windows-on-pr-approval:
+    name: Publish Windows app on PR approval
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    needs: verify
+    environment: pr-build-approval
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Publish Windows app files (.exe + dependencies)
+        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bodyslide-standalone-win-x64-pr-${{ github.event.pull_request.number }}
+          path: artifacts/win-x64

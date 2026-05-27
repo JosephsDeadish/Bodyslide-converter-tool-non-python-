@@ -55,7 +55,12 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 This repository includes `.github/workflows/build.yml`, which runs automatically on pushes to `main`/`master` and on pull requests.
 
-The workflow restores dependencies, builds the solution, runs tests, publishes the standalone app, and uploads it as an artifact.
+What it does:
+- **Every push/PR:** restore, build, test, and publish a Linux standalone artifact.
+- **Push to `main`/`master` (post-merge):** publish and upload Windows app files (`.exe` + dependencies) as `bodyslide-standalone-win-x64-release`.
+- **Pull requests:** includes an approval-gated Windows publish job (`pr-build-approval`) so you can approve packaging on each small PR session before merge.
+
+To require manual approval in PR builds, set required reviewers for the `pr-build-approval` environment in repository settings.
 
 ## Deformation profiles
 
@@ -86,6 +91,8 @@ Each successful conversion produces the following files in the output directory:
 | `texture-summary.json` | Texture audit: DDS count, missing normal maps, unrecognised files |
 | `preview-renders.json` | Preview metadata for downstream rendering integration |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
+
+When a matching cache entry exists in the selected output folder for the same armor mesh + target body, the converter now reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps.
 
 ## Current built-in presets
 

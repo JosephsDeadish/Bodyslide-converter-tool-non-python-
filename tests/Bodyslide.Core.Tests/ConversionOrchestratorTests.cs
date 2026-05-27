@@ -153,6 +153,35 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithDefaultModules_ReusesConversionLearningCache()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "cuirass_3ba.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var firstResult = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+            Assert.True(firstResult.Success);
+
+            var secondResult = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+            Assert.True(secondResult.Success);
+            Assert.Contains(secondResult.Steps, s => s.StartsWith("learning-cache:hit=", StringComparison.Ordinal));
+            Assert.Contains(secondResult.Steps, s => s.Equals("learning-cache:reused", StringComparison.Ordinal));
+            Assert.Contains(secondResult.Steps, s => s.Contains("mesh-converted:", StringComparison.Ordinal) && s.Contains("cache-reuse", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesDependencyMap()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

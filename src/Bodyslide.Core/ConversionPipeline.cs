@@ -365,6 +365,26 @@ public sealed class ConversionOrchestrator(
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
 
+            var defaultOutput = Path.Combine(
+                Environment.CurrentDirectory,
+                "output",
+                normalized.Request.TargetBody,
+                Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
+            var outputDirectory = Path.GetFullPath(normalized.Request.OutputDirectory ?? defaultOutput);
+            var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
+            var cacheEntries = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
+            var cacheKey = ConversionLearningCache.BuildCacheKey(
+                Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown",
+                normalized.Request.TargetBody);
+            var cachedEntry = cacheEntries
+                .Where(entry => string.Equals(entry.Key, cacheKey, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(entry => entry.LastSuccessfulConversion)
+                .FirstOrDefault();
+            if (cachedEntry is not null)
+            {
+                steps.Add($"learning-cache:hit={cachedEntry.LastSuccessfulConversion:O}");
+            }
+
             // Vanilla armor database lookup — enriches detection with known region maps.
             var vanillaEntry = armor.MeshFiles
                 .Select(mesh => vanillaArmorLookup.TryLookup(Path.GetFileName(mesh), out var entry) ? entry : null)
@@ -400,6 +420,24 @@ public sealed class ConversionOrchestrator(
             steps.Add($"cage:{cage.Mode}");
 
             var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, cancellationToken);
+            if (cachedEntry is not null && cachedEntry.RegionalMorphing.Count > 0)
+            {
+                var mergedMorphing = converted.RegionalMorphing.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var (region, cachedValue) in cachedEntry.RegionalMorphing)
+                {
+                    mergedMorphing[region] = mergedMorphing.TryGetValue(region, out var currentValue)
+                        ? Math.Round((currentValue * 0.4) + (cachedValue * 0.6), 6)
+                        : cachedValue;
+                }
+
+                converted = new ConvertedMesh(
+                    converted.MeshType,
+                    $"{converted.Strategy}+cache-reuse",
+                    converted.MeshCount,
+                    mergedMorphing);
+                steps.Add("learning-cache:reused");
+            }
+
             steps.Add($"mesh-converted:{converted.Strategy}");
 
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, cancellationToken);
@@ -543,6 +581,39 @@ internal sealed record ConversionCacheEntry(
     IReadOnlyDictionary<string, double> RegionalMorphing,
     bool HadClipping,
     string CorrectionMethod);
+
+internal static class ConversionLearningCache
+{
+    public static async Task<List<ConversionCacheEntry>> LoadEntriesAsync(string cachePath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(cachePath))
+        {
+            return [];
+        }
+
+        var raw = await File.ReadAllTextAsync(cachePath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+    }
+
+    public static string BuildCacheKey(string meshFileNameWithoutExtension, string targetBody)
+    {
+        return $"{SanitizeCacheKeyPart(meshFileNameWithoutExtension)}:{SanitizeCacheKeyPart(targetBody)}";
+    }
+
+    private static string SanitizeCacheKeyPart(string value)
+    {
+        var sanitized = new string(value
+            .Where(static ch => char.IsLetterOrDigit(ch) || ch is '-' or '_')
+            .ToArray());
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "unknown" : sanitized;
+    }
+}
 
 internal sealed class LocalArmorImportService : IArmorImportService
 {
@@ -1506,8 +1577,8 @@ internal sealed class LocalExportService : IExportService
         outputFiles.Add(logPath);
 
         var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
-        var cache = await LoadCacheAsync(cachePath, cancellationToken);
-        var cacheKey = $"{SanitizeCacheKeyPart(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown")}:{SanitizeCacheKeyPart(request.TargetBody)}";
+        var cache = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
+        var cacheKey = ConversionLearningCache.BuildCacheKey(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown", request.TargetBody);
         cache.RemoveAll(entry => string.Equals(entry.Key, cacheKey, StringComparison.OrdinalIgnoreCase));
         cache.Add(new ConversionCacheEntry(
             cacheKey,
@@ -1535,31 +1606,6 @@ internal sealed class LocalExportService : IExportService
         }
 
         return (outputDirectory, outputFiles);
-    }
-
-    private static async Task<List<ConversionCacheEntry>> LoadCacheAsync(string cachePath, CancellationToken cancellationToken)
-    {
-        if (!File.Exists(cachePath))
-        {
-            return [];
-        }
-
-        var raw = await File.ReadAllTextAsync(cachePath, cancellationToken);
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return [];
-        }
-
-        return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
-    }
-
-    private static string SanitizeCacheKeyPart(string value)
-    {
-        var sanitized = new string(value
-            .Where(static ch => char.IsLetterOrDigit(ch) || ch is '-' or '_')
-            .ToArray());
-
-        return string.IsNullOrWhiteSpace(sanitized) ? "unknown" : sanitized;
     }
 
     private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(ImportedArmor armor, PluginAnalysisResult pluginAnalysis)
