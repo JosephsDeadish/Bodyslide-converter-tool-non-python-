@@ -32,8 +32,8 @@ This repository contains the SlideSmith standalone .NET conversion tool (current
 ## Run
 
 ```bash
-# build executable (SlideSmith.exe on Windows publish output)
-dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false
+# build testable executable package (single-file, self-contained)
+dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
 
 # simple positional mode
 dotnet run --project src/Bodyslide.Standalone -- "<armor path>" "<target body>" "<optional output directory>"
@@ -65,11 +65,11 @@ dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 This repository includes `.github/workflows/build.yml`, which runs automatically on pushes to `main`/`master` and on pull requests.
 
 What it does:
-- **Every push/PR:** restore, build, test, and publish a Linux standalone artifact.
-- **Push to `main`/`master` (post-merge):** publish and upload Windows app files (`SlideSmith.exe` + dependencies) as `slidesmith-win-x64-release`.
-- **Pull requests:** includes an approval-gated Windows publish job (`pr-build-approval`) so you can approve packaging on each small PR session before merge.
+- **Every push/PR:** restore, build, test, build a Linux executable package, zip it, and upload it as an Actions artifact.
+- **Push to `main`/`master` (post-merge):** build Windows executable package, zip it, and upload as an Actions artifact.
+- **Pull requests:** build Windows executable package, zip it, and upload as an Actions artifact for testing.
 
-To require manual approval in PR builds, set required reviewers for the `pr-build-approval` environment in repository settings.
+These are CI build artifacts only (download from the Actions run page). No GitHub Release publishing is performed by this workflow.
 
 ## Deformation profiles
 
@@ -112,7 +112,7 @@ Implemented from issue scope:
 - body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
 - plugin scan, texture summary (6 DDS categories), vanilla armor lookup (65+ entries), voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
-- automatic CI builds with PR approval-gated Windows packaging and merge-time Windows `.exe` artifact publishing
+- automatic CI builds with Linux/Windows executable zip artifacts uploaded in Actions for PR and merge testing (no release publishing)
 - FOMOD metadata output (`fomod/ModuleConfig.xml`, `fomod/info.xml`)
 - **output `.nif` file(s)** written to the output directory; `_0`/`_1` weight variant pairs detected and written as matched pairs
 - **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
