@@ -97,4 +97,4 @@ Each successful conversion produces the following files in the output directory:
 
 ## Batch behavior
 
-If the input is a directory, all `.nif` files are converted in one run and exported into per-armor output folders.
+If the input is a directory or `.zip` archive, all `.nif` files are converted in one run and exported into per-armor output folders.

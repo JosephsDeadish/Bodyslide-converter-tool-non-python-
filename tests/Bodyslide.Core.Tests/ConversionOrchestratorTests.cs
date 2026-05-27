@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using System.IO.Compression;
 
 namespace Bodyslide.Core.Tests;
 
@@ -92,6 +93,33 @@ public sealed class ConversionOrchestratorTests
             {
                 Directory.Delete(outputDirectory, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_ConvertsAllNifsInZipArchive()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sourceDirectory = Path.Combine(workingDirectory, "source");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var zipPath = Path.Combine(workingDirectory, "mod-pack.zip");
+        Directory.CreateDirectory(sourceDirectory);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "armor_one.nif"), "mesh");
+            await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "armor_two.nif"), "mesh");
+            ZipFile.CreateFromDirectory(sourceDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var results = await runner.ConvertAsync(new ConversionRequest(zipPath, "CBBE", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 

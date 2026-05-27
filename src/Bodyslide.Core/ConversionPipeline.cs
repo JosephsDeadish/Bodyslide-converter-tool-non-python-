@@ -402,12 +402,39 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 {
     public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
     {
+        if (File.Exists(request.InputPath) && Path.GetExtension(request.InputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            var extractedArchive = Path.Combine(Path.GetTempPath(), "bodyslide-batch-extract", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(extractedArchive);
+            ZipFile.ExtractToDirectory(request.InputPath, extractedArchive);
+
+            try
+            {
+                return await ConvertDirectoryMeshesAsync(request, extractedArchive, cancellationToken);
+            }
+            finally
+            {
+                if (Directory.Exists(extractedArchive))
+                {
+                    Directory.Delete(extractedArchive, recursive: true);
+                }
+            }
+        }
+
         if (File.Exists(request.InputPath) || !Directory.Exists(request.InputPath))
         {
             return [await orchestrator.ConvertAsync(request, cancellationToken)];
         }
 
-        var meshFiles = Directory.GetFiles(request.InputPath, "*.nif", SearchOption.AllDirectories)
+        return await ConvertDirectoryMeshesAsync(request, request.InputPath, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ConversionResult>> ConvertDirectoryMeshesAsync(
+        ConversionRequest request,
+        string sourceDirectory,
+        CancellationToken cancellationToken)
+    {
+        var meshFiles = Directory.GetFiles(sourceDirectory, "*.nif", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
