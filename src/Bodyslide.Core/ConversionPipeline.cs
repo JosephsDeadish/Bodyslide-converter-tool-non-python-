@@ -6,9 +6,10 @@ namespace Bodyslide.Core;
 public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, string? TemporaryWorkspace = null);
+public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount);
 public sealed record DeformationCage(string Mode);
-public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount);
+public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred);
 public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions);
@@ -44,6 +45,66 @@ public static class RequestNormalizer
     }
 }
 
+internal sealed record BodySignatureTemplate(
+    string Body,
+    IReadOnlyList<string> MeshTokens,
+    IReadOnlyList<string> TextureTokens,
+    IReadOnlyList<string> PhysicsTokens);
+
+internal static class VanillaBodySignatureDatabase
+{
+    public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
+    [
+        new("CBBE", ["cbbe", "caliente"], ["femalebody_1", "femalebody_0"], []),
+        new("UNP", ["unp", "unpb"], ["femalebody"], []),
+        new("HIMBO", ["himbo", "male"], ["malebody"], []),
+        new("BHUNP", ["bhunp"], ["femalebody"], []),
+        new("3BA", ["3ba", "cbbe", "bodyslide"], ["femalebody"], ["smp", "cbpc"]),
+        new("TBD", ["tbd"], ["femalebody"], [])
+    ];
+}
+
+internal static class BodyTransformationFieldCatalog
+{
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> Fields =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.08,
+                ["waist"] = 0.96,
+                ["pelvis"] = 1.05,
+                ["legs"] = 1.03,
+                ["shoulders"] = 1.01
+            },
+            ["3BA"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.12,
+                ["waist"] = 0.95,
+                ["pelvis"] = 1.06,
+                ["legs"] = 1.04,
+                ["shoulders"] = 1.01
+            }
+        };
+
+    public static IReadOnlyDictionary<string, double> Resolve(string targetBody)
+    {
+        if (Fields.TryGetValue(targetBody, out var profile))
+        {
+            return profile;
+        }
+
+        return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.02,
+            ["waist"] = 0.99,
+            ["pelvis"] = 1.02,
+            ["legs"] = 1.01,
+            ["shoulders"] = 1.0
+        };
+    }
+}
+
 public interface IArmorImportService
 {
     Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken);
@@ -51,7 +112,7 @@ public interface IArmorImportService
 
 public interface IBodyDetectionService
 {
-    Task<string> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken);
+    Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken);
 }
 
 public interface IMeshAnalysisService
@@ -149,7 +210,12 @@ public sealed class ConversionOrchestrator(
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count}");
 
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
-            steps.Add($"detected-body:{detectedBody}");
+            var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
+            steps.Add($"detected-body:{detectedBody.Body}@{detectedBody.Confidence:P0}");
+            if (!string.IsNullOrWhiteSpace(evidenceSummary))
+            {
+                steps.Add($"body-evidence:{evidenceSummary}");
+            }
 
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
             steps.Add($"mesh-type:{analysis.MeshType}");
@@ -242,6 +308,16 @@ public static class StandaloneConversionModules
             new LocalExportService());
 }
 
+internal sealed record ConversionCacheEntry(
+    string Key,
+    DateTimeOffset LastSuccessfulConversion,
+    string TargetBody,
+    string MeshType,
+    string Strategy,
+    IReadOnlyDictionary<string, double> RegionalMorphing,
+    bool HadClipping,
+    string CorrectionMethod);
+
 internal sealed class LocalArmorImportService : IArmorImportService
 {
     public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken)
@@ -288,13 +364,68 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
-    private static readonly string[] KnownBodies = ["CBBE", "UNP", "HIMBO", "BHUNP", "3BA", "TBD"];
-
-    public Task<string> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
+    public Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
-        var signatures = string.Join(' ', armor.MeshFiles.Select(Path.GetFileNameWithoutExtension)).ToUpperInvariant();
-        var detected = KnownBodies.FirstOrDefault(signatures.Contains) ?? "CUSTOM";
-        return Task.FromResult(detected);
+        var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+        var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+        var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+
+        var scoredCandidates = VanillaBodySignatureDatabase.Templates
+            .Select(template => Score(template, meshNames, textureNames, physicsNames))
+            .OrderByDescending(result => result.Score)
+            .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var top = scoredCandidates.FirstOrDefault();
+        if (top is null || top.Score < 0.25)
+        {
+            return Task.FromResult(new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]));
+        }
+
+        return Task.FromResult(new BodyDetectionReport(top.Template.Body, top.Score, top.Evidence));
+    }
+
+    private static (BodySignatureTemplate Template, double Score, IReadOnlyList<string> Evidence) Score(
+        BodySignatureTemplate template,
+        IReadOnlyList<string> meshNames,
+        IReadOnlyList<string> textureNames,
+        IReadOnlyList<string> physicsNames)
+    {
+        var evidence = new List<string>();
+
+        var meshHitRatio = MatchRatio(meshNames, template.MeshTokens);
+        if (meshHitRatio > 0)
+        {
+            evidence.Add($"mesh:{meshHitRatio:P0}");
+        }
+
+        var textureHitRatio = MatchRatio(textureNames, template.TextureTokens);
+        if (textureHitRatio > 0)
+        {
+            evidence.Add($"uv-signature:{textureHitRatio:P0}");
+        }
+
+        var physicsHitRatio = MatchRatio(physicsNames, template.PhysicsTokens);
+        if (template.PhysicsTokens.Count > 0 && physicsHitRatio > 0)
+        {
+            evidence.Add($"physics:{physicsHitRatio:P0}");
+        }
+
+        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 0.1 : 0;
+        var score = Math.Clamp((meshHitRatio * 0.5) + (textureHitRatio * 0.3) + (physicsHitRatio * 0.1) + physicsExpectationBoost, 0, 1);
+        return (template, score, evidence);
+    }
+
+    private static double MatchRatio(IReadOnlyList<string> fileNames, IReadOnlyList<string> tokens)
+    {
+        if (tokens.Count == 0 || fileNames.Count == 0)
+        {
+            return 0;
+        }
+
+        var combined = string.Join(' ', fileNames).ToLowerInvariant();
+        var hits = tokens.Count(token => combined.Contains(token, StringComparison.OrdinalIgnoreCase));
+        return (double)hits / tokens.Count;
     }
 }
 
@@ -346,8 +477,22 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             _ => "hybrid-cage-deformation"
         };
 
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount));
+        var baseField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        var regionalMorphing = analysis.MeshType switch
+        {
+            "plate" => ApplyRigidityConstraints(baseField),
+            "cloth" => ApplySoftClothAmplification(baseField),
+            _ => baseField
+        };
+
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, regionalMorphing));
     }
+
+    private static IReadOnlyDictionary<string, double> ApplyRigidityConstraints(IReadOnlyDictionary<string, double> field) =>
+        field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 0.45), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
+        field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 1.15), StringComparer.OrdinalIgnoreCase);
 }
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
@@ -466,6 +611,38 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllLinesAsync(logPath, steps, cancellationToken);
         outputFiles.Add(logPath);
 
+        var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
+        var cache = await LoadCacheAsync(cachePath, cancellationToken);
+        var cacheKey = $"{Path.GetFileNameWithoutExtension(armor.MeshFiles[0])}:{request.TargetBody}";
+        cache.RemoveAll(entry => string.Equals(entry.Key, cacheKey, StringComparison.OrdinalIgnoreCase));
+        cache.Add(new ConversionCacheEntry(
+            cacheKey,
+            DateTimeOffset.UtcNow,
+            request.TargetBody,
+            analysis.MeshType,
+            mesh.Strategy,
+            mesh.RegionalMorphing,
+            clipping.HasClipping,
+            correction.Method));
+        await File.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        outputFiles.Add(cachePath);
+
         return (outputDirectory, outputFiles);
+    }
+
+    private static async Task<List<ConversionCacheEntry>> LoadCacheAsync(string cachePath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(cachePath))
+        {
+            return [];
+        }
+
+        var raw = await File.ReadAllTextAsync(cachePath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
     }
 }

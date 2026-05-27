@@ -85,6 +85,35 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
         }
+
+        [Fact]
+        public async Task ConvertAsync_WithDefaultModules_WritesConversionLearningCache()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var inputDirectory = Path.Combine(workingDirectory, "input");
+            var outputDirectory = Path.Combine(workingDirectory, "output");
+            Directory.CreateDirectory(inputDirectory);
+            Directory.CreateDirectory(outputDirectory);
+            var inputFile = Path.Combine(inputDirectory, "cuirass_3ba.nif");
+            await File.WriteAllTextAsync(inputFile, "mesh");
+
+            try
+            {
+                var orchestrator = StandaloneConversionModules.CreateDefault();
+                var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+                Assert.True(result.Success);
+                var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
+                Assert.True(File.Exists(cachePath));
+                var cacheContent = await File.ReadAllTextAsync(cachePath);
+                Assert.Contains("\"TargetBody\": \"3BA\"", cacheContent, StringComparison.Ordinal);
+                Assert.Contains("\"RegionalMorphing\"", cacheContent, StringComparison.Ordinal);
+            }
+            finally
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+        }
         finally
         {
             Directory.Delete(inputDirectory, recursive: true);
@@ -117,7 +146,8 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestDetector : IBodyDetectionService
     {
-        public Task<string> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken) => Task.FromResult("CBBE");
+        public Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken) =>
+            Task.FromResult(new BodyDetectionReport("CBBE", 0.99, ["mesh:100%"]));
     }
 
     private sealed class TestAnalyzer : IMeshAnalysisService
@@ -135,7 +165,7 @@ public sealed class ConversionOrchestratorTests
     private sealed class TestConverter : IMeshConversionService
     {
         public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, CancellationToken cancellationToken) =>
-            Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1));
+            Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { ["chest"] = 1.0 }));
     }
 
     private sealed class TestWeightTransfer : IWeightTransferService

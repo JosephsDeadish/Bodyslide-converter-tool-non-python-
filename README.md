@@ -11,6 +11,7 @@ This repository contains a standalone .NET conversion tool that bundles core con
 - clipping detection + auto-correction pass
 - physics profile generation
 - export package + manifest/log output
+- conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 
 ## Projects
 
