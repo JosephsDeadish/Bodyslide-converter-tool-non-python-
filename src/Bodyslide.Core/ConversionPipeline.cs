@@ -204,6 +204,10 @@ internal static class VanillaBodySignatureDatabase
 
 internal static class NifGeometrySignatureReader
 {
+    // Lightweight heuristics for plausible body/armor meshes.
+    private const int MinPlausibleVertexCount = 256;
+    private const int MaxPlausibleVertexCount = 250_000;
+    private const float MaxPlausibleCoordinateValue = 8192f;
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
 
@@ -293,7 +297,7 @@ internal static class NifGeometrySignatureReader
         for (var offset = 0; offset <= bytes.Length - sizeof(int); offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-            if (candidateVertexCount is < 256 or > 250_000)
+            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
             {
                 continue;
             }
@@ -369,7 +373,7 @@ internal static class NifGeometrySignatureReader
     }
 
     private static bool IsPlausibleCoordinate(float value) =>
-        float.IsFinite(value) && Math.Abs(value) <= 8192f;
+        float.IsFinite(value) && Math.Abs(value) <= MaxPlausibleCoordinateValue;
 }
 
 internal static class BodyTransformationFieldCatalog
