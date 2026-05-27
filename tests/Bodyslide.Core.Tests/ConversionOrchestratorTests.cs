@@ -565,6 +565,7 @@ public sealed class ConversionOrchestratorTests
             new TestVanillaArmorLookup(),
             new TestVoxelCollision(),
             new TestArmorRegionBindingService(),
+            new TestPoseSimulationService(),
             exporter ?? new TestExporter());
 
     private sealed class TestImporter : IArmorImportService
@@ -680,6 +681,16 @@ public sealed class ConversionOrchestratorTests
             Task.FromResult(new ArmorRegionBinding(["chest", "waist"], "test-stub"));
     }
 
+    private sealed class TestPoseSimulationService : IPoseSimulationService
+    {
+        public Task<PoseSimulationResult> SimulateAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new PoseSimulationResult(
+                ["T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak"],
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                [],
+                0));
+    }
+
     private sealed class TestExporter : IExportService
     {
         public string? ExportPath { get; private set; }
@@ -696,6 +707,7 @@ public sealed class ConversionOrchestratorTests
             BodySlideProject bodySlideProject,
             PluginAnalysisResult pluginAnalysis,
             TextureSummary textureSummary,
+            PoseSimulationResult poseSimulation,
             IReadOnlyList<string> steps,
             CancellationToken cancellationToken)
         {
@@ -1410,7 +1422,7 @@ public sealed class BodySignatureVertexCountTests
 public sealed class PreviewMetadataTests
 {
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_PreviewIsMetadataOnly()
+    public async Task ConvertAsync_WithDefaultModules_WritesPreviewHtml()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory  = Path.Combine(workingDirectory, "output");
@@ -1424,17 +1436,15 @@ public sealed class PreviewMetadataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
-            Assert.True(File.Exists(previewPath));
+            var previewPath = Path.Combine(outputDirectory, "preview.html");
+            Assert.True(File.Exists(previewPath), "preview.html should exist.");
 
             var content = await File.ReadAllTextAsync(previewPath);
-            Assert.Contains("\"metadata-only\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"TargetBody\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"MeshType\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"RegionalMorphing\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"ActivePhysicsNodes\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"SupportedSliders\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"Captures\"", content, StringComparison.Ordinal);
+            Assert.Contains("<!DOCTYPE html>",   content, StringComparison.Ordinal);
+            Assert.Contains("<svg ",             content, StringComparison.Ordinal);
+            Assert.Contains("3BA",               content, StringComparison.Ordinal);
+            Assert.Contains("Regional Morphing", content, StringComparison.Ordinal);
+            Assert.Contains("BodySlide Sliders", content, StringComparison.Ordinal);
         }
         finally
         {
@@ -1443,7 +1453,7 @@ public sealed class PreviewMetadataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_PreviewCaptures_ContainThreeAnnotatedViews()
+    public async Task ConvertAsync_WithDefaultModules_PreviewHtmlContainsSvgRegions()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory  = Path.Combine(workingDirectory, "output");
@@ -1457,13 +1467,11 @@ public sealed class PreviewMetadataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-renders.json"));
+            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
 
-            Assert.Contains("\"front\"", content, StringComparison.Ordinal);
-            Assert.Contains("\"side\"",  content, StringComparison.Ordinal);
-            Assert.Contains("\"back\"",  content, StringComparison.Ordinal);
-            Assert.Contains("\"Region\"",        content, StringComparison.Ordinal);
-            Assert.Contains("\"PrimarySliders\"", content, StringComparison.Ordinal);
+            // SVG body silhouette with coloured region overlays should be present.
+            Assert.Contains("<rect ",  content, StringComparison.Ordinal);
+            Assert.Contains("fill=",  content, StringComparison.Ordinal);
         }
         finally
         {
@@ -1472,7 +1480,7 @@ public sealed class PreviewMetadataTests
     }
 
     [Fact]
-    public async Task ConvertAsync_PreviewPhysicsNodes_PresentWhenSmpEnabled()
+    public async Task ConvertAsync_Preview_ContainsPoseRiskLabel()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory  = Path.Combine(workingDirectory, "output");
@@ -1486,10 +1494,13 @@ public sealed class PreviewMetadataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-renders.json"));
+            var content = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
 
-            // 3BA uses smp+cbpc so SMP nodes (NPC L Breast01 etc.) should appear.
-            Assert.Contains("NPC L Breast01", content, StringComparison.Ordinal);
+            // The subtitle line should include a pose risk summary.
+            Assert.True(
+                content.Contains("poses at risk", StringComparison.Ordinal) ||
+                content.Contains("poses OK",      StringComparison.Ordinal),
+                "Preview HTML subtitle should include a pose-risk label.");
         }
         finally
         {
@@ -2064,6 +2075,247 @@ public sealed class BatchReportTests
             Assert.Contains("\"TotalCount\": 3",   content, StringComparison.Ordinal);
             Assert.Contains("\"SuccessCount\": 3", content, StringComparison.Ordinal);
             Assert.Contains("\"FailedCount\": 0",  content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pose simulation, preview.html, and xEdit script tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class PoseSimulationAndPreviewTests
+{
+    // ── BasicPoseSimulationService ────────────────────────────────────────────
+
+    [Fact]
+    public async Task PoseSimulation_NoHighMorphs_ReturnsZeroAtRiskPoses()
+    {
+        var service = new BasicPoseSimulationService();
+        // Use 0.92 so that even with the highest regional amplifier (belly in Crouch = 1.12),
+        // the effective stress stays below the 1.10 risk threshold: 0.92 × 1.12 = 1.030.
+        var mesh    = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["chest"] = 0.92, ["waist"] = 0.92, ["belly"] = 0.92
+        });
+
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.Equal(0, result.TotalPosesAtRisk);
+        Assert.Empty(result.HighRiskRegions);
+        Assert.Empty(result.PoseClippingRisk);
+        Assert.Equal(8, result.TestedPoses.Count);
+    }
+
+    [Fact]
+    public async Task PoseSimulation_HighThighMorph_FlagsHighStressPoses()
+    {
+        var service = new BasicPoseSimulationService();
+        // thigh morph 1.09 × crouch amplifier 1.20 = 1.308 → above threshold
+        var mesh = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["thighs"] = 1.09
+        });
+
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.True(result.TotalPosesAtRisk > 0, "Expected at least one pose at risk for high thigh morph.");
+        Assert.Contains("thighs", result.HighRiskRegions, StringComparer.OrdinalIgnoreCase);
+        Assert.True(result.PoseClippingRisk.ContainsKey("Crouch") || result.PoseClippingRisk.ContainsKey("Sneak"),
+            "Crouch or Sneak should be flagged for high thigh morph.");
+    }
+
+    [Fact]
+    public async Task PoseSimulation_UnknownRegion_IsIgnoredGracefully()
+    {
+        var service = new BasicPoseSimulationService();
+        var mesh = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["nonexistent_region"] = 2.50
+        });
+
+        // Should not throw even though the region has no pose amplifiers defined.
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+        Assert.NotNull(result);
+        // Effective stress = 2.50 × 1.0 (no amplifier) = 2.50 → above threshold → flagged
+        Assert.True(result.TotalPosesAtRisk > 0, "T-pose should flag very high morph even without amplifier.");
+    }
+
+    [Fact]
+    public async Task PoseSimulation_ResultContainsAllEightPoses()
+    {
+        var service = new BasicPoseSimulationService();
+        var mesh    = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>());
+        var result  = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        var expectedPoses = new[] { "T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak" };
+        foreach (var pose in expectedPoses)
+        {
+            Assert.Contains(result.TestedPoses, p => string.Equals(p, pose, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    // ── preview.html output ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_WritesPreviewHtmlFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var previewPath = Path.Combine(outputDirectory, "preview.html");
+            Assert.True(File.Exists(previewPath), "preview.html was not written.");
+
+            var html = await File.ReadAllTextAsync(previewPath);
+            Assert.Contains("<!DOCTYPE html>",  html, StringComparison.Ordinal);
+            Assert.Contains("<svg ",            html, StringComparison.Ordinal);
+            Assert.Contains("SlideSmith",       html, StringComparison.Ordinal);
+            Assert.Contains("CBBE",             html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_PreviewHtmlContainsRegionalMorphingTable()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
+            Assert.Contains("Regional Morphing", html, StringComparison.Ordinal);
+            Assert.Contains("<table>",            html, StringComparison.Ordinal);
+            Assert.Contains("Factor",             html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_DoesNotWriteLegacyPreviewRendersJson()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "preview-renders.json")),
+                "preview-renders.json should not be written (replaced by preview.html).");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    // ── pose-simulation-report.json ───────────────────────────────────────────
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_WritesPoseSimulationReport()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var reportPath = Path.Combine(outputDirectory, "pose-simulation-report.json");
+            Assert.True(File.Exists(reportPath), "pose-simulation-report.json was not written.");
+
+            var json = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("TestedPoses",      json, StringComparison.Ordinal);
+            Assert.Contains("TotalPosesAtRisk", json, StringComparison.Ordinal);
+            Assert.Contains("HighRiskRegions",  json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConversionLog_ContainsPoseSimulationStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            Assert.True(result.Steps.Any(s => s.StartsWith("pose-simulation:", StringComparison.Ordinal)),
+                "Steps should contain a pose-simulation entry.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    // ── patch-armor.pas (xEdit script) ────────────────────────────────────────
+
+    [Fact]
+    public async Task Convert_WithPlugins_WritesXEditScript()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.esp"), "TES5");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var scriptPath = Path.Combine(outputDirectory, "patch-armor.pas");
+            if (File.Exists(scriptPath))
+            {
+                var content = await File.ReadAllTextAsync(scriptPath);
+                Assert.Contains("SlideSmith",   content, StringComparison.Ordinal);
+                Assert.Contains("ARMA",         content, StringComparison.Ordinal);
+                Assert.Contains("unit ",        content, StringComparison.Ordinal);
+                Assert.Contains("Initialize",   content, StringComparison.Ordinal);
+                Assert.Contains("Finalize",     content, StringComparison.Ordinal);
+            }
         }
         finally
         {

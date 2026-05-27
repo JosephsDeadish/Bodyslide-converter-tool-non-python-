@@ -121,11 +121,12 @@ Implemented from issue scope:
 - **vanilla recommended profile auto-apply** — when the vanilla armor database identifies a match and no explicit `--profile` was provided, its `RecommendedProfile` is automatically applied (emits `vanilla-profile:<name>` step)
 - **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step
 - **batch summary report** — converting a directory or `.zip` now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
+- **live preview HTML** (`preview.html`) — self-contained browser-openable file with an inline SVG body silhouette where each region is colour-coded by morph factor (blue→green→yellow→orange→red scale), plus regional morphing table, BodySlide slider list, physics-node list, and pose-clipping risk summary; replaces the old metadata-only `preview-renders.json`
+- **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that iterates ARMA records, matches detected mesh paths, and emits placement instructions — drop it into the Edit Scripts folder and run via Tools → Apply Script
+- **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 
-Still partial / placeholder versus full issue vision:
-- live preview rendering is metadata-only (enriched with mesh type, regional morphs, physics nodes, and per-view slider hints — no actual 3D render)
-- plugin editing is guidance output (not direct ESP mutation) — structured `ProposedPatchSteps` with per-mesh xEdit instructions are generated but no binary ESP is written
-- deformation/physics logic is rule-based with mesh-type-aware parameter tuning (cloth→softer, plate→stiffer), not a full geometry/animation engine
+Remaining gap versus full issue vision:
+- deformation/physics logic is rule-based with mesh-type-aware parameter tuning (cloth→softer, plate→stiffer), not a full geometry/animation engine with real vertex transformation
 
 ## Current built-in presets (27 total)
 

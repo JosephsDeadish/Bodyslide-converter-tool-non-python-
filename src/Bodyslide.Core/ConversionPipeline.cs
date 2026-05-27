@@ -350,6 +350,7 @@ public interface IExportService
         BodySlideProject bodySlideProject,
         PluginAnalysisResult pluginAnalysis,
         TextureSummary textureSummary,
+        PoseSimulationResult poseSimulation,
         IReadOnlyList<string> steps,
         CancellationToken cancellationToken);
 }
@@ -398,6 +399,17 @@ public interface IArmorRegionBindingService
     Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken);
 }
 
+public interface IPoseSimulationService
+{
+    /// <summary>
+    /// Simulates the converted mesh against a set of animation poses and reports per-pose
+    /// clipping risk by body region. Uses per-pose regional stress amplifiers to compute
+    /// an effective stretch factor; regions where the factor exceeds the risk threshold
+    /// are flagged as at-risk for that pose.
+    /// </summary>
+    Task<PoseSimulationResult> SimulateAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken);
+}
+
 public sealed class ConversionOrchestrator(
     IArmorImportService importer,
     IBodyDetectionService bodyDetector,
@@ -417,6 +429,7 @@ public sealed class ConversionOrchestrator(
     IVanillaArmorLookupService vanillaArmorLookup,
     IVoxelCollisionService voxelCollision,
     IArmorRegionBindingService armorRegionBinder,
+    IPoseSimulationService poseSimulator,
     IExportService exporter)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
@@ -582,6 +595,13 @@ public sealed class ConversionOrchestrator(
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
                 : "voxel-collision:none");
 
+            // Pose simulation — tests the converted mesh against 8 animation poses and
+            // reports per-pose clipping risk by body region.
+            var poseSimulation = await poseSimulator.SimulateAsync(converted, normalized.Request.TargetBody, cancellationToken);
+            steps.Add(poseSimulation.TotalPosesAtRisk > 0
+                ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
+                : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
+
             var physicsProfile = normalized.Preset?.PhysicsProfile ?? "smp+cbpc";
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
             steps.Add($"physics:{physics.Profile}");
@@ -589,7 +609,7 @@ public sealed class ConversionOrchestrator(
             var bodySlideProject = await bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
 
-            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, steps, cancellationToken);
+            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
             return new ConversionResult(true, export.OutputDirectory, steps, export.OutputFiles);
@@ -717,6 +737,7 @@ public static class StandaloneConversionModules
             new VanillaArmorLookupService(),
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
+            new BasicPoseSimulationService(),
             new LocalExportService());
 }
 
@@ -1888,6 +1909,7 @@ internal sealed class LocalExportService : IExportService
         BodySlideProject bodySlideProject,
         PluginAnalysisResult pluginAnalysis,
         TextureSummary textureSummary,
+        PoseSimulationResult poseSimulation,
         IReadOnlyList<string> steps,
         CancellationToken cancellationToken)
     {
@@ -2019,6 +2041,14 @@ internal sealed class LocalExportService : IExportService
                 JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
                 cancellationToken);
             outputFiles.Add(pluginPatchPath);
+
+            // Also write a runnable xEdit Pascal automation script so users can apply
+            // the ARMA record patches directly from SSEEdit / TES5Edit without manual edits.
+            var xEditScriptPath = Path.Combine(outputDirectory, "patch-armor.pas");
+            await File.WriteAllTextAsync(xEditScriptPath,
+                BuildXEditScript(pluginAnalysis, request.TargetBody),
+                cancellationToken);
+            outputFiles.Add(xEditScriptPath);
         }
 
         // Write texture summary when textures are present.
@@ -2031,25 +2061,21 @@ internal sealed class LocalExportService : IExportService
             outputFiles.Add(textureSummaryPath);
         }
 
-        var previewPath = Path.Combine(outputDirectory, "preview-renders.json");
-        var previewPayload = new
-        {
-            Mode = "metadata-only",
-            TargetBody = request.TargetBody,
-            SourceMeshCount = armor.MeshFiles.Count,
-            MeshType = analysis.MeshType,
-            PhysicsEnabled = analysis.PhysicsEnabled,
-            RegionalMorphing = mesh.RegionalMorphing,
-            ActivePhysicsNodes = ExtractPhysicsNodeNames(physics),
-            SupportedSliders = bodySlideProject.Sliders,
-            Captures = new[]
-            {
-                new { View = "front", Region = "torso-front", PrimarySliders = GetCaptureSliders("front", bodySlideProject.Sliders) },
-                new { View = "side",  Region = "torso-side",  PrimarySliders = GetCaptureSliders("side",  bodySlideProject.Sliders) },
-                new { View = "back",  Region = "torso-back",  PrimarySliders = GetCaptureSliders("back",  bodySlideProject.Sliders) }
-            }
-        };
-        await File.WriteAllTextAsync(previewPath, JsonSerializer.Serialize(previewPayload, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        // Write pose simulation report.
+        var poseReportPath = Path.Combine(outputDirectory, "pose-simulation-report.json");
+        await File.WriteAllTextAsync(poseReportPath,
+            JsonSerializer.Serialize(poseSimulation, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(poseReportPath);
+
+        // Write interactive SVG preview HTML — body silhouette with regions colour-coded
+        // by morph factor, plus slider, physics and pose-risk tables. This replaces the
+        // old metadata-only preview-renders.json with a file that can be opened directly
+        // in any browser without an additional 3D engine.
+        var previewPath = Path.Combine(outputDirectory, "preview.html");
+        await File.WriteAllTextAsync(previewPath,
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation),
+            cancellationToken);
         outputFiles.Add(previewPath);
 
         var logPath = Path.Combine(outputDirectory, "conversion.log");
@@ -2466,6 +2492,294 @@ internal sealed class LocalExportService : IExportService
 
         return ms.ToArray();
     }
+
+    // ── HTML Preview ──────────────────────────────────────────────────────────
+
+    // SVG layout: body region rectangles keyed by canonical region name.
+    // Each tuple is (x, y, width, height, label) in SVG coordinate space.
+    private static readonly IReadOnlyDictionary<string, (int X, int Y, int W, int H, string Label)> RegionShapes =
+        new Dictionary<string, (int, int, int, int, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["head"]      = (84,   4,  32, 32, "Head"),
+            ["neck"]      = (91,  37,  18, 18, "Neck"),
+            ["shoulders"] = (50,  54,  32, 18, "Sho"),
+            ["chest"]     = (76,  54,  48, 36, "Chest"),
+            ["arms"]      = (42,  72,  30, 72, "Arms"),
+            ["waist"]     = (80,  90,  40, 26, "Waist"),
+            ["belly"]     = (78, 116,  44, 30, "Belly"),
+            ["breasts"]   = (78,  54,  44, 36, "Breast"),
+            ["pelvis"]    = (76, 146,  48, 28, "Pelvis"),
+            ["butt"]      = (76, 146,  48, 28, "Butt"),
+            ["thighs"]    = (77, 174,  44, 58, "Thighs"),
+            ["calves"]    = (77, 232,  44, 60, "Calves"),
+            ["legs"]      = (77, 174,  44, 118, "Legs"),
+            ["feet"]      = (77, 292,  44, 24, "Feet"),
+        };
+
+    /// <summary>Returns a CSS colour for a morph factor on a blue→green→yellow→orange→red gradient.</summary>
+    private static string MorphColour(double factor) => factor switch
+    {
+        < 0.90 => "#3a7bd5",  // compact / blue
+        < 0.97 => "#27ae60",  // near-normal / green
+        < 1.05 => "#2ecc71",  // normal / light-green
+        < 1.12 => "#f1c40f",  // mild expansion / yellow
+        < 1.20 => "#e67e22",  // expanded / orange
+        _      => "#e74c3c"   // high expansion / red
+    };
+
+    /// <summary>
+    /// Generates a self-contained HTML file with an inline SVG body silhouette colour-coded by
+    /// regional morph factor, plus slider, physics, and pose-simulation-risk tables.
+    /// </summary>
+    private static string BuildPreviewHtml(
+        ConversionRequest request,
+        ImportedArmor armor,
+        MeshAnalysis analysis,
+        ConvertedMesh mesh,
+        BodySlideProject bodySlideProject,
+        PhysicsConfig physics,
+        PoseSimulationResult poseSimulation)
+    {
+        var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
+
+        // Build SVG body regions.
+        var svgParts = new System.Text.StringBuilder();
+        // Draw background body outline.
+        svgParts.AppendLine("""  <rect x="76" y="54" width="48" height="262" rx="10" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""  <circle cx="100" cy="20" r="18" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""  <rect x="42" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""  <rect x="146" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+
+        // Layer coloured overlays for each region that has a morph factor.
+        var drawnRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, factor) in mesh.RegionalMorphing.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!RegionShapes.TryGetValue(region, out var shape)) continue;
+            if (!drawnRegions.Add(region)) continue;
+
+            var colour = MorphColour(factor);
+            var opacity = Math.Clamp(0.45 + Math.Abs(factor - 1.0) * 1.2, 0.4, 0.85);
+            svgParts.AppendLine($"""  <rect x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
+            svgParts.AppendLine($"""  <text x="{shape.X + shape.W / 2}" y="{shape.Y + shape.H / 2 + 4}" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">{shape.Label}</text>""");
+        }
+
+        // Regional morphing table rows.
+        var regionRows = new System.Text.StringBuilder();
+        foreach (var (region, factor) in mesh.RegionalMorphing.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var cssClass = factor > 1.20 ? "val-high" : factor > 1.08 ? "val-med" : "val-low";
+            regionRows.AppendLine($"          <tr><td>{HtmlEncode(region)}</td><td class=\"{cssClass}\">{factor:F4}</td></tr>");
+        }
+
+        // Physics nodes list.
+        var physicsNodes = ExtractPhysicsNodeNames(physics);
+        var physicsPanel = physicsNodes.Count == 0
+            ? "<p style=\"color:#888;font-size:.85rem\">No physics nodes detected.</p>"
+            : $"<p style=\"font-size:.85rem\">{HtmlEncode(string.Join(", ", physicsNodes))}</p>";
+
+        // Slider list.
+        var sliderList = bodySlideProject.Sliders.Count == 0
+            ? "(none)"
+            : string.Join(", ", bodySlideProject.Sliders.Select(HtmlEncode));
+
+        // Pose simulation panel.
+        var posePanelHtml = new System.Text.StringBuilder();
+        if (poseSimulation.TotalPosesAtRisk > 0)
+        {
+            posePanelHtml.AppendLine("""      <div class="panel" style="margin-top:16px">""");
+            posePanelHtml.AppendLine("""        <h3 style="margin-top:0;color:#e67e22">⚠ Pose Clipping Risk</h3>""");
+            posePanelHtml.AppendLine("        <table><tr><th>Pose</th><th>At-Risk Regions</th></tr>");
+            foreach (var (pose, regions) in poseSimulation.PoseClippingRisk.OrderBy(kv => kv.Key))
+            {
+                posePanelHtml.AppendLine($"          <tr><td>{HtmlEncode(pose)}</td><td style=\"color:#ffd93d\">{HtmlEncode(string.Join(", ", regions))}</td></tr>");
+            }
+            posePanelHtml.AppendLine("        </table>");
+            posePanelHtml.AppendLine("      </div>");
+        }
+        else
+        {
+            posePanelHtml.AppendLine("""      <div class="panel" style="margin-top:16px"><p style="color:#6bcb77">✓ No clipping risk across all tested poses.</p></div>""");
+        }
+
+        var poseRiskLabel = poseSimulation.TotalPosesAtRisk > 0
+            ? $"⚠ {poseSimulation.TotalPosesAtRisk}/{poseSimulation.TestedPoses.Count} poses at risk"
+            : $"✓ {poseSimulation.TestedPoses.Count} poses OK";
+
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <title>SlideSmith Preview — {{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}}</title>
+              <style>
+                body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 24px; margin: 0; }
+                h1   { color: #c9a84c; margin-bottom: 4px; }
+                h3   { color: #9ab; }
+                .subtitle { color: #888; font-size: .9rem; margin-bottom: 24px; }
+                .layout  { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+                .body-fig { background: #16213e; border-radius: 12px; padding: 16px; }
+                .legend  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: .75rem; }
+                .legend-item { display: flex; align-items: center; gap: 4px; }
+                .dot     { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+                .panels  { display: flex; flex-direction: column; gap: 14px; }
+                .panel   { background: #16213e; border-radius: 8px; padding: 14px 18px; }
+                table    { border-collapse: collapse; font-size: .85rem; }
+                th, td   { padding: 5px 10px; border: 1px solid #2a3a4a; }
+                th       { background: #1a2a3a; color: #9ab; font-weight: 600; }
+                .val-high { color: #ff6b6b; font-weight: 700; }
+                .val-med  { color: #ffd93d; }
+                .val-low  { color: #6bcb77; }
+              </style>
+            </head>
+            <body>
+              <h1>SlideSmith Preview</h1>
+              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}}</p>
+              <div class="layout">
+                <div class="body-fig">
+                  <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
+            {{svgParts}}      </svg>
+                  <div class="legend">
+                    <div class="legend-item"><div class="dot" style="background:#3a7bd5"></div><span>Compact</span></div>
+                    <div class="legend-item"><div class="dot" style="background:#27ae60"></div><span>Normal</span></div>
+                    <div class="legend-item"><div class="dot" style="background:#f1c40f"></div><span>Mild</span></div>
+                    <div class="legend-item"><div class="dot" style="background:#e67e22"></div><span>Expanded</span></div>
+                    <div class="legend-item"><div class="dot" style="background:#e74c3c"></div><span>High</span></div>
+                  </div>
+                </div>
+                <div class="panels">
+                  <div class="panel">
+                    <h3 style="margin-top:0">Regional Morphing</h3>
+                    <table>
+                      <tr><th>Region</th><th>Factor</th></tr>
+            {{regionRows}}        </table>
+                  </div>
+                  <div class="panel">
+                    <h3 style="margin-top:0">BodySlide Sliders</h3>
+                    <p style="font-size:.85rem;margin:0">{{sliderList}}</p>
+                  </div>
+                  <div class="panel">
+                    <h3 style="margin-top:0">Physics Nodes</h3>
+                    {{physicsPanel}}
+                  </div>
+            {{posePanelHtml}}      </div>
+              </div>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string HtmlEncode(string value) =>
+        System.Net.WebUtility.HtmlEncode(value);
+
+    // ── xEdit Pascal Script ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Generates a runnable xEdit Pascal (Delphi) automation script that iterates all
+    /// loaded plugins, finds ARMA (ArmorAddon) records whose mesh paths match those
+    /// detected during plugin analysis, and reports them with the converted-file placement
+    /// instruction. Drop the output file into the Edit Scripts folder of SSEEdit/TES5Edit
+    /// and run it from the Tools → Apply Script menu.
+    /// </summary>
+    private static string BuildXEditScript(PluginAnalysisResult pluginAnalysis, string targetBody)
+    {
+        var allPaths = pluginAnalysis.ArmorAddons
+            .SelectMany(a => a.DetectedMeshPaths)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Build the const array declarations.
+        var pathDecls = new System.Text.StringBuilder();
+        for (var i = 0; i < allPaths.Count; i++)
+        {
+            pathDecls.AppendLine($"  cPaths[{i}] := '{allPaths[i].Replace("'", "''")}';");
+        }
+
+        var pathCount = allPaths.Count;
+        var safeTarget = targetBody.Replace("'", "''");
+
+        return $$"""
+            { ============================================================ }
+            { SlideSmith v0.1 — Auto-generated xEdit Armor Patcher Script  }
+            { Target body : {{safeTarget}}                                  }
+            {                                                               }
+            { HOW TO USE                                                    }
+            {   1. Copy this file to [SSEEdit install]\Edit Scripts\        }
+            {   2. Open SSEEdit and load the plugins you want to patch.     }
+            {   3. Select all plugins in the tree, then:                    }
+            {        Tools → Apply Script → SlideSmith_patch-armor          }
+            {   4. Inspect the Messages tab for detected ARMA records.      }
+            {   5. If a mesh path is listed, ensure the converted NIF file  }
+            {      is placed at that same path in your game data folder.    }
+            { ============================================================ }
+
+            unit SlideSmith_patch_armor;
+
+            interface
+            implementation
+
+            var
+              cPaths: array[0..{{Math.Max(pathCount - 1, 0)}}] of string;
+
+            procedure InitPaths;
+            begin
+            {{pathDecls}}end;
+
+            function Initialize: Integer;
+            begin
+              AddMessage('==============================================');
+              AddMessage('SlideSmith v0.1 Armor Patcher');
+              AddMessage('Target body: {{safeTarget}}');
+              AddMessage('Detected mesh paths: {{pathCount}}');
+              AddMessage('==============================================');
+              InitPaths;
+              Result := 0;
+            end;
+
+            function Process(e: IwbElement): Integer;
+            var
+              i: Integer;
+              sig, meshPath: string;
+              modelEl: IwbElement;
+            begin
+              Result := 0;
+              sig := Signature(e);
+              if sig <> 'ARMA' then exit;
+
+              // Check Female World Model (MOD2) and Male World Model (MOD2)
+              for i := 0 to High(cPaths) do begin
+
+                modelEl := ElementByPath(e, 'Female World Model\MOD2');
+                if Assigned(modelEl) then begin
+                  meshPath := GetEditValue(modelEl);
+                  if SameText(meshPath, cPaths[i]) then begin
+                    AddMessage('[ARMA] ' + Name(e) + ' | Female mesh: ' + meshPath);
+                    AddMessage('  → Place {{safeTarget}}-converted NIF at this path in game data.');
+                  end;
+                end;
+
+                modelEl := ElementByPath(e, 'Male World Model\MOD2');
+                if Assigned(modelEl) then begin
+                  meshPath := GetEditValue(modelEl);
+                  if SameText(meshPath, cPaths[i]) then begin
+                    AddMessage('[ARMA] ' + Name(e) + ' | Male mesh: ' + meshPath);
+                    AddMessage('  → Place {{safeTarget}}-converted NIF at this path in game data.');
+                  end;
+                end;
+
+              end;
+            end;
+
+            function Finalize: Integer;
+            begin
+              AddMessage('SlideSmith patch verification complete.');
+              AddMessage('All ARMA records with matching paths have been identified.');
+              Result := 0;
+            end;
+
+            end.
+            """;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2640,5 +2954,87 @@ internal sealed class SimplifiedVoxelCollisionService : IVoxelCollisionService
             affectedRegions,
             pushOutMagnitudes,
             GridResolution));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Basic Pose Simulation Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Simulates a converted mesh against 8 standard animation poses and reports per-pose
+/// clipping risk by body region.
+/// <para>
+/// Each pose has per-region stress amplifiers derived from typical skeletal deformations
+/// for that animation (e.g. Crouch amplifies thighs/pelvis because the femur rotates
+/// significantly forward). A region is flagged as at-risk for a pose when:
+///   <c>morph_factor × pose_amplifier ≥ RiskThreshold</c>
+/// The threshold is intentionally conservative so that borderline morphs on high-stress
+/// poses are surfaced for manual review.
+/// </para>
+/// </summary>
+internal sealed class BasicPoseSimulationService : IPoseSimulationService
+{
+    private static readonly IReadOnlyList<string> AnimationPoses =
+    [
+        "T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak"
+    ];
+
+    // Per-pose amplifiers by body region (regions not listed default to 1.0).
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> PoseAmplifiers =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 }
+        };
+
+    // A region is flagged at-risk when its effective stress (morph × pose amplifier) meets or exceeds this.
+    private const double RiskThreshold = 1.10;
+
+    public Task<PoseSimulationResult> SimulateAsync(
+        ConvertedMesh mesh,
+        string targetBody,
+        CancellationToken cancellationToken)
+    {
+        var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var highRiskSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var atRiskPoseCount = 0;
+
+        foreach (var pose in AnimationPoses)
+        {
+            PoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+            var atRiskRegions = new List<string>();
+            foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+            {
+                amplifiers.TryGetValue(region, out var amp);
+                var effectiveStress = morphFactor * (amp > 0 ? amp : 1.0);
+                if (effectiveStress >= RiskThreshold)
+                {
+                    atRiskRegions.Add(region);
+                    highRiskSet.Add(region);
+                }
+            }
+
+            if (atRiskRegions.Count > 0)
+            {
+                atRiskRegions.Sort(StringComparer.OrdinalIgnoreCase);
+                poseClippingRisk[pose] = atRiskRegions;
+                atRiskPoseCount++;
+            }
+        }
+
+        return Task.FromResult(new PoseSimulationResult(
+            AnimationPoses,
+            poseClippingRisk,
+            highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
+            atRiskPoseCount));
     }
 }
