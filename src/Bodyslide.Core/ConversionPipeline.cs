@@ -402,7 +402,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var textureHitRatio = MatchRatio(textureNames, template.TextureTokens);
         if (textureHitRatio > 0)
         {
-            evidence.Add($"uv-signature:{textureHitRatio:P0}");
+            evidence.Add($"texture:{textureHitRatio:P0}");
         }
 
         var physicsHitRatio = MatchRatio(physicsNames, template.PhysicsTokens);
