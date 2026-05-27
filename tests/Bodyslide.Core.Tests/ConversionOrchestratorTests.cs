@@ -85,35 +85,6 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
         }
-
-        [Fact]
-        public async Task ConvertAsync_WithDefaultModules_WritesConversionLearningCache()
-        {
-            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var inputDirectory = Path.Combine(workingDirectory, "input");
-            var outputDirectory = Path.Combine(workingDirectory, "output");
-            Directory.CreateDirectory(inputDirectory);
-            Directory.CreateDirectory(outputDirectory);
-            var inputFile = Path.Combine(inputDirectory, "cuirass_3ba.nif");
-            await File.WriteAllTextAsync(inputFile, "mesh");
-
-            try
-            {
-                var orchestrator = StandaloneConversionModules.CreateDefault();
-                var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
-
-                Assert.True(result.Success);
-                var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
-                Assert.True(File.Exists(cachePath));
-                var cacheContent = await File.ReadAllTextAsync(cachePath);
-                Assert.Contains("\"TargetBody\": \"3BA\"", cacheContent, StringComparison.Ordinal);
-                Assert.Contains("\"RegionalMorphing\"", cacheContent, StringComparison.Ordinal);
-            }
-            finally
-            {
-                Directory.Delete(workingDirectory, recursive: true);
-            }
-        }
         finally
         {
             Directory.Delete(inputDirectory, recursive: true);
@@ -121,6 +92,35 @@ public sealed class ConversionOrchestratorTests
             {
                 Directory.Delete(outputDirectory, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesConversionLearningCache()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "cuirass_3ba.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
+            Assert.True(File.Exists(cachePath));
+            var cacheContent = await File.ReadAllTextAsync(cachePath);
+            Assert.Contains("\"TargetBody\": \"3BA\"", cacheContent, StringComparison.Ordinal);
+            Assert.Contains("\"RegionalMorphing\"", cacheContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
