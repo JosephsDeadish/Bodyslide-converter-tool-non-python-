@@ -124,6 +124,138 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_StepsIncludeSkeletonAndPartitions()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(new TestExporter());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.StartsWith("skeleton:", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.StartsWith("partitions:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithOutputZip_ProducesZipFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory, OutputZip: true));
+
+            Assert.True(result.Success);
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            Assert.True(File.Exists(zipPath), $"Expected ZIP at {zipPath}");
+            Assert.Single(result.OutputFiles);
+            Assert.EndsWith(".zip", result.OutputFiles[0], StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_SkeletonStepReportsMapping()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var skeletonStep = result.Steps.FirstOrDefault(s => s.StartsWith("skeleton:", StringComparison.Ordinal));
+            Assert.NotNull(skeletonStep);
+            Assert.Contains("-mapped", skeletonStep, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_PartitionStepRebuildsSlots()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass_plate.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var partitionsStep = result.Steps.FirstOrDefault(s => s.StartsWith("partitions:", StringComparison.Ordinal));
+            Assert.NotNull(partitionsStep);
+            Assert.NotEqual("partitions:unchanged", partitionsStep, StringComparer.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("HIMBO")]
+    [InlineData("UNP")]
+    [InlineData("BHUNP")]
+    [InlineData("TBD")]
+    [InlineData("SAM")]
+    [InlineData("SOS")]
+    [InlineData("UBE")]
+    public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
+    {
+        var inputFile = Path.GetTempFileName();
+
+        try
+        {
+            var normalized = RequestNormalizer.Normalize(new ConversionRequest(inputFile, targetBody));
+            Assert.Equal(targetBody, normalized.Request.TargetBody);
+        }
+        finally
+        {
+            File.Delete(inputFile);
+        }
+    }
+
+    [Fact]
+    public void PresetCatalog_ContainsExpandedPresets()
+    {
+        var presets = PresetCatalog.All.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("BHUNP Curvy", presets);
+        Assert.Contains("HIMBO Muscular", presets);
+        Assert.Contains("3BA Slim", presets);
+        Assert.Contains("UNP Athletic", presets);
+    }
+
     private static ConversionOrchestrator BuildTestOrchestrator(IExportService? exporter = null) =>
         new(
             new TestImporter(),
@@ -132,7 +264,9 @@ public sealed class ConversionOrchestratorTests
             new TestCageGenerator(),
             new TestConverter(),
             new TestWeightTransfer(),
+            new TestSkeletonMapper(),
             new TestMorphGenerator(),
+            new TestPartitionRebuilder(),
             new TestClippingDetector(),
             new TestAutoCorrection(),
             new TestPhysicsSupport(),
@@ -174,10 +308,22 @@ public sealed class ConversionOrchestratorTests
             Task.FromResult(new WeightedMesh("mixed", "default", false));
     }
 
+    private sealed class TestSkeletonMapper : ISkeletonMappingService
+    {
+        public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new SkeletonMappingResult("xpmsse-vanilla", "xpmsse-vanilla", [], []));
+    }
+
     private sealed class TestMorphGenerator : IMorphGenerationService
     {
         public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
             Task.FromResult(new MorphSet("low", "high", true));
+    }
+
+    private sealed class TestPartitionRebuilder : IPartitionRebuildingService
+    {
+        public Task<PartitionRebuildingResult> RebuildAsync(WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new PartitionRebuildingResult(true, ["32:Body"], []));
     }
 
     private sealed class TestClippingDetector : IClippingDetectionService

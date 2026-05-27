@@ -3,16 +3,19 @@
 This repository contains a standalone .NET conversion tool that bundles core conversion stages into one app:
 
 - import scan (single `.nif`, armor folder, or zipped archive)
-- body signature detection
-- mesh type analysis (cloth/leather/plate/skin-tight/mixed)
+- body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback)
+- mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed)
 - deformation cage generation
 - mesh conversion strategy selection
-- weight transfer + morph generation
+- weight transfer + skeleton bone mapping (source → target, unsupported bone detection)
+- morph generation
+- partition rebuilding (BSDismemberSkinInstance slot assignment)
 - clipping detection + auto-correction pass
 - physics profile generation
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - preview metadata output (`preview-renders.json`) for downstream rendering integration
+- optional ZIP output (`--output-zip`) for mod-manager-ready packages
 
 ## Projects
 
@@ -29,15 +32,31 @@ dotnet run --project src/Bodyslide.Standalone -- "<armor path>" "<target body>" 
 # named mode with preset support
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path|folder|zip>" --preset "3BA Curvy" --output "<optional output directory>"
 
+# produce a mod-manager-ready ZIP instead of a bare output folder
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --output-zip
+
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets
 ```
 
 ## Current built-in presets
 
-- `3BA Curvy`
-- `HIMBO Lean`
-- `UNP Petite`
+| Preset | Target Body | Deformation | Physics |
+|---|---|---|---|
+| 3BA Curvy | 3BA | curvy | smp+cbpc |
+| 3BA Slim | 3BA | slim | smp+cbpc |
+| HIMBO Lean | HIMBO | lean | smp |
+| HIMBO Muscular | HIMBO | muscular | smp |
+| UNP Petite | UNP | petite | cbpc |
+| UNP Athletic | UNP | athletic | cbpc |
+| BHUNP Curvy | BHUNP | curvy | smp+cbpc |
+| BHUNP Slim | BHUNP | slim | smp+cbpc |
+
+## Supported body types
+
+**Female:** CBBE, 3BA, UNP, BHUNP, TBD, UBE  
+**Male:** HIMBO, SAM, SOS  
+**Custom:** any unrecognised body falls back to `CUSTOM` detection
 
 ## Batch behavior
 

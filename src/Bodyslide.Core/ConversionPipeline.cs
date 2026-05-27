@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Bodyslide.Core;
 
-public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null);
+public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, IReadOnlyList<string> BodyReferenceFiles, string? TemporaryWorkspace = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
@@ -15,15 +15,23 @@ public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideC
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 public sealed record CorrectionResult(bool Applied, string Method);
 public sealed record PhysicsConfig(string Profile);
+public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, bool IsPhysicsBone);
+public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetSkeleton, IReadOnlyList<SkeletonBoneMapping> BoneMappings, IReadOnlyList<string> UnsupportedBones);
+public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 
 public static class PresetCatalog
 {
     private static readonly Dictionary<string, ConversionPreset> Presets = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["3BA Curvy"] = new("3BA Curvy", "3BA", "curvy", "smp+cbpc"),
-        ["HIMBO Lean"] = new("HIMBO Lean", "HIMBO", "lean", "smp"),
-        ["UNP Petite"] = new("UNP Petite", "UNP", "petite", "cbpc")
+        ["3BA Curvy"]       = new("3BA Curvy",       "3BA",   "curvy",    "smp+cbpc"),
+        ["3BA Slim"]        = new("3BA Slim",         "3BA",   "slim",     "smp+cbpc"),
+        ["HIMBO Lean"]      = new("HIMBO Lean",       "HIMBO", "lean",     "smp"),
+        ["HIMBO Muscular"]  = new("HIMBO Muscular",   "HIMBO", "muscular", "smp"),
+        ["UNP Petite"]      = new("UNP Petite",       "UNP",   "petite",   "cbpc"),
+        ["UNP Athletic"]    = new("UNP Athletic",     "UNP",   "athletic", "cbpc"),
+        ["BHUNP Curvy"]     = new("BHUNP Curvy",      "BHUNP", "curvy",    "smp+cbpc"),
+        ["BHUNP Slim"]      = new("BHUNP Slim",       "BHUNP", "slim",     "smp+cbpc")
     };
 
     public static IReadOnlyCollection<ConversionPreset> All => Presets.Values;
@@ -59,12 +67,15 @@ internal static class VanillaBodySignatureDatabase
 {
     public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
     [
-        new("CBBE", ["cbbe", "caliente"], ["femalebody_1", "femalebody_0"], []),
-        new("UNP", ["unp", "unpb"], ["femalebody"], []),
-        new("HIMBO", ["himbo", "male"], ["malebody"], []),
-        new("BHUNP", ["bhunp"], ["femalebody"], []),
-        new("3BA", ["3ba", "cbbe", "bodyslide"], ["femalebody"], ["smp", "cbpc"]),
-        new("TBD", ["tbd"], ["femalebody"], [])
+        new("CBBE",  ["cbbe", "caliente"],       ["femalebody_1", "femalebody_0"], []),
+        new("UNP",   ["unp", "unpb"],            ["femalebody"],                  []),
+        new("HIMBO", ["himbo", "male"],          ["malebody"],                    []),
+        new("BHUNP", ["bhunp"],                  ["femalebody"],                  []),
+        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                 ["smp", "cbpc"]),
+        new("TBD",   ["tbd"],                    ["femalebody"],                  []),
+        new("SAM",   ["sam", "samlight"],        ["malebody"],                    []),
+        new("SOS",   ["sos", "soslight"],        ["malebody"],                    ["smp"]),
+        new("UBE",   ["ube"],                    ["femalebody"],                  [])
     ];
 }
 
@@ -75,18 +86,74 @@ internal static class BodyTransformationFieldCatalog
         {
             ["CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"] = 1.08,
-                ["waist"] = 0.96,
-                ["pelvis"] = 1.05,
-                ["legs"] = 1.03,
+                ["chest"]     = 1.08,
+                ["waist"]     = 0.96,
+                ["pelvis"]    = 1.05,
+                ["legs"]      = 1.03,
                 ["shoulders"] = 1.01
             },
             ["3BA"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"] = 1.12,
-                ["waist"] = 0.95,
-                ["pelvis"] = 1.06,
-                ["legs"] = 1.04,
+                ["chest"]     = 1.12,
+                ["waist"]     = 0.95,
+                ["pelvis"]    = 1.06,
+                ["legs"]      = 1.04,
+                ["shoulders"] = 1.01
+            },
+            ["HIMBO"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.10,
+                ["waist"]     = 1.02,
+                ["pelvis"]    = 1.04,
+                ["legs"]      = 1.06,
+                ["shoulders"] = 1.12
+            },
+            ["UNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.04,
+                ["waist"]     = 0.97,
+                ["pelvis"]    = 1.02,
+                ["legs"]      = 1.01,
+                ["shoulders"] = 1.00
+            },
+            ["BHUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.10,
+                ["waist"]     = 0.94,
+                ["pelvis"]    = 1.07,
+                ["legs"]      = 1.04,
+                ["shoulders"] = 1.01
+            },
+            ["TBD"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.06,
+                ["waist"]     = 0.96,
+                ["pelvis"]    = 1.04,
+                ["legs"]      = 1.02,
+                ["shoulders"] = 1.00
+            },
+            ["SAM"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.08,
+                ["waist"]     = 1.01,
+                ["pelvis"]    = 1.03,
+                ["legs"]      = 1.05,
+                ["shoulders"] = 1.10
+            },
+            ["SOS"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.05,
+                ["waist"]     = 1.00,
+                ["pelvis"]    = 1.02,
+                ["legs"]      = 1.04,
+                ["shoulders"] = 1.06
+            },
+            ["UBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.06,
+                ["waist"]     = 0.97,
+                ["pelvis"]    = 1.03,
+                ["legs"]      = 1.02,
                 ["shoulders"] = 1.01
             }
         };
@@ -159,6 +226,18 @@ public interface IPhysicsSupportService
     Task<PhysicsConfig> BuildAsync(WeightedMesh mesh, string targetBody, string physicsProfile, CancellationToken cancellationToken);
 }
 
+public interface ISkeletonMappingService
+{
+    /// <summary>Maps source skeleton bones to the target body skeleton, reporting any unsupported physics bones.</summary>
+    Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken);
+}
+
+public interface IPartitionRebuildingService
+{
+    /// <summary>Rebuilds BSDismemberSkinInstance partitions for Skyrim compatibility after mesh conversion.</summary>
+    Task<PartitionRebuildingResult> RebuildAsync(WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken);
+}
+
 public interface IExportService
 {
     Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
@@ -181,7 +260,9 @@ public sealed class ConversionOrchestrator(
     ICageGenerationService cageGenerator,
     IMeshConversionService meshConverter,
     IWeightTransferService weightTransfer,
+    ISkeletonMappingService skeletonMapper,
     IMorphGenerationService morphGenerator,
+    IPartitionRebuildingService partitionRebuilder,
     IClippingDetectionService clippingDetector,
     IAutoCorrectionService autoCorrection,
     IPhysicsSupportService physicsSupport,
@@ -233,8 +314,14 @@ public sealed class ConversionOrchestrator(
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"weights:{weighted.WeightProfile}");
 
+            var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
+            steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
+
             var morphs = await morphGenerator.GenerateAsync(weighted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph}");
+
+            var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
+            steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
             var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
@@ -305,7 +392,9 @@ public static class StandaloneConversionModules
             new BasicCageGenerationService(),
             new StrategyMeshConversionService(),
             new BasicWeightTransferService(),
+            new BasicSkeletonMappingService(),
             new BasicMorphGenerationService(),
+            new BasicPartitionRebuildingService(),
             new BasicClippingDetectionService(),
             new BasicAutoCorrectionService(),
             new BasicPhysicsSupportService(),
@@ -586,6 +675,172 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         Task.FromResult(new PhysicsConfig(physicsProfile));
 }
 
+/// <summary>
+/// Maps source skeleton bones to target body skeleton bones using known bone name tables.
+/// Bones that exist in the source but have no equivalent in the target skeleton are reported as unsupported.
+/// </summary>
+internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
+{
+    // Standard vanilla + XPMSSE bones shared by most body types.
+    private static readonly IReadOnlyList<string> CommonBones =
+    [
+        "NPC Root", "NPC COM", "NPC Pelvis", "NPC Spine", "NPC Spine1", "NPC Spine2",
+        "NPC Neck", "NPC Head",
+        "NPC L Clavicle", "NPC L UpperArm", "NPC L ForeArm", "NPC L Hand",
+        "NPC R Clavicle", "NPC R UpperArm", "NPC R ForeArm", "NPC R Hand",
+        "NPC L Thigh", "NPC L Calf", "NPC L Foot",
+        "NPC R Thigh", "NPC R Calf", "NPC R Foot"
+    ];
+
+    // Physics bones added by SMP/3BA/BHUNP on female bodies.
+    private static readonly IReadOnlySet<string> FeaturePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01",
+        "NPC Belly", "NPC Butt", "NPC L Butt", "NPC R Butt",
+        "NPC L Breast02", "NPC R Breast02"
+    };
+
+    // Physics bones specific to HIMBO/SAM male bodies.
+    private static readonly IReadOnlySet<string> MalePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"
+    };
+
+    // Map of which body types support which extra physics bone sets.
+    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> BodyPhysicsBoneSupport =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["3BA"]   = FeaturePhysicsBones,
+            ["BHUNP"] = FeaturePhysicsBones,
+            ["TBD"]   = FeaturePhysicsBones,
+            ["HIMBO"] = MalePhysicsBones,
+            ["SAM"]   = MalePhysicsBones,
+            ["CBBE"]  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            ["UNP"]   = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            ["UBE"]   = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            ["SOS"]   = MalePhysicsBones
+        };
+
+    public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    {
+        BodyPhysicsBoneSupport.TryGetValue(targetBody, out var targetPhysicsBones);
+        targetPhysicsBones ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var allTargetBones = CommonBones.Concat(targetPhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Infer which source physics bones are present from the body reference / physics files.
+        var sourcePhysicsBones = armor.PhysicsFiles.Count > 0
+            ? FeaturePhysicsBones.Concat(MalePhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var allSourceBones = CommonBones.Concat(sourcePhysicsBones).ToList();
+
+        var mappings = new List<SkeletonBoneMapping>(allSourceBones.Count);
+        var unsupportedBones = new List<string>();
+
+        foreach (var bone in allSourceBones)
+        {
+            if (allTargetBones.Contains(bone))
+            {
+                mappings.Add(new SkeletonBoneMapping(bone, bone, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+            }
+            else
+            {
+                unsupportedBones.Add(bone);
+            }
+        }
+
+        var sourceSkeleton = armor.PhysicsFiles.Count > 0 ? "xpmsse-physics" : "xpmsse-vanilla";
+        var targetSkeleton = targetPhysicsBones.Count > 0 ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
+
+        return Task.FromResult(new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones));
+    }
+}
+
+/// <summary>
+/// Rebuilds Skyrim BSDismemberSkinInstance body partitions after mesh conversion to ensure
+/// correct slot assignments and prevent invisible body parts or armor conflicts.
+/// </summary>
+internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingService
+{
+    // Standard Skyrim partition slot numbers and their labels.
+    private static readonly IReadOnlyDictionary<int, string> PartitionSlots =
+        new Dictionary<int, string>
+        {
+            [32] = "Body",
+            [33] = "Hands",
+            [34] = "Forearms",
+            [35] = "Amulet",
+            [36] = "Ring",
+            [37] = "Feet",
+            [38] = "Calves",
+            [39] = "Shield",
+            [40] = "Tail",
+            [41] = "LongHair",
+            [42] = "Circlet",
+            [43] = "Ears",
+            [44] = "Dragon Head",
+            [45] = "Dragon LWing",
+            [46] = "Dragon RWing",
+            [47] = "Dragon Body",
+            [48] = "Dragon Tail",
+            [49] = "Dragon Leg",
+            [50] = "Dragon Claws",
+            [54] = "DecapHead",
+            [55] = "Decap",
+            [56] = "Genitals"
+        };
+
+    public Task<PartitionRebuildingResult> RebuildAsync(WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
+    {
+        // Select partitions based on mesh type and target body.
+        var slots = new List<int>();
+
+        switch (analysis.MeshType)
+        {
+            case "plate":
+            case "leather":
+            case "mixed":
+                slots.Add(32); // Body
+                slots.Add(33); // Hands
+                slots.Add(37); // Feet
+                break;
+
+            case "cloth":
+            case "skin-tight":
+            case "physics-enabled":
+                slots.Add(32); // Body
+                break;
+
+            default:
+                slots.Add(32);
+                break;
+        }
+
+        // Physics-capable bodies get the genitals partition for compatibility.
+        if (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase))
+        {
+            slots.Add(56); // Genitals
+        }
+
+        var partitionLabels = slots
+            .Where(PartitionSlots.ContainsKey)
+            .Select(s => $"{s}:{PartitionSlots[s]}")
+            .ToList();
+
+        // Report any slots that cannot be mapped to valid partition names as removed.
+        var removedSlots = slots
+            .Where(s => !PartitionSlots.ContainsKey(s))
+            .Select(s => s.ToString())
+            .ToList();
+
+        return Task.FromResult(new PartitionRebuildingResult(true, partitionLabels, removedSlots));
+    }
+}
+
 internal sealed class LocalExportService : IExportService
 {
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
@@ -678,6 +933,19 @@ internal sealed class LocalExportService : IExportService
             correction.Method));
         await File.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(cachePath);
+
+        if (request.OutputZip)
+        {
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+
+            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+            outputFiles = [zipPath];
+            return (outputDirectory, outputFiles);
+        }
 
         return (outputDirectory, outputFiles);
     }
