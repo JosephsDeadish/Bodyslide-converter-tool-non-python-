@@ -38,17 +38,22 @@ jobs:
       - name: Test
         run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
 
-      - name: Publish standalone app
+      - name: Build standalone app package
         run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --no-build --output artifacts/standalone
 
-      - name: Upload standalone artifact
+      - name: Zip standalone app
+        run: |
+          cd artifacts
+          zip -r slidesmith-linux-release.zip standalone
+
+      - name: Upload standalone zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-linux-release
-          path: artifacts/standalone
+          name: slidesmith-linux-release-zip
+          path: artifacts/slidesmith-linux-release.zip
 
-  publish-windows-on-merge:
-    name: Publish Windows app on merge branch
+  package-windows-on-merge:
+    name: Package Windows app on merge branch
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: windows-latest
     needs: verify
@@ -69,21 +74,23 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
-      - name: Publish Windows app files (.exe + dependencies)
+      - name: Build Windows app files (.exe + dependencies)
         run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
 
-      - name: Upload Windows artifact
+      - name: Zip Windows app
+        run: Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/slidesmith-win-x64-release.zip
+
+      - name: Upload Windows zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-release
-          path: artifacts/win-x64
+          name: slidesmith-win-x64-release-zip
+          path: artifacts/slidesmith-win-x64-release.zip
 
-  publish-windows-on-pr-approval:
-    name: Publish Windows app on PR approval
+  package-windows-on-pr:
+    name: Package Windows app on pull request
     if: github.event_name == 'pull_request'
     runs-on: windows-latest
     needs: verify
-    environment: pr-build-approval
 
     steps:
       - name: Checkout
@@ -101,11 +108,14 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
-      - name: Publish Windows app files (.exe + dependencies)
+      - name: Build Windows app files (.exe + dependencies)
         run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained false --output artifacts/win-x64
 
-      - name: Upload Windows artifact
+      - name: Zip Windows app
+        run: Compress-Archive -Path artifacts/win-x64/* -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
+
+      - name: Upload Windows zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-pr-${{ github.event.pull_request.number }}
-          path: artifacts/win-x64
+          name: slidesmith-win-x64-pr-${{ github.event.pull_request.number }}-zip
+          path: artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
