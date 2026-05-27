@@ -2161,7 +2161,7 @@ internal sealed class LocalExportService : IExportService
         {
             // Source does not exist (e.g. in-memory test stubs).
             // Log a warning so missing files are surfaced rather than silently producing empty output.
-            await Console.Error.WriteLineAsync($"[SlideSmith] Warning: source NIF not found on disk — writing empty placeholder: {sourcePath}");
+            await Console.Error.WriteLineAsync($"[SlideSmith] Warning: source NIF not found on disk -- writing empty placeholder: {sourcePath}");
             await File.WriteAllBytesAsync(destPath, [], cancellationToken);
             return;
         }
