@@ -981,3 +981,273 @@ public sealed class VanillaArmorPipelineTests
         }
     }
 }
+
+public sealed class WeightVariantPairTests
+{
+    [Fact]
+    public void DetectWeightVariantPairs_FullPair_DetectsBothWeights()
+    {
+        var meshFiles = new List<string>
+        {
+            "/tmp/armor/cuirass_0.nif",
+            "/tmp/armor/cuirass_1.nif"
+        };
+
+        var pairs = LocalArmorImportService.DetectWeightVariantPairs(meshFiles);
+
+        Assert.Single(pairs);
+        Assert.Equal("cuirass", pairs[0].BaseName);
+        Assert.NotNull(pairs[0].LowWeightMesh);
+        Assert.NotNull(pairs[0].HighWeightMesh);
+        Assert.EndsWith("cuirass_0.nif", pairs[0].LowWeightMesh, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("cuirass_1.nif", pairs[0].HighWeightMesh, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DetectWeightVariantPairs_MultiplePairs_DetectsAll()
+    {
+        var meshFiles = new List<string>
+        {
+            "/tmp/armor/cuirass_0.nif",
+            "/tmp/armor/cuirass_1.nif",
+            "/tmp/armor/boots_0.nif",
+            "/tmp/armor/boots_1.nif",
+            "/tmp/armor/gloves_0.nif",
+            "/tmp/armor/gloves_1.nif"
+        };
+
+        var pairs = LocalArmorImportService.DetectWeightVariantPairs(meshFiles);
+
+        Assert.Equal(3, pairs.Count);
+        Assert.All(pairs, p => Assert.NotNull(p.LowWeightMesh));
+        Assert.All(pairs, p => Assert.NotNull(p.HighWeightMesh));
+    }
+
+    [Fact]
+    public void DetectWeightVariantPairs_MissingHighWeight_ReportsIncomplete()
+    {
+        var meshFiles = new List<string>
+        {
+            "/tmp/armor/gauntlets_0.nif"
+        };
+
+        var pairs = LocalArmorImportService.DetectWeightVariantPairs(meshFiles);
+
+        Assert.Single(pairs);
+        Assert.NotNull(pairs[0].LowWeightMesh);
+        Assert.Null(pairs[0].HighWeightMesh);
+    }
+
+    [Fact]
+    public void DetectWeightVariantPairs_NoWeightSuffix_ReturnsEmpty()
+    {
+        var meshFiles = new List<string>
+        {
+            "/tmp/armor/helmet.nif"
+        };
+
+        var pairs = LocalArmorImportService.DetectWeightVariantPairs(meshFiles);
+
+        Assert.Empty(pairs);
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WeightVariantStepPresent()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        // Provide a _0/_1 pair so the weight-variants step fires.
+        var mesh0 = Path.Combine(workingDirectory, "cuirass_0.nif");
+        var mesh1 = Path.Combine(workingDirectory, "cuirass_1.nif");
+        await File.WriteAllTextAsync(mesh0, "mesh");
+        await File.WriteAllTextAsync(mesh1, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var step = result.Steps.FirstOrDefault(s => s.StartsWith("weight-variants:", StringComparison.Ordinal));
+            Assert.NotNull(step);
+            Assert.Contains("pairs=1", step, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class BsdSliderDataTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            // BSD files land in SliderData/<ProjectName>/
+            var sliderDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(d => d.Contains("SliderData", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(sliderDataDir);
+
+            var bsdFiles = Directory.GetFiles(sliderDataDir!, "*.bsd", SearchOption.AllDirectories);
+            Assert.NotEmpty(bsdFiles);
+
+            // Verify BSD magic header in each file.
+            foreach (var bsdFile in bsdFiles)
+            {
+                var header = await File.ReadAllBytesAsync(bsdFile);
+                Assert.True(header.Length >= 4);
+                Assert.Equal(0x42, header[0]); // 'B'
+                Assert.Equal(0x53, header[1]); // 'S'
+                Assert.Equal(0x44, header[2]); // 'D'
+                Assert.Equal(0x00, header[3]); // null
+            }
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesBsdForLowAndHighWeight()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var sliderDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(d => d.Contains("SliderData", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(sliderDataDir);
+
+            var bsdFiles = Directory.GetFiles(sliderDataDir!, "*.bsd", SearchOption.AllDirectories).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Expect both low-weight (e.g. "Belly.bsd") and high-weight (e.g. "Belly_1.bsd") files.
+            Assert.True(bsdFiles.Any(f => !f!.EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase)), "Expected low-weight .bsd files.");
+            Assert.True(bsdFiles.Any(f => f!.EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase)), "Expected high-weight _1.bsd files.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class TriMorphFileTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            // Expect both the low-weight and high-weight TRI files.
+            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly);
+            Assert.True(triFiles.Length >= 2, "Expected at least 2 TRI files (low and high weight).");
+
+            // The standard low-weight TRI should NOT end with _1.tri
+            Assert.True(triFiles.Any(f => !Path.GetFileName(f).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase)),
+                "Expected a low-weight .tri file.");
+            Assert.True(triFiles.Any(f => Path.GetFileName(f).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase)),
+                "Expected a high-weight _1.tri file.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_TriFilesHaveFrtri003Magic()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "boots.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly);
+            Assert.NotEmpty(triFiles);
+
+            foreach (var triFile in triFiles)
+            {
+                var bytes = await File.ReadAllBytesAsync(triFile);
+                Assert.True(bytes.Length >= 8);
+                var magic = System.Text.Encoding.ASCII.GetString(bytes, 0, 8);
+                Assert.Equal("FRTRI003", magic);
+            }
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class BodySignatureVertexCountTests
+{
+    [Theory]
+    [InlineData("CBBE",  6942)] // within 6800-7100
+    [InlineData("UNP",   6032)] // within 5900-6200
+    [InlineData("HIMBO", 6820)] // within 6600-7100
+    [InlineData("BHUNP", 10080)] // within 9800-10400
+    [InlineData("3BA",   10032)] // within 9800-10400
+    public void BodySignatureTemplate_VertexCountRanges_IncludeTypicalCounts(string bodyName, int typicalCount)
+    {
+        var template = VanillaBodySignatureDatabase.Templates
+            .First(t => string.Equals(t.Body, bodyName, StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(template.VertexCountMin > 0, $"{bodyName} should have a non-zero VertexCountMin.");
+        Assert.True(template.VertexCountMax > template.VertexCountMin, $"{bodyName} VertexCountMax should exceed Min.");
+        Assert.InRange(typicalCount, template.VertexCountMin, template.VertexCountMax);
+    }
+
+    [Fact]
+    public void AllTemplates_HaveVertexCountRanges()
+    {
+        Assert.All(VanillaBodySignatureDatabase.Templates, t =>
+        {
+            Assert.True(t.VertexCountMin > 0,   $"{t.Body} is missing VertexCountMin.");
+            Assert.True(t.VertexCountMax > t.VertexCountMin, $"{t.Body} VertexCountMax must exceed Min.");
+        });
+    }
+}

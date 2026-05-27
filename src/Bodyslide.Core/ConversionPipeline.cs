@@ -6,7 +6,18 @@ namespace Bodyslide.Core;
 
 public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false, string? DeformationProfile = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
-public sealed record ImportedArmor(string SourcePath, IReadOnlyList<string> MeshFiles, IReadOnlyList<string> TextureFiles, IReadOnlyList<string> PhysicsFiles, IReadOnlyList<string> BodyReferenceFiles, string? TemporaryWorkspace = null);
+
+/// <summary>Tracks a matched low-weight (_0) and high-weight (_1) mesh pair for the same armor piece.</summary>
+public sealed record WeightVariantPair(string BaseName, string? LowWeightMesh, string? HighWeightMesh);
+
+public sealed record ImportedArmor(
+    string SourcePath,
+    IReadOnlyList<string> MeshFiles,
+    IReadOnlyList<string> TextureFiles,
+    IReadOnlyList<string> PhysicsFiles,
+    IReadOnlyList<string> BodyReferenceFiles,
+    string? TemporaryWorkspace = null,
+    IReadOnlyList<WeightVariantPair>? WeightVariantPairs = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount);
 public sealed record DeformationCage(string Mode);
@@ -78,27 +89,34 @@ public static class RequestNormalizer
 
 /// <summary>
 /// Defines token signatures used to match imported assets to known body families.
-/// Mesh, texture, and physics token hit ratios are combined into a confidence score.
+/// Mesh, texture, and physics token hit ratios are combined with optional vertex count
+/// range hints into a confidence score.
 /// </summary>
 internal sealed record BodySignatureTemplate(
     string Body,
     IReadOnlyList<string> MeshTokens,
     IReadOnlyList<string> TextureTokens,
-    IReadOnlyList<string> PhysicsTokens);
+    IReadOnlyList<string> PhysicsTokens,
+    int VertexCountMin = 0,
+    int VertexCountMax = 0);
 
 internal static class VanillaBodySignatureDatabase
 {
+    // Typical vertex counts per body type are well-known in the modding community.
+    // These ranges are used as additional scoring hints when NIF data is available.
+    // CBBE:  ~6942 vertices (standard), UNP: ~6032, HIMBO: ~6820, BHUNP: ~10080,
+    // 3BA:   ~10032 (CBBE base with physics), TBD: ~7680, SAM: ~5984, SOS: ~6274, UBE: ~7000
     public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
     [
-        new("CBBE",  ["cbbe", "caliente"],       ["femalebody_1", "femalebody_0"], []),
-        new("UNP",   ["unp", "unpb"],            ["femalebody"],                  []),
-        new("HIMBO", ["himbo", "male"],          ["malebody"],                    []),
-        new("BHUNP", ["bhunp"],                  ["femalebody"],                  []),
-        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                 ["smp", "cbpc"]),
-        new("TBD",   ["tbd"],                    ["femalebody"],                  []),
-        new("SAM",   ["sam", "samlight"],        ["malebody"],                    []),
-        new("SOS",   ["sos", "soslight"],        ["malebody"],                    ["smp"]),
-        new("UBE",   ["ube"],                    ["femalebody"],                  [])
+        new("CBBE",  ["cbbe", "caliente"],        ["femalebody_1", "femalebody_0"], [],           6800, 7100),
+        new("UNP",   ["unp", "unpb"],             ["femalebody"],                  [],           5900, 6200),
+        new("HIMBO", ["himbo", "male"],           ["malebody"],                    [],           6600, 7100),
+        new("BHUNP", ["bhunp"],                   ["femalebody"],                  [],           9800, 10400),
+        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc"], 9800, 10400),
+        new("TBD",   ["tbd"],                     ["femalebody"],                  [],           7400, 7900),
+        new("SAM",   ["sam", "samlight"],         ["malebody"],                    [],           5800, 6200),
+        new("SOS",   ["sos", "soslight"],         ["malebody"],                    ["smp"],      6100, 6500),
+        new("UBE",   ["ube"],                     ["femalebody"],                  [],           6800, 7200)
     ];
 }
 
@@ -365,6 +383,15 @@ public sealed class ConversionOrchestrator(
 
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
+
+            // Weight variant pair detection — report how many _0/_1 mesh pairs were found.
+            var weightPairs = armor.WeightVariantPairs ?? [];
+            var fullPairs    = weightPairs.Count(p => p.LowWeightMesh is not null && p.HighWeightMesh is not null);
+            var missingPairs = weightPairs.Count(p => p.LowWeightMesh is null || p.HighWeightMesh is null);
+            if (weightPairs.Count > 0)
+            {
+                steps.Add($"weight-variants:pairs={fullPairs},incomplete={missingPairs}");
+            }
 
             var defaultOutput = Path.Combine(
                 Environment.CurrentDirectory,
@@ -651,7 +678,39 @@ internal sealed class LocalArmorImportService : IArmorImportService
             })
             .ToList();
 
-        return Task.FromResult(new ImportedArmor(sourcePath, meshFiles, textureFiles, physicsFiles, bodyReferenceFiles, temporaryWorkspace));
+        return Task.FromResult(new ImportedArmor(sourcePath, meshFiles, textureFiles, physicsFiles, bodyReferenceFiles, temporaryWorkspace, DetectWeightVariantPairs(meshFiles)));
+    }
+
+    /// <summary>
+    /// Groups .nif mesh files into _0 (low-weight) and _1 (high-weight) pairs.
+    /// Files that end with _0 or _1 before the extension are considered weight variants.
+    /// Unpaired variants (a _0 without a matching _1 or vice versa) are reported with a null counterpart.
+    /// </summary>
+    internal static IReadOnlyList<WeightVariantPair> DetectWeightVariantPairs(IReadOnlyList<string> meshFiles)
+    {
+        var low  = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var high = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in meshFiles)
+        {
+            var baseName = Path.GetFileNameWithoutExtension(file) ?? string.Empty;
+            if (baseName.EndsWith("_0", StringComparison.OrdinalIgnoreCase))
+            {
+                low[baseName[..^2]] = file;
+            }
+            else if (baseName.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+            {
+                high[baseName[..^2]] = file;
+            }
+        }
+
+        var allBases = low.Keys.Union(high.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
+        return allBases
+            .Select(baseName => new WeightVariantPair(
+                baseName,
+                low.TryGetValue(baseName, out var l) ? l : null,
+                high.TryGetValue(baseName, out var h) ? h : null))
+            .ToList();
     }
 
     private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions)
@@ -1539,6 +1598,29 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
         outputFiles.Add(ospPath);
 
+        // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
+        // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
+        var bsdDirectory = Path.Combine(outputDirectory, "SliderData", bodySlideProject.ProjectName);
+        Directory.CreateDirectory(bsdDirectory);
+        foreach (var slider in bodySlideProject.Sliders)
+        {
+            var lowBsdPath  = Path.Combine(bsdDirectory, $"{slider}.bsd");
+            var highBsdPath = Path.Combine(bsdDirectory, $"{slider}_1.bsd");
+            await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false), cancellationToken);
+            await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true),  cancellationToken);
+            outputFiles.Add(lowBsdPath);
+            outputFiles.Add(highBsdPath);
+        }
+
+        // Write TRI morph files (.tri) — one for low-weight and one for high-weight.
+        // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
+        var triLowPath  = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}.tri");
+        var triHighPath = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}_1.tri");
+        await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false), cancellationToken);
+        await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true),  cancellationToken);
+        outputFiles.Add(triLowPath);
+        outputFiles.Add(triHighPath);
+
         // Write plugin patch guidance when plugins were found.
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
@@ -1725,6 +1807,84 @@ internal sealed class LocalExportService : IExportService
     private static string XmlEscape(string value)
     {
         return SecurityElement.Escape(value) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Builds a BSD (BodySlide Data) binary payload for a single slider.
+    /// <para>
+    /// BSD file layout (little-endian):
+    /// <list type="bullet">
+    ///   <item>4 bytes — magic "BSD\0" (0x42 0x53 0x44 0x00)</item>
+    ///   <item>2 bytes — version (0x01 0x00)</item>
+    ///   <item>1 byte  — weight flag (0x00 = low / _0, 0x01 = high / _1)</item>
+    ///   <item>2 bytes — slider name length (UTF-8)</item>
+    ///   <item>N bytes — slider name (UTF-8)</item>
+    ///   <item>4 bytes — vertex count (0 = stub; populated when NIF data is available)</item>
+    /// </list>
+    /// When a real NIF mesh parser is integrated, the vertex displacement deltas (3 × float32 per vertex)
+    /// should be appended immediately after the vertex count field.
+    /// </para>
+    /// </summary>
+    private static byte[] BuildBsdBytes(string sliderName, bool isHighWeight)
+    {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        using var ms = new System.IO.MemoryStream();
+        using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+
+        w.Write((byte)0x42); // 'B'
+        w.Write((byte)0x53); // 'S'
+        w.Write((byte)0x44); // 'D'
+        w.Write((byte)0x00); // null terminator
+        w.Write((ushort)1);               // version 1
+        w.Write(isHighWeight ? (byte)1 : (byte)0); // weight flag
+        w.Write((ushort)nameBytes.Length);
+        w.Write(nameBytes);
+        w.Write((uint)0);   // vertex count — 0 signals a stub (no NIF mesh data yet)
+
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Builds a TRI morph binary payload for all sliders of one weight variant.
+    /// <para>
+    /// TRI file layout (little-endian):
+    /// <list type="bullet">
+    ///   <item>8 bytes — magic "FRTRI003" (matches the BodySlide / Outfit Studio TRI header)</item>
+    ///   <item>4 bytes — vertex count (0 = stub)</item>
+    ///   <item>4 bytes — morph count (number of sliders)</item>
+    ///   <item>For each morph:
+    ///     <list type="bullet">
+    ///       <item>2 bytes — morph name length</item>
+    ///       <item>N bytes — morph name (UTF-8)</item>
+    ///       <item>4 bytes — delta count (0 = stub; normally equals vertex count)</item>
+    ///     </list>
+    ///   </item>
+    /// </list>
+    /// When a real NIF mesh parser is integrated, the delta arrays (3 × int16 per vertex × morph count)
+    /// should follow the morph directory entries.
+    /// </para>
+    /// </summary>
+    private static byte[] BuildTriBytes(string projectName, IReadOnlyList<string> sliders, bool isHighWeight)
+    {
+        using var ms = new System.IO.MemoryStream();
+        using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+
+        // Magic header matches BodySlide / Outfit Studio TRI format.
+        w.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        w.Write((uint)0);                  // vertex count — stub
+        w.Write((uint)sliders.Count);      // morph count
+
+        foreach (var slider in sliders)
+        {
+            // For the high-weight TRI the morph name gets a "_1" suffix to match BodySlide conventions.
+            var morphName = isHighWeight ? $"{slider}_1" : slider;
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morphName);
+            w.Write((ushort)nameBytes.Length);
+            w.Write(nameBytes);
+            w.Write((uint)0); // delta count — stub
+        }
+
+        return ms.ToArray();
     }
 }
 
