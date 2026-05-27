@@ -448,7 +448,10 @@ internal sealed class LocalExportService : IExportService
         outputFiles.Add(manifestPath);
 
         var convertedMeshListPath = Path.Combine(outputDirectory, "converted-meshes.txt");
-        await File.WriteAllLinesAsync(convertedMeshListPath, armor.MeshFiles.Select(Path.GetFileName), cancellationToken);
+        await File.WriteAllLinesAsync(
+            convertedMeshListPath,
+            armor.MeshFiles.Select(file => Path.GetFileName(file) ?? file),
+            cancellationToken);
         outputFiles.Add(convertedMeshListPath);
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
