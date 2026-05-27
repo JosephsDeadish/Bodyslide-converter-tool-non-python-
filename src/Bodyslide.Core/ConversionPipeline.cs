@@ -45,6 +45,10 @@ public static class RequestNormalizer
     }
 }
 
+/// <summary>
+/// Defines token signatures used to match imported assets to known body families.
+/// Mesh, texture, and physics token hit ratios are combined into a confidence score.
+/// </summary>
 internal sealed record BodySignatureTemplate(
     string Body,
     IReadOnlyList<string> MeshTokens,
@@ -423,7 +427,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return 0;
         }
 
-        var combined = string.Join(' ', fileNames).ToLowerInvariant();
+        var combined = string.Join(' ', fileNames);
         var hits = tokens.Count(token => combined.Contains(token, StringComparison.OrdinalIgnoreCase));
         return (double)hits / tokens.Count;
     }
@@ -613,7 +617,7 @@ internal sealed class LocalExportService : IExportService
 
         var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
         var cache = await LoadCacheAsync(cachePath, cancellationToken);
-        var cacheKey = $"{Path.GetFileNameWithoutExtension(armor.MeshFiles[0])}:{request.TargetBody}";
+        var cacheKey = $"{SanitizeCacheKeyPart(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown")}:{SanitizeCacheKeyPart(request.TargetBody)}";
         cache.RemoveAll(entry => string.Equals(entry.Key, cacheKey, StringComparison.OrdinalIgnoreCase));
         cache.Add(new ConversionCacheEntry(
             cacheKey,
@@ -644,5 +648,14 @@ internal sealed class LocalExportService : IExportService
         }
 
         return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+    }
+
+    private static string SanitizeCacheKeyPart(string value)
+    {
+        var sanitized = new string(value
+            .Where(static ch => char.IsLetterOrDigit(ch) || ch is '-' or '_')
+            .ToArray());
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "unknown" : sanitized;
     }
 }
