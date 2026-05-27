@@ -1615,3 +1615,179 @@ public sealed class PhysicsMeshTypeTuningTests
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expanded preset / body-type / texture / vanilla-DB / BodyTypeCatalog tests
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class ExpandedPresetTests
+{
+    [Theory]
+    [InlineData("CBBE Curvy",    "CBBE")]
+    [InlineData("CBBE Slim",     "CBBE")]
+    [InlineData("CBBE Athletic", "CBBE")]
+    [InlineData("CBBE Petite",   "CBBE")]
+    [InlineData("3BA Athletic",  "3BA")]
+    [InlineData("SAM Athletic",  "SAM")]
+    [InlineData("SAM Lean",      "SAM")]
+    [InlineData("SAM Muscular",  "SAM")]
+    [InlineData("SOS Lean",      "SOS")]
+    [InlineData("SOS Athletic",  "SOS")]
+    [InlineData("UBE Petite",    "UBE")]
+    [InlineData("UBE Curvy",     "UBE")]
+    [InlineData("HIMBO Athletic","HIMBO")]
+    public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)
+    {
+        Assert.True(PresetCatalog.TryGet(presetName, out var preset));
+        Assert.Equal(expectedBody, preset.TargetBody);
+    }
+
+    [Fact]
+    public void PresetCatalog_AllCount_AtLeast27()
+    {
+        Assert.True(PresetCatalog.All.Count >= 27, $"Expected >= 27 presets, got {PresetCatalog.All.Count}");
+    }
+}
+
+public sealed class BodyTransformationFieldTests
+{
+    [Theory]
+    [InlineData("CBBE")]
+    [InlineData("3BA")]
+    [InlineData("BHUNP")]
+    [InlineData("UNP")]
+    [InlineData("TBD")]
+    [InlineData("UBE")]
+    [InlineData("HIMBO")]
+    [InlineData("SAM")]
+    [InlineData("SOS")]
+    public void BodyTransformationFieldCatalog_AllBodyTypes_Have11Regions(string body)
+    {
+        var fields = BodyTransformationFieldCatalog.Resolve(body);
+        var requiredRegions = new[] { "waist", "hips", "chest", "shoulders", "neck", "breasts", "butt", "belly", "arms", "thighs", "calves" };
+        foreach (var region in requiredRegions.Where(r => !r.Equals("hips", StringComparison.OrdinalIgnoreCase)
+                                                       && !r.Equals("neck", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.True(fields.ContainsKey(region),
+                $"Body '{body}' is missing region '{region}'");
+        }
+    }
+
+    [Fact]
+    public void BodyTransformationFieldCatalog_FallbackBody_HasAtLeastWaistAndChest()
+    {
+        var fields = BodyTransformationFieldCatalog.Resolve("UNKNOWN_BODY_XYZ");
+        Assert.True(fields.ContainsKey("waist"));
+        Assert.True(fields.ContainsKey("chest"));
+    }
+}
+
+public sealed class ExpandedTextureClassificationTests
+{
+    [Theory]
+    [InlineData("body_s.dds",        "specular")]
+    [InlineData("chest_spec.dds",    "specular")]
+    [InlineData("arm_specular.dds",  "specular")]
+    [InlineData("body_g.dds",        "glow")]
+    [InlineData("chest_glow.dds",    "glow")]
+    [InlineData("leg_em.dds",        "glow")]
+    [InlineData("body_p.dds",        "parallax")]
+    [InlineData("torso_parallax.dds","parallax")]
+    [InlineData("body_h.dds",        "parallax")]
+    [InlineData("skin_sk.dds",       "subsurface")]
+    [InlineData("body_sss.dds",      "subsurface")]
+    [InlineData("skin_subsurface.dds","subsurface")]
+    public async Task BasicTextureAnalysisService_ClassifiesTextureTypes(string fileName, string expectedCategory)
+    {
+        var workingDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDir);
+        var texPath = Path.Combine(workingDir, fileName);
+        // Write valid DDS magic bytes so IsValidDdsAsync accepts the file
+        await File.WriteAllBytesAsync(texPath, [0x44, 0x44, 0x53, 0x20, 0x7C, 0x00, 0x00, 0x00]);
+
+        try
+        {
+            var armor = new ImportedArmor("armor.nif", [], [texPath], [], [], "CBBE");
+            var service = new BasicTextureAnalysisService();
+            var summary = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            switch (expectedCategory)
+            {
+                case "specular":
+                    Assert.True(summary.SpecularFiles?.Count > 0, $"{fileName} should produce a specular entry");
+                    break;
+                case "glow":
+                    Assert.True(summary.GlowFiles?.Count > 0, $"{fileName} should produce a glow entry");
+                    break;
+                case "parallax":
+                    Assert.True(summary.ParallaxFiles?.Count > 0, $"{fileName} should produce a parallax entry");
+                    break;
+                case "subsurface":
+                    Assert.True(summary.SubsurfaceFiles?.Count > 0, $"{fileName} should produce a subsurface entry");
+                    break;
+            }
+        }
+        finally
+        {
+            Directory.Delete(workingDir, recursive: true);
+        }
+    }
+}
+
+public sealed class ExpandedVanillaArmorDatabaseTests
+{
+    [Theory]
+    [InlineData("orcisharmor")]
+    [InlineData("stalhrimarmor")]
+    [InlineData("stalhrim")]
+    [InlineData("nordiccarvedarmor")]
+    [InlineData("bonemoldarmor")]
+    [InlineData("chitinarmor")]
+    [InlineData("skaalarmor")]
+    [InlineData("ebonymail")]
+    [InlineData("falmerhardened")]
+    [InlineData("draugrarmor")]
+    [InlineData("penitusoculatus")]
+    [InlineData("vampireroyalarmor")]
+    [InlineData("dawnguardheavy")]
+    [InlineData("nightingalearmor")]
+    [InlineData("imperialstudded")]
+    [InlineData("wolfarmor")]
+    [InlineData("saviorshide")]
+    [InlineData("boundarmor")]
+    [InlineData("ancientfalmer")]
+    public void VanillaArmorDatabase_ContainsNewEntry(string token)
+    {
+        var db = new VanillaArmorLookupService();
+        var found = db.All.Any(e => e.MeshFileTokens.Contains(token, StringComparer.OrdinalIgnoreCase));
+        Assert.True(found, $"VanillaArmorDatabase should contain token '{token}'");
+    }
+
+    [Fact]
+    public void VanillaArmorDatabase_TotalCount_AtLeast65()
+    {
+        var db = new VanillaArmorLookupService();
+        Assert.True(db.All.Count >= 65, $"Expected >= 65 vanilla armors, got {db.All.Count}");
+    }
+}
+
+public sealed class BodyTypeCatalogTests
+{
+    [Fact]
+    public void BodyTypeCatalog_All_ContainsExpectedBodies()
+    {
+        var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE" })
+        {
+            Assert.Contains(expected, names);
+        }
+    }
+
+    [Fact]
+    public void BodyTypeCatalog_All_EachBodyHasDetectionTokens()
+    {
+        foreach (var body in BodyTypeCatalog.All)
+        {
+            Assert.NotEmpty(body.DetectionTokens);
+        }
+    }
+}

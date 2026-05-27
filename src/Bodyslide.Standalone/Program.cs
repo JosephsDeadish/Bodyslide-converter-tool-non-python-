@@ -22,6 +22,20 @@ if (args.Contains("--list-profiles", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
+{
+    Console.WriteLine("Supported body types (signature detection):");
+    foreach (var body in BodyTypeCatalog.All)
+    {
+        var vcRange = body.VertexCountMin > 0
+            ? $"  vertices: {body.VertexCountMin}–{body.VertexCountMax}"
+            : string.Empty;
+        Console.WriteLine($" - {body.Name,-8} tokens: [{string.Join(", ", body.DetectionTokens)}]{vcRange}");
+    }
+
+    return;
+}
+
 if (!TryParseRequest(args, out var request, out var error))
 {
     Console.WriteLine(error);
@@ -30,6 +44,7 @@ if (!TryParseRequest(args, out var request, out var error))
     Console.WriteLine("  SlideSmith --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--source <body>] [--output-zip]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
+    Console.WriteLine("  SlideSmith --list-bodies");
     return;
 }
 

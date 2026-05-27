@@ -46,7 +46,15 @@ public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<strin
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 
 public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml);
-public sealed record TextureSummary(int TotalCount, IReadOnlyList<string> DiffuseFiles, IReadOnlyList<string> NormalFiles, IReadOnlyList<string> MissingNormals);
+public sealed record TextureSummary(
+    int TotalCount,
+    IReadOnlyList<string> DiffuseFiles,
+    IReadOnlyList<string> NormalFiles,
+    IReadOnlyList<string> MissingNormals,
+    IReadOnlyList<string>? SpecularFiles = null,
+    IReadOnlyList<string>? GlowFiles = null,
+    IReadOnlyList<string>? ParallaxFiles = null,
+    IReadOnlyList<string>? SubsurfaceFiles = null);
 public sealed record PluginArmorAddon(string RecordType, IReadOnlyList<string> DetectedMeshPaths);
 public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
 public sealed record MeshDependencyMapEntry(
@@ -60,14 +68,42 @@ public static class PresetCatalog
 {
     private static readonly Dictionary<string, ConversionPreset> Presets = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["3BA Curvy"]       = new("3BA Curvy",       "3BA",   "curvy",    "smp+cbpc"),
-        ["3BA Slim"]        = new("3BA Slim",         "3BA",   "slim",     "smp+cbpc"),
-        ["HIMBO Lean"]      = new("HIMBO Lean",       "HIMBO", "lean",     "smp"),
-        ["HIMBO Muscular"]  = new("HIMBO Muscular",   "HIMBO", "muscular", "smp"),
-        ["UNP Petite"]      = new("UNP Petite",       "UNP",   "petite",   "cbpc"),
-        ["UNP Athletic"]    = new("UNP Athletic",     "UNP",   "athletic", "cbpc"),
-        ["BHUNP Curvy"]     = new("BHUNP Curvy",      "BHUNP", "curvy",    "smp+cbpc"),
-        ["BHUNP Slim"]      = new("BHUNP Slim",       "BHUNP", "slim",     "smp+cbpc")
+        // ── 3BA ─────────────────────────────────────────────────────────────
+        ["3BA Curvy"]         = new("3BA Curvy",         "3BA",   "curvy",    "smp+cbpc"),
+        ["3BA Slim"]          = new("3BA Slim",           "3BA",   "slim",     "smp+cbpc"),
+        ["3BA Athletic"]      = new("3BA Athletic",       "3BA",   "athletic", "smp+cbpc"),
+        // ── BHUNP ────────────────────────────────────────────────────────────
+        ["BHUNP Curvy"]       = new("BHUNP Curvy",        "BHUNP", "curvy",    "smp+cbpc"),
+        ["BHUNP Slim"]        = new("BHUNP Slim",         "BHUNP", "slim",     "smp+cbpc"),
+        ["BHUNP Athletic"]    = new("BHUNP Athletic",     "BHUNP", "athletic", "smp+cbpc"),
+        // ── CBBE ────────────────────────────────────────────────────────────
+        ["CBBE Curvy"]        = new("CBBE Curvy",         "CBBE",  "curvy",    "none"),
+        ["CBBE Slim"]         = new("CBBE Slim",          "CBBE",  "slim",     "none"),
+        ["CBBE Athletic"]     = new("CBBE Athletic",      "CBBE",  "athletic", "none"),
+        ["CBBE Petite"]       = new("CBBE Petite",        "CBBE",  "petite",   "none"),
+        // ── UNP ─────────────────────────────────────────────────────────────
+        ["UNP Petite"]        = new("UNP Petite",         "UNP",   "petite",   "cbpc"),
+        ["UNP Athletic"]      = new("UNP Athletic",       "UNP",   "athletic", "cbpc"),
+        ["UNP Curvy"]         = new("UNP Curvy",          "UNP",   "curvy",    "cbpc"),
+        ["UNP Slim"]          = new("UNP Slim",           "UNP",   "slim",     "cbpc"),
+        // ── TBD ─────────────────────────────────────────────────────────────
+        ["TBD Lean"]          = new("TBD Lean",           "TBD",   "lean",     "cbpc"),
+        ["TBD Curvy"]         = new("TBD Curvy",          "TBD",   "curvy",    "cbpc"),
+        ["TBD Athletic"]      = new("TBD Athletic",       "TBD",   "athletic", "cbpc"),
+        // ── SAM ─────────────────────────────────────────────────────────────
+        ["SAM Athletic"]      = new("SAM Athletic",       "SAM",   "athletic", "smp"),
+        ["SAM Lean"]          = new("SAM Lean",           "SAM",   "lean",     "smp"),
+        ["SAM Muscular"]      = new("SAM Muscular",       "SAM",   "muscular", "smp"),
+        // ── SOS ─────────────────────────────────────────────────────────────
+        ["SOS Lean"]          = new("SOS Lean",           "SOS",   "lean",     "smp"),
+        ["SOS Athletic"]      = new("SOS Athletic",       "SOS",   "athletic", "smp"),
+        // ── UBE ─────────────────────────────────────────────────────────────
+        ["UBE Petite"]        = new("UBE Petite",         "UBE",   "petite",   "none"),
+        ["UBE Curvy"]         = new("UBE Curvy",          "UBE",   "curvy",    "none"),
+        // ── HIMBO ───────────────────────────────────────────────────────────
+        ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
+        ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
+        ["HIMBO Athletic"]    = new("HIMBO Athletic",     "HIMBO", "athletic", "smp"),
     };
 
     public static IReadOnlyCollection<ConversionPreset> All => Presets.Values;
@@ -87,6 +123,20 @@ public static class RequestNormalizer
 
         return (request, null);
     }
+}
+
+/// <summary>Exposes supported body type names and vertex-count hints for display / tooling consumers.</summary>
+public sealed record BodyTypeInfo(string Name, IReadOnlyList<string> DetectionTokens, int VertexCountMin, int VertexCountMax);
+
+/// <summary>Public catalog of all body types that the detection engine recognises.</summary>
+public static class BodyTypeCatalog
+{
+    private static readonly Lazy<IReadOnlyList<BodyTypeInfo>> _all = new(static () =>
+        VanillaBodySignatureDatabase.Templates
+            .Select(static t => new BodyTypeInfo(t.Body, t.MeshTokens, t.VertexCountMin, t.VertexCountMax))
+            .ToList());
+
+    public static IReadOnlyList<BodyTypeInfo> All => _all.Value;
 }
 
 /// <summary>
@@ -124,80 +174,73 @@ internal static class VanillaBodySignatureDatabase
 
 internal static class BodyTransformationFieldCatalog
 {
+    // Regions match the BodySlide slider taxonomy: 5 structural + 6 shape-specific.
+    // Values are expansion multipliers relative to the vanilla body (1.0 = no change).
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> Fields =
         new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
             ["CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"]     = 1.08,
-                ["waist"]     = 0.96,
-                ["pelvis"]    = 1.05,
-                ["legs"]      = 1.03,
-                ["shoulders"] = 1.01
+                ["chest"]     = 1.08,  ["waist"]    = 0.96,  ["pelvis"]   = 1.05,
+                ["legs"]      = 1.03,  ["shoulders"] = 1.01,
+                ["breasts"]   = 1.09,  ["butt"]     = 1.06,  ["belly"]    = 1.02,
+                ["arms"]      = 1.01,  ["thighs"]   = 1.04,  ["calves"]   = 1.02
             },
             ["3BA"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"]     = 1.12,
-                ["waist"]     = 0.95,
-                ["pelvis"]    = 1.06,
-                ["legs"]      = 1.04,
-                ["shoulders"] = 1.01
-            },
-            ["HIMBO"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,
-                ["waist"]     = 1.02,
-                ["pelvis"]    = 1.04,
-                ["legs"]      = 1.06,
-                ["shoulders"] = 1.12
-            },
-            ["UNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.04,
-                ["waist"]     = 0.97,
-                ["pelvis"]    = 1.02,
-                ["legs"]      = 1.01,
-                ["shoulders"] = 1.00
+                ["chest"]     = 1.12,  ["waist"]    = 0.95,  ["pelvis"]   = 1.06,
+                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
+                ["breasts"]   = 1.13,  ["butt"]     = 1.08,  ["belly"]    = 1.03,
+                ["arms"]      = 1.02,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
             },
             ["BHUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"]     = 1.10,
-                ["waist"]     = 0.94,
-                ["pelvis"]    = 1.07,
-                ["legs"]      = 1.04,
-                ["shoulders"] = 1.01
+                ["chest"]     = 1.10,  ["waist"]    = 0.94,  ["pelvis"]   = 1.07,
+                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
+                ["breasts"]   = 1.11,  ["butt"]     = 1.07,  ["belly"]    = 1.03,
+                ["arms"]      = 1.01,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
+            },
+            ["UNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.04,  ["waist"]    = 0.97,  ["pelvis"]   = 1.02,
+                ["legs"]      = 1.01,  ["shoulders"] = 1.00,
+                ["breasts"]   = 1.04,  ["butt"]     = 1.02,  ["belly"]    = 1.01,
+                ["arms"]      = 1.00,  ["thighs"]   = 1.02,  ["calves"]   = 1.01
             },
             ["TBD"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"]     = 1.06,
-                ["waist"]     = 0.96,
-                ["pelvis"]    = 1.04,
-                ["legs"]      = 1.02,
-                ["shoulders"] = 1.00
-            },
-            ["SAM"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,
-                ["waist"]     = 1.01,
-                ["pelvis"]    = 1.03,
-                ["legs"]      = 1.05,
-                ["shoulders"] = 1.10
-            },
-            ["SOS"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.05,
-                ["waist"]     = 1.00,
-                ["pelvis"]    = 1.02,
-                ["legs"]      = 1.04,
-                ["shoulders"] = 1.06
+                ["chest"]     = 1.06,  ["waist"]    = 0.96,  ["pelvis"]   = 1.04,
+                ["legs"]      = 1.02,  ["shoulders"] = 1.00,
+                ["breasts"]   = 1.07,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
+                ["arms"]      = 1.00,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
             },
             ["UBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"]     = 1.06,
-                ["waist"]     = 0.97,
-                ["pelvis"]    = 1.03,
-                ["legs"]      = 1.02,
-                ["shoulders"] = 1.01
+                ["chest"]     = 1.06,  ["waist"]    = 0.97,  ["pelvis"]   = 1.03,
+                ["legs"]      = 1.02,  ["shoulders"] = 1.01,
+                ["breasts"]   = 1.06,  ["butt"]     = 1.03,  ["belly"]    = 1.02,
+                ["arms"]      = 1.01,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
+            },
+            ["HIMBO"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.10,  ["waist"]    = 1.02,  ["pelvis"]   = 1.04,
+                ["legs"]      = 1.06,  ["shoulders"] = 1.12,
+                ["breasts"]   = 1.08,  ["butt"]     = 1.05,  ["belly"]    = 1.03,
+                ["arms"]      = 1.10,  ["thighs"]   = 1.07,  ["calves"]   = 1.05
+            },
+            ["SAM"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.08,  ["waist"]    = 1.01,  ["pelvis"]   = 1.03,
+                ["legs"]      = 1.05,  ["shoulders"] = 1.10,
+                ["breasts"]   = 1.05,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
+                ["arms"]      = 1.08,  ["thighs"]   = 1.06,  ["calves"]   = 1.04
+            },
+            ["SOS"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.05,  ["waist"]    = 1.00,  ["pelvis"]   = 1.02,
+                ["legs"]      = 1.04,  ["shoulders"] = 1.06,
+                ["breasts"]   = 1.03,  ["butt"]     = 1.03,  ["belly"]    = 1.01,
+                ["arms"]      = 1.05,  ["thighs"]   = 1.04,  ["calves"]   = 1.03
             }
         };
 
@@ -210,11 +253,10 @@ internal static class BodyTransformationFieldCatalog
 
         return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
-            ["chest"] = 1.02,
-            ["waist"] = 0.99,
-            ["pelvis"] = 1.02,
-            ["legs"] = 1.01,
-            ["shoulders"] = 1.0
+            ["chest"]     = 1.02,  ["waist"]    = 0.99,  ["pelvis"]   = 1.02,
+            ["legs"]      = 1.01,  ["shoulders"] = 1.00,
+            ["breasts"]   = 1.02,  ["butt"]     = 1.01,  ["belly"]    = 1.01,
+            ["arms"]      = 1.00,  ["thighs"]   = 1.01,  ["calves"]   = 1.01
         };
     }
 }
@@ -739,37 +781,72 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
-    private const double MeshTokenWeight = 0.5;
-    private const double TextureTokenWeight = 0.3;
-    private const double PhysicsTokenWeight = 0.1;
-    private const double PhysicsExpectationBoostValue = 0.1;
+    private const double MeshTokenWeight = 0.45;
+    private const double TextureTokenWeight = 0.25;
+    private const double PhysicsTokenWeight = 0.10;
+    private const double PhysicsExpectationBoostValue = 0.10;
+    private const double BoneSignatureWeight = 0.10;
 
-    public Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
+    // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["3BA"]   = ["NPC L Breast01", "NPC R Breast01", "NPC Belly01", "NPC L Butt", "NPC R Butt"],
+            ["BHUNP"] = ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC LBreast01", "NPC RBreast01"],
+            ["HIMBO"] = ["NPC L Pec", "NPC R Pec", "NPC LPec", "NPC RPec"],
+            ["SOS"]   = ["NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],
+            ["SAM"]   = ["SOS GenitalsBase", "SAM Genitals", "NPC L Breast01"],
+            ["TBD"]   = ["TBD Breast", "NPC Belly01", "NPC L Butt"],
+        };
+
+    public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
 
+        // Read physics file contents once for bone signature matching.
+        var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
+
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
-            .Select(template => Score(template, meshNames, textureNames, physicsNames))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, physicsContents))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < 0.25)
         {
-            return Task.FromResult(new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]));
+            return new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]);
         }
 
         var top = scoredCandidates[0];
-        return Task.FromResult(new BodyDetectionReport(top.Template.Body, top.Score, top.Evidence));
+        return new BodyDetectionReport(top.Template.Body, top.Score, top.Evidence);
+    }
+
+    private static async Task<string> ReadPhysicsContentsAsync(IReadOnlyList<string> physicsFiles, CancellationToken cancellationToken)
+    {
+        if (physicsFiles.Count == 0) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        foreach (var file in physicsFiles)
+        {
+            if (!File.Exists(file)) continue;
+            if (!Path.GetExtension(file).Equals(".xml", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                sb.Append(await File.ReadAllTextAsync(file, cancellationToken));
+                sb.Append(' ');
+            }
+            catch (IOException) { /* skip unreadable files */ }
+        }
+        return sb.ToString();
     }
 
     private static (BodySignatureTemplate Template, double Score, IReadOnlyList<string> Evidence) Score(
         BodySignatureTemplate template,
         IReadOnlyList<string> meshNames,
         IReadOnlyList<string> textureNames,
-        IReadOnlyList<string> physicsNames)
+        IReadOnlyList<string> physicsNames,
+        string physicsContents)
     {
         var evidence = new List<string>();
 
@@ -791,11 +868,24 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             evidence.Add($"physics:{physicsHitRatio:P0}");
         }
 
+        // Bone signature: check if specific physics bone names appear in XML content.
+        double boneSignatureScore = 0;
+        if (physicsContents.Length > 0 && BodyBoneSignatures.TryGetValue(template.Body, out var boneNames))
+        {
+            var hits = boneNames.Count(bone => physicsContents.Contains(bone, StringComparison.OrdinalIgnoreCase));
+            boneSignatureScore = (double)hits / boneNames.Count;
+            if (boneSignatureScore > 0)
+            {
+                evidence.Add($"bone-sig:{boneSignatureScore:P0}");
+            }
+        }
+
         var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
         var score = Math.Clamp(
             (meshHitRatio * MeshTokenWeight) +
             (textureHitRatio * TextureTokenWeight) +
             (physicsHitRatio * PhysicsTokenWeight) +
+            (boneSignatureScore * BoneSignatureWeight) +
             physicsExpectationBoost,
             0,
             1);
@@ -1374,6 +1464,10 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
         var diffuseFiles = new List<string>();
         var normalFiles = new List<string>();
         var missingNormals = new List<string>();
+        var specularFiles = new List<string>();
+        var glowFiles = new List<string>();
+        var parallaxFiles = new List<string>();
+        var subsurfaceFiles = new List<string>();
 
         foreach (var texturePath in armor.TextureFiles)
         {
@@ -1388,6 +1482,30 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
                 baseName.EndsWith("_normal", StringComparison.OrdinalIgnoreCase))
             {
                 normalFiles.Add(fileName);
+            }
+            else if (baseName.EndsWith("_s", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_spec", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_specular", StringComparison.OrdinalIgnoreCase))
+            {
+                specularFiles.Add(fileName);
+            }
+            else if (baseName.EndsWith("_g", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_glow", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_em", StringComparison.OrdinalIgnoreCase))
+            {
+                glowFiles.Add(fileName);
+            }
+            else if (baseName.EndsWith("_p", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_parallax", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_h", StringComparison.OrdinalIgnoreCase))
+            {
+                parallaxFiles.Add(fileName);
+            }
+            else if (baseName.EndsWith("_sk", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_subsurface", StringComparison.OrdinalIgnoreCase) ||
+                     baseName.EndsWith("_sss", StringComparison.OrdinalIgnoreCase))
+            {
+                subsurfaceFiles.Add(fileName);
             }
             else
             {
@@ -1405,7 +1523,15 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             }
         }
 
-        return new TextureSummary(armor.TextureFiles.Count, diffuseFiles, normalFiles, missingNormals);
+        return new TextureSummary(
+            armor.TextureFiles.Count,
+            diffuseFiles,
+            normalFiles,
+            missingNormals,
+            specularFiles,
+            glowFiles,
+            parallaxFiles,
+            subsurfaceFiles);
     }
 
     private static async Task<bool> IsValidDdsAsync(string path, CancellationToken cancellationToken)
@@ -1568,7 +1694,17 @@ internal sealed class LocalExportService : IExportService
             Correction = correction,
             BodySlide = new { bodySlideProject.ProjectName, bodySlideProject.TargetBody, SliderCount = bodySlideProject.Sliders.Count },
             Plugins = new { ScannedCount = pluginAnalysis.ScannedPlugins.Count, AddonCount = pluginAnalysis.ArmorAddons.Count },
-            Textures = new { textureSummary.TotalCount, DiffuseCount = textureSummary.DiffuseFiles.Count, NormalCount = textureSummary.NormalFiles.Count, MissingNormals = textureSummary.MissingNormals },
+            Textures = new
+            {
+                textureSummary.TotalCount,
+                DiffuseCount    = textureSummary.DiffuseFiles.Count,
+                NormalCount     = textureSummary.NormalFiles.Count,
+                SpecularCount   = textureSummary.SpecularFiles?.Count ?? 0,
+                GlowCount       = textureSummary.GlowFiles?.Count ?? 0,
+                ParallaxCount   = textureSummary.ParallaxFiles?.Count ?? 0,
+                SubsurfaceCount = textureSummary.SubsurfaceFiles?.Count ?? 0,
+                MissingNormals  = textureSummary.MissingNormals
+            },
             Steps = steps
         };
 
@@ -2122,39 +2258,71 @@ internal static class VanillaArmorDatabase
 {
     public static readonly IReadOnlyList<VanillaArmorEntry> Entries =
     [
-        new("Iron Armor",             ["ironarmor", "ironplate"],                    "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "curvy"),
-        new("Iron Helmet",            ["ironhelmet"],                                "Vanilla", ["42:Circlet"],                     "curvy"),
-        new("Steel Armor",            ["steelarmor", "steelplate"],                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Steel Helmet",           ["steelhelmet"],                               "Vanilla", ["42:Circlet"],                     "athletic"),
-        new("Steel Plate Armor",      ["steelplatearmor"],                           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Dwarven Armor",          ["dwarvenarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Dwarven Helmet",         ["dwarvenhelmet"],                             "Vanilla", ["42:Circlet"],                     "athletic"),
-        new("Elven Armor",            ["elvenarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Elven Helmet",           ["elvenhelmet"],                               "Vanilla", ["42:Circlet"],                     "slim"),
-        new("Elven Gilded Armor",     ["elvengildedarmor"],                          "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Glass Armor",            ["glassarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Glass Helmet",           ["glasshelmet"],                               "Vanilla", ["42:Circlet"],                     "slim"),
-        new("Ebony Armor",            ["ebonyarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
-        new("Ebony Helmet",           ["ebonyhelmet"],                               "Vanilla", ["42:Circlet"],                     "muscular"),
-        new("Daedric Armor",          ["daedricarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
-        new("Daedric Helmet",         ["daedrichelmet"],                             "Vanilla", ["42:Circlet"],                     "muscular"),
-        new("Dragonplate Armor",      ["dragonplatearmor", "dragonplate"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
-        new("Dragonscale Armor",      ["dragonscalearmor", "dragonscale"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Leather Armor",          ["leatherarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Hide Armor",             ["hidearmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Studded Armor",          ["studdedarmor"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Imperial Light Armor",   ["imperiallightarmor", "imperiallight"],       "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Imperial Heavy Armor",   ["imperialheavyarmor", "imperialheavy"],       "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Stormcloak Cuirass",     ["stormcloakcuirass", "stormcloak"],           "Vanilla", ["32:Body"],                        "athletic"),
-        new("Ancient Nord Armor",     ["ancientswordsman", "ancientnord"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
-        new("Forsworn Armor",         ["forswornarmor", "forsworn"],                 "Vanilla", ["32:Body"],                        "curvy"),
-        new("Fur Armor",              ["furarmor"],                                  "Vanilla", ["32:Body"],                        "slim"),
-        new("Mage Robes",             ["magescholarsrobe", "magerobe", "collegerobe"], "Vanilla", ["32:Body"],                     "slim"),
-        new("Thieves Guild Armor",    ["thievesguildarmor", "tgarmor"],              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Dark Brotherhood Armor", ["dbrobes", "darkbrotherhood"],               "Vanilla", ["32:Body"],                        "slim"),
-        new("Nightingale Armor",      ["nightingalearmor", "nightingale"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
-        new("Blades Armor",           ["bladearmor", "bladesamurai"],                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
-        new("Guard Armor",            ["guardarmor", "guardcuirass"],                "Vanilla", ["32:Body"],                        "athletic"),
+        new("Iron Armor",                   ["ironarmor", "ironplate"],                     "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "curvy"),
+        new("Iron Helmet",                  ["ironhelmet"],                                 "Vanilla", ["42:Circlet"],                          "curvy"),
+        new("Steel Armor",                  ["steelarmor", "steelplate"],                   "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Steel Helmet",                 ["steelhelmet"],                                "Vanilla", ["42:Circlet"],                          "athletic"),
+        new("Steel Plate Armor",            ["steelplatearmor"],                            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Dwarven Armor",                ["dwarvenarmor"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Dwarven Helmet",               ["dwarvenhelmet"],                              "Vanilla", ["42:Circlet"],                          "athletic"),
+        new("Elven Armor",                  ["elvenarmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Elven Helmet",                 ["elvenhelmet"],                                "Vanilla", ["42:Circlet"],                          "slim"),
+        new("Elven Gilded Armor",           ["elvengildedarmor"],                           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Glass Armor",                  ["glassarmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Glass Helmet",                 ["glasshelmet"],                                "Vanilla", ["42:Circlet"],                          "slim"),
+        new("Ebony Armor",                  ["ebonyarmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Ebony Helmet",                 ["ebonyhelmet"],                                "Vanilla", ["42:Circlet"],                          "muscular"),
+        new("Ebony Mail",                   ["ebonymail"],                                  "Vanilla", ["32:Body"],                             "muscular"),
+        new("Daedric Armor",                ["daedricarmor"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Daedric Helmet",               ["daedrichelmet"],                              "Vanilla", ["42:Circlet"],                          "muscular"),
+        new("Dragonplate Armor",            ["dragonplatearmor", "dragonplate"],            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Dragonscale Armor",            ["dragonscalearmor", "dragonscale"],            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Leather Armor",                ["leatherarmor"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Hide Armor",                   ["hidearmor"],                                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Studded Armor",                ["studdedarmor"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Orcish Armor",                 ["orcisharmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Orcish Helmet",                ["orcishhelmet"],                               "Vanilla", ["42:Circlet"],                          "muscular"),
+        new("Scaled Armor",                 ["scaledarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Scaled Helmet",                ["scaledhelmet"],                               "Vanilla", ["42:Circlet"],                          "athletic"),
+        new("Banded Iron Armor",            ["bandediron", "bandedarmor"],                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Wolf Armor",                   ["wolfarmor", "wolfcuirass"],                   "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Saviors Hide",                 ["saviorshide"],                                "Vanilla", ["32:Body"],                             "slim"),
+        new("Imperial Light Armor",         ["imperiallightarmor", "imperiallight"],        "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Imperial Studded Armor",       ["imperialstudded"],                            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Imperial Heavy Armor",         ["imperialheavyarmor", "imperialheavy"],        "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Stormcloak Cuirass",           ["stormcloakcuirass", "stormcloak"],            "Vanilla", ["32:Body"],                             "athletic"),
+        new("Ancient Nord Armor",           ["ancientswordsman", "ancientnord"],            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Draugr Armor",                 ["draugrarmor", "draugr"],                      "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Falmer Armor",                 ["falmerarmor"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "lean"),
+        new("Falmer Hardened Armor",        ["falmerhardened"],                             "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "lean"),
+        new("Falmer Heavy Armor",           ["falmerheavy"],                                "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Ancient Falmer Armor",         ["ancientfalmer"],                              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Forsworn Armor",               ["forswornarmor", "forsworn"],                  "Vanilla", ["32:Body"],                             "curvy"),
+        new("Fur Armor",                    ["furarmor"],                                   "Vanilla", ["32:Body"],                             "slim"),
+        new("Penitus Oculatus Armor",       ["penitusoculatus", "penitoculatus"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Mage Robes",                   ["magescholarsrobe", "magerobe", "collegerobe"], "Vanilla", ["32:Body"],                          "slim"),
+        new("Apprentice Robes",             ["apprenticerobes", "apprentice"],              "Vanilla", ["32:Body"],                             "slim"),
+        new("Adept Robes",                  ["adeptrobes"],                                 "Vanilla", ["32:Body"],                             "slim"),
+        new("Expert Robes",                 ["expertrobes"],                                "Vanilla", ["32:Body"],                             "slim"),
+        new("Master Robes",                 ["masterrobes"],                                "Vanilla", ["32:Body"],                             "slim"),
+        new("Arch-Mage Robes",              ["archmagerobes", "archmage"],                  "Vanilla", ["32:Body"],                             "slim"),
+        new("Thieves Guild Armor",          ["thievesguildarmor", "tgarmor"],               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Dark Brotherhood Armor",       ["dbrobes", "darkbrotherhood"],                 "Vanilla", ["32:Body"],                             "slim"),
+        new("Nightingale Armor",            ["nightingalearmor", "nightingale"],            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Blades Armor",                 ["bladearmor", "bladesamurai"],                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Guard Armor",                  ["guardarmor", "guardcuirass"],                 "Vanilla", ["32:Body"],                             "athletic"),
+        new("Dawnguard Heavy Armor",        ["dawnguardheavy", "dawnguardarmor"],           "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Dawnguard Scout Armor",        ["dawnguardscout"],                             "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Vampire Royal Armor",          ["vampireroyalarmor", "vampireroyal"],          "Vanilla", ["32:Body"],                             "slim"),
+        new("Nordic Carved Armor",          ["nordiccarvedarmor", "nordiccarved"],          "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Nordic Carved Helmet",         ["nordiccarvedhelmet"],                         "Vanilla", ["42:Circlet"],                          "athletic"),
+        new("Bonemold Armor",               ["bonemoldarmor", "bonemold"],                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Chitin Armor",                 ["chitinarmor", "chitin"],                      "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Stalhrim Armor",               ["stalhrimarmor", "stalhrim"],                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "muscular"),
+        new("Stalhrim Light Armor",         ["stalhrimilight", "stalhrimlight"],            "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Skaal Armor",                  ["skaalarmor", "skaal"],                        "Vanilla", ["32:Body"],                             "athletic"),
+        new("Bound Armor",                  ["boundarmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Thieves Guild Master Armor",   ["tgmasterarmor", "tgmaster"],                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
     ];
 }
 
