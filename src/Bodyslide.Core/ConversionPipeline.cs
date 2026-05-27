@@ -279,6 +279,64 @@ internal static class NifGeometrySignatureReader
         return TryReadHeuristicVertexBlock(bytes);
     }
 
+    public static bool TryLocateVertexBlock(byte[] bytes, out int vertexDataOffset, out int vertexCount)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
+        if (embeddedMarkerOffset >= 0)
+        {
+            var countOffset = embeddedMarkerOffset + EmbeddedVertexMarker.Length;
+            if (countOffset + sizeof(int) <= bytes.Length)
+            {
+                var embeddedCount = BitConverter.ToInt32(bytes, countOffset);
+                if (BuildSignature(bytes, countOffset + sizeof(int), embeddedCount) is not null)
+                {
+                    vertexDataOffset = countOffset + sizeof(int);
+                    vertexCount = embeddedCount;
+                    return true;
+                }
+            }
+        }
+
+        var scanLimit = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
+        var bestCount = 0;
+        var bestOffset = -1;
+
+        for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
+        {
+            var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+            {
+                continue;
+            }
+
+            var candidate = BuildSignature(bytes, offset + sizeof(int), candidateVertexCount);
+            if (candidate is null || candidate.VertexCount <= bestCount)
+            {
+                continue;
+            }
+
+            bestCount = candidate.VertexCount;
+            bestOffset = offset + sizeof(int);
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
     private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
     {
         var countOffset = markerOffset + EmbeddedVertexMarker.Length;
@@ -2259,11 +2317,9 @@ internal sealed class LocalExportService : IExportService
 
         // Write converted NIF mesh file(s) to the output directory.
         // When _0/_1 weight variant pairs are detected, both are written as a matched pair.
-        // For each pair or individual mesh, the output NIF is a copy of the source file that
-        // represents the conversion artifact (a full geometry engine would transform the
-        // vertices in-place; here the structure is preserved as a placeholder until NIF parsing
-        // is integrated).
-        var writtenNifs = await WriteConvertedNifsAsync(armor, outputDirectory, cancellationToken);
+        // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
+        // detected; otherwise the source bytes are copied through unchanged.
+        var writtenNifs = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
@@ -2432,15 +2488,15 @@ internal sealed class LocalExportService : IExportService
     }
 
     /// <summary>
-    /// Copies source NIF mesh files to the output directory as the conversion artifact.
+    /// Writes source NIF mesh files to the output directory as conversion artifacts.
     /// Detects _0/_1 weight variant pairs and writes them together so both halves land
     /// in the same output folder with their original pair naming intact.
-    /// A real NIF geometry engine would transform vertex positions in-place before writing;
-    /// the copy approach here preserves the file structure as a well-named placeholder
-    /// until NIF parsing support is integrated.
+    /// Uses a heuristic vertex-block transform when possible, otherwise falls back to
+    /// byte-for-byte passthrough.
     /// </summary>
     private static async Task<IReadOnlyList<string>> WriteConvertedNifsAsync(
         ImportedArmor armor,
+        ConvertedMesh mesh,
         string outputDirectory,
         CancellationToken cancellationToken)
     {
@@ -2462,8 +2518,8 @@ internal sealed class LocalExportService : IExportService
                     var lowDest  = Path.Combine(outputDirectory, Path.GetFileName(pair.LowWeightMesh)!);
                     var highDest = Path.Combine(outputDirectory, Path.GetFileName(pair.HighWeightMesh)!);
 
-                    await CopyNifAsync(pair.LowWeightMesh, lowDest, cancellationToken);
-                    await CopyNifAsync(pair.HighWeightMesh, highDest, cancellationToken);
+                    await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken);
+                    await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
                     written.Add(lowDest);
                     written.Add(highDest);
                 }
@@ -2485,14 +2541,14 @@ internal sealed class LocalExportService : IExportService
             if (pairedFiles.Contains(meshFile)) continue;
 
             var dest = Path.Combine(outputDirectory, Path.GetFileName(meshFile)!);
-            await CopyNifAsync(meshFile, dest, cancellationToken);
+            await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
         }
 
         return written;
     }
 
-    private static async Task CopyNifAsync(string sourcePath, string destPath, CancellationToken cancellationToken)
+    private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken)
     {
         if (!File.Exists(sourcePath))
         {
@@ -2503,10 +2559,103 @@ internal sealed class LocalExportService : IExportService
             return;
         }
 
-        // Use buffered async copy so large NIF files don't block the thread.
-        await using var src  = File.OpenRead(sourcePath);
-        await using var dest = File.Create(destPath);
-        await src.CopyToAsync(dest, bufferSize: 81920, cancellationToken);
+        var sourceBytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
+        var outputBytes = TryApplyNifVertexTransform(sourceBytes, mesh.RegionalMorphing);
+        await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
+    }
+
+    private static byte[] TryApplyNifVertexTransform(byte[] sourceBytes, IReadOnlyDictionary<string, double> regionalMorphing)
+    {
+        if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return sourceBytes;
+        }
+
+        if (vertexCount <= 0)
+        {
+            return sourceBytes;
+        }
+
+        var transformed = sourceBytes.ToArray();
+        const int vertexSize = 12;
+        var requiredBytes = (long)vertexCount * vertexSize;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
+        {
+            return sourceBytes;
+        }
+
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+        var minX = float.MaxValue;
+        var maxX = float.MinValue;
+        var minY = float.MaxValue;
+        var maxY = float.MinValue;
+
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexSize);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y);
+            maxY = Math.Max(maxY, y);
+            minZ = Math.Min(minZ, z);
+            maxZ = Math.Max(maxZ, z);
+        }
+
+        var zRange = Math.Max(0.0001f, maxZ - minZ);
+        var centerX = (minX + maxX) / 2f;
+        var centerY = (minY + maxY) / 2f;
+        var upperFactor = AverageMorph(regionalMorphing, "chest", "breasts", "shoulders", "arms");
+        var midFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis");
+        var lowerFactor = AverageMorph(regionalMorphing, "legs", "thighs", "calves", "butt", "pelvis");
+        var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
+        var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
+
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexSize);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            var normalizedHeight = (z - minZ) / zRange;
+            var lowerWeight = 1.0f - normalizedHeight;
+            var upperWeight = normalizedHeight;
+            var midWeight = Math.Max(0f, 1f - Math.Abs((normalizedHeight - 0.5f) * 2f));
+            var widthScale = (upperFactor * upperWeight) + (lowerFactor * lowerWeight) + (midFactor * midWeight * 0.5);
+            var depthScale = (depthFactor * 0.65) + (midFactor * 0.35);
+
+            var transformedX = centerX + ((x - centerX) * (float)widthScale);
+            var transformedY = centerY + ((y - centerY) * (float)depthScale);
+            var transformedZ = minZ + ((z - minZ) * (float)heightFactor);
+
+            Array.Copy(BitConverter.GetBytes(transformedX), 0, transformed, offset, 4);
+            Array.Copy(BitConverter.GetBytes(transformedY), 0, transformed, offset + 4, 4);
+            Array.Copy(BitConverter.GetBytes(transformedZ), 0, transformed, offset + 8, 4);
+        }
+
+        return transformed;
+    }
+
+    private static double AverageMorph(IReadOnlyDictionary<string, double> field, params string[] regions)
+    {
+        double total = 0;
+        var count = 0;
+
+        foreach (var region in regions)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            total += value;
+            count++;
+        }
+
+        return count > 0 ? total / count : 1d;
     }
 
     private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(ImportedArmor armor, PluginAnalysisResult pluginAnalysis)

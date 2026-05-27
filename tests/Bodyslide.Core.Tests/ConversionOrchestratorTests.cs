@@ -766,6 +766,30 @@ internal static class SyntheticNifTestData
 // ─────────────────────────────────────────────────────────────────────────────
 public sealed class NifOutputAndSourceOverrideTests
 {
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadEmbeddedVertices(byte[] bytes)
+    {
+        var marker = System.Text.Encoding.ASCII.GetBytes("VERT");
+        var markerIndex = bytes.AsSpan().IndexOf(marker);
+        Assert.True(markerIndex >= 0, "Synthetic NIF data should contain VERT marker.");
+
+        var countOffset = markerIndex + marker.Length;
+        var vertexCount = BitConverter.ToInt32(bytes, countOffset);
+        Assert.True(vertexCount > 0, "Synthetic NIF should contain at least one vertex.");
+
+        var vertices = new List<(float X, float Y, float Z)>(vertexCount);
+        var cursor = countOffset + sizeof(int);
+        for (var index = 0; index < vertexCount; index++)
+        {
+            vertices.Add((
+                BitConverter.ToSingle(bytes, cursor),
+                BitConverter.ToSingle(bytes, cursor + 4),
+                BitConverter.ToSingle(bytes, cursor + 8)));
+            cursor += 12;
+        }
+
+        return vertices;
+    }
+
     // ── NIF output ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -824,6 +848,48 @@ public sealed class NifOutputAndSourceOverrideTests
             // Both _0 and _1 variants must appear in the output.
             Assert.Contains("armor_0.nif", nifFiles);
             Assert.Contains("armor_1.nif", nifFiles);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSyntheticNif_AppliesVertexTransform()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "synthetic_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateUpperBodyArmorVertices();
+        await SyntheticNifTestData.WriteAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "synthetic_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            Assert.NotEmpty(writtenBytes);
+            Assert.Contains("Gamebryo File Format", System.Text.Encoding.ASCII.GetString(writtenBytes), StringComparison.Ordinal);
+
+            var sourceRead = ReadEmbeddedVertices(sourceBytes);
+            var transformedRead = ReadEmbeddedVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+
+            var anyVertexChanged = sourceRead.Zip(transformedRead, (src, dst) =>
+                    Math.Abs(src.X - dst.X) > 0.0001f ||
+                    Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                    Math.Abs(src.Z - dst.Z) > 0.0001f)
+                .Any(changed => changed);
+
+            Assert.True(anyVertexChanged, "Expected at least one synthetic vertex to be transformed.");
         }
         finally
         {

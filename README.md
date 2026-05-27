@@ -90,7 +90,7 @@ Each successful conversion produces the following files in the output directory:
 
 | File | Description |
 |---|---|
-| `<ArmorName>.nif` | Converted mesh (copied from source; vertex geometry transform applied by the pipeline) |
+| `<ArmorName>.nif` | Converted mesh with heuristic in-place vertex transform when a readable NIF vertex block is detected (falls back to safe copy when not detectable) |
 | `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair when both are detected in input |
 | `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
@@ -127,7 +127,7 @@ Implemented from issue scope:
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 
 Remaining gap versus full issue vision:
-- deformation/physics logic is rule-based with mesh-type-aware parameter tuning (cloth→softer, plate→stiffer), not a full geometry/animation engine with real vertex transformation
+- deformation/physics logic and vertex transformation are still heuristic/rule-based (no full NIF block graph parser or animation-driven geometry solver yet)
 
 ## Current built-in presets (27 total)
 
