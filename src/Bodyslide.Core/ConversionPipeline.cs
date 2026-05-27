@@ -376,12 +376,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var top = scoredCandidates.FirstOrDefault();
-        if (top is null || top.Score < 0.25)
+        if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < 0.25)
         {
             return Task.FromResult(new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]));
         }
 
+        var top = scoredCandidates[0];
         return Task.FromResult(new BodyDetectionReport(top.Template.Body, top.Score, top.Evidence));
     }
 
