@@ -269,7 +269,7 @@ public interface IBodySlideProjectService
 
 public interface ITextureAnalysisService
 {
-    /// <summary>Analyses DDS texture files for normal map coverage and reports missing normal maps.</summary>
+    /// <summary>Analyzes DDS texture files for normal map coverage and reports missing normal maps.</summary>
     Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken);
 }
 
@@ -1028,7 +1028,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 }
 
 /// <summary>
-/// Analyses DDS texture files by reading magic bytes and categorising diffuse vs. normal maps.
+/// Analyzes DDS texture files by reading magic bytes and categorizing diffuse vs. normal maps.
 /// Reports diffuse textures that have no matching _n normal map in the set.
 /// </summary>
 internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
