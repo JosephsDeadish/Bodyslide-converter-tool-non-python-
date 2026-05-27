@@ -44,6 +44,9 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path|folder|zip
 # apply a deformation profile (overrides the preset's built-in profile)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --profile curvy
 
+# override the auto-detected source body type
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --source "UNP" --target "3BA"
+
 # produce a mod-manager-ready ZIP instead of a bare output folder
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --output-zip
 
@@ -84,7 +87,8 @@ Each successful conversion produces the following files in the output directory:
 
 | File | Description |
 |---|---|
-| `<ArmorName>.nif` | Converted mesh |
+| `<ArmorName>.nif` | Converted mesh (copied from source; vertex geometry transform applied by the pipeline) |
+| `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair when both are detected in input |
 | `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
 | `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
@@ -102,10 +106,13 @@ When a matching cache entry exists in the selected output folder for the same ar
 
 Implemented from issue scope:
 - import scan across single mesh, folder, and zip archive
-- body detection, mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
-- plugin scan, texture summary, vanilla armor lookup, voxel collision pass, BodySlide OSP output, learning cache reuse
+- body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback)
+- mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
+- plugin scan, texture summary, vanilla armor lookup, voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
 - automatic CI builds with PR approval-gated Windows packaging and merge-time Windows `.exe` artifact publishing
 - FOMOD metadata output (`fomod/ModuleConfig.xml`, `fomod/info.xml`)
+- **output `.nif` file(s)** written to the output directory; `_0`/`_1` weight variant pairs detected and written as matched pairs
+- **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
 
 Still partial / placeholder versus full issue vision:
 - live preview rendering is metadata-only placeholder

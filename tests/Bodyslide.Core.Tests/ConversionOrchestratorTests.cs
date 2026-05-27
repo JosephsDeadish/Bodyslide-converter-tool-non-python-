@@ -699,6 +699,154 @@ public sealed class ConversionOrchestratorTests
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// New-feature tests (NIF output, --source override, weight-pair output)
+// ─────────────────────────────────────────────────────────────────────────────
+public sealed class NifOutputAndSourceOverrideTests
+{
+    // ── NIF output ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesNifFileToOutputDirectory()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "nif-data");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif");
+            Assert.NotEmpty(nifFiles);
+            // The output NIF must reproduce the source content.
+            var written = await File.ReadAllTextAsync(nifFiles[0]);
+            Assert.Equal("nif-data", written);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesBothWeightPairNifs()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+
+        var mesh0 = Path.Combine(inputDirectory, "armor_0.nif");
+        var mesh1 = Path.Combine(inputDirectory, "armor_1.nif");
+        await File.WriteAllTextAsync(mesh0, "low-weight");
+        await File.WriteAllTextAsync(mesh1, "high-weight");
+
+        try
+        {
+            // The directory input triggers batch, so use a single-mesh entry to keep it simple:
+            // provide mesh0 directly, with mesh1 sibling auto-imported by the LocalArmorImportService.
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // Both _0 and _1 variants must appear in the output.
+            Assert.Contains("armor_0.nif", nifFiles);
+            Assert.Contains("armor_1.nif", nifFiles);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    // ── --source override ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithSourceOverride_StepRecordsOverride()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "3BA", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("source-body-override:CBBE", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutSourceOverride_NoOverrideStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Steps, s => s.StartsWith("source-body-override:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    // ── Weight-pair output path isolation ─────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithWeightVariantPairDirectory_ReportsDetectedPair()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "ironarmor_0.nif"), "low");
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "ironarmor_1.nif"), "high");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            // The pipeline must report the detected weight variant pair.
+            Assert.Contains(result.Steps, s => s.StartsWith("weight-variants:pairs=", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
 public sealed class VanillaArmorLookupTests
 {
     [Fact]

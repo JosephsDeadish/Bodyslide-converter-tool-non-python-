@@ -4,7 +4,9 @@ using System.Text.Json;
 
 namespace Bodyslide.Core;
 
-public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false, string? DeformationProfile = null);
+// NOTE: All optional parameters must remain at the END and use named arguments at call-sites
+// to preserve positional-constructor compatibility for existing consumers.
+public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false, string? DeformationProfile = null, string? SourceBodyOverride = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 
 /// <summary>Tracks a matched low-weight (_0) and high-weight (_1) mesh pair for the same armor piece.</summary>
@@ -439,6 +441,12 @@ public sealed class ConversionOrchestrator(
             if (!string.IsNullOrWhiteSpace(evidenceSummary))
             {
                 steps.Add($"body-evidence:{evidenceSummary}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalized.Request.SourceBodyOverride))
+            {
+                detectedBody = new BodyDetectionReport(normalized.Request.SourceBodyOverride, 1.0, ["user-override"]);
+                steps.Add($"source-body-override:{normalized.Request.SourceBodyOverride}");
             }
 
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
@@ -1554,12 +1562,14 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         outputFiles.Add(manifestPath);
 
-        var convertedMeshListPath = Path.Combine(outputDirectory, "converted-meshes.txt");
-        await File.WriteAllLinesAsync(
-            convertedMeshListPath,
-            armor.MeshFiles.Select(file => Path.GetFileName(file) ?? file),
-            cancellationToken);
-        outputFiles.Add(convertedMeshListPath);
+        // Write converted NIF mesh file(s) to the output directory.
+        // When _0/_1 weight variant pairs are detected, both are written as a matched pair.
+        // For each pair or individual mesh, the output NIF is a copy of the source file that
+        // represents the conversion artifact (a full geometry engine would transform the
+        // vertices in-place; here the structure is preserved as a placeholder until NIF parsing
+        // is integrated).
+        var writtenNifs = await WriteConvertedNifsAsync(armor, outputDirectory, cancellationToken);
+        outputFiles.AddRange(writtenNifs);
 
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
         var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
@@ -1705,6 +1715,84 @@ internal sealed class LocalExportService : IExportService
         }
 
         return (outputDirectory, outputFiles);
+    }
+
+    /// <summary>
+    /// Copies source NIF mesh files to the output directory as the conversion artifact.
+    /// Detects _0/_1 weight variant pairs and writes them together so both halves land
+    /// in the same output folder with their original pair naming intact.
+    /// A real NIF geometry engine would transform vertex positions in-place before writing;
+    /// the copy approach here preserves the file structure as a well-named placeholder
+    /// until NIF parsing support is integrated.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> WriteConvertedNifsAsync(
+        ImportedArmor armor,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        var written = new List<string>();
+
+        // Build a set of mesh files that are part of a detected _0/_1 pair so we can
+        // treat unpaired singletons differently.
+        var pairedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (armor.WeightVariantPairs is { Count: > 0 } pairs)
+        {
+            foreach (var pair in pairs)
+            {
+                if (pair.LowWeightMesh is not null && pair.HighWeightMesh is not null)
+                {
+                    // Both halves present — write them with their original weight suffix names.
+                    pairedFiles.Add(pair.LowWeightMesh);
+                    pairedFiles.Add(pair.HighWeightMesh);
+
+                    var lowDest  = Path.Combine(outputDirectory, Path.GetFileName(pair.LowWeightMesh)!);
+                    var highDest = Path.Combine(outputDirectory, Path.GetFileName(pair.HighWeightMesh)!);
+
+                    await CopyNifAsync(pair.LowWeightMesh, lowDest, cancellationToken);
+                    await CopyNifAsync(pair.HighWeightMesh, highDest, cancellationToken);
+                    written.Add(lowDest);
+                    written.Add(highDest);
+                }
+                else
+                {
+                    // Incomplete pair — treat each half as an individual mesh below.
+                    var onlyHalf = pair.LowWeightMesh ?? pair.HighWeightMesh;
+                    if (onlyHalf is not null)
+                    {
+                        pairedFiles.Remove(onlyHalf);
+                    }
+                }
+            }
+        }
+
+        // Write any NIF files that were not handled as part of a complete pair.
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            if (pairedFiles.Contains(meshFile)) continue;
+
+            var dest = Path.Combine(outputDirectory, Path.GetFileName(meshFile)!);
+            await CopyNifAsync(meshFile, dest, cancellationToken);
+            written.Add(dest);
+        }
+
+        return written;
+    }
+
+    private static async Task CopyNifAsync(string sourcePath, string destPath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(sourcePath))
+        {
+            // Source does not exist (e.g. in-memory test stubs).
+            // Log a warning so missing files are surfaced rather than silently producing empty output.
+            await Console.Error.WriteLineAsync($"[SlideSmith] Warning: source NIF not found on disk — writing empty placeholder: {sourcePath}");
+            await File.WriteAllBytesAsync(destPath, [], cancellationToken);
+            return;
+        }
+
+        // Use buffered async copy so large NIF files don't block the thread.
+        await using var src  = File.OpenRead(sourcePath);
+        await using var dest = File.Create(destPath);
+        await src.CopyToAsync(dest, bufferSize: 81920, cancellationToken);
     }
 
     private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(ImportedArmor armor, PluginAnalysisResult pluginAnalysis)

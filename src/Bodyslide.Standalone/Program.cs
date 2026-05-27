@@ -27,7 +27,7 @@ if (!TryParseRequest(args, out var request, out var error))
     Console.WriteLine(error);
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--output-zip]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--source <body>] [--output-zip]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     return;
@@ -64,6 +64,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("output", out var output);
     parsed.TryGetValue("preset", out var preset);
     parsed.TryGetValue("profile", out var profile);
+    parsed.TryGetValue("source", out var source);
     var outputZip = parsed.ContainsKey("output-zip");
 
     if (string.IsNullOrWhiteSpace(input))
@@ -78,7 +79,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         return false;
     }
 
-    request = new ConversionRequest(input, target ?? string.Empty, output, preset, outputZip, profile);
+    request = new ConversionRequest(input, target ?? string.Empty, output, preset, outputZip, profile, source);
     return true;
 }
 
