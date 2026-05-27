@@ -51,11 +51,11 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 ```
 
-## GitHub Actions (manual build)
+## GitHub Actions (automatic build)
 
-This repository now includes `.github/workflows/manual-build.yml` with a **manual** trigger only (`workflow_dispatch`), so builds are run when you explicitly start them from Actions.
+This repository includes `.github/workflows/build.yml`, which runs automatically on pushes to `main`/`master` and on pull requests.
 
-For approval-gated runs, configure required reviewers on the `manual-build-approval` environment in repository settings. The workflow builds the solution, optionally runs tests, publishes the standalone app, and uploads it as an artifact.
+The workflow restores dependencies, builds the solution, runs tests, publishes the standalone app, and uploads it as an artifact.
 
 ## Deformation profiles
 
@@ -111,7 +111,7 @@ Each successful conversion produces the following files in the output directory:
 The pipeline automatically identifies 33 canonical Skyrim armors (Iron, Steel, Elven, Glass, Daedric, Dragonplate, Nightingale, etc.) by matching mesh file tokens (stripped of `_0`/`_1` weight suffixes). When a match is found, the armor's recommended deformation profile is applied unless overridden by `--profile`.
 
 ```
-vanilla-armor:Iron Armor,rec=slim
+vanilla-armor:Iron Armor,rec=curvy
 ```
 
 Unrecognised armor files emit `vanilla-armor:unknown` in the pipeline steps.
