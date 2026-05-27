@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Bodyslide.Core/Bodyslide.Core.csproj" />
+    <Project Path="src/Bodyslide.Standalone/Bodyslide.Standalone.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj" />
+  </Folder>
+</Solution>
