@@ -2804,6 +2804,7 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
     // size of a subrecord header: 4-byte type tag + 2-byte data length
     private const int SubrecordHeaderSize = 6;
+    private const string ExtendedSizeTag = "XXXX";
 
     // Bit 18 of flags = zlib-compressed record data.
     private const uint FlagCompressed = 0x00040000u;
@@ -2858,7 +2859,12 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 if (pathsRewritten > 0)
                 {
                     var baseName = Path.GetFileNameWithoutExtension(pluginPath);
-                    var outPath  = Path.Combine(outputDirectory, $"{baseName}_patched.esp");
+                    var extension = Path.GetExtension(pluginPath);
+                    if (string.IsNullOrWhiteSpace(extension))
+                    {
+                        extension = ".esp";
+                    }
+                    var outPath  = Path.Combine(outputDirectory, $"{baseName}_patched{extension}");
                     await File.WriteAllBytesAsync(outPath, patchedBytes, cancellationToken);
                     patchedPaths.Add(outPath);
                     totalArmaPatched    += armaPatched;
@@ -3113,9 +3119,11 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                               IReadOnlyDictionary<string, string> rewriteMap)
     {
         using var ms = new MemoryStream(dataSize);
-        int pos     = dataStart;
-        int end     = dataStart + dataSize;
+        int pos       = dataStart;
+        int end       = dataStart + dataSize;
         int rewritten = 0;
+        int? pendingExtendedSize = null;
+        byte[]? pendingExtendedPrefix = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3124,11 +3132,26 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
             if (pos + SubrecordHeaderSize + subSize > end) break;
 
-            if (MeshSubrecordTypes.Contains(subType) && subSize > 0)
+            if (string.Equals(subType, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
+            {
+                pendingExtendedSize = (int)ReadUInt32Le(bytes, pos + SubrecordHeaderSize);
+                pendingExtendedPrefix = bytes[pos..(pos + SubrecordHeaderSize + subSize)];
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > end)
+            {
+                break;
+            }
+
+            if (MeshSubrecordTypes.Contains(subType) && effectiveSubSize > 0)
             {
                 // Read null-terminated ASCII path string from the subrecord data.
-                int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, subSize);
-                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, effectiveSubSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 var meshPath = System.Text.Encoding.ASCII
                     .GetString(bytes, pos + SubrecordHeaderSize, strLen)
                     .Replace('\\', '/')
@@ -3146,18 +3169,34 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 }
                 else
                 {
-                    ms.Write(bytes, pos, SubrecordHeaderSize + subSize);
+                    if (pendingExtendedPrefix is not null)
+                    {
+                        ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
+                    }
+
+                    ms.Write(bytes, pos, SubrecordHeaderSize + effectiveSubSize);
                 }
             }
             else
             {
-                ms.Write(bytes, pos, SubrecordHeaderSize + subSize);
+                if (pendingExtendedPrefix is not null)
+                {
+                    ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
+                }
+
+                ms.Write(bytes, pos, SubrecordHeaderSize + effectiveSubSize);
             }
 
-            pos += SubrecordHeaderSize + subSize;
+            pendingExtendedPrefix = null;
+            pos += SubrecordHeaderSize + effectiveSubSize;
         }
 
         // Preserve any trailing bytes (should not happen in a well-formed file).
+        if (pendingExtendedPrefix is not null)
+        {
+            ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
+        }
+
         if (pos < end)
         {
             ms.Write(bytes, pos, end - pos);
@@ -3262,6 +3301,7 @@ internal static class BinaryArmaParser
     private const int LeHeaderSize  = 20;
     private const int SubrecordHeaderSize = 6;
     private const uint FlagCompressed = 0x00040000u;
+    private const string ExtendedSizeTag = "XXXX";
 
     // Biped-slot subrecord tags (BOD2 = SSE, BODT = LE)
     private static readonly HashSet<string> BipedSubrecords =
@@ -3486,6 +3526,7 @@ internal static class BinaryArmaParser
 
         int pos = 0;
         int end = dataBytes.Length;
+        int? pendingExtendedSize = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3494,15 +3535,26 @@ internal static class BinaryArmaParser
 
             if (pos + SubrecordHeaderSize + subSize > end) break;
 
+            if (string.Equals(subTag, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
+            {
+                pendingExtendedSize = (int)ReadUInt32Le(dataBytes, pos + SubrecordHeaderSize);
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > end) break;
+
             int dataStart = pos + SubrecordHeaderSize;
 
-            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && subSize > 0)
+            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && effectiveSubSize > 0)
             {
-                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
-                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 editorId    = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen);
             }
-            else if (BipedSubrecords.Contains(subTag) && subSize >= 4)
+            else if (BipedSubrecords.Contains(subTag) && effectiveSubSize >= 4)
             {
                 var slotFlags = ReadUInt32Le(dataBytes, dataStart);
                 for (int i = 0; i < 32; i++)
@@ -3511,10 +3563,10 @@ internal static class BinaryArmaParser
                         bipedSlots.Add(30 + i);
                 }
             }
-            else if (MeshSubrecords.Contains(subTag) && subSize > 0)
+            else if (MeshSubrecords.Contains(subTag) && effectiveSubSize > 0)
             {
-                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
-                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 var path    = System.Text.Encoding.ASCII
                     .GetString(dataBytes, dataStart, strLen)
                     .Replace('\\', '/');
@@ -3522,7 +3574,7 @@ internal static class BinaryArmaParser
                     meshPaths.Add(path);
             }
 
-            pos += SubrecordHeaderSize + subSize;
+            pos += SubrecordHeaderSize + effectiveSubSize;
         }
 
         var headerBytes = bytes[recordStart..(recordStart + headerSize)];
@@ -3552,6 +3604,7 @@ internal static class BinaryArmaParser
 
         int pos = 0;
         int end = dataBytes.Length;
+        int? pendingExtendedSize = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3560,18 +3613,29 @@ internal static class BinaryArmaParser
 
             if (pos + SubrecordHeaderSize + subSize > end) break;
 
+            if (string.Equals(subTag, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
+            {
+                pendingExtendedSize = (int)ReadUInt32Le(dataBytes, pos + SubrecordHeaderSize);
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > end) break;
+
             int dataStart = pos + SubrecordHeaderSize;
 
-            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && subSize > 0)
+            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && effectiveSubSize > 0)
             {
-                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
-                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 editorId    = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen);
             }
-            else if (ArmoMeshSubrecords.Contains(subTag) && subSize > 0)
+            else if (ArmoMeshSubrecords.Contains(subTag) && effectiveSubSize > 0)
             {
-                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
-                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 var path    = System.Text.Encoding.ASCII
                     .GetString(dataBytes, dataStart, strLen)
                     .Replace('\\', '/');
@@ -3579,7 +3643,7 @@ internal static class BinaryArmaParser
                     meshPaths.Add(path);
             }
 
-            pos += SubrecordHeaderSize + subSize;
+            pos += SubrecordHeaderSize + effectiveSubSize;
         }
 
         var headerBytes = bytes[recordStart..(recordStart + headerSize)];
@@ -3632,6 +3696,7 @@ internal static class PatchPluginWriter
 {
     private const int SseHeaderSize = 24;
     private const int SubrecordHeaderSize = 6;
+    private const string ExtendedSizeTag = "XXXX";
 
     // ESL flag — bit 9 of TES4 record flags; prevents consuming a load-order slot.
     private const uint EslFlag = 0x00000200u;
@@ -3842,6 +3907,8 @@ internal static class PatchPluginWriter
         int pos       = 0;
         int end       = dataBytes.Length;
         int rewritten = 0;
+        int? pendingExtendedSize = null;
+        byte[]? pendingExtendedPrefix = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3850,10 +3917,25 @@ internal static class PatchPluginWriter
 
             if (pos + SubrecordHeaderSize + subSize > end) break;
 
-            if (MeshSubrecords.Contains(subTag) && subSize > 0)
+            if (string.Equals(subTag, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
             {
-                int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, subSize);
-                int strLen   = nullIdx >= 0 ? nullIdx : subSize;
+                pendingExtendedSize = (int)(dataBytes[pos + 6]
+                    | (dataBytes[pos + 7] << 8)
+                    | (dataBytes[pos + 8] << 16)
+                    | (dataBytes[pos + 9] << 24));
+                pendingExtendedPrefix = dataBytes[pos..(pos + SubrecordHeaderSize + subSize)];
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > end) break;
+
+            if (MeshSubrecords.Contains(subTag) && effectiveSubSize > 0)
+            {
+                int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, effectiveSubSize);
+                int strLen   = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 var meshPath = System.Text.Encoding.ASCII
                     .GetString(dataBytes, pos + SubrecordHeaderSize, strLen)
                     .Replace('\\', '/')
@@ -3870,15 +3952,31 @@ internal static class PatchPluginWriter
                 }
                 else
                 {
-                    ms.Write(dataBytes, pos, SubrecordHeaderSize + subSize);
+                    if (pendingExtendedPrefix is not null)
+                    {
+                        ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
+                    }
+
+                    ms.Write(dataBytes, pos, SubrecordHeaderSize + effectiveSubSize);
                 }
             }
             else
             {
-                ms.Write(dataBytes, pos, SubrecordHeaderSize + subSize);
+                if (pendingExtendedPrefix is not null)
+                {
+                    ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
+                }
+
+                ms.Write(dataBytes, pos, SubrecordHeaderSize + effectiveSubSize);
             }
 
-            pos += SubrecordHeaderSize + subSize;
+            pendingExtendedPrefix = null;
+            pos += SubrecordHeaderSize + effectiveSubSize;
+        }
+
+        if (pendingExtendedPrefix is not null)
+        {
+            ms.Write(pendingExtendedPrefix, 0, pendingExtendedPrefix.Length);
         }
 
         if (pos < end)

@@ -3013,6 +3013,28 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
+    public void RewriteArmaSubrecords_ExtendedSizeMod2_RewritesPath()
+    {
+        const string original = "meshes/armor/iron/iron_0.nif\0";
+        const string expected = "meshes/slidesmith/cbbe/iron_0.nif";
+        byte[] data = BuildExtendedSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(original));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = expected
+        };
+
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+        Assert.Equal("MOD2", System.Text.Encoding.ASCII.GetString(newData, 0, 4));
+        var subSize = (ushort)(newData[4] | (newData[5] << 8));
+        var writtenPath = System.Text.Encoding.ASCII.GetString(newData, 6, subSize - 1);
+        Assert.Equal(expected, writtenPath);
+    }
+
+    [Fact]
     public void RewriteArmaSubrecords_CompressedFlagSkipped_ReturnsUnchanged()
     {
         // The RewritePlugin call skips compressed ARMA; this tests the raw subrecord
@@ -3216,6 +3238,44 @@ public sealed class BinaryPluginRewriteServiceTests
         }
     }
 
+    [Fact]
+    public async Task RewriteAsync_WithMatchingEsmPlugin_PreservesPluginExtension()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outDir  = Path.Combine(workDir, "out");
+        Directory.CreateDirectory(workDir);
+        Directory.CreateDirectory(outDir);
+
+        try
+        {
+            const string origPath = "meshes/armor/iron/iron_0.nif\0";
+            const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+            byte[] mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+            byte[] plugin   = BuildMinimalPlugin_SseWithArma(mod2Data);
+
+            var pluginPath = Path.Combine(workDir, "TestArmor.esm");
+            await File.WriteAllBytesAsync(pluginPath, plugin);
+
+            var svc = new BinaryPluginRewriteService();
+            var result = await svc.RewriteAsync(
+                [pluginPath],
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/iron_0.nif"] = newPath
+                },
+                outDir,
+                CancellationToken.None);
+
+            Assert.Single(result.PatchedPluginPaths);
+            Assert.EndsWith("_patched.esm", result.PatchedPluginPaths[0], StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
     // ── ARMO record rewrite ───────────────────────────────────────────────────
 
     [Fact]
@@ -3305,7 +3365,7 @@ public sealed class BinaryPluginRewriteServiceTests
             // The patched plugin should exist in the output when at least one mesh
             // path from the plugin matches the converted output file.
             var patchedEsp = result.OutputFiles
-                .FirstOrDefault(f => f.EndsWith("_patched.esp", StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(f => f.Contains("_patched.", StringComparison.OrdinalIgnoreCase));
 
             // Only present when the regex scan also found the path (i.e. rewrite map not empty).
             if (patchedEsp is not null)
@@ -3330,6 +3390,17 @@ public sealed class BinaryPluginRewriteServiceTests
         buf[4] = (byte)(data.Length & 0xFF);
         buf[5] = (byte)(data.Length >> 8);
         data.CopyTo(buf, 6);
+        return buf;
+    }
+
+    private static byte[] BuildExtendedSubrecord(string type, byte[] data)
+    {
+        var buf = new byte[16 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes("XXXX").CopyTo(buf, 0);
+        buf[4] = 4;
+        WriteUInt32Le(buf, 6, (uint)data.Length);
+        System.Text.Encoding.ASCII.GetBytes(type).CopyTo(buf, 10);
+        data.CopyTo(buf, 16);
         return buf;
     }
 
@@ -3505,6 +3576,18 @@ public sealed class BinaryArmaParserTests
         Assert.Contains("meshes/armor/a/a_1st_m.nif", paths);
     }
 
+    [Fact]
+    public void ExtractArmaRecords_ExtendedSizeMod2_ExtractsMeshPath()
+    {
+        byte[] mod2 = BuildExtendedSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/a/a_0.nif\0"));
+        var plugin      = BuildMinimalPlugin_SseWithArma(mod2);
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains("meshes/armor/a/a_0.nif", descriptors[0].MeshPaths);
+    }
+
     // ── GRUP traversal ────────────────────────────────────────────────────────
 
     [Fact]
@@ -3659,6 +3742,17 @@ public sealed class BinaryArmaParserTests
         return result;
     }
 
+    private static byte[] BuildExtendedSubrecord(string tag, byte[] data)
+    {
+        var result = new byte[16 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes("XXXX").CopyTo(result, 0);
+        result[4] = 4;
+        WriteUInt32Le(result, 6, (uint)data.Length);
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(result, 10);
+        data.CopyTo(result, 16);
+        return result;
+    }
+
     private static byte[] BuildArmaRecord(byte[] subrecordData, int headerSize)
     {
         var buf = new byte[headerSize + subrecordData.Length];
@@ -3805,6 +3899,22 @@ public sealed class PatchPluginWriterTests
 
         Assert.Equal(0, rewritten);
         Assert.Equal(edid, newData);
+    }
+
+    [Fact]
+    public void RewriteArmaData_ExtendedSizeMod2_RewritesPath()
+    {
+        byte[] mod2 = BuildExtendedSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_0.nif\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(mod2, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+        Assert.Equal("MOD2", System.Text.Encoding.ASCII.GetString(newData, 0, 4));
     }
 
     // ── BuildPatchPlugin ──────────────────────────────────────────────────────
@@ -4127,6 +4237,17 @@ public sealed class PatchPluginWriterTests
         result[4] = (byte)(data.Length & 0xFF);
         result[5] = (byte)((data.Length >> 8) & 0xFF);
         data.CopyTo(result, 6);
+        return result;
+    }
+
+    private static byte[] BuildExtendedSubrecord(string tag, byte[] data)
+    {
+        var result = new byte[16 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes("XXXX").CopyTo(result, 0);
+        result[4] = 4;
+        WriteUInt32Le(result, 6, (uint)data.Length);
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(result, 10);
+        data.CopyTo(result, 16);
         return result;
     }
 
