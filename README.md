@@ -180,6 +180,8 @@ Implemented from issue scope:
 
 - **ARMO world-model completion from `MODL`** — when an ARMO record includes a rewritten `MODL` ground mesh but is missing `MOD2` and/or `MOD3`, plugin rewrite now auto-appends the missing world model subrecord(s) from that rewritten `MODL` path so inventory/world model lookups stay valid for both male and female model entries
 
+- **morph-aware clipping region detection** — clipping detection now evaluates per-region morph intensity with mesh-type thresholds (instead of mesh-type-only flags), normalizes equivalent regions (e.g. hips→pelvis), and auto-flags armpit risk when shoulder/arm/chest pressure is high; this produces more realistic region highlights before auto-correction
+
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
 ## Current built-in presets (36 total)

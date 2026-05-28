@@ -2453,22 +2453,73 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
 {
     public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
-        var riskRegions = mesh.MeshType switch
+        var threshold = mesh.MeshType switch
         {
-            "plate" => new[] { "shoulders", "armpits" },
-            "cloth" => new[] { "thighs", "butt" },
-            "physics-enabled" => new[] { "breasts", "thighs", "butt", "armpits" },
-            "skin-tight" => new[] { "breasts", "thighs", "butt" },
-            _ => new[] { "armpits", "thighs" }
+            "physics-enabled" => 1.04,
+            "skin-tight" => 1.05,
+            "cloth" => 1.07,
+            "leather" => 1.09,
+            "mixed" => 1.08,
+            "plate" => 1.12,
+            _ => 1.10
         };
 
-        var detectionMethods = mesh.MeshType is "physics-enabled" or "skin-tight"
+        var regionScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+        {
+            if (morphFactor < threshold)
+            {
+                continue;
+            }
+
+            var normalizedRegion = NormalizeRegion(region);
+            regionScores[normalizedRegion] = Math.Max(regionScores.GetValueOrDefault(normalizedRegion), morphFactor);
+        }
+
+        var hasShoulderOrArmPressure =
+            regionScores.ContainsKey("shoulders") ||
+            regionScores.ContainsKey("arms") ||
+            regionScores.ContainsKey("chest");
+
+        if (hasShoulderOrArmPressure)
+        {
+            var shoulderPeak = new[]
+            {
+                regionScores.GetValueOrDefault("shoulders"),
+                regionScores.GetValueOrDefault("arms"),
+                regionScores.GetValueOrDefault("chest")
+            }.Max();
+
+            regionScores["armpits"] = Math.Max(regionScores.GetValueOrDefault("armpits"), shoulderPeak);
+        }
+
+        var riskRegions = regionScores
+            .OrderByDescending(pair => pair.Value)
+            .Select(pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToList();
+
+        var hasClipping = riskRegions.Count > 0;
+        var shouldUseVoxel = hasClipping || mesh.MeshType is "physics-enabled" or "skin-tight";
+        var detectionMethods = shouldUseVoxel
             ? new[] { "pose-simulation", "animation-stress", "voxel-penetration" }
             : new[] { "pose-simulation", "animation-stress" };
 
-        var hasClipping = mesh.MeshType is "cloth" or "skin-tight" or "physics-enabled";
         return Task.FromResult(new ClippingReport(hasClipping, riskRegions, detectionMethods));
     }
+
+    private static string NormalizeRegion(string region) =>
+        region.Trim().ToLowerInvariant() switch
+        {
+            "hips" => "pelvis",
+            "hip" => "pelvis",
+            "torso" => "chest",
+            "upperarms" => "arms",
+            "upper-arm" => "arms",
+            "upperarm" => "arms",
+            _ => region.Trim().ToLowerInvariant()
+        };
 }
 
 internal sealed class BasicAutoCorrectionService : IAutoCorrectionService

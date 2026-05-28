@@ -6380,6 +6380,54 @@ public sealed class ConversionReadmeGeneratorTests
             $"anime ({animeResult}) should amplify more than curvy ({curvyResult})");
     }
 
+    [Fact]
+    public async Task BasicClippingDetectionService_NoHighMorphs_ReturnsNoClipping()
+    {
+        var service = new BasicClippingDetectionService();
+        var mesh = new ConvertedMesh(
+            "plate",
+            "cage+rigid-islands+normal-preservation",
+            1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.03,
+                ["shoulders"] = 1.05,
+                ["thighs"] = 1.01
+            });
+
+        var result = await service.DetectAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.False(result.HasClipping);
+        Assert.Empty(result.Regions);
+        Assert.Equal(new[] { "pose-simulation", "animation-stress" }, result.DetectionMethods);
+    }
+
+    [Fact]
+    public async Task BasicClippingDetectionService_HighMorphs_HighlightsRiskRegionsIncludingArmpits()
+    {
+        var service = new BasicClippingDetectionService();
+        var mesh = new ConvertedMesh(
+            "skin-tight",
+            "cage+surface-project",
+            1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Shoulders"] = 1.14,
+                ["arms"] = 1.11,
+                ["breasts"] = 1.12,
+                ["hips"] = 1.09
+            });
+
+        var result = await service.DetectAsync(mesh, "3BA", CancellationToken.None);
+
+        Assert.True(result.HasClipping);
+        Assert.Contains("shoulders", result.Regions);
+        Assert.Contains("armpits", result.Regions);
+        Assert.Contains("breasts", result.Regions);
+        Assert.Contains("pelvis", result.Regions);
+        Assert.Contains("voxel-penetration", result.DetectionMethods);
+    }
+
     // ── PresetCatalog — anime presets present ────────────────────────────────────
 
     [Theory]
