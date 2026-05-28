@@ -1828,7 +1828,22 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public void TextureSummary_HasMissingSpecularParallaxGlowFields()
+    public void BuildRoughnessMapDds_ReturnsDdsWithNeutralGreyPixels()
+    {
+        var bytes = BuildRoughnessMapDdsViaReflection();
+        Assert.NotNull(bytes);
+        Assert.Equal(0x44, bytes[0]); // 'D'
+        Assert.Equal(0x44, bytes[1]); // 'D'
+        Assert.Equal(0x53, bytes[2]); // 'S'
+        Assert.Equal(0x20, bytes[3]); // ' '
+        Assert.Equal(0x80, bytes[128]);
+        Assert.Equal(0x80, bytes[129]);
+        Assert.Equal(0x80, bytes[130]);
+        Assert.Equal(0xFF, bytes[131]);
+    }
+
+    [Fact]
+    public void TextureSummary_HasMissingSpecularParallaxGlowRoughnessFields()
     {
         var summary = new TextureSummary(
             TotalCount: 3,
@@ -1837,14 +1852,17 @@ public sealed class ConversionOrchestratorTests
             MissingNormals: [],
             MissingSpecular: ["body.dds"],
             MissingParallax: ["body.dds"],
-            MissingGlow: ["body.dds"]);
+            MissingGlow: ["body.dds"],
+            MissingRoughness: ["body.dds"]);
 
         Assert.NotNull(summary.MissingSpecular);
         Assert.NotNull(summary.MissingParallax);
         Assert.NotNull(summary.MissingGlow);
+        Assert.NotNull(summary.MissingRoughness);
         Assert.Single(summary.MissingSpecular);
         Assert.Single(summary.MissingParallax);
         Assert.Single(summary.MissingGlow);
+        Assert.Single(summary.MissingRoughness);
     }
 
     [Fact]
@@ -1863,7 +1881,7 @@ public sealed class ConversionOrchestratorTests
             ddsBytes[4] = 124;
             await File.WriteAllBytesAsync(diffusePath, ddsBytes);
 
-            // Do NOT create armor_s.dds / armor_p.dds / armor_g.dds so they count as missing.
+            // Do NOT create armor_s.dds / armor_p.dds / armor_g.dds / armor_r.dds so they count as missing.
 
             var armor = new ImportedArmor(
                 MeshFiles: [],
@@ -1878,6 +1896,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("armor.dds", summary.MissingSpecular ?? [], StringComparer.OrdinalIgnoreCase);
             Assert.Contains("armor.dds", summary.MissingParallax ?? [], StringComparer.OrdinalIgnoreCase);
             Assert.Contains("armor.dds", summary.MissingGlow ?? [], StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("armor.dds", summary.MissingRoughness ?? [], StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -1901,12 +1920,13 @@ public sealed class ConversionOrchestratorTests
             var specPath     = Path.Combine(workdir, "armor_s.dds");
             var parallaxPath = Path.Combine(workdir, "armor_p.dds");
             var glowPath     = Path.Combine(workdir, "armor_g.dds");
-            foreach (var p in new[] { diffusePath, specPath, parallaxPath, glowPath })
+            var roughnessPath = Path.Combine(workdir, "armor_r.dds");
+            foreach (var p in new[] { diffusePath, specPath, parallaxPath, glowPath, roughnessPath })
                 await File.WriteAllBytesAsync(p, headerBytes);
 
             var armor = new ImportedArmor(
                 MeshFiles: [],
-                TextureFiles: [diffusePath, specPath, parallaxPath, glowPath],
+                TextureFiles: [diffusePath, specPath, parallaxPath, glowPath, roughnessPath],
                 PhysicsFiles: [],
                 BodyReferenceFiles: [],
                 SourcePath: workdir);
@@ -1917,6 +1937,7 @@ public sealed class ConversionOrchestratorTests
             Assert.DoesNotContain("armor.dds", summary.MissingSpecular ?? [], StringComparer.OrdinalIgnoreCase);
             Assert.DoesNotContain("armor.dds", summary.MissingParallax ?? [], StringComparer.OrdinalIgnoreCase);
             Assert.DoesNotContain("armor.dds", summary.MissingGlow ?? [], StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain("armor.dds", summary.MissingRoughness ?? [], StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -1975,6 +1996,15 @@ public sealed class ConversionOrchestratorTests
     {
         var method = typeof(LocalExportService)
             .GetMethod("BuildGlowMapDds",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        return (byte[])method!.Invoke(null, null)!;
+    }
+
+    private static byte[] BuildRoughnessMapDdsViaReflection()
+    {
+        var method = typeof(LocalExportService)
+            .GetMethod("BuildRoughnessMapDds",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
         return (byte[])method!.Invoke(null, null)!;
@@ -3500,6 +3530,9 @@ public sealed class ExpandedTextureClassificationTests
     [InlineData("body_p.dds",        "parallax")]
     [InlineData("torso_parallax.dds","parallax")]
     [InlineData("body_h.dds",        "parallax")]
+    [InlineData("body_r.dds",        "roughness")]
+    [InlineData("torso_rough.dds",   "roughness")]
+    [InlineData("torso_roughness.dds","roughness")]
     [InlineData("skin_sk.dds",       "subsurface")]
     [InlineData("body_sss.dds",      "subsurface")]
     [InlineData("skin_subsurface.dds","subsurface")]
@@ -3527,6 +3560,9 @@ public sealed class ExpandedTextureClassificationTests
                     break;
                 case "parallax":
                     Assert.True(summary.ParallaxFiles?.Count > 0, $"{fileName} should produce a parallax entry");
+                    break;
+                case "roughness":
+                    Assert.True(summary.RoughnessFiles?.Count > 0, $"{fileName} should produce a roughness entry");
                     break;
                 case "subsurface":
                     Assert.True(summary.SubsurfaceFiles?.Count > 0, $"{fileName} should produce a subsurface entry");
