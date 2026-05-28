@@ -5201,13 +5201,13 @@ internal sealed class LocalExportService : IExportService
                 continue;
             }
 
-            rewrites[normalisedOriginal] = BuildPluginConvertedMeshPath(targetBody, fileName);
+            rewrites[normalisedOriginal] = BuildPluginConvertedMeshPath(targetBody, fileName, normalisedOriginal);
         }
 
         return rewrites;
     }
 
-    private static string BuildPluginConvertedMeshPath(string targetBody, string fileName)
+    private static string BuildPluginConvertedMeshPath(string targetBody, string fileName, string originalPath)
     {
         var safeBodyToken = new string(targetBody
             .Trim()
@@ -5220,7 +5220,34 @@ internal sealed class LocalExportService : IExportService
             safeBodyToken = "target";
         }
 
-        return $"meshes/slidesmith/{safeBodyToken}/{fileName}";
+        var rewrittenRelative = $"slidesmith/{safeBodyToken}/{fileName}";
+        return HasPluginMeshesPrefix(originalPath)
+            ? $"meshes/{rewrittenRelative}"
+            : rewrittenRelative;
+    }
+
+    private static bool HasPluginMeshesPrefix(string pluginPath)
+    {
+        if (string.IsNullOrWhiteSpace(pluginPath))
+        {
+            return false;
+        }
+
+        var normalised = pluginPath.Replace('\\', '/').TrimStart('/');
+        return normalised.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveOutputMeshPath(string pluginMeshPath)
+    {
+        if (string.IsNullOrWhiteSpace(pluginMeshPath))
+        {
+            return string.Empty;
+        }
+
+        var normalised = pluginMeshPath.Replace('\\', '/').TrimStart('/');
+        return HasPluginMeshesPrefix(normalised)
+            ? normalised
+            : $"meshes/{normalised}";
     }
 
     private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
@@ -5248,9 +5275,15 @@ internal sealed class LocalExportService : IExportService
                 continue;
             }
 
+            var outputMeshPath = ResolveOutputMeshPath(rewrittenPath);
+            if (string.IsNullOrWhiteSpace(outputMeshPath))
+            {
+                continue;
+            }
+
             var destinationPath = Path.Combine(
                 outputDirectory,
-                rewrittenPath.Replace('/', Path.DirectorySeparatorChar));
+                outputMeshPath.Replace('/', Path.DirectorySeparatorChar));
             var destinationDirectory = Path.GetDirectoryName(destinationPath);
             if (!string.IsNullOrWhiteSpace(destinationDirectory))
             {
