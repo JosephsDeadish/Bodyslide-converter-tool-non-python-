@@ -59,7 +59,17 @@ public sealed record TextureSummary(
     IReadOnlyList<string>? SpecularFiles = null,
     IReadOnlyList<string>? GlowFiles = null,
     IReadOnlyList<string>? ParallaxFiles = null,
-    IReadOnlyList<string>? SubsurfaceFiles = null);
+    IReadOnlyList<string>? SubsurfaceFiles = null,
+    IReadOnlyList<string>? MaterialTexturePaths = null);
+
+/// <summary>Describes race compatibility between the imported armor's plugin RNAM entries and the target body.</summary>
+public sealed record RaceCompatibilityReport(
+    bool IsCompatible,
+    IReadOnlyList<string> Warnings,
+    IReadOnlyList<string> IncompatibleRaces);
+
+/// <summary>Reports progress during a batch conversion run.</summary>
+public sealed record BatchProgressUpdate(int Completed, int Total, string CurrentFile, bool Success);
 /// <summary>
 /// Describes a single ARMA (ArmorAddon) record found in a plugin file.
 /// <c>FormId</c> and <c>EditorId</c> are extracted via binary parsing.
@@ -1069,6 +1079,18 @@ public interface IPoseSimulationService
         => SimulateAsync(mesh, targetBody, cancellationToken);
 }
 
+public interface IRaceCompatibilityService
+{
+    /// <summary>
+    /// Checks whether the armor plugin's race references (RNAM) are compatible with the target body.
+    /// Returns warnings for races whose body shape is not covered by the selected body replacer.
+    /// </summary>
+    Task<RaceCompatibilityReport> CheckAsync(
+        PluginAnalysisResult pluginAnalysis,
+        string targetBody,
+        CancellationToken cancellationToken);
+}
+
 public sealed class ConversionOrchestrator(
     IArmorImportService importer,
     IBodyDetectionService bodyDetector,
@@ -1089,7 +1111,8 @@ public sealed class ConversionOrchestrator(
     IVoxelCollisionService voxelCollision,
     IArmorRegionBindingService armorRegionBinder,
     IPoseSimulationService poseSimulator,
-    IExportService exporter)
+    IExportService exporter,
+    IRaceCompatibilityService? raceCompatService = null)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
     {
@@ -1173,10 +1196,28 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"textures:missing-normals={textureSummary.MissingNormals.Count}");
             }
 
+            if (textureSummary.MaterialTexturePaths?.Count > 0)
+            {
+                steps.Add($"material-textures:{textureSummary.MaterialTexturePaths.Count}");
+            }
+
             var pluginAnalysis = await pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken);
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
                 steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
+            }
+
+            if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
+            {
+                var raceReport = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
+                if (raceReport.IncompatibleRaces.Count > 0)
+                {
+                    steps.Add($"race-compat:warnings={string.Join(',', raceReport.IncompatibleRaces)}");
+                }
+                else
+                {
+                    steps.Add("race-compat:ok");
+                }
             }
 
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
@@ -1293,7 +1334,10 @@ public sealed class ConversionOrchestrator(
 
 public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 {
-    public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(
+        ConversionRequest request,
+        CancellationToken cancellationToken = default,
+        IProgress<BatchProgressUpdate>? progress = null)
     {
         if (File.Exists(request.InputPath) && Path.GetExtension(request.InputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
@@ -1303,7 +1347,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
             try
             {
-                return await ConvertDirectoryMeshesAsync(request, extractedArchive, cancellationToken);
+                return await ConvertDirectoryMeshesAsync(request, extractedArchive, progress, cancellationToken);
             }
             finally
             {
@@ -1316,15 +1360,18 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (File.Exists(request.InputPath) || !Directory.Exists(request.InputPath))
         {
-            return [await orchestrator.ConvertAsync(request, cancellationToken)];
+            var single = await orchestrator.ConvertAsync(request, cancellationToken);
+            progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(request.InputPath), single.Success));
+            return [single];
         }
 
-        return await ConvertDirectoryMeshesAsync(request, request.InputPath, cancellationToken);
+        return await ConvertDirectoryMeshesAsync(request, request.InputPath, progress, cancellationToken);
     }
 
     private async Task<IReadOnlyList<ConversionResult>> ConvertDirectoryMeshesAsync(
         ConversionRequest request,
         string sourceDirectory,
+        IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
         var meshFiles = Directory.GetFiles(sourceDirectory, "*.nif", SearchOption.AllDirectories)
@@ -1340,14 +1387,33 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var rootOutput = request.OutputDirectory ??
             Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
 
-        var resultsWithPaths = new List<(string MeshFile, ConversionResult Result)>(meshFiles.Count);
-        foreach (var meshFile in meshFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var perArmorOutput = Path.Combine(rootOutput, Path.GetFileNameWithoutExtension(meshFile));
-            var perArmorRequest = request with { InputPath = meshFile, OutputDirectory = perArmorOutput };
-            resultsWithPaths.Add((meshFile, await orchestrator.ConvertAsync(perArmorRequest, cancellationToken)));
-        }
+        var total = meshFiles.Count;
+        var completed = 0;
+        var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
+
+        var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
+        await Parallel.ForEachAsync(
+            meshFiles,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = maxDegreeOfParallelism,
+                CancellationToken = cancellationToken,
+            },
+            async (meshFile, ct) =>
+            {
+                var perArmorOutput = Path.Combine(rootOutput, Path.GetFileNameWithoutExtension(meshFile));
+                var perArmorRequest = request with { InputPath = meshFile, OutputDirectory = perArmorOutput };
+                var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
+                resultBag.Add((meshFile, result));
+
+                var done = Interlocked.Increment(ref completed);
+                progress?.Report(new BatchProgressUpdate(done, total, Path.GetFileName(meshFile), result.Success));
+            });
+
+        // Restore deterministic ordering (same as original sorted input order).
+        var resultsWithPaths = meshFiles
+            .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
 
         await WriteBatchReportAsync(resultsWithPaths, request.TargetBody, rootOutput, cancellationToken);
 
@@ -1431,7 +1497,102 @@ public static class StandaloneConversionModules
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
             new AnimationDrivenPoseSimulationService(),
-            new LocalExportService());
+            new LocalExportService(),
+            new BasicRaceCompatibilityService());
+}
+
+/// <summary>
+/// Checks whether the ARMA/ARMO plugin records in the armor target races that are not covered by
+/// the selected body replacer, reporting incompatible races as conversion warnings.
+/// </summary>
+internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
+{
+    // Standard Skyrim.esm race FormIDs for the common playable races.
+    // These base FormIDs are stable across load orders (no mod-index prefix applied).
+    private static readonly IReadOnlyDictionary<uint, string> KnownRaces =
+        new Dictionary<uint, string>
+        {
+            [0x00013741] = "DefaultRace",
+            [0x00013742] = "NordRace",
+            [0x00013744] = "ImperialRace",
+            [0x00013745] = "BretonRace",
+            [0x00013746] = "RedguardRace",
+            [0x00013747] = "AltmerRace",
+            [0x00013748] = "BosmerRace",
+            [0x00013749] = "DunmerRace",
+            [0x0001397A] = "OrcRace",
+            [0x00023FE9] = "KhajiitRace",
+            [0x00013BB9] = "ArgonianRace",
+        };
+
+    // Races whose body shapes differ significantly from the standard humanoid skeleton.
+    // Standard body replacers (CBBE, 3BA, BHUNP, UNP, SAM, HIMBO, …) target only
+    // humanoid races and do NOT replace Khajiit or Argonian body meshes.
+    private static readonly HashSet<string> SpecialRaces =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "KhajiitRace",
+            "ArgonianRace",
+        };
+
+    // Body types that only replace the standard humanoid form and cannot be used
+    // directly for Khajiit/Argonian armor without additional race-specific patches.
+    private static readonly HashSet<string> HumanoidOnlyBodies =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CBBE", "3BA", "BHUNP", "UNP", "TBD", "UBE", "SAM", "SOS", "HIMBO"
+        };
+
+    public Task<RaceCompatibilityReport> CheckAsync(
+        PluginAnalysisResult pluginAnalysis,
+        string targetBody,
+        CancellationToken cancellationToken)
+    {
+        // Only emit warnings for body types known to be humanoid-only.
+        if (!HumanoidOnlyBodies.Contains(targetBody))
+        {
+            return Task.FromResult(new RaceCompatibilityReport(true, [], []));
+        }
+
+        // Collect all race FormIDs referenced by ARMA or ARMO records.
+        var referencedFormIds = pluginAnalysis.ArmorAddons
+            .Where(a => a.RaceFormId is not null)
+            .Select(a => a.RaceFormId!.Value)
+            .Concat(
+                (pluginAnalysis.ArmorRecords ?? [])
+                    .Where(r => r.RaceFormId is not null)
+                    .Select(r => r.RaceFormId!.Value))
+            .Distinct()
+            .ToList();
+
+        if (referencedFormIds.Count == 0)
+        {
+            return Task.FromResult(new RaceCompatibilityReport(true, [], []));
+        }
+
+        var incompatible = new List<string>();
+        var warnings = new List<string>();
+
+        foreach (var formId in referencedFormIds)
+        {
+            if (!KnownRaces.TryGetValue(formId & 0x00FFFFFFu, out var raceName))
+            {
+                continue;
+            }
+
+            if (SpecialRaces.Contains(raceName))
+            {
+                incompatible.Add(raceName);
+                warnings.Add(
+                    $"{raceName} is not covered by {targetBody}; a race-specific body patch may be required.");
+            }
+        }
+
+        return Task.FromResult(new RaceCompatibilityReport(
+            IsCompatible: incompatible.Count == 0,
+            Warnings: warnings,
+            IncompatibleRaces: incompatible));
+    }
 }
 
 internal sealed record ConversionCacheEntry(
@@ -1835,7 +1996,11 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
     {
         var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
 
-        var meshType = fileNames.Any(name => name.Contains("plate") || name.Contains("cuirass") || name.Contains("pauldron")) ? "plate" :
+        var meshType = fileNames.Any(name =>
+                name.Contains("helmet") || name.Contains("circlet") || name.Contains("crown") ||
+                name.Contains("hood") || name.Contains("coif") || name.Contains("hat") ||
+                name.Contains("headgear")) ? "headgear" :
+            fileNames.Any(name => name.Contains("plate") || name.Contains("cuirass") || name.Contains("pauldron")) ? "plate" :
             fileNames.Any(name => name.Contains("leather") || name.Contains("hide")) ? "leather" :
             fileNames.Any(name => name.Contains("cloth") || name.Contains("robe") || name.Contains("skirt")) ? "cloth" :
             fileNames.Any(name => name.Contains("tight") || name.Contains("bodysuit") || name.Contains("catsuit")) ? "skin-tight" :
@@ -1858,6 +2023,7 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
     {
         var mode = analysis.MeshType switch
         {
+            "headgear" => "rigid-no-deform-cage",
             "plate" => "rigid-regional-cage",
             "physics-enabled" => "physics-stabilized-cage",
             "cloth" => "smooth-adaptive-cage",
@@ -1891,6 +2057,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     {
         var strategy = analysis.MeshType switch
         {
+            "headgear" => "rigid-no-deform",
             "cloth" => "cage+shrinkwrap+curvature-preserve",
             "physics-enabled" => "cage+smooth-projection+physics-stabilized",
             "plate" => "cage+rigid-islands+normal-preservation",
@@ -1898,6 +2065,17 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             "skin-tight" => "body-transform-field",
             _ => "hybrid-cage-deformation"
         };
+
+        // Headgear (helmets, hoods, circlets) does not deform with body shape changes.
+        // The head geometry is independent of the body type, so no regional morphing is applied.
+        if (string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(new ConvertedMesh(
+                analysis.MeshType,
+                strategy,
+                analysis.MeshCount,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)));
+        }
 
         // Compute a relative source→target delta when sourceBody is provided.
         // When source == target the delta is 1.0 per region (no-op). When source differs from target
@@ -2393,6 +2571,10 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
 
         switch (analysis.MeshType)
         {
+            case "headgear":
+                slots.Add(42); // Circlet (used for helmets, hoods, circlets, crowns)
+                break;
+
             case "plate":
             case "leather":
             case "mixed":
@@ -2412,11 +2594,12 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 break;
         }
 
-        // Physics-capable bodies get the genitals partition for compatibility.
-        if (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase))
+        // Physics-capable bodies get the genitals partition for compatibility (body slots only).
+        if (!string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase)))
         {
             slots.Add(56); // Genitals
         }
@@ -2775,6 +2958,14 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
     // DDS magic: "DDS " = 0x44 0x44 0x53 0x20
     private static readonly byte[] DdsMagic = [0x44, 0x44, 0x53, 0x20];
 
+    // Regex to match relative Bethesda texture paths inside BGSM/BGEM material files.
+    // Matches strings like textures/armor/something_d.dds (case-insensitive).
+    private static readonly System.Text.RegularExpressions.Regex MaterialTexturePathRegex =
+        new(@"textures/[^""<>\s]+\.dds",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
     public async Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var diffuseFiles = new List<string>();
@@ -2839,6 +3030,8 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             }
         }
 
+        var materialTexturePaths = await ScanMaterialFilesAsync(armor.SourcePath, cancellationToken);
+
         return new TextureSummary(
             armor.TextureFiles.Count,
             diffuseFiles,
@@ -2847,7 +3040,85 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             specularFiles,
             glowFiles,
             parallaxFiles,
-            subsurfaceFiles);
+            subsurfaceFiles,
+            materialTexturePaths);
+    }
+
+    /// <summary>
+    /// Scans .bgsm and .bgem material files found in the armor source path for embedded texture references.
+    /// BGSM/BGEM files in Skyrim SE are JSON and contain relative texture paths (e.g. textures/armor/…_d.dds).
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ScanMaterialFilesAsync(string sourcePath, CancellationToken cancellationToken)
+    {
+        var materialFiles = EnumerateMaterialFilesForScan(sourcePath);
+        if (materialFiles.Count == 0)
+        {
+            return [];
+        }
+
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var materialFile in materialFiles)
+        {
+            if (!File.Exists(materialFile)) continue;
+            try
+            {
+                var content = await File.ReadAllTextAsync(materialFile, cancellationToken);
+                foreach (System.Text.RegularExpressions.Match m in MaterialTexturePathRegex.Matches(content))
+                {
+                    found.Add(m.Value.Replace('\\', '/').ToLowerInvariant());
+                }
+            }
+            catch (IOException)
+            {
+                // Ignore unreadable material files.
+            }
+        }
+
+        return [.. found.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static IReadOnlyList<string> EnumerateMaterialFilesForScan(string sourcePath)
+    {
+        static bool IsMaterial(string p) => Path.GetExtension(p) is ".bgsm" or ".bgem";
+
+        var root = ResolveSupportRootForScan(sourcePath);
+        if (File.Exists(root)) return IsMaterial(root) ? [Path.GetFullPath(root)] : [];
+        if (!Directory.Exists(root)) return [];
+
+        var opts = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            MatchCasing = MatchCasing.CaseInsensitive,
+        };
+
+        return Directory.GetFiles(root, "*.*", opts)
+            .Where(IsMaterial)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string ResolveSupportRootForScan(string sourcePath)
+    {
+        if (File.Exists(sourcePath))
+        {
+            // Walk up to the nearest "meshes" ancestor and use its parent as mod root.
+            var dir = Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? string.Empty;
+            while (!string.IsNullOrEmpty(dir))
+            {
+                var name = Path.GetFileName(dir);
+                if (string.Equals(name, "meshes", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.GetDirectoryName(dir) ?? dir;
+                }
+
+                dir = Path.GetDirectoryName(dir) ?? string.Empty;
+            }
+
+            return Path.GetDirectoryName(Path.GetFullPath(sourcePath)) ?? sourcePath;
+        }
+
+        return sourcePath;
     }
 
     private static async Task<bool> IsValidDdsAsync(string path, CancellationToken cancellationToken)

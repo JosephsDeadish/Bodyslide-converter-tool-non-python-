@@ -738,7 +738,9 @@ public sealed class ConversionOrchestratorTests
 
     private static ConversionOrchestrator BuildTestOrchestrator(
         IExportService? exporter = null,
-        ISkeletonMappingService? skeletonMapper = null) =>
+        ISkeletonMappingService? skeletonMapper = null,
+        IPluginAnalysisService? pluginAnalyzer = null,
+        IRaceCompatibilityService? raceCompatService = null) =>
         new(
             new TestImporter(),
             new TestDetector(),
@@ -754,12 +756,13 @@ public sealed class ConversionOrchestratorTests
             new TestPhysicsSupport(),
             new TestBodySlideProjectService(),
             new TestTextureAnalysisService(),
-            new TestPluginAnalysisService(),
+            pluginAnalyzer ?? new TestPluginAnalysisService(),
             new TestVanillaArmorLookup(),
             new TestVoxelCollision(),
             new TestArmorRegionBindingService(),
             new TestPoseSimulationService(),
-            exporter ?? new TestExporter());
+            exporter ?? new TestExporter(),
+            raceCompatService ?? new BasicRaceCompatibilityService());
 
     private sealed class TestImporter : IArmorImportService
     {
@@ -914,6 +917,409 @@ public sealed class ConversionOrchestratorTests
             Directory.CreateDirectory(ExportPath);
             return Task.FromResult<(string, IReadOnlyList<string>)>((ExportPath, []));
         }
+    }
+    // ── Gap 1: Headgear detection ─────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("ironhelmet.nif",   "headgear")]
+    [InlineData("steelcirclet.nif", "headgear")]
+    [InlineData("thiefhood.nif",    "headgear")]
+    [InlineData("goldcrown.nif",    "headgear")]
+    [InlineData("magehat.nif",      "headgear")]
+    [InlineData("banditmask.nif",   "mixed")]     // No headgear keyword → falls through to default
+    [InlineData("cuirass.nif",      "plate")]
+    [InlineData("robes.nif",        "cloth")]
+    public async Task BasicMeshAnalysisService_DetectsHeadgearMeshType(string fileName, string expectedType)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var nifPath = Path.Combine(dir, fileName);
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+            Assert.Equal(expectedType, result.MeshType);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AssignsSlot42ForHeadgear()
+    {
+        var mesh = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.True(result.Rebuilt);
+        Assert.Contains("42:Circlet", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("32:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_DoesNotAddGenitalsPartitionForHeadgear()
+    {
+        var mesh = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1);
+        var service = new BasicPartitionRebuildingService();
+
+        // 3BA is a physics body that normally gets slot 56 for body slots — not for headgear.
+        var result = await service.RebuildAsync(mesh, analysis, "3BA", CancellationToken.None);
+
+        Assert.Contains("42:Circlet", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("56:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicCageGenerationService_UsesRigidNoDeformCageForHeadgear()
+    {
+        var analysis = new MeshAnalysis("headgear", false, 1);
+        var service = new BasicCageGenerationService();
+
+        var cage = await service.BuildAsync(analysis, "CBBE", CancellationToken.None);
+
+        Assert.Equal("rigid-no-deform-cage", cage.Mode);
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_ProducesEmptyRegionalMorphingForHeadgear()
+    {
+        var nifPath = Path.GetTempFileName();
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("headgear", false, 1);
+            var cage = new DeformationCage("rigid-no-deform-cage");
+            var service = new StrategyMeshConversionService();
+
+            var result = await service.ConvertAsync(armor, analysis, cage, "CBBE", null, null, CancellationToken.None);
+
+            Assert.Equal("headgear", result.MeshType);
+            Assert.Equal("rigid-no-deform", result.Strategy);
+            Assert.Empty(result.RegionalMorphing);
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    // ── Gap 2: Race compatibility check ──────────────────────────────────────
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_ReturnsOkForStandardHumanoidRaces()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "ArmorAddon01", [30], RaceFormId: 0x00013742u), // NordRace
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForKhajiitRaceWithHumanoidBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "KhajiitArmor01", [30], RaceFormId: 0x00023FE9u), // KhajiitRace
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("KhajiitRace", report.IncompatibleRaces);
+        Assert.NotEmpty(report.Warnings);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForArgonianRaceWithHumanoidBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["argonian-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "ArgonianArmor01", [30], RaceFormId: 0x00013BB9u), // ArgonianRace
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "3BA", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("ArgonianRace", report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_ReturnsCompatibleWhenNoRaceFormIds()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "ArmorAddon01"), // No RNAM
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_AllowsAnyRaceForVanillaTargetBody()
+    {
+        // Vanilla target body should not produce warnings since it's not a humanoid-only replacer.
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "KhajiitArmor01", [30], RaceFormId: 0x00023FE9u),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+    }
+
+    // ── Gap 3: Parallel batch conversion ─────────────────────────────────────
+
+    [Fact]
+    public async Task BatchConversionRunner_ConvertsAllNifsInParallelAndPreservesOrder()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var outputDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            // Create three NIF files in alphabetical order.
+            var names = new[] { "armorA.nif", "armorB.nif", "armorC.nif" };
+            foreach (var name in names)
+            {
+                await File.WriteAllBytesAsync(Path.Combine(dir, name), []);
+            }
+
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var progressEvents = new System.Collections.Concurrent.ConcurrentBag<BatchProgressUpdate>();
+            var progress = new Progress<BatchProgressUpdate>(progressEvents.Add);
+
+            var request = new ConversionRequest(dir, "CBBE", outputDir);
+            var results = await runner.ConvertAsync(request, CancellationToken.None, progress);
+
+            // All three NIFs converted successfully.
+            Assert.Equal(3, results.Count);
+            Assert.All(results, r => Assert.True(r.Success));
+
+            // Progress events were reported — one per NIF.
+            Assert.Equal(3, progressEvents.Count(p => p.Total == 3));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            if (Directory.Exists(outputDir)) Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConversionRunner_ReportsSingleItemProgressForNonBatchInput()
+    {
+        var nifPath = Path.GetTempFileName();
+        var outputDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var progressEvents = new List<BatchProgressUpdate>();
+            var progress = new Progress<BatchProgressUpdate>(progressEvents.Add);
+
+            var request = new ConversionRequest(nifPath, "CBBE", outputDir);
+            var results = await runner.ConvertAsync(request, CancellationToken.None, progress);
+
+            Assert.Single(results);
+            Assert.True(results[0].Success);
+
+            // Wait briefly for the Progress<T> callback (it marshals to the synchronization context).
+            await Task.Delay(50);
+            Assert.Single(progressEvents);
+            Assert.Equal(1, progressEvents[0].Total);
+            Assert.Equal(1, progressEvents[0].Completed);
+        }
+        finally
+        {
+            File.Delete(nifPath);
+            if (Directory.Exists(outputDir)) Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    // ── Gap 4: BGSM/BGEM material texture scanning ───────────────────────────
+
+    [Fact]
+    public async Task BasicTextureAnalysisService_ExtractsMaterialTexturePathsFromBgsmFile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshesDir = Path.Combine(dir, "meshes", "armor");
+        Directory.CreateDirectory(meshesDir);
+        var materialsDir = Path.Combine(dir, "materials", "armor");
+        Directory.CreateDirectory(materialsDir);
+
+        var nifPath = Path.Combine(meshesDir, "armor.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        // Write a BGSM file with embedded texture paths in JSON format.
+        var bgsmContent = """
+            {
+              "BSLightingShaderProperty": {
+                "textures": [
+                  "textures/armor/myarmor_d.dds",
+                  "textures/armor/myarmor_n.dds"
+                ]
+              }
+            }
+            """;
+        await File.WriteAllTextAsync(Path.Combine(materialsDir, "myarmor.bgsm"), bgsmContent);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicTextureAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.MaterialTexturePaths);
+            Assert.Contains("textures/armor/myarmor_d.dds", result.MaterialTexturePaths!);
+            Assert.Contains("textures/armor/myarmor_n.dds", result.MaterialTexturePaths!);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicTextureAnalysisService_ReturnsEmptyMaterialPathsWhenNoMaterialFilesExist()
+    {
+        // Use a subdirectory under meshes/ so the mod-root scan stays inside a controlled directory.
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshesDir = Path.Combine(dir, "meshes", "armor");
+        Directory.CreateDirectory(meshesDir);
+        var nifPath = Path.Combine(meshesDir, "empty.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicTextureAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            // Should return an empty list (not null) when no .bgsm/.bgem files are found.
+            Assert.NotNull(result.MaterialTexturePaths);
+            Assert.Empty(result.MaterialTexturePaths!);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ── Gap 5: Race compat step in orchestrator ────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_EmitsRaceCompatStepWhenPluginsScanned()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            // Use a plugin analyzer that returns a Khajiit-race ARMA record.
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                pluginAnalyzer: new KhajiitPluginAnalysisService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.StartsWith("race-compat:warnings=", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_EmitsRaceCompatOkWhenAllRacesCompatible()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                pluginAnalyzer: new NordRacePluginAnalysisService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("race-compat:ok", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    // Helper stubs for Gap 5 orchestrator race-compat tests.
+    private sealed class KhajiitPluginAnalysisService : IPluginAnalysisService
+    {
+        public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new PluginAnalysisResult(
+                ScannedPlugins: ["khajiit.esp"],
+                ArmorAddons:
+                [
+                    new PluginArmorAddon("ARMA", [], 0x100, "KhajiitAddon", [30], RaceFormId: 0x00023FE9u),
+                ],
+                PatchGuidance: string.Empty));
+    }
+
+    private sealed class NordRacePluginAnalysisService : IPluginAnalysisService
+    {
+        public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new PluginAnalysisResult(
+                ScannedPlugins: ["armor.esp"],
+                ArmorAddons:
+                [
+                    new PluginArmorAddon("ARMA", [], 0x100, "NordAddon", [30], RaceFormId: 0x00013742u), // NordRace
+                ],
+                PatchGuidance: string.Empty));
     }
 }
 
@@ -1712,7 +2118,6 @@ public sealed class BsdSliderDataTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
-}
 
 public sealed class TriMorphFileTests
 {
@@ -5424,4 +5829,5 @@ public sealed class ConversionReadmeGeneratorTests
         }
         return [.. parts];
     }
+}
 }

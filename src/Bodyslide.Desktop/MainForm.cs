@@ -525,7 +525,20 @@ public sealed class MainForm : Form
                 SourceBodyOverride: sourceOverride);
 
             var cancellationToken = _activeConversion.Token;
-            var results = await Task.Run(() => _batchRunner.ConvertAsync(request, cancellationToken));
+
+            // Wire a per-item progress callback so the progress bar advances
+            // during batch runs instead of showing a marquee spinner throughout.
+            var progress = new Progress<BatchProgressUpdate>(update =>
+            {
+                _progressBar.Style = ProgressBarStyle.Continuous;
+                _progressBar.Maximum = update.Total;
+                _progressBar.Value = Math.Min(update.Completed, update.Total);
+                _statusLabel.Text = $"Converting {update.Completed}/{update.Total}: {update.CurrentFile}";
+            });
+
+            var results = await Task.Run(
+                () => _batchRunner.ConvertAsync(request, cancellationToken, progress),
+                cancellationToken);
             _lastOutputDirectory = GetBestOutputDirectory(results);
             _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
             _lastBatchReportPath = GetBatchReportPath(input, output, effectiveTargetBody);
