@@ -4,12 +4,12 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 
 - import scan (single `.nif`, armor folder, or zipped archive)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
-- mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed)
+- mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
 - mesh conversion strategy selection
 - weight transfer + skeleton bone mapping (source → target, unsupported bone detection)
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
-- partition rebuilding (BSDismemberSkinInstance slot assignment)
+- partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass
 - physics profile generation (CBPC + SMP XML config file output)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
@@ -184,7 +184,9 @@ Implemented from issue scope:
 
 - **shrinkwrap clearance projection pass** — NIF vertex transformation now enforces a per-region body-envelope minimum radius with adaptive clearance after animation-driven push-out, so near-surface vertices are projected outward instead of lingering on the clipping boundary
 
-Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
+- **headgear sub-type classification and head/hair partition assignment** — the mesh analysis stage now classifies all headgear into one of four sub-types: `full-helmet` (full head-covering piece; keywords: helmet, greathelm, warhelm, sallet, barbute, bascinet), `hood` (cloth/leather hair-covering; keywords: hood, cowl, coif, veil, shroud), `face-mask` (partial face covering; keywords: mask, visor, blindfold, eyepatch, facecover), or `circlet` (small accessory worn over hair; keywords: circlet, crown, diadem, tiara, hat, cap); partition rebuilding then assigns the correct Skyrim `BSDismemberSkinInstance` skin-partition IDs per sub-type — full-helmet → slots 30 (Head) + 31 (Hair), hood → slot 31 (Hair), face-mask → slot 30 (Head), circlet → slot 42 (Circlet) — preventing invisible head parts, hair z-fighting, and circlet/helmet slot conflicts in-game
+
+Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, and headgear sub-type/partition handling), with additional quality passes still being iterated.
 
 ## Current built-in presets (36 total)
 

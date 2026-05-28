@@ -23,7 +23,24 @@ public sealed record ImportedArmor(
     string? TemporaryWorkspace = null,
     IReadOnlyList<WeightVariantPair>? WeightVariantPairs = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
-public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount);
+/// <summary>
+/// Headgear sub-classification values.  Only populated when <c>MeshType</c> is <c>"headgear"</c>.
+/// <list type="bullet">
+///   <item><c>full-helmet</c> — full head-covering piece; uses skin partitions 30 (Head) + 31 (Hair).</item>
+///   <item><c>hood</c>        — cloth or leather hair-covering; uses skin partition 31 (Hair).</item>
+///   <item><c>face-mask</c>   — partial face covering (visor, mask, blindfold); uses skin partition 30 (Head).</item>
+///   <item><c>circlet</c>     — small accessory worn over hair (circlet, crown, hat); uses skin partition 42 (Circlet).</item>
+/// </list>
+/// </summary>
+public static class HeadgearSubTypes
+{
+    public const string FullHelmet = "full-helmet";
+    public const string Hood       = "hood";
+    public const string FaceMask   = "face-mask";
+    public const string Circlet    = "circlet";
+}
+
+public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount, string? HeadgearSubType = null);
 public sealed record DeformationCage(string Mode);
 public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null);
@@ -2182,14 +2199,34 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
 internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 {
+    // Keywords that indicate a full head-covering helmet (replaces head + hair slots).
+    private static readonly string[] FullHelmetKeywords =
+        ["helmet", "greathelm", "warhelm", "sallet", "barbute", "bascinet"];
+
+    // Keywords that indicate a hair-covering hood or cowl (replaces hair slot).
+    private static readonly string[] HoodKeywords =
+        ["hood", "cowl", "coif", "veil", "shroud"];
+
+    // Keywords that indicate a partial face covering (visor, mask, blindfold).
+    private static readonly string[] FaceMaskKeywords =
+        ["mask", "visor", "blindfold", "eyepatch", "facecover"];
+
+    // Keywords that indicate a circlet or small head accessory (worn over hair).
+    private static readonly string[] CircletKeywords =
+        ["circlet", "crown", "diadem", "tiara", "hat", "cap", "headgear"];
+
     public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
 
-        var meshType = fileNames.Any(name =>
-                name.Contains("helmet") || name.Contains("circlet") || name.Contains("crown") ||
-                name.Contains("hood") || name.Contains("coif") || name.Contains("hat") ||
-                name.Contains("headgear")) ? "headgear" :
+        // Determine whether any filename matches a headgear keyword (all sub-type groups combined).
+        bool IsHeadgear(string name) =>
+            FullHelmetKeywords.Any(name.Contains) ||
+            HoodKeywords.Any(name.Contains)       ||
+            FaceMaskKeywords.Any(name.Contains)   ||
+            CircletKeywords.Any(name.Contains);
+
+        var meshType = fileNames.Any(IsHeadgear) ? "headgear" :
             fileNames.Any(name => name.Contains("plate") || name.Contains("cuirass") || name.Contains("pauldron")) ? "plate" :
             fileNames.Any(name => name.Contains("leather") || name.Contains("hide")) ? "leather" :
             fileNames.Any(name => name.Contains("cloth") || name.Contains("robe") || name.Contains("skirt")) ? "cloth" :
@@ -2203,7 +2240,22 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             ? "physics-enabled"
             : meshType;
 
-        return Task.FromResult(new MeshAnalysis(finalMeshType, physicsEnabled, armor.MeshFiles.Count));
+        // Classify headgear into a sub-type so partition rebuilding can assign the
+        // correct Skyrim BSDismemberSkinInstance skin-partition IDs.
+        string? headgearSubType = null;
+        if (finalMeshType == "headgear")
+        {
+            if (fileNames.Any(n => FullHelmetKeywords.Any(n.Contains)))
+                headgearSubType = HeadgearSubTypes.FullHelmet;
+            else if (fileNames.Any(n => HoodKeywords.Any(n.Contains)))
+                headgearSubType = HeadgearSubTypes.Hood;
+            else if (fileNames.Any(n => FaceMaskKeywords.Any(n.Contains)))
+                headgearSubType = HeadgearSubTypes.FaceMask;
+            else
+                headgearSubType = HeadgearSubTypes.Circlet;
+        }
+
+        return Task.FromResult(new MeshAnalysis(finalMeshType, physicsEnabled, armor.MeshFiles.Count, headgearSubType));
     }
 }
 
@@ -2213,7 +2265,11 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
     {
         var mode = analysis.MeshType switch
         {
-            "headgear" => "rigid-no-deform-cage",
+            "headgear"
+            or HeadgearSubTypes.FullHelmet
+            or HeadgearSubTypes.Hood
+            or HeadgearSubTypes.FaceMask
+            or HeadgearSubTypes.Circlet => "rigid-no-deform-cage",
             "plate" => "rigid-regional-cage",
             "physics-enabled" => "physics-stabilized-cage",
             "cloth" => "smooth-adaptive-cage",
@@ -2247,7 +2303,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     {
         var strategy = analysis.MeshType switch
         {
-            "headgear" => "rigid-no-deform",
+            "headgear"
+            or HeadgearSubTypes.FullHelmet
+            or HeadgearSubTypes.Hood
+            or HeadgearSubTypes.FaceMask
+            or HeadgearSubTypes.Circlet => "rigid-no-deform",
             "cloth" => "cage+shrinkwrap+curvature-preserve",
             "physics-enabled" => "cage+smooth-projection+physics-stabilized",
             "plate" => "cage+rigid-islands+normal-preservation",
@@ -2258,7 +2318,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         // Headgear (helmets, hoods, circlets) does not deform with body shape changes.
         // The head geometry is independent of the body type, so no regional morphing is applied.
-        if (string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase))
+        bool isHeadgear = string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase)
+            || analysis.HeadgearSubType is not null;
+        if (isHeadgear)
         {
             return Task.FromResult(new ConvertedMesh(
                 analysis.MeshType,
@@ -2781,6 +2843,8 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
     private static readonly IReadOnlyDictionary<int, string> PartitionSlots =
         new Dictionary<int, string>
         {
+            [30] = "Head",
+            [31] = "Hair",
             [32] = "Body",
             [33] = "Hands",
             [34] = "Forearms",
@@ -2813,7 +2877,27 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         switch (analysis.MeshType)
         {
             case "headgear":
-                slots.Add(42); // Circlet (used for helmets, hoods, circlets, crowns)
+                // Use the headgear sub-type to assign the correct Skyrim skin-partition IDs.
+                // Full helmets cover the head and displace hair → slots 30 (Head) + 31 (Hair).
+                // Hoods cover only the hair slot → slot 31 (Hair).
+                // Face masks cover the face/head area → slot 30 (Head).
+                // Circlets, crowns and hats sit on top of hair → slot 42 (Circlet).
+                switch (analysis.HeadgearSubType)
+                {
+                    case HeadgearSubTypes.FullHelmet:
+                        slots.Add(30); // Head
+                        slots.Add(31); // Hair
+                        break;
+                    case HeadgearSubTypes.Hood:
+                        slots.Add(31); // Hair
+                        break;
+                    case HeadgearSubTypes.FaceMask:
+                        slots.Add(30); // Head
+                        break;
+                    default: // circlet or unclassified headgear
+                        slots.Add(42); // Circlet
+                        break;
+                }
                 break;
 
             case "plate":
@@ -2836,7 +2920,9 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         }
 
         // Physics-capable bodies get the genitals partition for compatibility (body slots only).
-        if (!string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase) &&
+        bool isHeadgearPart = string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase)
+            || analysis.HeadgearSubType is not null;
+        if (!isHeadgearPart &&
             (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||

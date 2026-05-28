@@ -930,7 +930,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("thiefhood.nif",    "headgear")]
     [InlineData("goldcrown.nif",    "headgear")]
     [InlineData("magehat.nif",      "headgear")]
-    [InlineData("banditmask.nif",   "mixed")]     // No headgear keyword → falls through to default
+    [InlineData("banditmask.nif",   "headgear")]  // mask keyword → face-mask sub-type headgear
     [InlineData("cuirass.nif",      "plate")]
     [InlineData("robes.nif",        "cloth")]
     public async Task BasicMeshAnalysisService_DetectsHeadgearMeshType(string fileName, string expectedType)
@@ -6830,6 +6830,189 @@ public sealed class ConversionReadmeGeneratorTests
             parts.AddRange(data);
         }
         return [.. parts];
+    }
+
+    // ── Gap 10: Headgear sub-type classification and head/hair partition assignment ──
+
+    [Theory]
+    [InlineData("ironhelmet.nif",       HeadgearSubTypes.FullHelmet)]
+    [InlineData("warhelm.nif",          HeadgearSubTypes.FullHelmet)]
+    [InlineData("greathelm.nif",        HeadgearSubTypes.FullHelmet)]
+    [InlineData("thiefhood.nif",        HeadgearSubTypes.Hood)]
+    [InlineData("magecoif.nif",         HeadgearSubTypes.Hood)]
+    [InlineData("darkshroud.nif",       HeadgearSubTypes.Hood)]
+    [InlineData("banditmask.nif",       HeadgearSubTypes.FaceMask)]
+    [InlineData("facevisor.nif",        HeadgearSubTypes.FaceMask)]
+    [InlineData("nighteyeblindfold.nif", HeadgearSubTypes.FaceMask)]
+    [InlineData("steelcirclet.nif",     HeadgearSubTypes.Circlet)]
+    [InlineData("goldcrown.nif",        HeadgearSubTypes.Circlet)]
+    [InlineData("magehat.nif",          HeadgearSubTypes.Circlet)]
+    [InlineData("dwarvendiadem.nif",    HeadgearSubTypes.Circlet)]
+    public async Task BasicMeshAnalysisService_DetectsCorrectHeadgearSubType(string fileName, string expectedSubType)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var nifPath = Path.Combine(dir, fileName);
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.Equal("headgear", result.MeshType);
+            Assert.Equal(expectedSubType, result.HeadgearSubType);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicMeshAnalysisService_NonHeadgearHasNullSubType()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var nifPath = Path.Combine(dir, "cuirass.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.Equal("plate", result.MeshType);
+            Assert.Null(result.HeadgearSubType);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AssignsHead30AndHair31ForFullHelmet()
+    {
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.FullHelmet);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.True(result.Rebuilt);
+        Assert.Contains("30:Head", result.Partitions);
+        Assert.Contains("31:Hair", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("42:", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("32:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AssignsHair31ForHood()
+    {
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.Hood);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.True(result.Rebuilt);
+        Assert.Contains("31:Hair", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("30:", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("42:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AssignsHead30ForFaceMask()
+    {
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.FaceMask);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.True(result.Rebuilt);
+        Assert.Contains("30:Head", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("31:", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("42:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AssignsCirclet42ForCircletSubType()
+    {
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.Circlet);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.True(result.Rebuilt);
+        Assert.Contains("42:Circlet", result.Partitions);
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("30:", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("31:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_NullSubTypeDefaultsToCirclet()
+    {
+        // MeshAnalysis with MeshType="headgear" but no HeadgearSubType (null) should
+        // fall back to the safe circlet default for backward compatibility.
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubType: null);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.Contains("42:Circlet", result.Partitions);
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_FullHelmetDoesNotGetGenitalsPartitionOn3BA()
+    {
+        var mesh     = new WeightedMesh("headgear", "default", false);
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.FullHelmet);
+        var service  = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "3BA", CancellationToken.None);
+
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("56:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicCageGenerationService_FullHelmetSubTypeUsesRigidNoDeformCage()
+    {
+        // HeadgearSubType is populated; MeshType is still "headgear".
+        var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.FullHelmet);
+        var service  = new BasicCageGenerationService();
+
+        var cage = await service.BuildAsync(analysis, "CBBE", CancellationToken.None);
+
+        Assert.Equal("rigid-no-deform-cage", cage.Mode);
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_FullHelmetHasRigidNoDeformStrategyAndNoMorphing()
+    {
+        var nifPath = Path.GetTempFileName();
+        try
+        {
+            var armor    = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.FullHelmet);
+            var cage     = new DeformationCage("rigid-no-deform-cage");
+            var service  = new StrategyMeshConversionService();
+
+            var result = await service.ConvertAsync(armor, analysis, cage, "3BA", null, null, CancellationToken.None);
+
+            Assert.Equal("headgear", result.MeshType);
+            Assert.Equal("rigid-no-deform", result.Strategy);
+            Assert.Empty(result.RegionalMorphing);
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
     }
 }
 }
