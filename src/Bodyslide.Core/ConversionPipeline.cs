@@ -60,7 +60,10 @@ public sealed record TextureSummary(
     IReadOnlyList<string>? GlowFiles = null,
     IReadOnlyList<string>? ParallaxFiles = null,
     IReadOnlyList<string>? SubsurfaceFiles = null,
-    IReadOnlyList<string>? MaterialTexturePaths = null);
+    IReadOnlyList<string>? MaterialTexturePaths = null,
+    IReadOnlyList<string>? MissingSpecular = null,
+    IReadOnlyList<string>? MissingParallax = null,
+    IReadOnlyList<string>? MissingGlow = null);
 
 /// <summary>Describes race compatibility between the imported armor's plugin RNAM entries and the target body.</summary>
 public sealed record RaceCompatibilityReport(
@@ -3205,6 +3208,10 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             }
         }
 
+        var missingSpecular  = new List<string>();
+        var missingParallax  = new List<string>();
+        var missingGlow      = new List<string>();
+
         foreach (var diffuse in diffuseFiles)
         {
             var baseName = Path.GetFileNameWithoutExtension(diffuse);
@@ -3212,6 +3219,25 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             if (!normalFiles.Any(n => n.Equals(expectedNormal, StringComparison.OrdinalIgnoreCase)))
             {
                 missingNormals.Add(diffuse);
+            }
+
+            // Track missing auxiliary textures so the export stage can generate stubs.
+            var expectedSpecular = baseName + "_s.dds";
+            if (!specularFiles.Any(s => s.Equals(expectedSpecular, StringComparison.OrdinalIgnoreCase)))
+            {
+                missingSpecular.Add(diffuse);
+            }
+
+            var expectedParallax = baseName + "_p.dds";
+            if (!parallaxFiles.Any(p => p.Equals(expectedParallax, StringComparison.OrdinalIgnoreCase)))
+            {
+                missingParallax.Add(diffuse);
+            }
+
+            var expectedGlow = baseName + "_g.dds";
+            if (!glowFiles.Any(g => g.Equals(expectedGlow, StringComparison.OrdinalIgnoreCase)))
+            {
+                missingGlow.Add(diffuse);
             }
         }
 
@@ -3226,7 +3252,10 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             glowFiles,
             parallaxFiles,
             subsurfaceFiles,
-            materialTexturePaths);
+            materialTexturePaths,
+            missingSpecular,
+            missingParallax,
+            missingGlow);
     }
 
     /// <summary>
@@ -3490,9 +3519,10 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     private static readonly HashSet<string> ArmorRecordTypes = new(StringComparer.Ordinal)
         { "ARMA", "ARMO" };
 
-    // ARMA subrecord types that hold NIF mesh file paths.
+    // ARMA/ARMO subrecord types that hold NIF mesh file paths.
+    // MODL is the ground-display mesh in ARMO records (shown when the item is dropped in-world).
     private static readonly HashSet<string> MeshSubrecordTypes = new(StringComparer.Ordinal)
-        { "MOD2", "MOD3", "MOD4", "MOD5" };
+        { "MOD2", "MOD3", "MOD4", "MOD5", "MODL" };
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -4059,11 +4089,11 @@ internal static class BinaryArmaParser
         new(StringComparer.Ordinal) { "BOD2", "BODT" };
 
     private static readonly HashSet<string> MeshSubrecords =
-        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
+        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5", "MODL" };
 
-    // ARMO only uses MOD2 (male world model) and MOD3 (female world model).
+    // ARMO only uses MOD2 (male world model), MOD3 (female world model), and MODL (ground drop mesh).
     private static readonly HashSet<string> ArmoMeshSubrecords =
-        new(StringComparer.Ordinal) { "MOD2", "MOD3" };
+        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MODL" };
 
     /// <summary>Extracts all ARMA record descriptors from a plugin byte array.</summary>
     public static IReadOnlyList<ArmaRecordDescriptor> ExtractArmaRecords(byte[] bytes)
@@ -4474,7 +4504,7 @@ internal static class PatchPluginWriter
     private const uint EslFlag = 0x00000200u;
 
     private static readonly HashSet<string> MeshSubrecords =
-        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
+        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5", "MODL" };
 
     /// <summary>
     /// Builds the raw bytes for a minimal patch ESP.
@@ -5073,6 +5103,15 @@ internal sealed class LocalExportService : IExportService
         var generatedNormals = await GenerateMissingNormalMapStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
         outputFiles.AddRange(generatedNormals);
 
+        // Generate auxiliary texture stubs (specular _s, parallax _p, glow _g) for any diffuse
+        // textures that are missing those companions.  Neutral stubs avoid black/broken surfaces
+        // and can be overridden by the user with real textures later.
+        var (generatedSpecular, generatedParallax, generatedGlow) =
+            await GenerateMissingAuxTextureStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
+        outputFiles.AddRange(generatedSpecular);
+        outputFiles.AddRange(generatedParallax);
+        outputFiles.AddRange(generatedGlow);
+
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
         var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
         await File.WriteAllTextAsync(
@@ -5255,6 +5294,12 @@ internal sealed class LocalExportService : IExportService
         if (generatedNormals.Count > 0)
         {
             await File.AppendAllTextAsync(logPath, $"normal-stubs:generated={generatedNormals.Count}{Environment.NewLine}", cancellationToken);
+        }
+        if (generatedSpecular.Count > 0 || generatedParallax.Count > 0 || generatedGlow.Count > 0)
+        {
+            await File.AppendAllTextAsync(logPath,
+                $"aux-stubs:specular={generatedSpecular.Count},parallax={generatedParallax.Count},glow={generatedGlow.Count}{Environment.NewLine}",
+                cancellationToken);
         }
         outputFiles.Add(logPath);
 
@@ -5541,6 +5586,149 @@ internal sealed class LocalExportService : IExportService
         span[offset + 1] = (byte)((value >> 8) & 0xFF);
         span[offset + 2] = (byte)((value >> 16) & 0xFF);
         span[offset + 3] = (byte)((value >> 24) & 0xFF);
+    }
+
+    /// <summary>
+    /// Builds a shared DDS helper: 4×4 uncompressed BGRA8, every pixel the same solid colour.
+    /// Used by the aux-texture stub builders.
+    /// </summary>
+    private static byte[] BuildSolidColorDds(byte b, byte g, byte r, byte a)
+    {
+        const int width         = 4;
+        const int height        = 4;
+        const int bytesPerPixel = 4;
+        const int headerBytes   = 128;
+
+        var data = new byte[headerBytes + width * height * bytesPerPixel];
+        var s    = data.AsSpan();
+
+        s[0] = 0x44; s[1] = 0x44; s[2] = 0x53; s[3] = 0x20;
+
+        WriteDdsLE(s,  4, 124);
+        WriteDdsLE(s,  8, 0x100FU);
+        WriteDdsLE(s, 12, (uint)height);
+        WriteDdsLE(s, 16, (uint)width);
+        WriteDdsLE(s, 20, (uint)(width * bytesPerPixel));
+        WriteDdsLE(s, 24, 0);
+        WriteDdsLE(s, 28, 1);
+
+        WriteDdsLE(s, 76,  32U);
+        WriteDdsLE(s, 80,  0x41U);
+        WriteDdsLE(s, 84,  0U);
+        WriteDdsLE(s, 88,  32U);
+        WriteDdsLE(s, 92,  0x00FF0000U);
+        WriteDdsLE(s, 96,  0x0000FF00U);
+        WriteDdsLE(s, 100, 0x000000FFU);
+        WriteDdsLE(s, 104, 0xFF000000U);
+
+        WriteDdsLE(s, 108, 0x1000U);
+
+        for (var i = 0; i < width * height; i++)
+        {
+            var off = headerBytes + i * bytesPerPixel;
+            data[off]     = b;
+            data[off + 1] = g;
+            data[off + 2] = r;
+            data[off + 3] = a;
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Neutral specular/roughness mask: mid-grey (0x80) in all channels.
+    /// Skyrim interprets R=specular intensity, G=gloss, B=unused. Mid-grey is a safe neutral.
+    /// </summary>
+    internal static byte[] BuildSpecularMapDds()
+        => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF);
+
+    /// <summary>
+    /// Flat parallax/height map: all-black means zero height offset (no displacement).
+    /// </summary>
+    internal static byte[] BuildParallaxMapDds()
+        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00);
+
+    /// <summary>
+    /// Empty glow/emissive map: all-black means no self-illumination.
+    /// </summary>
+    internal static byte[] BuildGlowMapDds()
+        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00);
+
+    /// <summary>
+    /// Generates stub DDS files for specular (_s), parallax (_p), and glow (_g) textures
+    /// that are referenced by a diffuse map but do not yet exist in the output directory.
+    /// Returns a triple of (specularPaths, parallaxPaths, glowPaths).
+    /// </summary>
+    private static async Task<(IReadOnlyList<string> Specular, IReadOnlyList<string> Parallax, IReadOnlyList<string> Glow)>
+        GenerateMissingAuxTextureStubsAsync(
+            ImportedArmor armor,
+            TextureSummary textureSummary,
+            string outputDirectory,
+            CancellationToken cancellationToken)
+    {
+        var specGenerated  = new List<string>();
+        var parallaxGenerated = new List<string>();
+        var glowGenerated  = new List<string>();
+
+        var missingSpecularSet  = new HashSet<string>(textureSummary.MissingSpecular  ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingParallaxSet  = new HashSet<string>(textureSummary.MissingParallax  ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingGlowSet      = new HashSet<string>(textureSummary.MissingGlow      ?? [], StringComparer.OrdinalIgnoreCase);
+
+        if (missingSpecularSet.Count == 0 && missingParallaxSet.Count == 0 && missingGlowSet.Count == 0)
+            return (specGenerated, parallaxGenerated, glowGenerated);
+
+        var specBytes     = BuildSpecularMapDds();
+        var parallaxBytes = BuildParallaxMapDds();
+        var glowBytes     = BuildGlowMapDds();
+
+        foreach (var texturePath in armor.TextureFiles)
+        {
+            var fileName = Path.GetFileName(texturePath);
+
+            // Resolve the output directory path for this diffuse.
+            var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, Path.GetFullPath(texturePath));
+            var destDiffuse  = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
+            if (!destDiffuse.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
+                destDiffuse = Path.Combine(outputDirectory, fileName);
+
+            var destDir  = Path.GetDirectoryName(destDiffuse) ?? outputDirectory;
+            var stemName = Path.GetFileNameWithoutExtension(destDiffuse);
+
+            if (missingSpecularSet.Contains(fileName))
+            {
+                var stubPath = Path.Combine(destDir, stemName + "_s.dds");
+                if (!File.Exists(stubPath))
+                {
+                    Directory.CreateDirectory(destDir);
+                    await File.WriteAllBytesAsync(stubPath, specBytes, cancellationToken);
+                    specGenerated.Add(stubPath);
+                }
+            }
+
+            if (missingParallaxSet.Contains(fileName))
+            {
+                var stubPath = Path.Combine(destDir, stemName + "_p.dds");
+                if (!File.Exists(stubPath))
+                {
+                    Directory.CreateDirectory(destDir);
+                    await File.WriteAllBytesAsync(stubPath, parallaxBytes, cancellationToken);
+                    parallaxGenerated.Add(stubPath);
+                }
+            }
+
+            if (missingGlowSet.Contains(fileName))
+            {
+                var stubPath = Path.Combine(destDir, stemName + "_g.dds");
+                if (!File.Exists(stubPath))
+                {
+                    Directory.CreateDirectory(destDir);
+                    await File.WriteAllBytesAsync(stubPath, glowBytes, cancellationToken);
+                    glowGenerated.Add(stubPath);
+                }
+            }
+        }
+
+        return (specGenerated, parallaxGenerated, glowGenerated);
     }
 
 
@@ -6978,6 +7166,8 @@ internal sealed class LocalExportService : IExportService
                 TryRewriteModelPath(e, 'Male World Model\MOD2');
                 TryRewriteModelPath(e, 'Female World Model\MOD3 - Model Filename');
                 TryRewriteModelPath(e, 'Female World Model\MOD3');
+                TryRewriteModelPath(e, 'MODL - Model Filename');
+                TryRewriteModelPath(e, 'Model\MODL - Model Filename');
               end;
             end;
 
