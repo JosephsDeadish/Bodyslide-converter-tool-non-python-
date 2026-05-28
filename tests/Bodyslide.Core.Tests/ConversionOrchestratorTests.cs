@@ -4721,7 +4721,8 @@ public sealed class BinaryPluginRewriteServiceTests
         const string newPath  = "meshes/slidesmith/cbbe/steel_w.nif";
 
         byte[] mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
-        byte[] plugin = BuildMinimalPlugin_SseWithArmo(mod2Data);
+        byte[] armoRecord = BuildArmoRecord(mod2Data, headerSize: 24);
+        byte[] plugin = [..BuildMinimalPlugin_SseNoArma(), ..armoRecord];
 
         var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -4928,7 +4929,7 @@ public sealed class BinaryPluginRewriteServiceTests
                 CancellationToken.None);
 
             Assert.Equal(1, result.PluginsProcessed);
-            Assert.Equal(1, result.PathsRewritten);
+            Assert.Equal(2, result.PathsRewritten);
             Assert.Single(result.PatchedPluginPaths);
 
             var patchedContent = System.Text.Encoding.Latin1.GetString(
