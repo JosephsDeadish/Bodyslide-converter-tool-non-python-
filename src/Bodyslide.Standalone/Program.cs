@@ -49,7 +49,7 @@ if (!TryParseRequest(args, out var request, out var error))
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--source <body>] [--output-zip]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body>] [--targets <body1,body2>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
@@ -108,9 +108,13 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("target", out var target);
     parsed.TryGetValue("output", out var output);
     parsed.TryGetValue("preset", out var preset);
+    parsed.TryGetValue("presets", out var presetsValue);
     parsed.TryGetValue("profile", out var profile);
     parsed.TryGetValue("source", out var source);
+    parsed.TryGetValue("targets", out var targetsValue);
     var outputZip = parsed.ContainsKey("output-zip");
+    var selectedTargets = CombineSelections(target, ParseDelimitedValues(targetsValue));
+    var selectedPresets = CombineSelections(preset, ParseDelimitedValues(presetsValue));
 
     if (string.IsNullOrWhiteSpace(input))
     {
@@ -118,13 +122,23 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         return false;
     }
 
-    if (string.IsNullOrWhiteSpace(target) && string.IsNullOrWhiteSpace(preset))
+    if (selectedTargets.Count == 0 && selectedPresets.Count == 0)
     {
-        error = "Provide --target or --preset.";
+        error = "Provide --target/--targets or --preset/--presets.";
         return false;
     }
 
-    request = new ConversionRequest(input, target ?? string.Empty, output, preset, outputZip, profile, source);
+    request = new ConversionRequest(
+        InputPath: input,
+        TargetBody: selectedTargets.FirstOrDefault() ?? string.Empty,
+        OutputDirectory: output,
+        Preset: selectedPresets.FirstOrDefault(),
+        OutputZip: outputZip,
+        DeformationProfile: profile,
+        SourceBodyOverride: source,
+        TargetBodies: selectedTargets.Count > 1 ? selectedTargets : null,
+        Presets: selectedPresets.Count > 1 ? selectedPresets : null);
+
     return true;
 }
 
@@ -158,6 +172,29 @@ static bool ShouldPauseOnExit(string[] args)
     if (args.Length == 0)
     {
         return true;
+    }
+
+    static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+    static IReadOnlyList<string> CombineSelections(string? singleValue, IReadOnlyList<string> multiValues)
+    {
+        var combined = new List<string>();
+        if (!string.IsNullOrWhiteSpace(singleValue))
+        {
+            combined.Add(singleValue);
+        }
+
+        combined.AddRange(multiValues);
+        return combined
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);

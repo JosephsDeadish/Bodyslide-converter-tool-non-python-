@@ -9,8 +9,18 @@ namespace Bodyslide.Core;
 
 // NOTE: All optional parameters must remain at the END and use named arguments at call-sites
 // to preserve positional-constructor compatibility for existing consumers.
-public sealed record ConversionRequest(string InputPath, string TargetBody, string? OutputDirectory = null, string? Preset = null, bool OutputZip = false, string? DeformationProfile = null, string? SourceBodyOverride = null);
+public sealed record ConversionRequest(
+    string InputPath,
+    string TargetBody,
+    string? OutputDirectory = null,
+    string? Preset = null,
+    bool OutputZip = false,
+    string? DeformationProfile = null,
+    string? SourceBodyOverride = null,
+    IReadOnlyList<string>? TargetBodies = null,
+    IReadOnlyList<string>? Presets = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
+internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
 /// <summary>Tracks a matched low-weight (_0) and high-weight (_1) mesh pair for the same armor piece.</summary>
 public sealed record WeightVariantPair(string BaseName, string? LowWeightMesh, string? HighWeightMesh);
@@ -315,12 +325,107 @@ public static class RequestNormalizer
 {
     public static (ConversionRequest Request, ConversionPreset? Preset) Normalize(ConversionRequest request)
     {
-        if (!string.IsNullOrWhiteSpace(request.Preset) && PresetCatalog.TryGet(request.Preset, out var preset))
+        if (!string.IsNullOrWhiteSpace(request.Preset))
         {
-            return (request with { TargetBody = preset.TargetBody }, preset);
+            if (PresetCatalog.TryGet(request.Preset, out var preset))
+            {
+                return (request with { TargetBody = preset.TargetBody }, preset);
+            }
+
+            throw new InvalidDataException($"Unknown preset '{request.Preset}'. Use --list-presets to view available presets.");
         }
 
         return (request, null);
+    }
+
+    public static IReadOnlyList<NormalizedConversionRequest> Expand(ConversionRequest request)
+    {
+        var expanded = new List<NormalizedConversionRequest>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddVariant(ConversionRequest candidate, string displayName)
+        {
+            var normalized = Normalize(candidate);
+            var outputSegment = MakeSafePathSegment(displayName);
+            var key = $"{normalized.Request.TargetBody}|{normalized.Request.Preset}|{normalized.Request.DeformationProfile}|{outputSegment}";
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            expanded.Add(new NormalizedConversionRequest(normalized.Request, normalized.Preset, displayName, outputSegment));
+        }
+
+        foreach (var presetName in EnumerateNonEmpty(request.Presets))
+        {
+            AddVariant(
+                request with
+                {
+                    TargetBody = string.Empty,
+                    Preset = presetName,
+                    TargetBodies = null,
+                    Presets = null,
+                },
+                presetName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Preset))
+        {
+            AddVariant(
+                request with
+                {
+                    TargetBodies = null,
+                    Presets = null,
+                },
+                request.Preset);
+        }
+
+        foreach (var targetBody in EnumerateNonEmpty(request.TargetBodies))
+        {
+            AddVariant(
+                request with
+                {
+                    TargetBody = targetBody,
+                    Preset = null,
+                    TargetBodies = null,
+                    Presets = null,
+                },
+                targetBody);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.TargetBody))
+        {
+            AddVariant(
+                request with
+                {
+                    TargetBodies = null,
+                    Presets = null,
+                },
+                request.TargetBody);
+        }
+
+        return expanded;
+    }
+
+    private static IEnumerable<string> EnumerateNonEmpty(IReadOnlyList<string>? values) =>
+        values?.Where(static value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase) ??
+        [];
+
+    private static string MakeSafePathSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "conversion";
+        }
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var safeChars = value
+            .Trim()
+            .Select(ch => char.IsWhiteSpace(ch) || invalidChars.Contains(ch) ? '_' : ch)
+            .ToArray();
+
+        var safe = new string(safeChars).Trim('_');
+        return string.IsNullOrWhiteSpace(safe) ? "conversion" : safe;
     }
 }
 
@@ -1760,12 +1865,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken = default,
         IProgress<BatchProgressUpdate>? progress = null)
     {
+        var variants = RequestNormalizer.Expand(request);
+
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
             var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract");
             try
             {
-                return await ConvertDirectoryMeshesAsync(request, extractedArchive, progress, cancellationToken);
+                return await ConvertDirectoryMeshesAsync(request, variants, extractedArchive, progress, cancellationToken);
             }
             finally
             {
@@ -1778,16 +1885,46 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (File.Exists(request.InputPath) || !Directory.Exists(request.InputPath))
         {
-            var single = await orchestrator.ConvertAsync(request, cancellationToken);
-            progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(request.InputPath), single.Success));
+            return await ConvertSingleInputAsync(request, variants, progress, cancellationToken);
+        }
+
+        return await ConvertDirectoryMeshesAsync(request, variants, request.InputPath, progress, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ConversionResult>> ConvertSingleInputAsync(
+        ConversionRequest originalRequest,
+        IReadOnlyList<NormalizedConversionRequest> variants,
+        IProgress<BatchProgressUpdate>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (variants.Count <= 1)
+        {
+            var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken);
+            progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(originalRequest.InputPath), single.Success));
             return [single];
         }
 
-        return await ConvertDirectoryMeshesAsync(request, request.InputPath, progress, cancellationToken);
+        var results = new List<ConversionResult>(variants.Count);
+        var fileName = Path.GetFileName(originalRequest.InputPath);
+        var armorName = Path.GetFileNameWithoutExtension(originalRequest.InputPath);
+
+        for (var index = 0; index < variants.Count; index++)
+        {
+            var variant = variants[index];
+            var variantRootOutput = BuildVariantRootOutput(originalRequest, variant, batchMode: false);
+            var variantOutput = Path.Combine(variantRootOutput, armorName);
+            var variantRequest = variant.Request with { OutputDirectory = variantOutput };
+            var result = await orchestrator.ConvertAsync(variantRequest, cancellationToken);
+            results.Add(result);
+            progress?.Report(new BatchProgressUpdate(index + 1, variants.Count, $"{fileName} [{variant.DisplayName}]", result.Success));
+        }
+
+        return results;
     }
 
     private async Task<IReadOnlyList<ConversionResult>> ConvertDirectoryMeshesAsync(
         ConversionRequest request,
+        IReadOnlyList<NormalizedConversionRequest> variants,
         string sourceDirectory,
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
@@ -1802,13 +1939,53 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             throw new InvalidDataException($"No convertible armor .nif files were found in '{request.InputPath}'.");
         }
 
-        var rootOutput = request.OutputDirectory ??
-            Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
+        if (variants.Count <= 1)
+        {
+            var variant = variants[0];
+            var rootOutput = request.OutputDirectory ??
+                Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
+            var resultsWithPaths = await ConvertMeshSetAsync(meshFiles, variant.Request, rootOutput, variants.Count, progress, cancellationToken);
+            await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
+            return resultsWithPaths.Select(x => x.Result).ToList();
+        }
 
-        var total = meshFiles.Count;
+        var total = meshFiles.Count * variants.Count;
         var completed = 0;
-        var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
+        var allResults = new List<ConversionResult>(total);
 
+        foreach (var variant in variants)
+        {
+            var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
+            var resultsWithPaths = await ConvertMeshSetAsync(
+                meshFiles,
+                variant.Request,
+                variantRootOutput,
+                total,
+                progress,
+                cancellationToken,
+                () => Interlocked.Increment(ref completed),
+                variant.DisplayName);
+
+            await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, variantRootOutput, cancellationToken);
+            allResults.AddRange(resultsWithPaths.Select(x => x.Result));
+        }
+
+        return allResults;
+    }
+
+    private async Task<IReadOnlyList<(string MeshFile, ConversionResult Result)>> ConvertMeshSetAsync(
+        IReadOnlyList<string> meshFiles,
+        ConversionRequest request,
+        string rootOutput,
+        int total,
+        IProgress<BatchProgressUpdate>? progress,
+        CancellationToken cancellationToken,
+        Func<int>? incrementCompleted = null,
+        string? variantLabel = null)
+    {
+        incrementCompleted ??= () => 1;
+
+        var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
         await Parallel.ForEachAsync(
             meshFiles,
@@ -1824,18 +2001,31 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
                 resultBag.Add((meshFile, result));
 
-                var done = Interlocked.Increment(ref completed);
-                progress?.Report(new BatchProgressUpdate(done, total, Path.GetFileName(meshFile), result.Success));
+                var done = incrementCompleted();
+                var currentLabel = Path.GetFileName(meshFile);
+                if (!string.IsNullOrWhiteSpace(variantLabel))
+                {
+                    currentLabel += $" [{variantLabel}]";
+                }
+
+                progress?.Report(new BatchProgressUpdate(done, total, currentLabel, result.Success));
             });
 
-        // Restore deterministic ordering (same as original sorted input order).
-        var resultsWithPaths = meshFiles
+        return meshFiles
             .Select(path => resultBag.First(r => string.Equals(r.MeshFile, path, StringComparison.OrdinalIgnoreCase)))
             .ToList();
+    }
 
-        await WriteBatchReportAsync(resultsWithPaths, request.TargetBody, rootOutput, cancellationToken);
+    private static string BuildVariantRootOutput(ConversionRequest originalRequest, NormalizedConversionRequest variant, bool batchMode)
+    {
+        if (!string.IsNullOrWhiteSpace(originalRequest.OutputDirectory))
+        {
+            return Path.Combine(originalRequest.OutputDirectory, variant.OutputSegment);
+        }
 
-        return resultsWithPaths.Select(x => x.Result).ToList();
+        return batchMode
+            ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
+            : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
     }
 
     private static bool IsConvertibleBatchMesh(string path)
@@ -1866,6 +2056,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     private static async Task WriteBatchReportAsync(
         IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
         string targetBody,
+        string conversionLabel,
         string rootOutput,
         CancellationToken cancellationToken)
     {
@@ -1873,6 +2064,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         var report = new
         {
+            ConversionLabel = conversionLabel,
             TargetBody = targetBody,
             TotalCount = resultsWithPaths.Count,
             SuccessCount = resultsWithPaths.Count(r => r.Result.Success),

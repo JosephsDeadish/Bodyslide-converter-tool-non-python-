@@ -11,6 +11,8 @@ public sealed class MainForm : Form
     private readonly TextBox _outputTextBox;
     private readonly ComboBox _presetComboBox;
     private readonly ComboBox _targetComboBox;
+    private readonly TextBox _presetBatchTextBox;
+    private readonly TextBox _targetBatchTextBox;
     private readonly ComboBox _profileComboBox;
     private readonly ComboBox _sourceComboBox;
     private readonly TextBox _logTextBox;
@@ -171,15 +173,14 @@ public sealed class MainForm : Form
             _presetComboBox.SelectedIndex = 0;
         }
         leftOptions.Controls.Add(_presetComboBox, 1, 0);
-        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
-        _presetDetailsLabel = new Label
+        leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        _presetBatchTextBox = new TextBox
         {
-            Anchor = AnchorStyles.Left,
-            AutoSize = true,
+            Dock = DockStyle.Fill,
+            PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
-        leftOptions.Controls.Add(_presetDetailsLabel, 1, 2);
-
-        leftOptions.Controls.Add(new Label { Text = "Target Body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        leftOptions.Controls.Add(_presetBatchTextBox, 1, 1);
+        leftOptions.Controls.Add(new Label { Text = "Target Body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -193,7 +194,21 @@ public sealed class MainForm : Form
         {
             _targetComboBox.SelectedIndex = 0;
         }
-        leftOptions.Controls.Add(_targetComboBox, 1, 1);
+        leftOptions.Controls.Add(_targetComboBox, 1, 2);
+        leftOptions.Controls.Add(new Label { Text = "Target batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _targetBatchTextBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            PlaceholderText = "Example: CBBE, 3BA, HIMBO",
+        };
+        leftOptions.Controls.Add(_targetBatchTextBox, 1, 3);
+        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        _presetDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+        };
+        leftOptions.Controls.Add(_presetDetailsLabel, 1, 4);
         conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
 
         var rightOptions = new TableLayoutPanel
@@ -462,7 +477,9 @@ public sealed class MainForm : Form
     {
         var usingPreset = _usePresetRadio.Checked;
         _presetComboBox.Enabled = usingPreset;
+        _presetBatchTextBox.Enabled = usingPreset;
         _targetComboBox.Enabled = !usingPreset;
+        _targetBatchTextBox.Enabled = !usingPreset;
         if (usingPreset && TryGetSelectedPreset(out var preset))
         {
             var targetIndex = _targetComboBox.FindStringExact(preset.TargetBody);
@@ -480,9 +497,10 @@ public sealed class MainForm : Form
         var usingPreset = _usePresetRadio.Checked;
         var preset = _presetComboBox.SelectedItem?.ToString();
         var target = _targetComboBox.SelectedItem?.ToString();
+        var selectedPresets = CombineSelections(preset, ParseDelimitedValues(_presetBatchTextBox.Text));
+        var selectedTargets = CombineSelections(target, ParseDelimitedValues(_targetBatchTextBox.Text));
         var profile = ReadOptionalComboValue(_profileComboBox);
         var sourceOverride = ReadOptionalComboValue(_sourceComboBox);
-        var effectiveTargetBody = ResolveEffectiveTargetBody(usingPreset, target);
 
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -496,33 +514,37 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (usingPreset && string.IsNullOrWhiteSpace(preset))
+        if (usingPreset && selectedPresets.Count == 0)
         {
-            MessageBox.Show(this, "Please select a preset.", "Missing preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Please select at least one preset.", "Missing preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        if (!usingPreset && string.IsNullOrWhiteSpace(target))
+        if (!usingPreset && selectedTargets.Count == 0)
         {
-            MessageBox.Show(this, "Please select a target body.", "Missing target body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Please select at least one target body.", "Missing target body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
         _statusLabel.Text = "Converting...";
-        AppendLog($"Starting conversion ({(usingPreset ? $"preset: {preset}" : $"target: {target}")})...");
+        AppendLog(usingPreset
+            ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
+            : $"Starting conversion (targets: {string.Join(", ", selectedTargets)})...");
 
         try
         {
             var request = new ConversionRequest(
                 InputPath: input,
-                TargetBody: usingPreset ? string.Empty : target!,
+                TargetBody: usingPreset ? string.Empty : selectedTargets.First(),
                 OutputDirectory: output,
-                Preset: usingPreset ? preset : null,
+                Preset: usingPreset ? selectedPresets.First() : null,
                 OutputZip: _outputZipCheckBox.Checked,
                 DeformationProfile: profile,
-                SourceBodyOverride: sourceOverride);
+                SourceBodyOverride: sourceOverride,
+                TargetBodies: !usingPreset && selectedTargets.Count > 1 ? selectedTargets : null,
+                Presets: usingPreset && selectedPresets.Count > 1 ? selectedPresets : null);
 
             var cancellationToken = _activeConversion.Token;
 
@@ -541,7 +563,7 @@ public sealed class MainForm : Form
                 cancellationToken);
             _lastOutputDirectory = GetBestOutputDirectory(results);
             _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
-            _lastBatchReportPath = GetBatchReportPath(input, output, effectiveTargetBody);
+            _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             await LoadPreviewInAppAsync(_lastPreviewPath);
 
@@ -787,9 +809,13 @@ public sealed class MainForm : Form
             return first;
         }
 
-        return Directory.Exists(first)
-            ? first
-            : Path.GetDirectoryName(first);
+        var commonRoot = FindCommonDirectory(results.Select(r => r.OutputDirectory));
+        if (!string.IsNullOrWhiteSpace(commonRoot) && Directory.Exists(commonRoot))
+        {
+            return commonRoot;
+        }
+
+        return Directory.Exists(first) ? first : Path.GetDirectoryName(first);
     }
 
     private static string? GetFirstExistingOutputFile(IReadOnlyList<ConversionResult> results, string fileName)
@@ -801,28 +827,46 @@ public sealed class MainForm : Form
                 File.Exists(path));
     }
 
-    private static string? GetBatchReportPath(string inputPath, string? outputPath, string targetBody)
+    private static string? FindCommonDirectory(IEnumerable<string> directories)
     {
-        var isBatchInput =
-            Directory.Exists(inputPath) ||
-            (File.Exists(inputPath) && IsSupportedArchivePath(inputPath));
-        if (!isBatchInput || string.IsNullOrWhiteSpace(targetBody))
+        var normalized = directories
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToArray();
+        if (normalized.Length == 0)
         {
             return null;
         }
 
-        var rootOutput = outputPath ??
-            Path.Combine(Environment.CurrentDirectory, "output", targetBody, "batch");
-        var batchReportPath = Path.Combine(rootOutput, "batch-report.json");
-        return File.Exists(batchReportPath) ? batchReportPath : null;
-    }
+        var separator = Path.DirectorySeparatorChar;
+        var candidateSegments = normalized[0]
+            .TrimEnd(separator, Path.AltDirectorySeparatorChar)
+            .Split(separator, Path.AltDirectorySeparatorChar)
+            .ToList();
 
-    private static bool IsSupportedArchivePath(string path)
-    {
-        return path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
-               path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase) ||
-               path.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase) ||
-               path.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase);
+        for (var index = 1; index < normalized.Length && candidateSegments.Count > 0; index++)
+        {
+            var comparisonSegments = normalized[index]
+                .TrimEnd(separator, Path.AltDirectorySeparatorChar)
+                .Split(separator, Path.AltDirectorySeparatorChar);
+
+            var shared = 0;
+            while (shared < candidateSegments.Count &&
+                   shared < comparisonSegments.Length &&
+                   string.Equals(candidateSegments[shared], comparisonSegments[shared], StringComparison.OrdinalIgnoreCase))
+            {
+                shared++;
+            }
+
+            candidateSegments = candidateSegments.Take(shared).ToList();
+        }
+
+        if (candidateSegments.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(separator, candidateSegments);
     }
 
     private void AppendLog(string message)
@@ -855,16 +899,6 @@ public sealed class MainForm : Form
         return !string.IsNullOrWhiteSpace(selectedPreset) && PresetCatalog.TryGet(selectedPreset, out preset);
     }
 
-    private string ResolveEffectiveTargetBody(bool usingPreset, string? customTargetBody)
-    {
-        if (usingPreset && TryGetSelectedPreset(out var preset))
-        {
-            return preset.TargetBody;
-        }
-
-        return customTargetBody ?? string.Empty;
-    }
-
     private bool InputPathExists()
     {
         var inputPath = _inputTextBox.Text.Trim();
@@ -893,5 +927,28 @@ public sealed class MainForm : Form
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
+    }
+
+    private static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+    private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
+    {
+        var combined = new List<string>();
+        if (!string.IsNullOrWhiteSpace(selectedValue))
+        {
+            combined.Add(selectedValue);
+        }
+
+        combined.AddRange(enteredValues);
+        return combined
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 }

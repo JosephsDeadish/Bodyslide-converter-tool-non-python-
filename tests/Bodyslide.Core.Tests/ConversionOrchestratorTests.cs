@@ -98,6 +98,71 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BatchRunner_ConvertsSingleNifToMultipleTargetBodies()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var request = new ConversionRequest(
+                InputPath: inputFile,
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                TargetBodies: ["CBBE", "HIMBO"]);
+
+            var results = await runner.ConvertAsync(request);
+
+            Assert.Equal(2, results.Count);
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("CBBE", Path.GetFileNameWithoutExtension(inputFile)), StringComparison.Ordinal));
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", Path.GetFileNameWithoutExtension(inputFile)), StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_ConvertsSingleNifToMultiplePresetsIntoSeparateFolders()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var request = new ConversionRequest(
+                InputPath: inputFile,
+                TargetBody: string.Empty,
+                OutputDirectory: outputDirectory,
+                Preset: "CBBE Curvy",
+                Presets: ["CBBE Curvy", "CBBE Slim"]);
+
+            var results = await runner.ConvertAsync(request);
+
+            Assert.Equal(2, results.Count);
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("CBBE_Curvy", Path.GetFileNameWithoutExtension(inputFile)), StringComparison.Ordinal));
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("CBBE_Slim", Path.GetFileNameWithoutExtension(inputFile)), StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInZipArchive()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
