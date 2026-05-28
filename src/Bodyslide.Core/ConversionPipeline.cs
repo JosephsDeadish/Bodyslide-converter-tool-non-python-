@@ -3863,7 +3863,10 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         byte[]? pendingExtendedPrefix = null;
         bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
         bool sawModl = false;
+        bool sawMod2 = false;
+        bool sawMod3 = false;
         string? generatedModlPath = null;
+        string? generatedWorldModelPath = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3893,6 +3896,14 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 {
                     sawModl = true;
                 }
+                else if (isArmo && string.Equals(subType, "MOD2", StringComparison.Ordinal))
+                {
+                    sawMod2 = true;
+                }
+                else if (isArmo && string.Equals(subType, "MOD3", StringComparison.Ordinal))
+                {
+                    sawMod3 = true;
+                }
 
                 // Read null-terminated ASCII path string from the subrecord data.
                 int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, effectiveSubSize);
@@ -3909,6 +3920,13 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
                     WriteSubrecordWithExtendedSize(ms, subType, newBytes);
                     rewritten++;
+
+                    if (isArmo &&
+                        generatedWorldModelPath is null &&
+                        string.Equals(subType, "MODL", StringComparison.Ordinal))
+                    {
+                        generatedWorldModelPath = newPath;
+                    }
 
                     if (isArmo &&
                         generatedModlPath is null &&
@@ -3958,6 +3976,22 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
             var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
             WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
             rewritten++;
+        }
+
+        if (isArmo && !string.IsNullOrWhiteSpace(generatedWorldModelPath))
+        {
+            var worldModelBytes = System.Text.Encoding.ASCII.GetBytes(generatedWorldModelPath + '\0');
+            if (!sawMod2)
+            {
+                WriteSubrecordWithExtendedSize(ms, "MOD2", worldModelBytes);
+                rewritten++;
+            }
+
+            if (!sawMod3)
+            {
+                WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                rewritten++;
+            }
         }
 
         return (ms.ToArray(), rewritten);
@@ -4738,7 +4772,10 @@ internal static class PatchPluginWriter
         byte[]? pendingExtendedPrefix = null;
         bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
         bool sawModl = false;
+        bool sawMod2 = false;
+        bool sawMod3 = false;
         string? generatedModlPath = null;
+        string? generatedWorldModelPath = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -4768,6 +4805,14 @@ internal static class PatchPluginWriter
                 {
                     sawModl = true;
                 }
+                else if (isArmo && string.Equals(subTag, "MOD2", StringComparison.Ordinal))
+                {
+                    sawMod2 = true;
+                }
+                else if (isArmo && string.Equals(subTag, "MOD3", StringComparison.Ordinal))
+                {
+                    sawMod3 = true;
+                }
 
                 int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, effectiveSubSize);
                 int strLen   = nullIdx >= 0 ? nullIdx : effectiveSubSize;
@@ -4782,6 +4827,13 @@ internal static class PatchPluginWriter
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
                     WriteSubrecordWithExtendedSize(ms, subTag, newBytes);
                     rewritten++;
+
+                    if (isArmo &&
+                        generatedWorldModelPath is null &&
+                        string.Equals(subTag, "MODL", StringComparison.Ordinal))
+                    {
+                        generatedWorldModelPath = newPath;
+                    }
 
                     if (isArmo &&
                         generatedModlPath is null &&
@@ -4830,6 +4882,22 @@ internal static class PatchPluginWriter
             var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
             WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
             rewritten++;
+        }
+
+        if (isArmo && !string.IsNullOrWhiteSpace(generatedWorldModelPath))
+        {
+            var worldModelBytes = System.Text.Encoding.ASCII.GetBytes(generatedWorldModelPath + '\0');
+            if (!sawMod2)
+            {
+                WriteSubrecordWithExtendedSize(ms, "MOD2", worldModelBytes);
+                rewritten++;
+            }
+
+            if (!sawMod3)
+            {
+                WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                rewritten++;
+            }
         }
 
         return (ms.ToArray(), rewritten);

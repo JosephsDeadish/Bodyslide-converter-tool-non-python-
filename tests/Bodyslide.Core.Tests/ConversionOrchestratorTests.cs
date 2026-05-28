@@ -4565,6 +4565,25 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
+    public void RewriteArmaSubrecords_ArmoWithOnlyModl_SynthesizesMissingMod2Mod3()
+    {
+        byte[] modl = BuildSubrecord("MODL",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_gnd.nif\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_gnd.nif"] = "meshes/slidesmith/cbbe/iron_gnd.nif"
+        };
+
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            modl, 0, modl.Length, rewriteMap, "ARMO");
+
+        Assert.Equal(3, rewritten); // MODL rewrite + synthesized MOD2 + synthesized MOD3
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MODL"));
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MOD2"));
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MOD3"));
+    }
+
+    [Fact]
     public void RewriteArmaSubrecords_EmptyData_ReturnsUnchanged()
     {
         var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -5634,6 +5653,24 @@ public sealed class PatchPluginWriterTests
         Assert.Equal(2, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_w.nif"));
     }
 
+    [Fact]
+    public void RewriteArmaData_ArmoWithOnlyModl_GeneratesMissingMod2Mod3()
+    {
+        byte[] modl = BuildSubrecord("MODL",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_ground.nif\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_ground.nif"] = "meshes/slidesmith/cbbe/iron_ground.nif"
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(modl, rewriteMap, "ARMO");
+
+        Assert.Equal(3, rewritten); // MODL rewrite + synthesized MOD2 + synthesized MOD3
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_ground.nif", "MODL"));
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_ground.nif", "MOD2"));
+        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_ground.nif", "MOD3"));
+    }
+
     // ── BuildPatchPlugin ──────────────────────────────────────────────────────
 
     [Fact]
@@ -5976,7 +6013,7 @@ public sealed class PatchPluginWriterTests
         buf[offset + 3] = (byte)(value >> 24);
     }
 
-    private static int CountSubrecordPathOccurrences(byte[] recordData, string expectedPath)
+    private static int CountSubrecordPathOccurrences(byte[] recordData, string expectedPath, string? tagFilter = null)
     {
         var count = 0;
         var pos = 0;
@@ -5991,7 +6028,9 @@ public sealed class PatchPluginWriterTests
             }
 
             var tag = System.Text.Encoding.ASCII.GetString(recordData, pos, 4);
-            if (size > 0 && (tag == "MOD2" || tag == "MOD3" || tag == "MODL"))
+            if (size > 0 &&
+                (tag == "MOD2" || tag == "MOD3" || tag == "MODL") &&
+                (tagFilter is null || string.Equals(tag, tagFilter, StringComparison.Ordinal)))
             {
                 var path = System.Text.Encoding.ASCII.GetString(recordData, pos + 6, size).TrimEnd('\0').Replace('\\', '/');
                 if (path.Equals(expected, StringComparison.OrdinalIgnoreCase))

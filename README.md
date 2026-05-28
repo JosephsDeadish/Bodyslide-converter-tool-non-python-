@@ -178,6 +178,8 @@ Implemented from issue scope:
 
 - **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
 
+- **ARMO world-model completion from `MODL`** — when an ARMO record includes a rewritten `MODL` ground mesh but is missing `MOD2` and/or `MOD3`, plugin rewrite now auto-appends the missing world model subrecord(s) from that rewritten `MODL` path so inventory/world model lookups stay valid for both male and female model entries
+
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
 ## Current built-in presets (36 total)
