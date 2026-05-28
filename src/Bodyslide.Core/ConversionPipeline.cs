@@ -1377,7 +1377,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             _ => profileField
         };
 
-        var solverRefinedMorphing = ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
+        var solverRefinedMorphing = !string.IsNullOrWhiteSpace(sourceBody)
+            ? regionalMorphing
+            : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing));
     }
 
@@ -1403,7 +1405,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static IReadOnlyDictionary<string, double> ApplyRegionAwareSolver(IReadOnlyDictionary<string, double> field, string meshType)
     {
-        if (field.Count == 0)
+        if (field.Count == 0 || meshType.Equals("mixed", StringComparison.OrdinalIgnoreCase))
         {
             return field;
         }
