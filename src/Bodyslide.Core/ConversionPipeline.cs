@@ -3361,38 +3361,39 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 totalRead += n;
             }
 
-            /// <summary>
-            /// Compresses rewritten record data back into Bethesda's compressed-record payload format:
-            /// uint32LE uncompressed-size prefix + zlib-compressed bytes.
-            /// </summary>
-            private static byte[]? TryCompressRecord(
-                byte[] uncompressedData, List<string> warnings, string recordTag)
-            {
-                try
-                {
-                    using var compressedStream = new MemoryStream();
-                    using (var zlib = new ZLibStream(compressedStream, CompressionLevel.Fastest, leaveOpen: true))
-                    {
-                        zlib.Write(uncompressedData, 0, uncompressedData.Length);
-                    }
-
-                    var compressedBytes = compressedStream.ToArray();
-                    var payload = new byte[4 + compressedBytes.Length];
-                    BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)uncompressedData.Length);
-                    compressedBytes.CopyTo(payload, 4);
-                    return payload;
-                }
-                catch (Exception ex)
-                {
-                    warnings.Add($"Could not compress {recordTag} record after patching: {ex.Message}");
-                    return null;
-                }
-            }
             return totalRead > 0 ? result : null;
         }
         catch (Exception ex)
         {
             warnings.Add($"Could not decompress {recordTag} record at offset {offset}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Compresses rewritten record data back into Bethesda's compressed-record payload format:
+    /// uint32LE uncompressed-size prefix + zlib-compressed bytes.
+    /// </summary>
+    private static byte[]? TryCompressRecord(
+        byte[] uncompressedData, List<string> warnings, string recordTag)
+    {
+        try
+        {
+            using var compressedStream = new MemoryStream();
+            using (var zlib = new ZLibStream(compressedStream, CompressionLevel.Fastest, leaveOpen: true))
+            {
+                zlib.Write(uncompressedData, 0, uncompressedData.Length);
+            }
+
+            var compressedBytes = compressedStream.ToArray();
+            var payload = new byte[4 + compressedBytes.Length];
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)uncompressedData.Length);
+            compressedBytes.CopyTo(payload, 4);
+            return payload;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Could not compress {recordTag} record after patching: {ex.Message}");
             return null;
         }
     }

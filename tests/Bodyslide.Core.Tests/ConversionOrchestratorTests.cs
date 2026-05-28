@@ -3609,6 +3609,35 @@ public sealed class BinaryPluginRewriteServiceTests
         return [..tes4, ..grup];
     }
 
+    /// <summary>
+    /// Builds a record with <paramref name="tag"/> whose payload is the zlib-compressed form of
+    /// <paramref name="uncompressedData"/> (FlagCompressed bit 18 = 0x00040000 set in header flags).
+    /// </summary>
+    private static byte[] BuildCompressedRecord(byte[] uncompressedData, string tag, int headerSize = 24)
+    {
+        byte[] compressed;
+        using (var ms = new MemoryStream())
+        {
+            using var zlib = new System.IO.Compression.ZLibStream(
+                ms, System.IO.Compression.CompressionLevel.Fastest);
+            zlib.Write(uncompressedData, 0, uncompressedData.Length);
+            zlib.Close();
+            compressed = ms.ToArray();
+        }
+
+        var payload = new byte[4 + compressed.Length];
+        WriteUInt32Le(payload, 0, (uint)uncompressedData.Length);
+        compressed.CopyTo(payload, 4);
+
+        var buf = new byte[headerSize + payload.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)payload.Length);
+        WriteUInt32Le(buf, 8, 0x00040000u);  // FlagCompressed
+        WriteUInt32Le(buf, 12, 0x00000001u); // FormID
+        payload.CopyTo(buf, headerSize);
+        return buf;
+    }
+
     private static void WriteUInt32Le(byte[] buf, int offset, uint value)
     {
         buf[offset]     = (byte)(value);
