@@ -740,7 +740,9 @@ public sealed class ConversionOrchestratorTests
         IExportService? exporter = null,
         ISkeletonMappingService? skeletonMapper = null,
         IPluginAnalysisService? pluginAnalyzer = null,
-        IRaceCompatibilityService? raceCompatService = null) =>
+        IRaceCompatibilityService? raceCompatService = null,
+        INormalRecalculationService? normalRecalcService = null,
+        IWeightSolverService? weightSolverService = null) =>
         new(
             new TestImporter(),
             new TestDetector(),
@@ -762,7 +764,9 @@ public sealed class ConversionOrchestratorTests
             new TestArmorRegionBindingService(),
             new TestPoseSimulationService(),
             exporter ?? new TestExporter(),
-            raceCompatService ?? new BasicRaceCompatibilityService());
+            raceCompatService ?? new BasicRaceCompatibilityService(),
+            normalRecalcService: normalRecalcService,
+            weightSolverService: weightSolverService);
 
     private sealed class TestImporter : IArmorImportService
     {
@@ -1320,6 +1324,369 @@ public sealed class ConversionOrchestratorTests
                     new PluginArmorAddon("ARMA", [], 0x100, "NordAddon", [30], RaceFormId: 0x00013742u), // NordRace
                 ],
                 PatchGuidance: string.Empty));
+    }
+
+    // -------------------------------------------------------------------------
+    // Gap 6 — Normal recalculation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ConvertAsync_WithNormalRecalcService_EmitsNormalsStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                normalRecalcService: new BasicNormalRecalculationService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.StartsWith("normals:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutNormalRecalcService_DoesNotEmitNormalsStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                normalRecalcService: null);
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Steps, s => s.StartsWith("normals:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicNormalRecalculationService_ReturnsAngleWeightedMethod()
+    {
+        var mesh = new ConvertedMesh(
+            MeshType: "cloth",
+            Strategy: "test",
+            MeshCount: 1,
+            RegionalMorphing: new Dictionary<string, double> { ["torso"] = 0.5 });
+
+        var svc = new BasicNormalRecalculationService();
+        var result = await svc.RecalculateAsync(mesh, CancellationToken.None);
+
+        Assert.Equal("angle-weighted", result.SmoothingMethod);
+    }
+
+    [Fact]
+    public async Task BasicNormalRecalculationService_RecalculatedCountIsPositive()
+    {
+        var mesh = new ConvertedMesh(
+            MeshType: "plate",
+            Strategy: "test",
+            MeshCount: 2,
+            RegionalMorphing: new Dictionary<string, double>());
+
+        var svc = new BasicNormalRecalculationService();
+        var result = await svc.RecalculateAsync(mesh, CancellationToken.None);
+
+        Assert.True(result.RecalculatedCount > 0);
+    }
+
+    [Fact]
+    public async Task BasicNormalRecalculationService_PlateHasMoreSmoothingGroupsThanCloth()
+    {
+        var clothMesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+        var plateMesh = new ConvertedMesh("plate", "test", 1, new Dictionary<string, double>());
+
+        var svc = new BasicNormalRecalculationService();
+        var clothResult = await svc.RecalculateAsync(clothMesh, CancellationToken.None);
+        var plateResult = await svc.RecalculateAsync(plateMesh, CancellationToken.None);
+
+        Assert.True(plateResult.SmoothingGroupCount > clothResult.SmoothingGroupCount);
+    }
+
+    [Fact]
+    public async Task BasicNormalRecalculationService_MultiPartMeshScalesCount()
+    {
+        var single = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+        var multi  = new ConvertedMesh("cloth", "test", 3, new Dictionary<string, double>());
+
+        var svc = new BasicNormalRecalculationService();
+        var singleResult = await svc.RecalculateAsync(single, CancellationToken.None);
+        var multiResult  = await svc.RecalculateAsync(multi, CancellationToken.None);
+
+        Assert.True(multiResult.RecalculatedCount > singleResult.RecalculatedCount);
+    }
+
+    [Fact]
+    public async Task BasicNormalRecalculationService_MorphRegionsIncreaseCount()
+    {
+        var noMorphs   = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+        var withMorphs = new ConvertedMesh("cloth", "test", 1,
+            new Dictionary<string, double> { ["torso"] = 0.3, ["arms"] = 0.2, ["legs"] = 0.5 });
+
+        var svc = new BasicNormalRecalculationService();
+        var noResult   = await svc.RecalculateAsync(noMorphs, CancellationToken.None);
+        var withResult = await svc.RecalculateAsync(withMorphs, CancellationToken.None);
+
+        Assert.True(withResult.RecalculatedCount > noResult.RecalculatedCount);
+    }
+
+    [Fact]
+    public async Task NormalsStep_ContainsSmoothingMethodAndGroupCount()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                normalRecalcService: new BasicNormalRecalculationService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            var normalsStep = result.Steps.FirstOrDefault(s => s.StartsWith("normals:", StringComparison.Ordinal));
+            Assert.NotNull(normalsStep);
+            Assert.Contains("angle-weighted", normalsStep, StringComparison.Ordinal);
+            Assert.Contains("groups=", normalsStep, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Gap 7 — Weight solver / normalization
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ConvertAsync_WithWeightSolverService_EmitsWeightSolverStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                weightSolverService: new BasicWeightSolverService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s =>
+                s.StartsWith("weight-solver:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutWeightSolverService_DoesNotEmitWeightSolverStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                weightSolverService: null);
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Steps, s => s.StartsWith("weight-solver:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicWeightSolverService_PlateArmorReportsOverweightFixes()
+    {
+        var mesh = new WeightedMesh(
+            MeshType: "plate",
+            WeightProfile: "CBBE",
+            PhysicsWeightsTransferred: false,
+            SourceSmpBones: []);
+
+        var svc = new BasicWeightSolverService();
+        var report = await svc.SolveAsync(mesh, CancellationToken.None);
+
+        Assert.True(report.FixedOverweightCount > 0);
+    }
+
+    [Fact]
+    public async Task BasicWeightSolverService_ClothArmorReportsUnderweightFixes()
+    {
+        var mesh = new WeightedMesh(
+            MeshType: "cloth",
+            WeightProfile: "CBBE",
+            PhysicsWeightsTransferred: false,
+            SourceSmpBones: []);
+
+        var svc = new BasicWeightSolverService();
+        var report = await svc.SolveAsync(mesh, CancellationToken.None);
+
+        Assert.True(report.FixedUnderweightCount > 0);
+    }
+
+    [Fact]
+    public async Task BasicWeightSolverService_PhysicsMeshHasHigherDefectCount()
+    {
+        var noPhysics   = new WeightedMesh("cloth", "CBBE", false, []);
+        var withPhysics = new WeightedMesh("cloth", "CBBE", true, []);
+
+        var svc = new BasicWeightSolverService();
+        var noPhysicsReport   = await svc.SolveAsync(noPhysics,   CancellationToken.None);
+        var withPhysicsReport = await svc.SolveAsync(withPhysics, CancellationToken.None);
+
+        Assert.True(
+            withPhysicsReport.FixedOverweightCount + withPhysicsReport.FixedUnderweightCount >
+            noPhysicsReport.FixedOverweightCount   + noPhysicsReport.FixedUnderweightCount);
+    }
+
+    [Fact]
+    public async Task BasicWeightSolverService_WasRepairedTrueWhenDefectsExist()
+    {
+        var mesh = new WeightedMesh("plate", "CBBE", false, []);
+
+        var svc = new BasicWeightSolverService();
+        var report = await svc.SolveAsync(mesh, CancellationToken.None);
+
+        Assert.True(report.WasRepaired);
+    }
+
+    [Fact]
+    public async Task WeightSolverStep_RepairedMesh_ContainsFixedCounts()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                weightSolverService: new BasicWeightSolverService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            var solverStep = result.Steps.FirstOrDefault(s => s.StartsWith("weight-solver:", StringComparison.Ordinal));
+            Assert.NotNull(solverStep);
+            // For a non-ok step the detail fields must be present
+            if (!solverStep!.Equals("weight-solver:ok", StringComparison.Ordinal))
+            {
+                Assert.Contains("fixed-over=", solverStep, StringComparison.Ordinal);
+                Assert.Contains("fixed-under=", solverStep, StringComparison.Ordinal);
+                Assert.Contains("disconnected=", solverStep, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WeightSolverStep_AppearsBeforeSkeletonMappingStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                weightSolverService: new BasicWeightSolverService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            var steps = result.Steps.ToList();
+            var solverIdx  = steps.FindIndex(s => s.StartsWith("weight-solver:", StringComparison.Ordinal));
+            var skeletonIdx = steps.FindIndex(s => s.StartsWith("skeleton:", StringComparison.Ordinal));
+
+            Assert.True(solverIdx >= 0, "weight-solver step not found");
+            Assert.True(skeletonIdx >= 0, "skeleton step not found");
+            Assert.True(solverIdx < skeletonIdx, "weight-solver must appear before skeleton step");
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NormalsStep_AppearsAfterWeightSolverStep()
+    {
+        var inputFile = Path.GetTempFileName() + ".nif";
+        File.WriteAllText(inputFile, "dummy");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                normalRecalcService: new BasicNormalRecalculationService(),
+                weightSolverService: new BasicWeightSolverService());
+
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            var steps = result.Steps.ToList();
+            var solverIdx  = steps.FindIndex(s => s.StartsWith("weight-solver:", StringComparison.Ordinal));
+            var normalsIdx = steps.FindIndex(s => s.StartsWith("normals:", StringComparison.Ordinal));
+
+            Assert.True(solverIdx >= 0, "weight-solver step not found");
+            Assert.True(normalsIdx >= 0, "normals step not found");
+            Assert.True(normalsIdx > solverIdx, "normals step must appear after weight-solver step");
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory, recursive: true);
+        }
     }
 }
 
