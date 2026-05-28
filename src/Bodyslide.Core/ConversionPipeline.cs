@@ -1296,12 +1296,13 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken)
     {
         var meshFiles = Directory.GetFiles(sourceDirectory, "*.nif", SearchOption.AllDirectories)
+            .Where(IsConvertibleBatchMesh)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (meshFiles.Count == 0)
         {
-            throw new InvalidDataException($"No .nif files were found in '{request.InputPath}'.");
+            throw new InvalidDataException($"No convertible armor .nif files were found in '{request.InputPath}'.");
         }
 
         var rootOutput = request.OutputDirectory ??
@@ -1319,6 +1320,31 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         await WriteBatchReportAsync(resultsWithPaths, request.TargetBody, rootOutput, cancellationToken);
 
         return resultsWithPaths.Select(x => x.Result).ToList();
+    }
+
+    private static bool IsConvertibleBatchMesh(string path)
+    {
+        if (!Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        if (fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("reference", StringComparison.OrdinalIgnoreCase) ||
+            fileName.StartsWith("femalebody", StringComparison.OrdinalIgnoreCase) ||
+            fileName.StartsWith("malebody", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedPath = path.Replace('\\', '/');
+        return !normalizedPath.Contains("/actors/character/character assets/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task WriteBatchReportAsync(

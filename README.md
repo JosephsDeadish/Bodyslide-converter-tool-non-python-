@@ -128,6 +128,7 @@ When a matching cache entry exists in the selected output folder for the same ar
 
 Implemented from issue scope:
 - import scan across single mesh, folder, and zip archive
+- batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
 - body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
 - plugin scan, texture summary (6 DDS categories), vanilla armor lookup (65+ entries), voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
