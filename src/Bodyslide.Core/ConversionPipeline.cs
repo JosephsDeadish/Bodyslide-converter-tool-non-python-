@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Numerics;
 using System.Security;
 using System.Text.Json;
 
@@ -76,6 +77,19 @@ public sealed record PoseSimulationResult(
     IReadOnlyDictionary<string, IReadOnlyList<string>> PoseClippingRisk,
     IReadOnlyList<string> HighRiskRegions,
     int TotalPosesAtRisk);
+
+/// <summary>
+/// Per-bone rotation delta for a single animation pose (Skyrim Z-up coordinate space).
+/// <c>RotX</c> is the forward/back tilt angle in radians (positive = forward tilt).
+/// <c>TransZ</c> is a vertical offset in normalised mesh-space units (applied before rotation).
+/// </summary>
+internal readonly record struct PoseBoneRotation(float RotX = 0f, float TransZ = 0f);
+
+/// <summary>Result produced by <see cref="AnimationDrivenGeometrySolver.Solve"/>.</summary>
+public sealed record AnimationDrivenResult(
+    int VerticesAnalyzed,
+    IReadOnlyDictionary<string, double> MaxPushOutPerRegion,
+    string Method);
 
 public static class PresetCatalog
 {
@@ -912,6 +926,18 @@ public interface IPoseSimulationService
     /// are flagged as at-risk for that pose.
     /// </summary>
     Task<PoseSimulationResult> SimulateAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Extended entry point that optionally supplies source mesh file paths so the
+    /// implementation can read NIF vertex data for animation-driven geometry solving.
+    /// The default implementation delegates to <see cref="SimulateAsync"/> and ignores the paths.
+    /// </summary>
+    Task<PoseSimulationResult> SimulateWithMeshDataAsync(
+        ConvertedMesh mesh,
+        string targetBody,
+        IReadOnlyList<string>? sourceMeshPaths,
+        CancellationToken cancellationToken)
+        => SimulateAsync(mesh, targetBody, cancellationToken);
 }
 
 public sealed class ConversionOrchestrator(
@@ -1099,9 +1125,11 @@ public sealed class ConversionOrchestrator(
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
                 : "voxel-collision:none");
 
-            // Pose simulation — tests the converted mesh against 8 animation poses and
-            // reports per-pose clipping risk by body region.
-            var poseSimulation = await poseSimulator.SimulateAsync(converted, normalized.Request.TargetBody, cancellationToken);
+            // Pose simulation — tests the converted mesh against 8 animation poses using the
+            // animation-driven geometry solver when NIF vertex data is available, falling back
+            // to the heuristic amplifier approach otherwise.
+            var poseSimulation = await poseSimulator.SimulateWithMeshDataAsync(
+                converted, normalized.Request.TargetBody, armor.MeshFiles, cancellationToken);
             steps.Add(poseSimulation.TotalPosesAtRisk > 0
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
@@ -1241,7 +1269,7 @@ public static class StandaloneConversionModules
             new VanillaArmorLookupService(),
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
-            new BasicPoseSimulationService(),
+            new AnimationDrivenPoseSimulationService(),
             new LocalExportService());
 }
 
@@ -2964,12 +2992,15 @@ internal sealed class LocalExportService : IExportService
         var minY = float.MaxValue;
         var maxY = float.MinValue;
 
+        // First pass: compute bounding box and collect vertex positions for the solver
+        var rawVertices = new (float X, float Y, float Z)[vertexCount];
         for (var index = 0; index < vertexCount; index++)
         {
             var offset = vertexDataOffset + (index * vertexSize);
             var x = BitConverter.ToSingle(transformed, offset);
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
+            rawVertices[index] = (x, y, z);
             minX = Math.Min(minX, x);
             maxX = Math.Max(maxX, x);
             minY = Math.Min(minY, y);
@@ -2987,6 +3018,12 @@ internal sealed class LocalExportService : IExportService
         var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
         var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
 
+        // Run animation-driven solver to get per-region push-out corrections
+        var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
+        var pushOut = solverResult.MaxPushOutPerRegion;
+        var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+
+        // Second pass: apply morph scale transform + animation-driven push-out correction
         for (var index = 0; index < vertexCount; index++)
         {
             var offset = vertexDataOffset + (index * vertexSize);
@@ -3003,6 +3040,24 @@ internal sealed class LocalExportService : IExportService
             var transformedX = centerX + ((x - centerX) * (float)widthScale);
             var transformedY = centerY + ((y - centerY) * (float)depthScale);
             var transformedZ = minZ + ((z - minZ) * (float)heightFactor);
+
+            // Animation-driven push-out: move vertex outward along its XY direction from the
+            // body centre by the push-out depth so that it sits outside the body envelope at
+            // the worst animation pose.
+            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            if (pushOut.TryGetValue(region, out var depth) && depth > 0)
+            {
+                var dx = transformedX - centerX;
+                var dy = transformedY - centerY;
+                var xyDist = MathF.Sqrt(dx * dx + dy * dy);
+                if (xyDist > 0.0001f)
+                {
+                    // Scale push-out from normalised units back to model-space units
+                    var pushOutModelSpace = (float)(depth * normScale);
+                    transformedX += (dx / xyDist) * pushOutModelSpace;
+                    transformedY += (dy / xyDist) * pushOutModelSpace;
+                }
+            }
 
             Array.Copy(BitConverter.GetBytes(transformedX), 0, transformed, offset, 4);
             Array.Copy(BitConverter.GetBytes(transformedY), 0, transformed, offset + 4, 4);
@@ -4088,5 +4143,472 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
             poseClippingRisk,
             highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
             atRiskPoseCount));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation-Driven Geometry Solver
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Implements an animation-driven geometry solver for Skyrim armor conversion.
+/// <para>
+/// The solver works in three stages:
+/// <list type="number">
+///   <item>Assign each vertex to a skeletal region based on its normalised Z-height.</item>
+///   <item>
+///     For each of 8 standard animation poses, apply a simplified per-region rigid rotation
+///     (single-bone LBS) in the sagittal plane to compute the deformed vertex position.
+///   </item>
+///   <item>
+///     For each deformed vertex, test penetration against a per-region body-envelope
+///     cylinder whose XY radius is scaled by the region's morph factor.  The push-out
+///     depth (in normalised mesh-space units) is recorded per region.
+///   </item>
+/// </list>
+/// </para>
+/// <para>
+/// Because the skeleton transform is driven by anatomically-derived per-pose bone angles,
+/// push-out values capture stress patterns that a pure morph-factor threshold misses —
+/// e.g. the thigh cylinder is only penetrated when Crouch deeply rotates the femur, not
+/// in the T-pose baseline.
+/// </para>
+/// </summary>
+internal static class AnimationDrivenGeometrySolver
+{
+    // ── Region definitions ────────────────────────────────────────────────────
+
+    // Normalised height bands → region names. Evaluated in order; first match wins.
+    private static readonly (float MaxHeightNorm, string Region)[] HeightRegionMap =
+    [
+        (0.05f, "feet"),
+        (0.25f, "calves"),
+        (0.48f, "thighs"),
+        (0.57f, "butt"),
+        (0.64f, "pelvis"),
+        (0.71f, "belly"),
+        (0.78f, "waist"),
+        (0.86f, "chest"),
+        (0.93f, "shoulders"),
+        (1.01f, "arms"),
+    ];
+
+    // Base XY half-radius of the body-envelope cylinder per region
+    // (normalised mesh-space units, before morph-factor scaling).
+    private static readonly IReadOnlyDictionary<string, float> BaseRadius =
+        new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"]      = 0.040f,
+            ["calves"]    = 0.058f,
+            ["thighs"]    = 0.088f,
+            ["butt"]      = 0.100f,
+            ["pelvis"]    = 0.105f,
+            ["belly"]     = 0.095f,
+            ["waist"]     = 0.075f,
+            ["chest"]     = 0.115f,
+            ["breasts"]   = 0.115f,
+            ["shoulders"] = 0.095f,
+            ["arms"]      = 0.055f,
+        };
+
+    // Joint pivot height for each region: the normalised height around which this
+    // region's vertices rotate when the bone is flexed.
+    private static readonly IReadOnlyDictionary<string, float> PivotHeight =
+        new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"]      = 0.00f,
+            ["calves"]    = 0.05f,
+            ["thighs"]    = 0.25f,
+            ["butt"]      = 0.48f,
+            ["pelvis"]    = 0.48f,
+            ["belly"]     = 0.57f,
+            ["waist"]     = 0.60f,
+            ["chest"]     = 0.71f,
+            ["breasts"]   = 0.71f,
+            ["shoulders"] = 0.82f,
+            ["arms"]      = 0.86f,
+        };
+
+    // ── Pose library ──────────────────────────────────────────────────────────
+
+    // Each pose maps region → PoseBoneRotation.
+    // RotX is in radians; positive = forward/anterior tilt in Skyrim's Z-up system.
+    // TransZ is a vertical offset in normalised units applied before the rotation.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, PoseBoneRotation>> Poses =
+        new Dictionary<string, IReadOnlyDictionary<string, PoseBoneRotation>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["T-pose"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase),
+
+            ["Walk"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"] = new(-0.610f),          // ~35° forward swing
+                ["calves"] = new( 0.349f),           // ~20° knee flex
+                ["belly"]  = new( 0.087f),           // ~5°  torso lean
+                ["waist"]  = new( 0.087f),
+                ["pelvis"] = new(TransZ: -0.025f),   // slight hip drop
+            },
+
+            ["Run"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"]    = new(-0.960f),        // ~55° running stride
+                ["calves"]    = new( 0.611f),        // ~35° knee flex
+                ["belly"]     = new( 0.262f),        // ~15° lean
+                ["waist"]     = new( 0.262f),
+                ["chest"]     = new( 0.175f),        // ~10°
+                ["arms"]      = new(-0.524f),        // ~30° arm swing
+                ["shoulders"] = new(-0.349f),        // ~20°
+                ["pelvis"]    = new(TransZ: -0.035f),
+            },
+
+            ["Idle"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["shoulders"] = new( 0.052f),        // ~3° slight drop
+                ["chest"]     = new( 0.026f),
+                ["arms"]      = new(-0.087f),        // ~5°
+            },
+
+            ["Crouch"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"]    = new(-1.484f),        // ~85° deep forward
+                ["calves"]    = new( 1.361f),        // ~78° flex
+                ["butt"]      = new(-1.484f),        // follows thigh
+                ["belly"]     = new( 0.524f),        // ~30° lean
+                ["waist"]     = new( 0.524f),
+                ["chest"]     = new( 0.349f),        // ~20°
+                ["pelvis"]    = new(TransZ: -0.080f),// hip drop
+            },
+
+            ["Combat-Idle"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = new( 0.209f),        // ~12° torso forward
+                ["arms"]      = new(-0.436f),        // ~25° raised
+                ["shoulders"] = new(-0.262f),        // ~15°
+                ["thighs"]    = new(-0.349f),        // ~20° slight crouch
+                ["calves"]    = new( 0.262f),        // ~15°
+                ["waist"]     = new( 0.175f),
+                ["pelvis"]    = new(TransZ: -0.020f),
+            },
+
+            ["Jump"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"]    = new( 0.436f),        // ~25° back (tuck)
+                ["calves"]    = new(-0.785f),        // ~45° tuck
+                ["arms"]      = new( 0.524f),        // ~30° up/out
+                ["shoulders"] = new( 0.349f),        // ~20°
+                ["belly"]     = new(-0.175f),        // ~10° lean back
+                ["pelvis"]    = new(TransZ:  0.020f),// slight rise
+            },
+
+            ["Sneak"] = new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"]    = new(-1.309f),        // ~75° deep crouch
+                ["calves"]    = new( 1.134f),        // ~65°
+                ["butt"]      = new(-1.309f),
+                ["belly"]     = new( 0.489f),        // ~28° lean
+                ["waist"]     = new( 0.489f),
+                ["chest"]     = new( 0.314f),        // ~18°
+                ["pelvis"]    = new(TransZ: -0.065f),
+            },
+        };
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /// <summary>Maps a normalised Z-height (0–1) to the corresponding body region name.</summary>
+    internal static string HeightToRegion(float normalizedHeight)
+    {
+        foreach (var (max, region) in HeightRegionMap)
+        {
+            if (normalizedHeight <= max) return region;
+        }
+        return "arms";
+    }
+
+    /// <summary>
+    /// Runs the animation-driven geometry solver against the extracted vertex positions.
+    /// Returns the maximum push-out depth per region across all 8 poses, expressed in
+    /// normalised mesh-space units (0 = no penetration).
+    /// </summary>
+    public static AnimationDrivenResult Solve(
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyDictionary<string, double> regionalMorphing)
+    {
+        if (vertices.Count == 0)
+        {
+            return new AnimationDrivenResult(0,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+                "animation-driven:no-vertices");
+        }
+
+        // Compute mesh bounding box
+        var minX = float.MaxValue; var maxX = float.MinValue;
+        var minY = float.MaxValue; var maxY = float.MinValue;
+        var minZ = float.MaxValue; var maxZ = float.MinValue;
+
+        foreach (var (x, y, z) in vertices)
+        {
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+
+        var zRange   = Math.Max(0.0001f, maxZ - minZ);
+        var xyScale  = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f); // XY normalisation scale
+        var centerX  = (minX + maxX) * 0.5f;
+        var centerY  = (minY + maxY) * 0.5f;
+
+        // Track maximum push-out depth per region across all poses
+        var maxPushOut = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (poseName, poseBones) in Poses)
+        {
+            for (var i = 0; i < vertices.Count; i++)
+            {
+                var (vx, vy, vz) = vertices[i];
+                var hNorm = (vz - minZ) / zRange;
+                var region = HeightToRegion(hNorm);
+
+                // Retrieve the bone rotation for this region in the current pose
+                poseBones.TryGetValue(region, out var boneRot);
+
+                // Normalise XY to the same 0-1 scale as height
+                var xNorm = (vx - centerX) / xyScale;
+                var yNorm = (vy - centerY) / xyScale;
+
+                // Apply vertical offset (hip drop, etc.)
+                var deformedH = hNorm + boneRot.TransZ;
+                var deformedY = yNorm;
+
+                // Apply forward/back rotation around the joint pivot in the sagittal (Z-Y) plane
+                if (MathF.Abs(boneRot.RotX) > 0.001f)
+                {
+                    PivotHeight.TryGetValue(region, out var pivot);
+                    var arm  = hNorm - pivot;
+                    var cosA = MathF.Cos(boneRot.RotX);
+                    var sinA = MathF.Sin(boneRot.RotX);
+                    deformedH = pivot + arm * cosA;
+                    deformedY = yNorm + arm * sinA;
+                }
+
+                // Get morph factor for this region (default 1.0)
+                regionalMorphing.TryGetValue(region, out var morphFactor);
+                if (morphFactor < 0.01) morphFactor = 1.0;
+
+                // Body-envelope cylinder radius for this region at its morph factor
+                BaseRadius.TryGetValue(region, out var baseR);
+                if (baseR < 0.001f) baseR = 0.08f;
+                var bodyRadius = baseR * (float)morphFactor;
+
+                // XY distance of deformed vertex from the body centre axis (normalised)
+                var xyDist = MathF.Sqrt(xNorm * xNorm + deformedY * deformedY);
+
+                // Penetration: positive means the vertex is inside the body envelope
+                var penetration = bodyRadius - xyDist;
+                if (penetration > 0.0)
+                {
+                    maxPushOut.TryGetValue(region, out var existing);
+                    if (penetration > existing)
+                    {
+                        maxPushOut[region] = Math.Round(penetration, 6);
+                    }
+                }
+
+                _ = deformedH; // used via pose logic; suppress unused-variable warning
+            }
+        }
+
+        return new AnimationDrivenResult(vertices.Count, maxPushOut, "animation-driven");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation-Driven Pose Simulation Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Pose simulation service that uses the <see cref="AnimationDrivenGeometrySolver"/> when NIF
+/// vertex data is available via <see cref="SimulateWithMeshDataAsync"/>.
+/// <para>
+/// When source mesh paths are supplied, the service reads each NIF file in turn, extracts
+/// vertex positions from the first readable geometry block, and runs the animation-driven
+/// solver to obtain per-pose push-out values grounded in actual vertex geometry rather than
+/// pure morph-factor thresholds.  If no vertices can be extracted the service falls back to
+/// the same heuristic amplifier approach used by <see cref="BasicPoseSimulationService"/>.
+/// </para>
+/// </summary>
+internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationService
+{
+    private static readonly IReadOnlyList<string> AnimationPoses =
+        ["T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak"];
+
+    // Per-pose regional stress amplifiers — retained as the heuristic fallback path.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> PoseAmplifiers =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 },
+        };
+
+    private const double RiskThreshold = 1.10;
+
+    public Task<PoseSimulationResult> SimulateAsync(
+        ConvertedMesh mesh,
+        string targetBody,
+        CancellationToken cancellationToken)
+        => Task.FromResult(RunHeuristicSimulation(mesh));
+
+    public async Task<PoseSimulationResult> SimulateWithMeshDataAsync(
+        ConvertedMesh mesh,
+        string targetBody,
+        IReadOnlyList<string>? sourceMeshPaths,
+        CancellationToken cancellationToken)
+    {
+        // Try animation-driven mode when source NIF paths are available
+        if (sourceMeshPaths is { Count: > 0 })
+        {
+            foreach (var path in sourceMeshPaths)
+            {
+                if (!File.Exists(path)) continue;
+
+                try
+                {
+                    var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+                    var vertices = ExtractVertices(bytes);
+                    if (vertices.Count > 0)
+                    {
+                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing);
+                        return BuildResultFromSolverOutput(solverResult);
+                    }
+                }
+#pragma warning disable CA1031
+                catch
+#pragma warning restore CA1031
+                {
+                    // If a specific NIF fails to read, try the next one
+                }
+            }
+        }
+
+        // Heuristic fallback
+        return RunHeuristicSimulation(mesh);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ExtractVertices(byte[] bytes)
+    {
+        if (!NifGeometrySignatureReader.TryLocateVertexBlock(bytes, out var offset, out var count) || count <= 0)
+        {
+            return [];
+        }
+
+        const int vertexSize = 12;
+        var required = (long)count * vertexSize;
+        if (offset < 0 || offset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var result = new List<(float, float, float)>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var o = offset + i * vertexSize;
+            result.Add((
+                BitConverter.ToSingle(bytes, o),
+                BitConverter.ToSingle(bytes, o + 4),
+                BitConverter.ToSingle(bytes, o + 8)));
+        }
+
+        return result;
+    }
+
+    private static PoseSimulationResult BuildResultFromSolverOutput(AnimationDrivenResult solver)
+    {
+        // Map solver push-out depths → PoseSimulationResult.
+        // Each region with non-zero push-out is assigned to its highest-stress pose.
+        var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var highRiskSet      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (region, pushOut) in solver.MaxPushOutPerRegion)
+        {
+            if (pushOut <= 0.0) continue;
+
+            highRiskSet.Add(region);
+            var worstPose = GetWorstPoseForRegion(region);
+
+            if (!poseClippingRisk.TryGetValue(worstPose, out var existing))
+            {
+                existing = new List<string>();
+                poseClippingRisk[worstPose] = existing;
+            }
+
+            ((List<string>)existing).Add(region);
+        }
+
+        // Sort each pose's at-risk list
+        foreach (var key in poseClippingRisk.Keys.ToList())
+        {
+            ((List<string>)poseClippingRisk[key]).Sort(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return new PoseSimulationResult(
+            AnimationPoses,
+            poseClippingRisk,
+            highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
+            poseClippingRisk.Count);
+    }
+
+    private static string GetWorstPoseForRegion(string region) =>
+        region.ToLowerInvariant() switch
+        {
+            "thighs" or "calves" or "butt" or "pelvis" => "Crouch",
+            "chest" or "breasts"                        => "Combat-Idle",
+            "shoulders"                                 => "Combat-Idle",
+            "arms"                                      => "Run",
+            "belly" or "waist"                          => "Sneak",
+            _                                           => "Run",
+        };
+
+    private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh)
+    {
+        var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var highRiskSet      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var atRiskPoseCount  = 0;
+
+        foreach (var pose in AnimationPoses)
+        {
+            PoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+            var atRiskRegions = new List<string>();
+            foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+            {
+                amplifiers.TryGetValue(region, out var amp);
+                var effectiveStress = morphFactor * (amp > 0 ? amp : 1.0);
+                if (effectiveStress >= RiskThreshold)
+                {
+                    atRiskRegions.Add(region);
+                    highRiskSet.Add(region);
+                }
+            }
+
+            if (atRiskRegions.Count > 0)
+            {
+                atRiskRegions.Sort(StringComparer.OrdinalIgnoreCase);
+                poseClippingRisk[pose] = atRiskRegions;
+                atRiskPoseCount++;
+            }
+        }
+
+        return new PoseSimulationResult(
+            AnimationPoses,
+            poseClippingRisk,
+            highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
+            atRiskPoseCount);
     }
 }

@@ -2584,3 +2584,234 @@ public sealed class PoseSimulationAndPreviewTests
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animation-Driven Geometry Solver Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class AnimationDrivenGeometrySolverTests
+{
+    // ── AnimationDrivenGeometrySolver.Solve ───────────────────────────────────
+
+    [Fact]
+    public void Solve_EmptyVertexList_ReturnsZeroVerticesAndEmptyPushOut()
+    {
+        var result = AnimationDrivenGeometrySolver.Solve(
+            [],
+            new Dictionary<string, double>());
+
+        Assert.Equal(0, result.VerticesAnalyzed);
+        Assert.Empty(result.MaxPushOutPerRegion);
+        Assert.Contains("no-vertices", result.Method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Solve_VerticesInsideBodyEnvelope_ProducesPushOutForAffectedRegions()
+    {
+        // Thigh vertices very close to the body axis: they should penetrate the
+        // thigh cylinder (baseRadius=0.088 × morphFactor=1.4 = 0.1232) when the
+        // Crouch pose rotates them toward it.
+        var vertices = new List<(float X, float Y, float Z)>();
+        for (var i = 0; i < 20; i++)
+        {
+            // Place vertices in the thigh region (normalised height ~0.35)
+            var z = 0.35f + (i * 0.001f);
+            vertices.Add((0.05f, 0.01f, z));  // near body axis
+        }
+
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["thighs"] = 1.4  // generous morph expands the body envelope
+        };
+
+        var result = AnimationDrivenGeometrySolver.Solve(vertices, morphing);
+
+        Assert.Equal(vertices.Count, result.VerticesAnalyzed);
+        Assert.Equal("animation-driven", result.Method);
+        // Vertices near the axis should be inside the expanded body envelope → push-out > 0
+        Assert.True(result.MaxPushOutPerRegion.ContainsKey("thighs"),
+            "Thigh region should have a push-out entry for vertices inside the body envelope.");
+        Assert.True(result.MaxPushOutPerRegion["thighs"] > 0,
+            "Push-out for thigh region should be positive.");
+    }
+
+    [Fact]
+    public void Solve_VerticesFarFromBodyAxis_NoPushOut()
+    {
+        // Vertices in a symmetric +X/-X pattern so that after XY normalisation each
+        // vertex sits at xyDist ≈ 0.5 — far beyond any body-envelope radius (max 0.115).
+        var vertices = new List<(float X, float Y, float Z)>();
+        for (var i = 0; i < 10; i++)
+        {
+            var z = (float)i * 0.1f;
+            vertices.Add(( 1.0f, 0f, z));
+            vertices.Add((-1.0f, 0f, z));
+        }
+
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["thighs"] = 1.0, ["chest"] = 1.0
+        };
+
+        var result = AnimationDrivenGeometrySolver.Solve(vertices, morphing);
+
+        Assert.Equal(vertices.Count, result.VerticesAnalyzed);
+        // All vertices are far from the body axis; none should penetrate the envelope
+        Assert.True(result.MaxPushOutPerRegion.Values.All(v => v <= 0),
+            "Vertices far from body axis should have zero push-out.");
+    }
+
+    [Fact]
+    public void Solve_AllEightPosesEvaluated_MethodIsAnimationDriven()
+    {
+        var vertices = SyntheticNifTestData.CreateBodyVertices(100);
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["thighs"] = 1.1, ["chest"] = 1.1, ["belly"] = 1.05
+        };
+
+        var result = AnimationDrivenGeometrySolver.Solve(vertices, morphing);
+
+        Assert.Equal("animation-driven", result.Method);
+        Assert.True(result.VerticesAnalyzed == 100);
+    }
+
+    [Fact]
+    public void HeightToRegion_CorrectlyMapsNormalisedHeights()
+    {
+        Assert.Equal("feet",      AnimationDrivenGeometrySolver.HeightToRegion(0.01f));
+        Assert.Equal("calves",    AnimationDrivenGeometrySolver.HeightToRegion(0.15f));
+        Assert.Equal("thighs",    AnimationDrivenGeometrySolver.HeightToRegion(0.40f));
+        Assert.Equal("butt",      AnimationDrivenGeometrySolver.HeightToRegion(0.52f));
+        Assert.Equal("pelvis",    AnimationDrivenGeometrySolver.HeightToRegion(0.60f));
+        Assert.Equal("belly",     AnimationDrivenGeometrySolver.HeightToRegion(0.67f));
+        Assert.Equal("waist",     AnimationDrivenGeometrySolver.HeightToRegion(0.74f));
+        Assert.Equal("chest",     AnimationDrivenGeometrySolver.HeightToRegion(0.82f));
+        Assert.Equal("shoulders", AnimationDrivenGeometrySolver.HeightToRegion(0.90f));
+        Assert.Equal("arms",      AnimationDrivenGeometrySolver.HeightToRegion(0.97f));
+    }
+
+    // ── AnimationDrivenPoseSimulationService ──────────────────────────────────
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateAsync_ReturnsEightPoses()
+    {
+        var service = new AnimationDrivenPoseSimulationService();
+        var mesh    = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>());
+        var result  = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        var expectedPoses = new[] { "T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak" };
+        foreach (var pose in expectedPoses)
+        {
+            Assert.Contains(result.TestedPoses, p => string.Equals(p, pose, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateAsync_HeuristicFallback_FlagsHighMorphRegion()
+    {
+        var service = new AnimationDrivenPoseSimulationService();
+        // No mesh paths supplied → heuristic path; thigh 1.09 × crouch 1.20 = 1.308 > 1.10 threshold
+        var mesh = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["thighs"] = 1.09
+        });
+
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.True(result.TotalPosesAtRisk > 0, "Expected at least one pose at risk for high thigh morph.");
+        Assert.Contains("thighs", result.HighRiskRegions, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateWithMeshDataAsync_NullPaths_UsesFallback()
+    {
+        var service = new AnimationDrivenPoseSimulationService();
+        var mesh    = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["thighs"] = 1.09
+        });
+
+        var result = await service.SimulateWithMeshDataAsync(mesh, "CBBE", null, CancellationToken.None);
+
+        Assert.Equal(8, result.TestedPoses.Count);
+        Assert.True(result.TotalPosesAtRisk > 0);
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateWithMeshDataAsync_WithSyntheticNif_UsesAnimationDrivenPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var nifPath = Path.Combine(workingDirectory, "test.nif");
+
+        // Write a synthetic NIF with body-region vertices
+        var vertices = SyntheticNifTestData.CreateBodyVertices(200);
+        await SyntheticNifTestData.WriteAsync(nifPath, vertices);
+
+        try
+        {
+            var service = new AnimationDrivenPoseSimulationService();
+            var mesh    = new ConvertedMesh("cloth", "3BA", 1, new Dictionary<string, double>
+            {
+                ["thighs"] = 1.15, ["chest"] = 1.12, ["belly"] = 1.08
+            });
+
+            var result = await service.SimulateWithMeshDataAsync(
+                mesh, "3BA", [nifPath], CancellationToken.None);
+
+            Assert.Equal(8, result.TestedPoses.Count);
+            // Animation-driven path processes real vertex data; result is a valid PoseSimulationResult
+            Assert.NotNull(result.HighRiskRegions);
+            Assert.NotNull(result.PoseClippingRisk);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateWithMeshDataAsync_MissingFile_FallsBackToHeuristic()
+    {
+        var service = new AnimationDrivenPoseSimulationService();
+        var mesh    = new ConvertedMesh("mixed", "test", 1, new Dictionary<string, double>
+        {
+            ["thighs"] = 1.09
+        });
+
+        // Supply a non-existent path; service should fall back to heuristic silently
+        var result = await service.SimulateWithMeshDataAsync(
+            mesh, "CBBE", ["/nonexistent/path/test.nif"], CancellationToken.None);
+
+        Assert.Equal(8, result.TestedPoses.Count);
+        Assert.True(result.TotalPosesAtRisk > 0, "Heuristic fallback should flag high thigh morph.");
+    }
+
+    // ── Integration: animation-driven path in full pipeline ───────────────────
+
+    [Fact]
+    public async Task Convert_WithSyntheticNif_PoseSimulationStepPresent()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(200));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.True(result.Steps.Any(s => s.StartsWith("pose-simulation:", StringComparison.Ordinal)),
+                "Steps should contain a pose-simulation entry.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
