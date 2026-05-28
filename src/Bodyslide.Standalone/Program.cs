@@ -1,5 +1,7 @@
 using Bodyslide.Core;
 
+var shouldPauseOnExit = ShouldPauseOnExit(args);
+
 if (args.Contains("--list-presets", StringComparer.OrdinalIgnoreCase))
 {
     Console.WriteLine("Available presets:");
@@ -54,28 +56,40 @@ if (!TryParseRequest(args, out var request, out var error))
     Console.WriteLine();
     Console.WriteLine("Drag a .nif file or folder onto SlideSmith.exe, or run it from a command prompt.");
 
-    if (args.Length == 0)
+    if (shouldPauseOnExit)
     {
-        Console.WriteLine();
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey(intercept: true);
+        PauseBeforeExit();
     }
 
     return;
 }
 
-var orchestrator = StandaloneConversionModules.CreateDefault();
-var batchRunner = new BatchConversionRunner(orchestrator);
-var results = await batchRunner.ConvertAsync(request);
-
-Console.WriteLine($"Converted {results.Count} armor item(s).");
-foreach (var result in results)
+try
 {
-    Console.WriteLine($"Output: {result.OutputDirectory}");
-    foreach (var step in result.Steps)
+    var orchestrator = StandaloneConversionModules.CreateDefault();
+    var batchRunner = new BatchConversionRunner(orchestrator);
+    var results = await batchRunner.ConvertAsync(request);
+
+    Console.WriteLine($"Converted {results.Count} armor item(s).");
+    foreach (var result in results)
     {
-        Console.WriteLine($" - {step}");
+        Console.WriteLine($"Output: {result.OutputDirectory}");
+        foreach (var step in result.Steps)
+        {
+            Console.WriteLine($" - {step}");
+        }
     }
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"Conversion failed: {ex.Message}");
+
+    if (shouldPauseOnExit)
+    {
+        PauseBeforeExit();
+    }
+
+    Environment.ExitCode = 1;
 }
 
 static bool TryParseRequest(string[] args, out ConversionRequest request, out string error)
@@ -137,4 +151,21 @@ static Dictionary<string, string> ParseNamedArguments(string[] args)
     }
 
     return map;
+}
+
+static bool ShouldPauseOnExit(string[] args)
+{
+    if (args.Length == 0)
+    {
+        return true;
+    }
+
+    return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
+}
+
+static void PauseBeforeExit()
+{
+    Console.WriteLine();
+    Console.WriteLine("Press any key to exit...");
+    Console.ReadKey(intercept: true);
 }
