@@ -14,7 +14,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - physics profile generation (CBPC + SMP XML config file output)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
-- **deformation profile modifier** — fine-tunes regional morphs using named profiles (curvy, slim, petite, athletic, muscular, lean)
+- **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
@@ -88,12 +88,14 @@ Pass `--profile <name>` to scale regional morphs toward or away from the neutral
 
 | Profile | Amplifier | Effect |
 |---|---|---|
+| balanced | 1.00 | Pure pass-through — delta unchanged (default for Vanilla presets) |
 | curvy | 1.15 | Amplifies curves beyond the base shape |
-| muscular | 1.25 | Strongest amplification of all dimensions |
 | athletic | 1.08 | Subtle amplification with a toned look |
 | lean | 0.88 | Reduces bulk while keeping proportions |
 | slim | 0.82 | Visibly slimmer than the neutral body |
 | petite | 0.75 | Smallest overall body dimensions |
+| muscular | 1.25 | Strongest amplification of all dimensions |
+| anime | 1.45 | Heavily amplified stylised anime proportions |
 
 ## Output files
 
@@ -153,7 +155,15 @@ Implemented from issue scope:
 
 - **true binary plugin record rewriting** — `BinaryPluginRewriteService` directly parses the Bethesda ESP/ESM/ESL binary format (handles both Skyrim LE 20-byte and SSE 24-byte record headers), walks the GRUP/record structure, locates every ARMA (ArmorAddon) record, and rewrites `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecords in-place; produces a `<name>_patched.esp` file in the output directory that the user can drop straight into their Skyrim `Data` folder without running xEdit; the `patch-armor.pas` xEdit script and `plugin-patches.json` are still generated as supplementary reference
 
-- **structured binary ARMA record analysis** — `BinaryArmaParser` now walks the full binary ARMA record to extract `FormID` (uint32 from record header), `EditorId` (EDID subrecord null-terminated string), `BipedSlots` (decoded from BOD2/BODT 32-bit slot flags: each set bit maps to slot 30+i), and all four mesh paths (MOD2/MOD3/MOD4/MOD5); `BasicPluginAnalysisService` upgraded from regex path-scan to `BinaryArmaParser`; each `PluginArmorAddon` now carries `FormId`, `EditorId`, and `BipedSlots` alongside the detected mesh paths
+- **structured binary ARMA record analysis** — `BinaryArmaParser` now walks the full binary ARMA record to extract `FormID` (uint32 from record header), `EditorId` (EDID subrecord null-terminated string), `BipedSlots` (decoded from BOD2/BODT 32-bit slot flags: each set bit maps to slot 30+i), all four mesh paths (MOD2/MOD3/MOD4/MOD5), and **race FormID** (`RNAM` subrecord); `BinaryArmaParser` also parses ARMO records for **keyword FormIDs** (`KWDA` — array of 4-byte FormIDs, one per keyword for slot/behaviour filtering) and **race FormID** (`RNAM`); each `PluginArmorAddon` now carries `RaceFormId` and each `PluginArmorRecord` carries `KeywordFormIds` and `RaceFormId`
+
+- **SMP source bone extraction** — `BasicWeightTransferService` now reads SMP physics XML files bundled with the source armor (from `ImportedArmor.PhysicsFiles`) and parses `<bone name="...">` elements to extract distinct bone names; these are surfaced as `WeightedMesh.SourceSmpBones` (alphabetically sorted) and logged as `smp-bones:...` in `conversion.log`, enabling accurate SMP weight transfer between source and target body physics configs
+
+- **"balanced" deformation profile** — the `balanced` profile (amplifier 1.00, neutral pass-through) is now a registered entry in `DeformationProfileModifier.ProfileAmplifiers`; previously the "Vanilla Balanced" preset silently no-oped because "balanced" was absent from the amplifier table
+
+- **"anime" deformation profile + presets** — a new `anime` profile (amplifier 1.45 — strongly amplified proportions for stylised anime aesthetics) is registered, along with four new presets: `CBBE Anime`, `3BA Anime`, `BHUNP Anime`, and `UNP Anime`
+
+- **Vanilla conversion presets** — four new presets enable direct Vanilla→mod-body conversion: `Vanilla to CBBE`, `Vanilla to 3BA`, `Vanilla to HIMBO`, `Vanilla to UNP` (all balanced deformation; physics profile matches the target body)
 
 - **minimal override patch ESP** — in addition to the full-copy `_patched.esp`, export now generates `<name>_SlidesmithPatch.esp`: a proper Bethesda override plugin that lists the original ESP as its sole master file (`MAST`+`DATA` subrecords in TES4) and contains **only** the ARMA records that had paths rewritten; uses the same FormIDs as the originals so the engine treats them as overrides; can be dropped into the Data folder after the original without replacing any unrelated records; only generated when at least one ARMA record path matched the rewrite map
 
@@ -167,24 +177,28 @@ Implemented from issue scope:
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
-## Current built-in presets (27 total)
+## Current built-in presets (36 total)
 
 | Preset | Target Body | Deformation | Physics |
 |---|---|---|---|
 | 3BA Curvy | 3BA | curvy | smp+cbpc |
 | 3BA Slim | 3BA | slim | smp+cbpc |
 | 3BA Athletic | 3BA | athletic | smp+cbpc |
+| 3BA Anime | 3BA | anime | smp+cbpc |
 | BHUNP Curvy | BHUNP | curvy | smp+cbpc |
 | BHUNP Slim | BHUNP | slim | smp+cbpc |
 | BHUNP Athletic | BHUNP | athletic | smp+cbpc |
+| BHUNP Anime | BHUNP | anime | smp+cbpc |
 | CBBE Curvy | CBBE | curvy | none |
 | CBBE Slim | CBBE | slim | none |
 | CBBE Athletic | CBBE | athletic | none |
 | CBBE Petite | CBBE | petite | none |
+| CBBE Anime | CBBE | anime | none |
 | UNP Petite | UNP | petite | cbpc |
 | UNP Athletic | UNP | athletic | cbpc |
 | UNP Curvy | UNP | curvy | cbpc |
 | UNP Slim | UNP | slim | cbpc |
+| UNP Anime | UNP | anime | cbpc |
 | TBD Lean | TBD | lean | cbpc |
 | TBD Curvy | TBD | curvy | cbpc |
 | TBD Athletic | TBD | athletic | cbpc |
@@ -196,6 +210,10 @@ Issue #2 baseline coverage has been expanded substantially (import/dependency sc
 | UBE Petite | UBE | petite | none |
 | UBE Curvy | UBE | curvy | none |
 | Vanilla Balanced | Vanilla | balanced | none |
+| Vanilla to CBBE | CBBE | balanced | none |
+| Vanilla to 3BA | 3BA | balanced | smp+cbpc |
+| Vanilla to HIMBO | HIMBO | balanced | smp |
+| Vanilla to UNP | UNP | balanced | cbpc |
 | HIMBO Lean | HIMBO | lean | smp |
 | HIMBO Muscular | HIMBO | muscular | smp |
 | HIMBO Athletic | HIMBO | athletic | smp |

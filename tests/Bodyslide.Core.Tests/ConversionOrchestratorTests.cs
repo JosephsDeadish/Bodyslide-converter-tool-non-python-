@@ -793,7 +793,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestWeightTransfer : IWeightTransferService
     {
-        public Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
+        public Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, ImportedArmor? sourceArmor, CancellationToken cancellationToken) =>
             Task.FromResult(new WeightedMesh("mixed", "default", false));
     }
 
@@ -5034,5 +5034,367 @@ public sealed class ConversionReadmeGeneratorTests
             Assert.Equal(0x80, dds[off + 2]); // R
             Assert.Equal(0xFF, dds[off + 3]); // A
         }
+    }
+
+    // ── DeformationProfileModifier tests ────────────────────────────────────────
+
+    [Theory]
+    [InlineData("balanced",  1.00)]
+    [InlineData("curvy",     1.15)]
+    [InlineData("slim",      0.82)]
+    [InlineData("petite",    0.75)]
+    [InlineData("athletic",  1.08)]
+    [InlineData("muscular",  1.25)]
+    [InlineData("lean",      0.88)]
+    [InlineData("anime",     1.45)]
+    public void DeformationProfileModifier_AppliesCorrectAmplifier(string profileName, double amplifier)
+    {
+        // Input field with base value 1.2 → delta from neutral (1.0) = 0.2
+        // After amplification: delta * amplifier → result = 1.0 + delta * amplifier
+        const double inputValue = 1.2;
+        const double baseValue  = 1.0;
+        double expectedResult   = baseValue + (inputValue - baseValue) * amplifier;
+
+        var field = new Dictionary<string, double> { ["chest"] = inputValue };
+        var result = DeformationProfileModifier.Apply(field, profileName);
+
+        Assert.Equal(expectedResult, result["chest"], precision: 9);
+    }
+
+    [Fact]
+    public void DeformationProfileModifier_BalancedProfile_IsNeutral()
+    {
+        // "balanced" must be a pure pass-through: amplifier 1.0 preserves the delta exactly.
+        const double inputValue = 2.5;
+        var field  = new Dictionary<string, double> { ["chest"] = inputValue };
+        var result = DeformationProfileModifier.Apply(field, "balanced");
+
+        Assert.Equal(inputValue, result["chest"], precision: 9);
+    }
+
+    [Fact]
+    public void DeformationProfileModifier_AnimeProfile_AmplifiedMoreThanCurvy()
+    {
+        // "anime" (1.45) must produce a larger deviation from base than "curvy" (1.15).
+        const double inputValue = 2.0;
+        var field = new Dictionary<string, double> { ["chest"] = inputValue };
+
+        double animeResult = DeformationProfileModifier.Apply(field, "anime")["chest"];
+        double curvyResult = DeformationProfileModifier.Apply(field, "curvy")["chest"];
+
+        Assert.True(animeResult > curvyResult,
+            $"anime ({animeResult}) should amplify more than curvy ({curvyResult})");
+    }
+
+    // ── PresetCatalog — anime presets present ────────────────────────────────────
+
+    [Theory]
+    [InlineData("CBBE Anime",  "CBBE",  "anime")]
+    [InlineData("3BA Anime",   "3BA",   "anime")]
+    [InlineData("BHUNP Anime", "BHUNP", "anime")]
+    [InlineData("UNP Anime",   "UNP",   "anime")]
+    public void PresetCatalog_ContainsAnimePreset(string presetName, string expectedBody, string expectedProfile)
+    {
+        Assert.True(PresetCatalog.TryGet(presetName, out var preset),
+            $"Preset '{presetName}' should exist in PresetCatalog");
+        Assert.Equal(expectedBody,    preset.TargetBody);
+        Assert.Equal(expectedProfile, preset.DeformationProfile);
+    }
+
+    // ── PresetCatalog — Vanilla conversion presets ───────────────────────────────
+
+    [Theory]
+    [InlineData("Vanilla Balanced", "Vanilla", "balanced")]
+    [InlineData("Vanilla to CBBE",  "CBBE",    "balanced")]
+    [InlineData("Vanilla to 3BA",   "3BA",     "balanced")]
+    [InlineData("Vanilla to HIMBO", "HIMBO",   "balanced")]
+    [InlineData("Vanilla to UNP",   "UNP",     "balanced")]
+    public void PresetCatalog_ContainsVanillaPreset(string presetName, string expectedBody, string expectedProfile)
+    {
+        Assert.True(PresetCatalog.TryGet(presetName, out var preset),
+            $"Preset '{presetName}' should exist in PresetCatalog");
+        Assert.Equal(expectedBody,    preset.TargetBody);
+        Assert.Equal(expectedProfile, preset.DeformationProfile);
+    }
+
+    // ── VanillaBodySignatureDatabase — Vanilla in catalog ───────────────────────
+
+    [Fact]
+    public void VanillaBodySignatureDatabase_ContainsVanillaTemplate()
+    {
+        var vanilla = VanillaBodySignatureDatabase.Templates
+            .FirstOrDefault(t => string.Equals(t.Body, "Vanilla", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(vanilla);
+    }
+
+    [Fact]
+    public void BodyTypeCatalog_ContainsVanilla()
+    {
+        var vanilla = BodyTypeCatalog.All
+            .FirstOrDefault(b => string.Equals(b.Name, "Vanilla", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(vanilla);
+    }
+
+    // ── BinaryArmaParser — ARMA RNAM extraction ──────────────────────────────────
+
+    [Fact]
+    public void BinaryArmaParser_ExtractsRaceFormIdFromRnamSubrecord()
+    {
+        // Build a minimal SSE plugin (24-byte record header) with a single ARMA record
+        // that contains only RNAM (race FormID = 0x00000013).
+        const uint raceFormId = 0x00000013u; // Skyrim's default race FormID
+        var bytes = BuildMinimalPlugin(
+            recordTag: "ARMA",
+            subrecords: BuildSubrecords(
+                ("RNAM", BitConverter.GetBytes(raceFormId))));
+
+        var addons = BinaryArmaParser.ExtractArmaRecords(bytes);
+
+        Assert.Single(addons);
+        Assert.Equal(raceFormId, addons[0].RaceFormId);
+    }
+
+    [Fact]
+    public void BinaryArmaParser_NullRaceFormId_WhenRnamAbsent()
+    {
+        var bytes = BuildMinimalPlugin(
+            recordTag: "ARMA",
+            subrecords: BuildSubrecords(
+                ("EDID", System.Text.Encoding.ASCII.GetBytes("TestEdid\0"))));
+
+        var addons = BinaryArmaParser.ExtractArmaRecords(bytes);
+
+        Assert.Single(addons);
+        Assert.Null(addons[0].RaceFormId);
+    }
+
+    // ── BinaryArmaParser — ARMO KWDA + RNAM extraction ───────────────────────────
+
+    [Fact]
+    public void BinaryArmaParser_ExtractsKeywordFormIdsFromKwdaSubrecord()
+    {
+        // KWDA with 3 keyword FormIDs.
+        var kwdaPayload = new byte[12];
+        BitConverter.TryWriteBytes(kwdaPayload.AsSpan(0), 0xAABBCCDDu);
+        BitConverter.TryWriteBytes(kwdaPayload.AsSpan(4), 0x11223344u);
+        BitConverter.TryWriteBytes(kwdaPayload.AsSpan(8), 0xDEADBEEFu);
+
+        var bytes = BuildMinimalPlugin(
+            recordTag: "ARMO",
+            subrecords: BuildSubrecords(("KWDA", kwdaPayload)));
+
+        var records = BinaryArmaParser.ExtractArmoRecords(bytes);
+
+        Assert.Single(records);
+        Assert.NotNull(records[0].KeywordFormIds);
+        Assert.Equal(3, records[0].KeywordFormIds!.Count);
+        Assert.Equal(0xAABBCCDDu, records[0].KeywordFormIds[0]);
+        Assert.Equal(0x11223344u, records[0].KeywordFormIds[1]);
+        Assert.Equal(0xDEADBEEFu, records[0].KeywordFormIds[2]);
+    }
+
+    [Fact]
+    public void BinaryArmaParser_ExtractsRaceFormIdFromArmoRnamSubrecord()
+    {
+        const uint raceFormId = 0x00000019u;
+        var bytes = BuildMinimalPlugin(
+            recordTag: "ARMO",
+            subrecords: BuildSubrecords(("RNAM", BitConverter.GetBytes(raceFormId))));
+
+        var records = BinaryArmaParser.ExtractArmoRecords(bytes);
+
+        Assert.Single(records);
+        Assert.Equal(raceFormId, records[0].RaceFormId);
+    }
+
+    [Fact]
+    public void BinaryArmaParser_NullKeywords_WhenKwdaAbsent()
+    {
+        var bytes = BuildMinimalPlugin(
+            recordTag: "ARMO",
+            subrecords: BuildSubrecords(
+                ("EDID", System.Text.Encoding.ASCII.GetBytes("ArmorTest\0"))));
+
+        var records = BinaryArmaParser.ExtractArmoRecords(bytes);
+
+        Assert.Single(records);
+        Assert.Null(records[0].KeywordFormIds);
+        Assert.Null(records[0].RaceFormId);
+    }
+
+    // ── BasicWeightTransferService — SourceSmpBones from physics XML ─────────────
+
+    [Fact]
+    public async Task BasicWeightTransferService_ParsesSmpBonesFromPhysicsXml()
+    {
+        var xmlPath = Path.GetTempFileName() + ".xml";
+        await File.WriteAllTextAsync(xmlPath,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <physics>
+              <ActorPhysicsBodies>
+                <bone name="NPC Breast.L" />
+                <bone name="NPC Breast.R" />
+                <bone name="NPC Belly" />
+              </ActorPhysicsBodies>
+            </physics>
+            """);
+
+        try
+        {
+            var armor   = BuildArmorWithPhysics([xmlPath]);
+            var service = new BasicWeightTransferService();
+            var mesh    = new ConvertedMesh("cloth", "vertex-morph", 3, new Dictionary<string, double>());
+            var analysis = new MeshAnalysis("CBBE", true, 3);
+
+            var result = await service.TransferAsync(mesh, analysis, "3BA", armor, CancellationToken.None);
+
+            Assert.NotNull(result.SourceSmpBones);
+            Assert.Contains("NPC Belly",      result.SourceSmpBones!);
+            Assert.Contains("NPC Breast.L",   result.SourceSmpBones!);
+            Assert.Contains("NPC Breast.R",   result.SourceSmpBones!);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task BasicWeightTransferService_NullSourceSmpBones_WhenNoPhysicsFiles()
+    {
+        var service  = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-morph", 3, new Dictionary<string, double>());
+        var analysis = new MeshAnalysis("CBBE", false, 1);
+
+        var result = await service.TransferAsync(mesh, analysis, "CBBE", null, CancellationToken.None);
+
+        Assert.Null(result.SourceSmpBones);
+    }
+
+    [Fact]
+    public async Task BasicWeightTransferService_SmpBonesAreSortedAlphabetically()
+    {
+        var xmlPath = Path.GetTempFileName() + ".xml";
+        await File.WriteAllTextAsync(xmlPath,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <physics>
+              <bone name="Zebra" />
+              <bone name="Apple" />
+              <bone name="Mango" />
+            </physics>
+            """);
+
+        try
+        {
+            var armor   = BuildArmorWithPhysics([xmlPath]);
+            var service = new BasicWeightTransferService();
+            var mesh    = new ConvertedMesh("cloth", "vertex-morph", 1, new Dictionary<string, double>());
+            var analysis = new MeshAnalysis("CBBE", false, 1);
+
+            var result = await service.TransferAsync(mesh, analysis, "CBBE", armor, CancellationToken.None);
+
+            Assert.NotNull(result.SourceSmpBones);
+            Assert.Equal(["Apple", "Mango", "Zebra"], result.SourceSmpBones!.ToArray());
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    // ── Plugin armor record surfacing — RNAM/KWDA propagated to public records ───
+
+    [Fact]
+    public void PluginArmorAddon_ExposesRaceFormId()
+    {
+        const uint formId   = 0xABC123u;
+        const uint raceId   = 0x000013u;
+        var addon = new PluginArmorAddon("test.esp", [], formId, "TestEdid", null, raceId);
+
+        Assert.Equal(raceId, addon.RaceFormId);
+    }
+
+    [Fact]
+    public void PluginArmorRecord_ExposesKeywordFormIdsAndRaceFormId()
+    {
+        IReadOnlyList<uint> kwIds = [0x111u, 0x222u];
+        const uint raceId = 0x019u;
+        var record = new PluginArmorRecord("test.esp", [], 0xBEEFu, "TestArmo", kwIds, raceId);
+
+        Assert.Equal(kwIds, record.KeywordFormIds);
+        Assert.Equal(raceId, record.RaceFormId);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    private static ImportedArmor BuildArmorWithPhysics(IReadOnlyList<string> physicsFiles) =>
+        new ImportedArmor(
+            SourcePath:          "dummy.esp",
+            MeshFiles:           ["mesh.nif"],
+            TextureFiles:        [],
+            PhysicsFiles:        physicsFiles,
+            BodyReferenceFiles:  []);
+
+    // Build a minimal SSE (24-byte record header) ESP with a TES4 header record
+    // followed by a single record of the given type containing the given subrecords.
+    private static byte[] BuildMinimalPlugin(string recordTag, byte[] subrecords)
+    {
+        // TES4 record: 24 bytes header + minimal HEDR subrecord (12 bytes) + empty CNAM
+        byte[] hedr = BuildSubrecords(("HEDR", new byte[] { 0, 0, 0x40, 0x3F, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0x03 }));
+        int tes4DataLen = hedr.Length;
+        var tes4 = BuildRecordBytes("TES4", tes4DataLen, 0, hedr);
+
+        // target record
+        int recDataLen = subrecords.Length;
+        uint targetFormId = 0xABC123u;
+        var rec = BuildRecordBytes(recordTag, recDataLen, targetFormId, subrecords);
+
+        // group wrapping the target record
+        var grp = BuildGroupBytes(recordTag, rec);
+
+        return [.. tes4, .. grp];
+    }
+
+    private static byte[] BuildRecordBytes(string tag, int dataLen, uint formId, byte[] data)
+    {
+        // SSE: 24-byte header: tag(4) + dataSize(4) + flags(4) + formId(4) + revision(4) + version(2) + unknown(2)
+        var hdr = new byte[24];
+        var tagBytes = System.Text.Encoding.ASCII.GetBytes(tag);
+        Array.Copy(tagBytes, hdr, 4);
+        BitConverter.TryWriteBytes(hdr.AsSpan(4),  (uint)dataLen);
+        BitConverter.TryWriteBytes(hdr.AsSpan(12), formId);
+        // version = 44 (SSE)
+        hdr[20] = 44; hdr[21] = 0;
+        return [.. hdr, .. data];
+    }
+
+    private static byte[] BuildGroupBytes(string label, byte[] content)
+    {
+        // GRUP header: "GRUP"(4) + groupSize(4) + label(4) + groupType(4) + stamp(2) + unknown(2) + version(2) + unknown(2)
+        var hdr = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes("GRUP").CopyTo(hdr, 0);
+        int totalSize = 24 + content.Length;
+        BitConverter.TryWriteBytes(hdr.AsSpan(4), (uint)totalSize);
+        System.Text.Encoding.ASCII.GetBytes(label.PadRight(4)[..4]).CopyTo(hdr, 8);
+        return [.. hdr, .. content];
+    }
+
+    private static byte[] BuildSubrecords(params (string Tag, byte[] Data)[] subs)
+    {
+        var parts = new List<byte>();
+        foreach (var (tag, data) in subs)
+        {
+            var tagBytes = System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]);
+            var hdr = new byte[6];
+            tagBytes.CopyTo(hdr, 0);
+            BitConverter.TryWriteBytes(hdr.AsSpan(4), (ushort)data.Length);
+            parts.AddRange(hdr);
+            parts.AddRange(data);
+        }
+        return [.. parts];
     }
 }

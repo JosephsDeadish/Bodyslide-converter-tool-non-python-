@@ -26,7 +26,7 @@ public sealed record BodyDetectionReport(string Body, double Confidence, IReadOn
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount);
 public sealed record DeformationCage(string Mode);
 public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
-public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred);
+public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null);
 public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 public sealed record CorrectionResult(bool Applied, string Method);
@@ -70,17 +70,21 @@ public sealed record PluginArmorAddon(
     IReadOnlyList<string> DetectedMeshPaths,
     uint FormId = 0,
     string? EditorId = null,
-    IReadOnlyList<int>? BipedSlots = null);
+    IReadOnlyList<int>? BipedSlots = null,
+    uint? RaceFormId = null);
 
 /// <summary>
 /// Describes a single ARMO (Armor) record found in a plugin file.
-/// Carries FormID, EditorID, and detected mesh paths (MOD2/MOD3 world models).
+/// Carries FormID, EditorID, detected mesh paths (MOD2/MOD3 world models),
+/// keyword FormIDs (KWDA) for slot/behaviour filtering, and race FormID (RNAM).
 /// </summary>
 public sealed record PluginArmorRecord(
     string RecordType,
     IReadOnlyList<string> DetectedMeshPaths,
     uint FormId = 0,
-    string? EditorId = null);
+    string? EditorId = null,
+    IReadOnlyList<uint>? KeywordFormIds = null,
+    uint? RaceFormId = null);
 
 /// <summary>
 /// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
@@ -127,12 +131,14 @@ internal sealed record ArmaRecordDescriptor(
     IReadOnlyList<int> BipedSlots,
     IReadOnlyList<string> MeshPaths,
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
-    byte[] OriginalDataBytes);           // The record data payload (not including header)
+    byte[] OriginalDataBytes,           // The record data payload (not including header)
+    uint? RaceFormId = null);           // RNAM — the race this ArmorAddon applies to
 
 /// <summary>
 /// Full parsed descriptor for a single ARMO (Armor) record — carries everything the
 /// patch generator needs to emit a valid override record: original header bytes, data
-/// bytes, FormID, editor ID, and the mesh paths found in MOD2/MOD3 subrecords.
+/// bytes, FormID, editor ID, the mesh paths found in MOD2/MOD3 subrecords, keyword
+/// FormIDs from KWDA (slot/behaviour filtering), and the race FormID from RNAM.
 /// </summary>
 internal sealed record ArmoRecordDescriptor(
     uint FormId,
@@ -140,7 +146,9 @@ internal sealed record ArmoRecordDescriptor(
     string? EditorId,
     IReadOnlyList<string> MeshPaths,
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
-    byte[] OriginalDataBytes);           // The record data payload (not including header)
+    byte[] OriginalDataBytes,           // The record data payload (not including header)
+    IReadOnlyList<uint>? KeywordFormIds = null,  // KWDA — keyword FormIDs
+    uint? RaceFormId = null);                    // RNAM — race FormID
 
 public sealed record MeshDependencyMapEntry(
     string Mesh,
@@ -208,8 +216,17 @@ public static class PresetCatalog
         // ── UBE ─────────────────────────────────────────────────────────────
         ["UBE Petite"]        = new("UBE Petite",         "UBE",   "petite",   "none"),
         ["UBE Curvy"]         = new("UBE Curvy",          "UBE",   "curvy",    "none"),
+        // ── Anime ───────────────────────────────────────────────────────────
+        ["CBBE Anime"]        = new("CBBE Anime",         "CBBE",  "anime",    "none"),
+        ["3BA Anime"]         = new("3BA Anime",          "3BA",   "anime",    "smp+cbpc"),
+        ["BHUNP Anime"]       = new("BHUNP Anime",        "BHUNP", "anime",    "smp+cbpc"),
+        ["UNP Anime"]         = new("UNP Anime",          "UNP",   "anime",    "cbpc"),
         // ── Vanilla ─────────────────────────────────────────────────────────
         ["Vanilla Balanced"]  = new("Vanilla Balanced",   "Vanilla", "balanced", "none"),
+        ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
+        ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
+        ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
+        ["Vanilla to UNP"]    = new("Vanilla to UNP",     "UNP",     "balanced", "cbpc"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
@@ -427,15 +444,16 @@ internal static class VanillaBodySignatureDatabase
     // 3BA:   ~10032 (CBBE base with physics), TBD: ~7680, SAM: ~5984, SOS: ~6274, UBE: ~7000
     public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
     [
-        new("CBBE",  ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
-        new("UNP",   ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
-        new("HIMBO", ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
-        new("BHUNP", ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("TBD",   ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
-        new("SAM",   ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
-        new("SOS",   ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
-        new("UBE",   ["ube"],                      ["femalebody"],                  [],            6800, 7200, 4.3, 7.4, 0.30, 0.80)
+        new("CBBE",    ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
+        new("UNP",     ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
+        new("HIMBO",   ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
+        new("BHUNP",   ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
+        new("3BA",     ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
+        new("TBD",     ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
+        new("SAM",     ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
+        new("SOS",     ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
+        new("UBE",     ["ube"],                      ["femalebody"],                  [],            6800, 7200, 4.3, 7.4, 0.30, 0.80),
+        new("Vanilla", ["vanilla", "femalebody", "malebody"], ["femalebody", "malebody"], [],        4000, 6100, 4.0, 7.5, 0.28, 0.90),
     ];
 }
 
@@ -913,7 +931,10 @@ public interface IMeshConversionService
 
 public interface IWeightTransferService
 {
-    Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken);
+    Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
+        TransferAsync(mesh, analysis, targetBody, null, cancellationToken);
+
+    Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, ImportedArmor? sourceArmor, CancellationToken cancellationToken);
 }
 
 public interface IMorphGenerationService
@@ -1208,8 +1229,10 @@ public sealed class ConversionOrchestrator(
 
             steps.Add($"mesh-converted:{converted.Strategy}");
 
-            var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, cancellationToken);
+            var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken);
             steps.Add($"weights:{weighted.WeightProfile}");
+            if (weighted.SourceSmpBones is { Count: > 0 } smpBones)
+                steps.Add($"smp-bones:{string.Join('+', smpBones)}");
 
             var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
@@ -1988,13 +2011,59 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
 {
-    public Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
+    public Task<WeightedMesh> TransferAsync(
+        ConvertedMesh mesh,
+        MeshAnalysis analysis,
+        string targetBody,
+        ImportedArmor? sourceArmor,
+        CancellationToken cancellationToken)
     {
         var profile = analysis.PhysicsEnabled
             ? "nearest-triangle+heatmap+normalized-smoothing+physics-weights"
             : "nearest-triangle+heatmap+normalized-smoothing";
 
-        return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled));
+        var smpBones = ParseSmpBones(sourceArmor);
+
+        return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones));
+    }
+
+    // Parse bone names from SMP XML physics files bundled with the source armor.
+    // SMP config files use <bone name="..."> elements; extract distinct bone names.
+    private static IReadOnlyList<string>? ParseSmpBones(ImportedArmor? armor)
+    {
+        if (armor is null || armor.PhysicsFiles.Count == 0)
+            return null;
+
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in armor.PhysicsFiles)
+        {
+            if (!path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!File.Exists(path))
+                continue;
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(path);
+                foreach (var el in doc.Descendants())
+                {
+                    // SMP uses both <bone name="..."> and <bone name="..."> inside various wrapper elements
+                    if (string.Equals(el.Name.LocalName, "bone", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var name = (string?)el.Attribute("name");
+                        if (!string.IsNullOrWhiteSpace(name))
+                            bones.Add(name.Trim());
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Skip malformed or unreadable SMP files gracefully
+            }
+        }
+
+        return bones.Count > 0 ? [.. bones.Order(StringComparer.OrdinalIgnoreCase)] : null;
     }
 }
 
@@ -2562,12 +2631,14 @@ public static class DeformationProfileModifier
     private static readonly IReadOnlyDictionary<string, double> ProfileAmplifiers =
         new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
+            ["balanced"] = 1.00,   // full-fidelity delta, no amplification or attenuation
             ["curvy"]    = 1.15,
             ["slim"]     = 0.82,
             ["petite"]   = 0.75,
             ["athletic"] = 1.08,
             ["muscular"] = 1.25,
-            ["lean"]     = 0.88
+            ["lean"]     = 0.88,
+            ["anime"]    = 1.45    // strongly amplified proportions for stylised anime aesthetics
         };
 
     public static IReadOnlyDictionary<string, double> Apply(IReadOnlyDictionary<string, double> field, string? profile)
@@ -2847,7 +2918,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                         d.MeshPaths,
                         d.FormId,
                         d.EditorId,
-                        d.BipedSlots.Count > 0 ? d.BipedSlots : null))
+                        d.BipedSlots.Count > 0 ? d.BipedSlots : null,
+                        d.RaceFormId))
                     .ToList();
             }
             else
@@ -2863,7 +2935,9 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     pluginName,
                     d.MeshPaths,
                     d.FormId,
-                    d.EditorId))
+                    d.EditorId,
+                    d.KeywordFormIds,
+                    d.RaceFormId))
                 .ToList();
 
             return (addons, records);
@@ -3734,6 +3808,7 @@ internal static class BinaryArmaParser
         string? editorId    = null;
         var bipedSlots      = new List<int>();
         var meshPaths       = new List<string>();
+        uint? raceFormId    = null;
 
         int pos = 0;
         int end = dataBytes.Length;
@@ -3784,6 +3859,10 @@ internal static class BinaryArmaParser
                 if (!string.IsNullOrEmpty(path))
                     meshPaths.Add(path);
             }
+            else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
+            {
+                raceFormId = ReadUInt32Le(dataBytes, dataStart);
+            }
 
             pos += SubrecordHeaderSize + effectiveSubSize;
         }
@@ -3800,7 +3879,8 @@ internal static class BinaryArmaParser
             bipedSlots,
             meshPaths,
             headerBytes,
-            dataBytes);   // decompressed (or raw) data — PatchPluginWriter uses this
+            dataBytes,        // decompressed (or raw) data — PatchPluginWriter uses this
+            raceFormId);
     }
 
     // ── ARMO record parser ────────────────────────────────────────────────────
@@ -3812,6 +3892,8 @@ internal static class BinaryArmaParser
 
         string? editorId = null;
         var meshPaths    = new List<string>();
+        var keywords     = new List<uint>();
+        uint? raceFormId = null;
 
         int pos = 0;
         int end = dataBytes.Length;
@@ -3853,6 +3935,17 @@ internal static class BinaryArmaParser
                 if (!string.IsNullOrEmpty(path))
                     meshPaths.Add(path);
             }
+            else if (string.Equals(subTag, "KWDA", StringComparison.Ordinal) && effectiveSubSize >= 4)
+            {
+                // KWDA: array of 4-byte FormIDs, one per keyword
+                int count = effectiveSubSize / 4;
+                for (int ki = 0; ki < count; ki++)
+                    keywords.Add(ReadUInt32Le(dataBytes, dataStart + ki * 4));
+            }
+            else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
+            {
+                raceFormId = ReadUInt32Le(dataBytes, dataStart);
+            }
 
             pos += SubrecordHeaderSize + effectiveSubSize;
         }
@@ -3865,7 +3958,9 @@ internal static class BinaryArmaParser
             editorId,
             meshPaths,
             headerBytes,
-            dataBytes);   // decompressed (or raw) data
+            dataBytes,     // decompressed (or raw) data
+            keywords.Count > 0 ? keywords : null,
+            raceFormId);
     }
 
     // ── Binary helpers ────────────────────────────────────────────────────────
