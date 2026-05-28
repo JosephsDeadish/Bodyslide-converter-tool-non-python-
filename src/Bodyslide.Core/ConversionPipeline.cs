@@ -534,7 +534,7 @@ internal static class NifGeometrySignatureReader
             var scanStart = Math.Max(node.StartOffset, 0);
             var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
 
-            for (var offset = scanStart; offset <= scanEnd; offset += sizeof(int))
+            for (var offset = scanStart; offset <= scanEnd; offset++)
             {
                 var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
                 if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
