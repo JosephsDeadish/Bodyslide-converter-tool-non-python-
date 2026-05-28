@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security;
@@ -61,6 +62,17 @@ public sealed record TextureSummary(
     IReadOnlyList<string>? SubsurfaceFiles = null);
 public sealed record PluginArmorAddon(string RecordType, IReadOnlyList<string> DetectedMeshPaths);
 public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
+
+/// <summary>
+/// Outcome of the binary plugin rewrite pass: how many plugins were processed,
+/// how many ARMA records were patched, and the paths of the rewritten plugin files.
+/// </summary>
+public sealed record PluginRewriteResult(
+    int PluginsProcessed,
+    int ArmaRecordsPatched,
+    int PathsRewritten,
+    IReadOnlyList<string> PatchedPluginPaths,
+    IReadOnlyList<string> Warnings);
 public sealed record MeshDependencyMapEntry(
     string Mesh,
     IReadOnlyList<string> Textures,
@@ -889,6 +901,20 @@ public interface IPluginAnalysisService
 {
     /// <summary>Scans .esp/.esm/.esl plugin files for ArmorAddon mesh path references and generates patch guidance.</summary>
     Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken);
+}
+
+public interface IPluginRewriteService
+{
+    /// <summary>
+    /// Parses each plugin binary, finds ARMA records, rewrites MOD2/MOD3/MOD4/MOD5 mesh path
+    /// subrecords according to <paramref name="rewriteMap"/>, and writes a patched copy to
+    /// <paramref name="outputDirectory"/> for every plugin that contained matching paths.
+    /// </summary>
+    Task<PluginRewriteResult> RewriteAsync(
+        IReadOnlyList<string> pluginPaths,
+        IReadOnlyDictionary<string, string> rewriteMap,
+        string outputDirectory,
+        CancellationToken cancellationToken);
 }
 
 public interface IVanillaArmorLookupService
@@ -2655,6 +2681,399 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     }
 }
 
+/// <summary>
+/// Performs true binary rewriting of Bethesda .esp/.esm/.esl plugin files:
+/// parses the binary record structure, locates ARMA (ArmorAddon) records,
+/// rewrites MOD2/MOD3/MOD4/MOD5 mesh path subrecords to point at the
+/// converted SlideSmith meshes, and writes a patched plugin copy to the
+/// output directory. Supports both Skyrim LE (20-byte record headers) and
+/// Skyrim SE / Special Edition (24-byte record headers).
+/// </summary>
+internal sealed class BinaryPluginRewriteService : IPluginRewriteService
+{
+    // SSE record/GRUP header is 24 bytes; LE is 20 bytes.
+    private const int SseHeaderSize = 24;
+    private const int LeHeaderSize  = 20;
+
+    // size of a subrecord header: 4-byte type tag + 2-byte data length
+    private const int SubrecordHeaderSize = 6;
+
+    // Bit 18 of flags = zlib-compressed record data; skip these.
+    private const uint FlagCompressed = 0x00040000u;
+
+    // ARMA subrecord types that hold NIF mesh file paths.
+    private static readonly HashSet<string> MeshSubrecordTypes = new(StringComparer.Ordinal)
+        { "MOD2", "MOD3", "MOD4", "MOD5" };
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    public async Task<PluginRewriteResult> RewriteAsync(
+        IReadOnlyList<string> pluginPaths,
+        IReadOnlyDictionary<string, string> rewriteMap,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (rewriteMap.Count == 0 || pluginPaths.Count == 0)
+        {
+            return new PluginRewriteResult(0, 0, 0, [], []);
+        }
+
+        // Normalise the rewrite-map keys to lowercase forward-slash so the
+        // case-insensitive comparison below never misses a match.
+        var normMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in rewriteMap)
+        {
+            normMap[key.Replace('\\', '/').ToLowerInvariant()] = value;
+        }
+
+        var patchedPaths = new List<string>();
+        var warnings     = new List<string>();
+        int totalArmaPatched    = 0;
+        int totalPathsRewritten = 0;
+
+        foreach (var pluginPath in pluginPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var bytes      = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
+                var headerSize = DetectHeaderSize(bytes);
+
+                var (patchedBytes, armaPatched, pathsRewritten, fileWarnings) =
+                    RewritePlugin(bytes, headerSize, normMap);
+
+                foreach (var w in fileWarnings) warnings.Add(w);
+
+                if (pathsRewritten > 0)
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(pluginPath);
+                    var outPath  = Path.Combine(outputDirectory, $"{baseName}_patched.esp");
+                    await File.WriteAllBytesAsync(outPath, patchedBytes, cancellationToken);
+                    patchedPaths.Add(outPath);
+                    totalArmaPatched    += armaPatched;
+                    totalPathsRewritten += pathsRewritten;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                warnings.Add($"Could not process {Path.GetFileName(pluginPath)}: {ex.Message}");
+            }
+        }
+
+        return new PluginRewriteResult(
+            pluginPaths.Count,
+            totalArmaPatched,
+            totalPathsRewritten,
+            patchedPaths,
+            warnings);
+    }
+
+    // ── Header-size detection ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Skyrim LE = 20-byte record headers; after the TES4 header the first subrecord
+    /// "HEDR" appears at byte offset 20.  SSE extends the header to 24 bytes so "HEDR"
+    /// appears at offset 24.  Any other layout defaults to the SSE size.
+    /// </summary>
+    internal static int DetectHeaderSize(byte[] bytes)
+    {
+        if (bytes.Length < 4 ||
+            bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return SseHeaderSize;
+        }
+
+        // LE: "HEDR" at offset 20
+        if (bytes.Length > 23 &&
+            bytes[20] == 'H' && bytes[21] == 'E' && bytes[22] == 'D' && bytes[23] == 'R')
+        {
+            return LeHeaderSize;
+        }
+
+        return SseHeaderSize;
+    }
+
+    // ── File-level rewrite ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Rebuilds the entire plugin file, rewriting matching ARMA mesh-path subrecords.
+    /// Returns (patched_bytes, arma_records_patched, paths_rewritten, warnings).
+    /// </summary>
+    internal static (byte[] Patched, int ArmaPatched, int PathsRewritten, IReadOnlyList<string> Warnings)
+        RewritePlugin(byte[] bytes, int headerSize, IReadOnlyDictionary<string, string> rewriteMap)
+    {
+        using var ms = new MemoryStream(bytes.Length);
+        var warnings       = new List<string>();
+        int armaPatched    = 0;
+        int pathsRewritten = 0;
+
+        int pos = 0;
+        while (pos < bytes.Length)
+        {
+            if (pos + headerSize > bytes.Length) break;
+
+            var tag      = ReadTag(bytes, pos);
+            var field4   = ReadUInt32Le(bytes, pos + 4);
+
+            if (string.Equals(tag, "GRUP", StringComparison.Ordinal))
+            {
+                // For GRUPs, field4 = TOTAL group size (header + content).
+                var groupSize = (int)field4;
+                if (groupSize < headerSize || pos + groupSize > bytes.Length) break;
+
+                int contentSize = groupSize - headerSize;
+
+                var (groupContent, ga, gp, gw) =
+                    RewriteBlock(bytes, pos + headerSize, contentSize, headerSize, rewriteMap);
+
+                foreach (var w in gw) warnings.Add(w);
+                armaPatched    += ga;
+                pathsRewritten += gp;
+
+                // Write GRUP header with updated total size.
+                ms.Write(bytes, pos, 4);                                         // "GRUP"
+                WriteUInt32Le(ms, (uint)(headerSize + groupContent.Length));      // new total
+                ms.Write(bytes, pos + 8, headerSize - 8);                        // rest of hdr
+                ms.Write(groupContent, 0, groupContent.Length);
+
+                pos += groupSize;
+            }
+            else
+            {
+                // Regular record — field4 = data size (NOT including header).
+                var dataSize  = (int)field4;
+                int totalSize = headerSize + dataSize;
+                if (pos + totalSize > bytes.Length) break;
+
+                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                {
+                    var flags      = ReadUInt32Le(bytes, pos + 8);
+                    bool compressed = (flags & FlagCompressed) != 0;
+
+                    if (!compressed && dataSize >= 0)
+                    {
+                        var (newData, rp) =
+                            RewriteArmaSubrecords(bytes, pos + headerSize, dataSize, rewriteMap);
+
+                        pathsRewritten += rp;
+                        if (rp > 0) armaPatched++;
+
+                        // Write ARMA header with (possibly updated) data size.
+                        ms.Write(bytes, pos, 4);                              // "ARMA"
+                        WriteUInt32Le(ms, (uint)newData.Length);               // new dataSize
+                        ms.Write(bytes, pos + 8, headerSize - 8);             // flags..rest
+                        ms.Write(newData, 0, newData.Length);
+                    }
+                    else
+                    {
+                        // Compressed ARMA: copy verbatim.
+                        ms.Write(bytes, pos, totalSize);
+                    }
+                }
+                else
+                {
+                    // Any other record: copy verbatim.
+                    ms.Write(bytes, pos, totalSize);
+                }
+
+                pos += totalSize;
+            }
+        }
+
+        return (ms.ToArray(), armaPatched, pathsRewritten, warnings);
+    }
+
+    // ── Block-level rewrite (content inside a GRUP) ───────────────────────────
+
+    private static (byte[] Content, int ArmaPatched, int PathsRewritten, IReadOnlyList<string> Warnings)
+        RewriteBlock(byte[] bytes, int start, int length, int headerSize,
+                     IReadOnlyDictionary<string, string> rewriteMap)
+    {
+        using var ms = new MemoryStream(length);
+        var warnings       = new List<string>();
+        int armaPatched    = 0;
+        int pathsRewritten = 0;
+
+        int pos = start;
+        int end = start + length;
+
+        while (pos < end)
+        {
+            if (pos + headerSize > end) break;
+
+            var tag    = ReadTag(bytes, pos);
+            var field4 = ReadUInt32Le(bytes, pos + 4);
+
+            if (string.Equals(tag, "GRUP", StringComparison.Ordinal))
+            {
+                var groupSize = (int)field4;
+                if (groupSize < headerSize || pos + groupSize > end) break;
+
+                int contentSize = groupSize - headerSize;
+                var (groupContent, ga, gp, gw) =
+                    RewriteBlock(bytes, pos + headerSize, contentSize, headerSize, rewriteMap);
+
+                foreach (var w in gw) warnings.Add(w);
+                armaPatched    += ga;
+                pathsRewritten += gp;
+
+                ms.Write(bytes, pos, 4);
+                WriteUInt32Le(ms, (uint)(headerSize + groupContent.Length));
+                ms.Write(bytes, pos + 8, headerSize - 8);
+                ms.Write(groupContent, 0, groupContent.Length);
+
+                pos += groupSize;
+            }
+            else
+            {
+                var dataSize  = (int)field4;
+                int totalSize = headerSize + dataSize;
+                if (pos + totalSize > end) break;
+
+                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                {
+                    var flags      = ReadUInt32Le(bytes, pos + 8);
+                    bool compressed = (flags & FlagCompressed) != 0;
+
+                    if (!compressed && dataSize >= 0)
+                    {
+                        var (newData, rp) =
+                            RewriteArmaSubrecords(bytes, pos + headerSize, dataSize, rewriteMap);
+
+                        pathsRewritten += rp;
+                        if (rp > 0) armaPatched++;
+
+                        ms.Write(bytes, pos, 4);
+                        WriteUInt32Le(ms, (uint)newData.Length);
+                        ms.Write(bytes, pos + 8, headerSize - 8);
+                        ms.Write(newData, 0, newData.Length);
+                    }
+                    else
+                    {
+                        ms.Write(bytes, pos, totalSize);
+                    }
+                }
+                else
+                {
+                    ms.Write(bytes, pos, totalSize);
+                }
+
+                pos += totalSize;
+            }
+        }
+
+        return (ms.ToArray(), armaPatched, pathsRewritten, warnings);
+    }
+
+    // ── ARMA subrecord rewrite ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Walks the subrecords of a single ARMA record, replacing the data string of
+    /// MOD2 / MOD3 / MOD4 / MOD5 subrecords when the path is in <paramref name="rewriteMap"/>.
+    /// Returns (new_data_bytes, paths_rewritten).
+    /// </summary>
+    internal static (byte[] NewData, int PathsRewritten)
+        RewriteArmaSubrecords(byte[] bytes, int dataStart, int dataSize,
+                              IReadOnlyDictionary<string, string> rewriteMap)
+    {
+        using var ms = new MemoryStream(dataSize);
+        int pos     = dataStart;
+        int end     = dataStart + dataSize;
+        int rewritten = 0;
+
+        while (pos + SubrecordHeaderSize <= end)
+        {
+            var subType = ReadTag(bytes, pos);
+            var subSize = ReadUInt16Le(bytes, pos + 4);
+
+            if (pos + SubrecordHeaderSize + subSize > end) break;
+
+            if (MeshSubrecordTypes.Contains(subType) && subSize > 0)
+            {
+                // Read null-terminated ASCII path string from the subrecord data.
+                int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, subSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                var meshPath = System.Text.Encoding.ASCII
+                    .GetString(bytes, pos + SubrecordHeaderSize, strLen)
+                    .Replace('\\', '/')
+                    .ToLowerInvariant();
+
+                if (!string.IsNullOrEmpty(meshPath) &&
+                    rewriteMap.TryGetValue(meshPath, out var newPath))
+                {
+                    // Write subrecord with the new (case-preserved) path.
+                    var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
+                    WriteTag(ms, subType);
+                    WriteUInt16Le(ms, (ushort)newBytes.Length);
+                    ms.Write(newBytes, 0, newBytes.Length);
+                    rewritten++;
+                }
+                else
+                {
+                    ms.Write(bytes, pos, SubrecordHeaderSize + subSize);
+                }
+            }
+            else
+            {
+                ms.Write(bytes, pos, SubrecordHeaderSize + subSize);
+            }
+
+            pos += SubrecordHeaderSize + subSize;
+        }
+
+        // Preserve any trailing bytes (should not happen in a well-formed file).
+        if (pos < end)
+        {
+            ms.Write(bytes, pos, end - pos);
+        }
+
+        return (ms.ToArray(), rewritten);
+    }
+
+    // ── Binary helpers ────────────────────────────────────────────────────────
+
+    private static string ReadTag(byte[] bytes, int offset) =>
+        System.Text.Encoding.ASCII.GetString(bytes, offset, 4);
+
+    private static uint ReadUInt32Le(byte[] bytes, int offset) =>
+        (uint)(bytes[offset]
+             | (bytes[offset + 1] << 8)
+             | (bytes[offset + 2] << 16)
+             | (bytes[offset + 3] << 24));
+
+    private static ushort ReadUInt16Le(byte[] bytes, int offset) =>
+        (ushort)(bytes[offset] | (bytes[offset + 1] << 8));
+
+    private static void WriteUInt32Le(MemoryStream ms, uint value)
+    {
+        ms.WriteByte((byte)(value));
+        ms.WriteByte((byte)(value >> 8));
+        ms.WriteByte((byte)(value >> 16));
+        ms.WriteByte((byte)(value >> 24));
+    }
+
+    private static void WriteUInt16Le(MemoryStream ms, ushort value)
+    {
+        ms.WriteByte((byte)(value));
+        ms.WriteByte((byte)(value >> 8));
+    }
+
+    private static void WriteTag(MemoryStream ms, string tag)
+    {
+        var encoded = System.Text.Encoding.ASCII.GetBytes(tag);
+        ms.Write(encoded, 0, Math.Min(4, encoded.Length));
+    }
+
+    private static int IndexOfNull(byte[] bytes, int start, int length)
+    {
+        for (int i = 0; i < length; i++)
+        {
+            if (bytes[start + i] == 0) return i;
+        }
+        return -1;
+    }
+}
+
 internal sealed class LocalExportService : IExportService
 {
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
@@ -2823,6 +3242,23 @@ internal sealed class LocalExportService : IExportService
                 BuildXEditScript(pluginAnalysis, request.TargetBody, pluginRewriteMap),
                 cancellationToken);
             outputFiles.Add(xEditScriptPath);
+
+            // True binary plugin record rewriting: parse the ESP/ESM/ESL binary,
+            // locate every ARMA record, and rewrite MOD2/MOD3/MOD4/MOD5 mesh path
+            // subrecords directly.  Output goes to <name>_patched.esp which the user
+            // can drop straight into their Data folder.
+            if (pluginRewriteMap.Count > 0)
+            {
+                var sourcePluginPaths = EnumeratePluginFiles(armor.SourcePath);
+                if (sourcePluginPaths.Count > 0)
+                {
+                    var rewriter = new BinaryPluginRewriteService();
+                    var rewriteResult = await rewriter.RewriteAsync(
+                        sourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
+
+                    outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
+                }
+            }
         }
 
         // Write texture summary when textures are present.

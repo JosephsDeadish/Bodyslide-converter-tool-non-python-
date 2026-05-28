@@ -110,6 +110,8 @@ Each successful conversion produces the following files in the output directory:
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
+| `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
+| `<PluginName>_patched.esp` | **True binary-rewritten plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord that matched a converted NIF updated in-place; drop this file into your Skyrim `Data` folder alongside the converted meshes; supports both Skyrim LE (20-byte record headers) and Skyrim SE / SSE (24-byte headers); only produced when at least one path was rewritten |
 | `texture-summary.json` | Texture audit: DDS count per type (diffuse/normal/specular/glow/parallax/subsurface), missing normal maps |
 | `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls (swap body profile, rotate view, adjust sliders) |
 | `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
@@ -144,6 +146,8 @@ Implemented from issue scope:
 - **support asset carry-forward** — export now copies scanned textures, physics files, plugin files, and body-reference files into the output tree using source-relative paths so converted packs include required sidecar assets
 
 - **animation-driven geometry solver** — `AnimationDrivenGeometrySolver` applies linear-blend skinning (LBS) across 8 canonical poses using anatomically-derived per-region bone rotations (sagittal Z-Y plane), computing per-region body-envelope penetration depth; `AnimationDrivenPoseSimulationService` reads source mesh vertices from NIF files, runs the solver, and feeds push-out corrections back into the vertex transform pass; heuristic fallback used when no mesh data is available — all vertex transformations are now pose-informed rather than purely morph-threshold based
+
+- **true binary plugin record rewriting** — `BinaryPluginRewriteService` directly parses the Bethesda ESP/ESM/ESL binary format (handles both Skyrim LE 20-byte and SSE 24-byte record headers), walks the GRUP/record structure, locates every ARMA (ArmorAddon) record, and rewrites `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecords in-place; produces a `<name>_patched.esp` file in the output directory that the user can drop straight into their Skyrim `Data` folder without running xEdit; the `patch-armor.pas` xEdit script and `plugin-patches.json` are still generated as supplementary reference
 
 All gaps from issue #2 have now been addressed.
 

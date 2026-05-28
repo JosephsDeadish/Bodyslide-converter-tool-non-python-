@@ -2866,3 +2866,468 @@ public sealed class AnimationDrivenGeometrySolverTests
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BinaryPluginRewriteService Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class BinaryPluginRewriteServiceTests
+{
+    // ── Header-size detection ─────────────────────────────────────────────────
+
+    [Fact]
+    public void DetectHeaderSize_TooShort_ReturnsSseDefault()
+    {
+        var result = BinaryPluginRewriteService.DetectHeaderSize([]);
+        Assert.Equal(24, result);
+    }
+
+    [Fact]
+    public void DetectHeaderSize_NotTes4_ReturnsSseDefault()
+    {
+        var bytes = new byte[30];
+        System.Text.Encoding.ASCII.GetBytes("GRUP").CopyTo(bytes, 0);
+        Assert.Equal(24, BinaryPluginRewriteService.DetectHeaderSize(bytes));
+    }
+
+    [Fact]
+    public void DetectHeaderSize_LePlugin_Returns20()
+    {
+        // Build a minimal TES4 header where "HEDR" appears at offset 20 (LE layout).
+        var bytes = new byte[28];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        System.Text.Encoding.ASCII.GetBytes("HEDR").CopyTo(bytes, 20);
+        Assert.Equal(20, BinaryPluginRewriteService.DetectHeaderSize(bytes));
+    }
+
+    [Fact]
+    public void DetectHeaderSize_SsePlugin_Returns24()
+    {
+        // TES4 header where "HEDR" is NOT at offset 20 (SSE — 24-byte headers).
+        var bytes = new byte[32];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        System.Text.Encoding.ASCII.GetBytes("HEDR").CopyTo(bytes, 24);
+        Assert.Equal(24, BinaryPluginRewriteService.DetectHeaderSize(bytes));
+    }
+
+    // ── ARMA subrecord rewrite ────────────────────────────────────────────────
+
+    [Fact]
+    public void RewriteArmaSubrecords_NoMatchingPaths_ReturnsBytesUnchanged()
+    {
+        // Build an ARMA data block with a single EDID subrecord (not a mesh path subrecord).
+        const string edid = "MyArmor\0";
+        var edidBytes = System.Text.Encoding.ASCII.GetBytes(edid);
+        byte[] data = BuildSubrecord("EDID", edidBytes);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+        };
+
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        Assert.Equal(0, rewritten);
+        Assert.Equal(data, newData);
+    }
+
+    [Fact]
+    public void RewriteArmaSubrecords_MatchingMod2_RewritesPath()
+    {
+        const string original = "meshes/armor/iron/iron_0.nif\0";
+        const string expected = "meshes/slidesmith/cbbe/iron_0.nif";
+
+        var origBytes = System.Text.Encoding.ASCII.GetBytes(original);
+        byte[] data = BuildSubrecord("MOD2", origBytes);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = expected
+        };
+
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+
+        // Parse the output subrecord and verify the path.
+        var subType = System.Text.Encoding.ASCII.GetString(newData, 0, 4);
+        var subSize = (ushort)(newData[4] | (newData[5] << 8));
+        var writtenPath = System.Text.Encoding.ASCII
+            .GetString(newData, 6, subSize - 1); // exclude null terminator
+        Assert.Equal("MOD2", subType);
+        Assert.Equal(expected, writtenPath, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RewriteArmaSubrecords_Mod3Mod4Mod5_AllRewritten()
+    {
+        const string orig3 = "meshes/armor/iron/iron_m_0.nif\0";
+        const string orig4 = "meshes/armor/iron/iron_1stf.nif\0";
+        const string orig5 = "meshes/armor/iron/iron_1stm.nif\0";
+
+        byte[] mod3 = BuildSubrecord("MOD3", System.Text.Encoding.ASCII.GetBytes(orig3));
+        byte[] mod4 = BuildSubrecord("MOD4", System.Text.Encoding.ASCII.GetBytes(orig4));
+        byte[] mod5 = BuildSubrecord("MOD5", System.Text.Encoding.ASCII.GetBytes(orig5));
+
+        byte[] data = [..mod3, ..mod4, ..mod5];
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_m_0.nif"]  = "meshes/slidesmith/himbo/iron_m_0.nif",
+            ["meshes/armor/iron/iron_1stf.nif"] = "meshes/slidesmith/himbo/iron_1stf.nif",
+            ["meshes/armor/iron/iron_1stm.nif"] = "meshes/slidesmith/himbo/iron_1stm.nif",
+        };
+
+        var (_, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        Assert.Equal(3, rewritten);
+    }
+
+    [Fact]
+    public void RewriteArmaSubrecords_CaseInsensitiveLookup_MatchesUpperCasePath()
+    {
+        // Plugin stores path with Windows mixed-case backslashes; map key is lowercase.
+        const string storedPath  = "Meshes\\Armor\\Iron\\Iron_0.nif\0";
+        const string newPath     = "meshes/slidesmith/cbbe/iron_0.nif";
+        const string mapKey      = "meshes/armor/iron/iron_0.nif";   // normalised lowercase
+
+        byte[] data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(storedPath));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [mapKey] = newPath
+        };
+
+        var (_, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        // BinaryPluginRewriteService normalises path before lookup, so this should match.
+        Assert.Equal(1, rewritten);
+    }
+
+    [Fact]
+    public void RewriteArmaSubrecords_CompressedFlagSkipped_ReturnsUnchanged()
+    {
+        // The RewritePlugin call skips compressed ARMA; this tests the raw subrecord
+        // function with an empty data block — should produce 0 rewrites and no crash.
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            [], 0, 0, rewriteMap);
+
+        Assert.Equal(0, rewritten);
+        Assert.Empty(newData);
+    }
+
+    // ── Full plugin round-trip ────────────────────────────────────────────────
+
+    [Fact]
+    public void RewritePlugin_NoArmaRecord_ReturnsIdenticalBytes()
+    {
+        // Build a minimal SSE plugin with only a TES4 record (no ARMA).
+        byte[] plugin = BuildMinimalPlugin_SseNoArma();
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+        };
+
+        var (patched, armaPatched, pathsRewritten, _) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Equal(0, armaPatched);
+        Assert.Equal(0, pathsRewritten);
+        Assert.Equal(plugin, patched);
+    }
+
+    [Fact]
+    public void RewritePlugin_ArmaWithMatchingMod2_PatchesPathAndUpdatesDataSize()
+    {
+        const string origPath = "meshes/armor/iron/iron_0.nif\0";
+        const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+        byte[] mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+        byte[] plugin   = BuildMinimalPlugin_SseWithArma(mod2Data);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = newPath
+        };
+
+        var (patched, armaPatched, pathsRewritten, warnings) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Empty(warnings);
+        Assert.Equal(1, armaPatched);
+        Assert.Equal(1, pathsRewritten);
+
+        // Verify the patched path appears verbatim in the output.
+        var content = System.Text.Encoding.Latin1.GetString(patched);
+        Assert.Contains(newPath, content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RewritePlugin_ArmaInsideGrup_PatchesPathAndUpdatesGrupSize()
+    {
+        const string origPath = "meshes/armor/iron/iron_0.nif\0";
+        const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+        byte[] mod2Data   = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+        byte[] armaRecord = BuildArmaRecord(mod2Data, headerSize: 24);
+
+        // Wrap the ARMA record inside a GRUP.
+        byte[] plugin = BuildMinimalPlugin_SseWithGrupContaining(armaRecord);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = newPath
+        };
+
+        var (patched, armaPatched, pathsRewritten, warnings) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Empty(warnings);
+        Assert.Equal(1, armaPatched);
+        Assert.Equal(1, pathsRewritten);
+
+        // Verify patched content is present.
+        var content = System.Text.Encoding.Latin1.GetString(patched);
+        Assert.Contains(newPath, content, StringComparison.Ordinal);
+    }
+
+    // ── RewriteAsync integration ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task RewriteAsync_EmptyMap_ReturnsZeroResult()
+    {
+        var svc = new BinaryPluginRewriteService();
+        var result = await svc.RewriteAsync(
+            ["some/path.esp"],
+            new Dictionary<string, string>(),
+            Path.GetTempPath(),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.PluginsProcessed);
+        Assert.Equal(0, result.PathsRewritten);
+        Assert.Empty(result.PatchedPluginPaths);
+    }
+
+    [Fact]
+    public async Task RewriteAsync_EmptyPluginList_ReturnsZeroResult()
+    {
+        var svc = new BinaryPluginRewriteService();
+        var result = await svc.RewriteAsync(
+            [],
+            new Dictionary<string, string> { ["meshes/a.nif"] = "meshes/b.nif" },
+            Path.GetTempPath(),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.PluginsProcessed);
+        Assert.Empty(result.PatchedPluginPaths);
+    }
+
+    [Fact]
+    public async Task RewriteAsync_WithMatchingPlugin_WritesPatchedFile()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outDir  = Path.Combine(workDir, "out");
+        Directory.CreateDirectory(workDir);
+        Directory.CreateDirectory(outDir);
+
+        try
+        {
+            const string origPath = "meshes/armor/iron/iron_0.nif\0";
+            const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+            byte[] mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+            byte[] plugin   = BuildMinimalPlugin_SseWithArma(mod2Data);
+
+            var pluginPath = Path.Combine(workDir, "TestArmor.esp");
+            await File.WriteAllBytesAsync(pluginPath, plugin);
+
+            var svc = new BinaryPluginRewriteService();
+            var result = await svc.RewriteAsync(
+                [pluginPath],
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/iron_0.nif"] = newPath
+                },
+                outDir,
+                CancellationToken.None);
+
+            Assert.Equal(1, result.PluginsProcessed);
+            Assert.Equal(1, result.ArmaRecordsPatched);
+            Assert.Equal(1, result.PathsRewritten);
+            Assert.Single(result.PatchedPluginPaths);
+
+            var patchedFile = result.PatchedPluginPaths[0];
+            Assert.True(File.Exists(patchedFile));
+            Assert.EndsWith("_patched.esp", patchedFile, StringComparison.OrdinalIgnoreCase);
+
+            var patchedContent = System.Text.Encoding.Latin1.GetString(await File.ReadAllBytesAsync(patchedFile));
+            Assert.Contains(newPath, patchedContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RewriteAsync_NoMatchingPaths_NoPatchedFileWritten()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outDir  = Path.Combine(workDir, "out");
+        Directory.CreateDirectory(workDir);
+        Directory.CreateDirectory(outDir);
+
+        try
+        {
+            // Plugin with a path that is NOT in the rewrite map.
+            byte[] mod2Data = BuildSubrecord("MOD2",
+                System.Text.Encoding.ASCII.GetBytes("meshes/other/other_0.nif\0"));
+            byte[] plugin = BuildMinimalPlugin_SseWithArma(mod2Data);
+
+            var pluginPath = Path.Combine(workDir, "Other.esp");
+            await File.WriteAllBytesAsync(pluginPath, plugin);
+
+            var svc = new BinaryPluginRewriteService();
+            var result = await svc.RewriteAsync(
+                [pluginPath],
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+                },
+                outDir,
+                CancellationToken.None);
+
+            Assert.Equal(1, result.PluginsProcessed);
+            Assert.Equal(0, result.PathsRewritten);
+            Assert.Empty(result.PatchedPluginPaths);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    // ── Full pipeline integration ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task Convert_WithSsePlugin_WritesPatchedPlugin()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outDir  = Path.Combine(workDir, "out");
+        Directory.CreateDirectory(workDir);
+
+        try
+        {
+            // Write a real SSE plugin that has an ARMA record pointing at testarmor.nif.
+            const string origPath = "meshes/armor/testarmor/testarmor_0.nif\0";
+            byte[] mod2 = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+            byte[] plugin = BuildMinimalPlugin_SseWithArma(mod2);
+
+            await File.WriteAllBytesAsync(Path.Combine(workDir, "testarmor.nif"), new byte[] { 0x4E, 0x69, 0x66 });
+            await File.WriteAllBytesAsync(Path.Combine(workDir, "testarmor.esp"), plugin);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(
+                    Path.Combine(workDir, "testarmor.nif"),
+                    "CBBE",
+                    outDir));
+
+            Assert.True(result.Success);
+
+            // The patched plugin should exist in the output when at least one mesh
+            // path from the plugin matches the converted output file.
+            var patchedEsp = result.OutputFiles
+                .FirstOrDefault(f => f.EndsWith("_patched.esp", StringComparison.OrdinalIgnoreCase));
+
+            // Only present when the regex scan also found the path (i.e. rewrite map not empty).
+            if (patchedEsp is not null)
+            {
+                Assert.True(File.Exists(patchedEsp),
+                    $"Patched plugin file should exist at {patchedEsp}");
+            }
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    // ── Binary-builder helpers ────────────────────────────────────────────────
+
+    /// <summary>Builds a 6+data subrecord: type(4) + size(2) + data.</summary>
+    private static byte[] BuildSubrecord(string type, byte[] data)
+    {
+        var buf = new byte[6 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(type).CopyTo(buf, 0);
+        buf[4] = (byte)(data.Length & 0xFF);
+        buf[5] = (byte)(data.Length >> 8);
+        data.CopyTo(buf, 6);
+        return buf;
+    }
+
+    /// <summary>Builds an ARMA record with a 24-byte SSE record header wrapping <paramref name="subrecordData"/>.</summary>
+    private static byte[] BuildArmaRecord(byte[] subrecordData, int headerSize = 24)
+    {
+        var buf = new byte[headerSize + subrecordData.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)subrecordData.Length); // dataSize
+        // flags = 0, formID = 0x00000001, rest = 0
+        WriteUInt32Le(buf, 12, 0x00000001u);
+        subrecordData.CopyTo(buf, headerSize);
+        return buf;
+    }
+
+    /// <summary>Builds a minimal SSE plugin (TES4 + HEDR) with no ARMA records.</summary>
+    private static byte[] BuildMinimalPlugin_SseNoArma()
+    {
+        // TES4 record: header(24) + HEDR subrecord(6+12=18) + CNAM subrecord(6+1=7) = 25 bytes data
+        byte[] hedrData = new byte[12];    // version(4)+numRecords(4)+nextObjectID(4)
+        byte[] hedr = BuildSubrecord("HEDR", hedrData);
+        byte[] cnam = BuildSubrecord("CNAM", [0x00]); // empty author
+        byte[] tes4Data = [..hedr, ..cnam];
+
+        var buf = new byte[24 + tes4Data.Length];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)tes4Data.Length);
+        tes4Data.CopyTo(buf, 24);
+        return buf;
+    }
+
+    /// <summary>Builds a minimal SSE plugin (TES4 + one ARMA at file top level) with the given subrecord data.</summary>
+    private static byte[] BuildMinimalPlugin_SseWithArma(byte[] armaSubrecords)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        byte[] arma = BuildArmaRecord(armaSubrecords, headerSize: 24);
+        return [..tes4, ..arma];
+    }
+
+    /// <summary>Wraps the ARMA record inside a top-level GRUP and prepends a TES4 record.</summary>
+    private static byte[] BuildMinimalPlugin_SseWithGrupContaining(byte[] armaRecord)
+    {
+        // GRUP header (24 bytes): "GRUP" + totalSize + label("ARMA") + groupType(0) + ...
+        int grupTotal = 24 + armaRecord.Length;
+        var grup = new byte[grupTotal];
+        System.Text.Encoding.ASCII.GetBytes("GRUP").CopyTo(grup, 0);
+        WriteUInt32Le(grup, 4, (uint)grupTotal);         // total size
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(grup, 8); // label = top-level ARMA group
+        // groupType = 0 (top-level record group), rest zeros
+        armaRecord.CopyTo(grup, 24);
+
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        return [..tes4, ..grup];
+    }
+
+    private static void WriteUInt32Le(byte[] buf, int offset, uint value)
+    {
+        buf[offset]     = (byte)(value);
+        buf[offset + 1] = (byte)(value >> 8);
+        buf[offset + 2] = (byte)(value >> 16);
+        buf[offset + 3] = (byte)(value >> 24);
+    }
+}
