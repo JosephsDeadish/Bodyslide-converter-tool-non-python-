@@ -111,7 +111,9 @@ Each successful conversion produces the following files in the output directory:
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
 | `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
-| `<PluginName>_patched.esp` | **True binary-rewritten plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord that matched a converted NIF updated in-place; drop this file into your Skyrim `Data` folder alongside the converted meshes; supports both Skyrim LE (20-byte record headers) and Skyrim SE / SSE (24-byte headers); only produced when at least one path was rewritten |
+| `<PluginName>_patched.esp` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord that matched a converted NIF updated in-place; supports both Skyrim LE (20-byte record headers) and Skyrim SE / SSE (24-byte headers); only produced when at least one path was rewritten |
+| `<PluginName>_SlidesmithPatch.esp` | **Minimal override patch ESP** — contains ONLY the patched ARMA records and lists the original plugin as its master; proper Bethesda override plugin safe to load after the original; only produced when at least one ARMA path matched the rewrite map |
+| `README.txt` | Human-readable installation guide: lists all generated files, where to put them, how to apply the patch ESP, how to build BodySlide morphs, and any manual finishing steps required |
 | `texture-summary.json` | Texture audit: DDS count per type (diffuse/normal/specular/glow/parallax/subsurface), missing normal maps |
 | `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls (swap body profile, rotate view, adjust sliders) |
 | `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
@@ -149,7 +151,13 @@ Implemented from issue scope:
 
 - **true binary plugin record rewriting** — `BinaryPluginRewriteService` directly parses the Bethesda ESP/ESM/ESL binary format (handles both Skyrim LE 20-byte and SSE 24-byte record headers), walks the GRUP/record structure, locates every ARMA (ArmorAddon) record, and rewrites `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecords in-place; produces a `<name>_patched.esp` file in the output directory that the user can drop straight into their Skyrim `Data` folder without running xEdit; the `patch-armor.pas` xEdit script and `plugin-patches.json` are still generated as supplementary reference
 
-All gaps from issue #2 have now been addressed.
+- **structured binary ARMA record analysis** — `BinaryArmaParser` now walks the full binary ARMA record to extract `FormID` (uint32 from record header), `EditorId` (EDID subrecord null-terminated string), `BipedSlots` (decoded from BOD2/BODT 32-bit slot flags: each set bit maps to slot 30+i), and all four mesh paths (MOD2/MOD3/MOD4/MOD5); `BasicPluginAnalysisService` upgraded from regex path-scan to `BinaryArmaParser`; each `PluginArmorAddon` now carries `FormId`, `EditorId`, and `BipedSlots` alongside the detected mesh paths
+
+- **minimal override patch ESP** — in addition to the full-copy `_patched.esp`, export now generates `<name>_SlidesmithPatch.esp`: a proper Bethesda override plugin that lists the original ESP as its sole master file (`MAST`+`DATA` subrecords in TES4) and contains **only** the ARMA records that had paths rewritten; uses the same FormIDs as the originals so the engine treats them as overrides; can be dropped into the Data folder after the original without replacing any unrelated records; only generated when at least one ARMA record path matched the rewrite map
+
+- **generated README.txt** — `ConversionReadmeGenerator` now writes a `README.txt` inside every output package describing: what was converted, all files generated with their purpose, step-by-step manual installation instructions, plugin patch usage (patch ESP or xEdit script fallback), BodySlide build instructions, and notes on manual finishing steps required; satisfies the Stage 7 README requirement from the issue spec
+
+All gaps from issue #2 have now been addressed, including true plugin record rewriting with a proper Bethesda override patch ESP and a generated README.txt per output package.
 
 ## Current built-in presets (27 total)
 

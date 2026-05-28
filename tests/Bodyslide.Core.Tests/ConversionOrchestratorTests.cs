@@ -3331,3 +3331,601 @@ public sealed class BinaryPluginRewriteServiceTests
         buf[offset + 3] = (byte)(value >> 24);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BinaryArmaParser Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class BinaryArmaParserTests
+{
+    // ── Header-size detection (same logic as BinaryPluginRewriteService) ──────
+
+    [Fact]
+    public void DetectHeaderSize_LePlugin_Returns20()
+    {
+        var bytes = new byte[28];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        System.Text.Encoding.ASCII.GetBytes("HEDR").CopyTo(bytes, 20);
+        Assert.Equal(20, BinaryArmaParser.DetectHeaderSize(bytes));
+    }
+
+    [Fact]
+    public void DetectHeaderSize_SsePlugin_Returns24()
+    {
+        var bytes = new byte[32];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        System.Text.Encoding.ASCII.GetBytes("HEDR").CopyTo(bytes, 24);
+        Assert.Equal(24, BinaryArmaParser.DetectHeaderSize(bytes));
+    }
+
+    // ── FormID extraction ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_ReadsFormIdFromRecordHeader()
+    {
+        // Build a minimal SSE plugin with a single ARMA record whose FormID = 0x00001234.
+        const uint expectedFormId = 0x00001234u;
+        byte[] armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TestArmor\0"));
+        byte[] plugin   = BuildMinimalPlugin_SseWithArmaAndFormId(armaData, expectedFormId);
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Equal(expectedFormId, descriptors[0].FormId);
+    }
+
+    // ── EditorID (EDID subrecord) extraction ──────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_ReadsEditorIdFromEdidSubrecord()
+    {
+        const string editorId = "SomeCoolArmor";
+        byte[] edid  = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(editorId + "\0"));
+        byte[] mod2  = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/test/test_0.nif\0"));
+        byte[] armaData = [..edid, ..mod2];
+
+        byte[] plugin = BuildMinimalPlugin_SseWithArma(armaData);
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Equal(editorId, descriptors[0].EditorId);
+    }
+
+    // ── BOD2 biped-slot decoding ──────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_DecodesBipedSlotsFromBod2()
+    {
+        // Slot 32 (Body) = bit 2 → flags = 0x00000004
+        // Slot 33 (Hands) = bit 3 → flags |= 0x00000008
+        // Combined: 0x0000000C
+        const uint slotFlags = 0x0000000Cu;
+
+        using var bod2Ms = new MemoryStream(8);
+        WriteUInt32Le(bod2Ms, slotFlags); // slot flags
+        WriteUInt32Le(bod2Ms, 0);         // general flags
+        byte[] bod2    = BuildSubrecord("BOD2", bod2Ms.ToArray());
+        byte[] plugin  = BuildMinimalPlugin_SseWithArma(bod2);
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains(32, descriptors[0].BipedSlots);  // Body
+        Assert.Contains(33, descriptors[0].BipedSlots);  // Hands
+        Assert.DoesNotContain(30, descriptors[0].BipedSlots);
+    }
+
+    // ── Mesh path extraction ──────────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_ExtractsMeshPathsFromMod2Mod3Mod4Mod5()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/a/a_0.nif\0"));
+        byte[] mod3 = BuildSubrecord("MOD3",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/a/a_1.nif\0"));
+        byte[] mod4 = BuildSubrecord("MOD4",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/a/a_1st_f.nif\0"));
+        byte[] mod5 = BuildSubrecord("MOD5",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/a/a_1st_m.nif\0"));
+        byte[] data = [..mod2, ..mod3, ..mod4, ..mod5];
+
+        var plugin      = BuildMinimalPlugin_SseWithArma(data);
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        var paths = descriptors[0].MeshPaths;
+        Assert.Equal(4, paths.Count);
+        Assert.Contains("meshes/armor/a/a_0.nif", paths);
+        Assert.Contains("meshes/armor/a/a_1.nif", paths);
+        Assert.Contains("meshes/armor/a/a_1st_f.nif", paths);
+        Assert.Contains("meshes/armor/a/a_1st_m.nif", paths);
+    }
+
+    // ── GRUP traversal ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_FindsArmaInsideGrup()
+    {
+        byte[] mod2   = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/iron/a_0.nif\0"));
+        byte[] arma   = BuildArmaRecord(mod2, headerSize: 24);
+        byte[] plugin = BuildMinimalPlugin_SseWithGrupContaining(arma);
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains("meshes/iron/a_0.nif", descriptors[0].MeshPaths);
+    }
+
+    // ── Original record bytes are preserved ──────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_PreservesOriginalRecordBytes()
+    {
+        byte[] edid = BuildSubrecord("EDID",
+            System.Text.Encoding.ASCII.GetBytes("PreserveMe\0"));
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/a/b.nif\0"));
+        byte[] armaData = [..edid, ..mod2];
+
+        var plugin      = BuildMinimalPlugin_SseWithArma(armaData);
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        // Original header must be 24 bytes (SSE) and start with "ARMA"
+        Assert.Equal(24, descriptors[0].OriginalRecordHeaderBytes.Length);
+        Assert.Equal("ARMA",
+            System.Text.Encoding.ASCII.GetString(descriptors[0].OriginalRecordHeaderBytes, 0, 4));
+        // Original data bytes must equal the armaData we provided
+        Assert.Equal(armaData, descriptors[0].OriginalDataBytes);
+    }
+
+    // ── Empty / malformed inputs ──────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmaRecords_EmptyInput_ReturnsEmpty()
+    {
+        var result = BinaryArmaParser.ExtractArmaRecords([]);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ExtractArmaRecords_NoArmaRecords_ReturnsEmpty()
+    {
+        byte[] plugin = BuildMinimalPlugin_SseNoArma();
+        var result    = BinaryArmaParser.ExtractArmaRecords(plugin);
+        Assert.Empty(result);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>Like BuildMinimalPlugin_SseWithArma but lets the caller set the FormID.</summary>
+    private static byte[] BuildMinimalPlugin_SseWithArmaAndFormId(byte[] armaSubrecords, uint formId)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        byte[] arma = BuildArmaRecordWithFormId(armaSubrecords, formId, headerSize: 24);
+        return [..tes4, ..arma];
+    }
+
+    private static byte[] BuildArmaRecordWithFormId(byte[] subrecordData, uint formId, int headerSize)
+    {
+        var buf = new byte[headerSize + subrecordData.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)subrecordData.Length);
+        WriteUInt32Le(buf, 8, 0);       // flags
+        WriteUInt32Le(buf, 12, formId); // FormID
+        subrecordData.CopyTo(buf, headerSize);
+        return buf;
+    }
+
+    private static byte[] BuildSubrecord(string tag, byte[] data)
+    {
+        var result = new byte[6 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(result, 0);
+        result[4] = (byte)(data.Length & 0xFF);
+        result[5] = (byte)((data.Length >> 8) & 0xFF);
+        data.CopyTo(result, 6);
+        return result;
+    }
+
+    private static byte[] BuildArmaRecord(byte[] subrecordData, int headerSize)
+    {
+        var buf = new byte[headerSize + subrecordData.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)subrecordData.Length);
+        WriteUInt32Le(buf, 8, 0);
+        WriteUInt32Le(buf, 12, 0x00000001u);
+        subrecordData.CopyTo(buf, headerSize);
+        return buf;
+    }
+
+    private static byte[] BuildMinimalPlugin_SseNoArma()
+    {
+        byte[] hedrData = new byte[12];
+        byte[] hedr     = BuildSubrecord("HEDR", hedrData);
+        byte[] cnam     = BuildSubrecord("CNAM", [0x00]);
+        byte[] tes4Data = [..hedr, ..cnam];
+        var buf = new byte[24 + tes4Data.Length];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)tes4Data.Length);
+        tes4Data.CopyTo(buf, 24);
+        return buf;
+    }
+
+    private static byte[] BuildMinimalPlugin_SseWithArma(byte[] armaSubrecords)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        byte[] arma = BuildArmaRecord(armaSubrecords, headerSize: 24);
+        return [..tes4, ..arma];
+    }
+
+    private static byte[] BuildMinimalPlugin_SseWithGrupContaining(byte[] armaRecord)
+    {
+        int grupTotal = 24 + armaRecord.Length;
+        var grup = new byte[grupTotal];
+        System.Text.Encoding.ASCII.GetBytes("GRUP").CopyTo(grup, 0);
+        WriteUInt32Le(grup, 4, (uint)grupTotal);
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(grup, 8);
+        armaRecord.CopyTo(grup, 24);
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        return [..tes4, ..grup];
+    }
+
+    private static void WriteUInt32Le(byte[] buf, int offset, uint value)
+    {
+        buf[offset]     = (byte)(value);
+        buf[offset + 1] = (byte)(value >> 8);
+        buf[offset + 2] = (byte)(value >> 16);
+        buf[offset + 3] = (byte)(value >> 24);
+    }
+
+    private static void WriteUInt32Le(MemoryStream ms, uint value)
+    {
+        ms.WriteByte((byte)(value));
+        ms.WriteByte((byte)(value >> 8));
+        ms.WriteByte((byte)(value >> 16));
+        ms.WriteByte((byte)(value >> 24));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PatchPluginWriter Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class PatchPluginWriterTests
+{
+    // ── ARMA data rewrite ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void RewriteArmaData_MatchingPath_RewritesAndCounts()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_0.nif\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(mod2, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+        // Verify the new path in the output subrecord.
+        var tag  = System.Text.Encoding.ASCII.GetString(newData, 0, 4);
+        var size = (ushort)(newData[4] | (newData[5] << 8));
+        var path = System.Text.Encoding.ASCII.GetString(newData, 6, size - 1);
+        Assert.Equal("MOD2", tag);
+        Assert.Equal("meshes/slidesmith/cbbe/iron_0.nif", path);
+    }
+
+    [Fact]
+    public void RewriteArmaData_NoMatch_ReturnsOriginalAndZero()
+    {
+        byte[] edid = BuildSubrecord("EDID",
+            System.Text.Encoding.ASCII.GetBytes("NoMesh\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/x.nif"] = "meshes/y.nif"
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(edid, rewriteMap);
+
+        Assert.Equal(0, rewritten);
+        Assert.Equal(edid, newData);
+    }
+
+    // ── BuildPatchPlugin ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildPatchPlugin_NoMatchingPaths_ReturnsZeroIncluded()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/no/match.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "NoMatch", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/other/path.nif"] = "meshes/slidesmith/out.nif"
+        };
+
+        var (_, included) = PatchPluginWriter.BuildPatchPlugin("Source.esp", [descriptor], rewriteMap);
+
+        Assert.Equal(0, included);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_WithMatchingArma_IncludesRecord()
+    {
+        const string originalPath = "meshes/armor/iron/iron_0.nif";
+        const string newPath      = "meshes/slidesmith/cbbe/iron_0.nif";
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes(originalPath + "\0"));
+        var descriptor = BuildDescriptor(0x00001234u, "TestArmor", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [originalPath] = newPath
+        };
+
+        var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+            "MyMod.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        Assert.Equal(1, included);
+        Assert.True(patchBytes.Length > 0);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_OutputStartsWithTes4Tag()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/a/b.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "ArmorA", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/a/b.nif"] = "meshes/slidesmith/out/b.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            "OriginalPlugin.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        var tag = System.Text.Encoding.ASCII.GetString(patchBytes, 0, 4);
+        Assert.Equal("TES4", tag);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_Tes4DataContainsMasterFileName()
+    {
+        const string masterName = "OriginalArmor.esp";
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/orig/a.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "ArmorRec", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/orig/a.nif"] = "meshes/slidesmith/new/a.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            masterName, [descriptor], rewriteMap, headerSize: 24);
+
+        // Search the TES4 data for the MAST subrecord tag followed by the master name.
+        var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
+        Assert.Contains("MAST", asLatin1);
+        Assert.Contains(masterName, asLatin1);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_OutputContainsGrupAndArmaTag()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/x/y.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "ArmorX", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/x/y.nif"] = "meshes/slidesmith/y.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            "X.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
+        Assert.Contains("GRUP", asLatin1);
+        Assert.Contains("ARMA", asLatin1);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_PatchedArmaPreservesOriginalFormId()
+    {
+        const uint formId  = 0x00ABCD12u;
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/a/c.nif\0"));
+        var descriptor = BuildDescriptor(formId, "ArmorC", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/a/c.nif"] = "meshes/slidesmith/c.nif"
+        };
+
+        var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+            "C.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        Assert.Equal(1, included);
+
+        // Locate the ARMA *record* in the patch output (not the GRUP label).
+        // Layout: ... GRUP[0..3] | totalSize[4..7] | "ARMA"(label)[8..11] | groupType[12..15] | VC[16..23]
+        //              ARMA(record)[0..3] | dataSize[4..7] | flags[8..11] | FormID[12..15] | ...
+        // The GRUP label "ARMA" appears 8 bytes after the "GRUP" tag.
+        // Skip any "ARMA" occurrence that is a GRUP label by checking whether
+        // the 8 bytes before it are "GRUP".
+        int armaOff = -1;
+        for (int i = 0; i < patchBytes.Length - 4; i++)
+        {
+            if (patchBytes[i] == 'A' && patchBytes[i + 1] == 'R' &&
+                patchBytes[i + 2] == 'M' && patchBytes[i + 3] == 'A' &&
+                i + 24 <= patchBytes.Length)
+            {
+                // Skip GRUP label — "ARMA" at byte offset 8 inside a GRUP header.
+                if (i >= 8 &&
+                    patchBytes[i - 8] == 'G' && patchBytes[i - 7] == 'R' &&
+                    patchBytes[i - 6] == 'U' && patchBytes[i - 5] == 'P')
+                {
+                    continue;
+                }
+                armaOff = i;
+                break;
+            }
+        }
+
+        // We should have found an ARMA record.
+        Assert.True(armaOff >= 0, "ARMA record not found in patch output");
+
+        // Read FormID from header bytes 12–15.
+        var patchedFormId = (uint)(patchBytes[armaOff + 12]
+                                 | (patchBytes[armaOff + 13] << 8)
+                                 | (patchBytes[armaOff + 14] << 16)
+                                 | (patchBytes[armaOff + 15] << 24));
+        Assert.Equal(formId, patchedFormId);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static ArmaRecordDescriptor BuildDescriptor(
+        uint formId, string editorId, byte[] dataBytes)
+    {
+        // Build a 24-byte SSE record header.
+        var header = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(header, 0);
+        WriteUInt32Le(header, 4, (uint)dataBytes.Length);
+        WriteUInt32Le(header, 8, 0);        // flags
+        WriteUInt32Le(header, 12, formId);
+
+        return new ArmaRecordDescriptor(
+            FormId: formId,
+            PluginFileName: "Test.esp",
+            EditorId: editorId,
+            BipedSlots: [],
+            MeshPaths: [],
+            OriginalRecordHeaderBytes: header,
+            OriginalDataBytes: dataBytes);
+    }
+
+    private static byte[] BuildSubrecord(string tag, byte[] data)
+    {
+        var result = new byte[6 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(result, 0);
+        result[4] = (byte)(data.Length & 0xFF);
+        result[5] = (byte)((data.Length >> 8) & 0xFF);
+        data.CopyTo(result, 6);
+        return result;
+    }
+
+    private static void WriteUInt32Le(byte[] buf, int offset, uint value)
+    {
+        buf[offset]     = (byte)(value);
+        buf[offset + 1] = (byte)(value >> 8);
+        buf[offset + 2] = (byte)(value >> 16);
+        buf[offset + 3] = (byte)(value >> 24);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ConversionReadmeGenerator Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class ConversionReadmeGeneratorTests
+{
+    [Fact]
+    public void Generate_IncludesArmorNameAndTargetBody()
+    {
+        var readme = BuildReadme();
+        Assert.Contains("iron_0", readme);
+        Assert.Contains("CBBE", readme);
+    }
+
+    [Fact]
+    public void Generate_IncludesWhatWasConvertedSection()
+    {
+        var readme = BuildReadme();
+        Assert.Contains("WHAT WAS CONVERTED", readme);
+        Assert.Contains("Target body:", readme);
+    }
+
+    [Fact]
+    public void Generate_IncludesFilesGeneratedSection()
+    {
+        var readme = BuildReadme();
+        Assert.Contains("FILES GENERATED", readme);
+    }
+
+    [Fact]
+    public void Generate_IncludesHowToInstallSection()
+    {
+        var readme = BuildReadme();
+        Assert.Contains("HOW TO INSTALL", readme);
+    }
+
+    [Fact]
+    public void Generate_WhenPatchEspGenerated_MentionsPatchFile()
+    {
+        var readme = BuildReadme(patchEspGenerated: true, espPath: "/out/MyMod_SlidesmithPatch.esp");
+        Assert.Contains("SlidesmithPatch", readme);
+        Assert.Contains("override patch", readme);
+    }
+
+    [Fact]
+    public void Generate_WhenNoPatchEsp_MentionsXEditScript()
+    {
+        var readme = BuildReadme(patchEspGenerated: false);
+        Assert.Contains("xEdit", readme);
+    }
+
+    [Fact]
+    public void Generate_IncludesBodySlideSection()
+    {
+        var readme = BuildReadme(includeBsd: true);
+        Assert.Contains("BODYSLIDE", readme);
+        Assert.Contains("Build", readme);
+    }
+
+    [Fact]
+    public void Generate_IsNonEmptyString()
+    {
+        var readme = BuildReadme();
+        Assert.True(readme.Length > 200);
+    }
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+
+    private static string BuildReadme(
+        bool patchEspGenerated = false,
+        string? espPath = null,
+        bool includeBsd = false)
+    {
+        var request    = new ConversionRequest("/src", "CBBE");
+        var armor      = new ImportedArmor(
+            "/src",
+            ["iron_0.nif"],
+            [],
+            [],
+            []);
+        var mesh       = new ConvertedMesh("leather", "proportional", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+        var bsProject  = new BodySlideProject("IronArmor", "CBBE",
+            includeBsd ? ["Belly", "Butt"] : [],
+            "<osp/>");
+        var pluginResult = new PluginAnalysisResult([], [], "No plugins found.");
+        var files      = new List<string> { "/out/iron_0.nif" };
+        if (espPath is not null) files.Add(espPath);
+        if (includeBsd)
+        {
+            files.Add("/out/SliderData/Belly.bsd");
+            files.Add("/out/IronArmor.osp");
+        }
+
+        var rewriteMap = new Dictionary<string, string>
+        {
+            ["meshes/armor/iron/iron_0.nif"] = "meshes/slidesmith/cbbe/iron_0.nif"
+        };
+
+        return ConversionReadmeGenerator.Generate(
+            request, armor, mesh, bsProject,
+            pluginResult, files, rewriteMap, patchEspGenerated);
+    }
+}

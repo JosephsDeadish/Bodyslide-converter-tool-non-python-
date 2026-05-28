@@ -60,7 +60,17 @@ public sealed record TextureSummary(
     IReadOnlyList<string>? GlowFiles = null,
     IReadOnlyList<string>? ParallaxFiles = null,
     IReadOnlyList<string>? SubsurfaceFiles = null);
-public sealed record PluginArmorAddon(string RecordType, IReadOnlyList<string> DetectedMeshPaths);
+/// <summary>
+/// Describes a single ARMA (ArmorAddon) record found in a plugin file.
+/// <c>FormId</c> and <c>EditorId</c> are extracted via binary parsing.
+/// <c>BipedSlots</c> contains the decoded equipment slot numbers (30–61) from BOD2/BODT.
+/// </summary>
+public sealed record PluginArmorAddon(
+    string RecordType,
+    IReadOnlyList<string> DetectedMeshPaths,
+    uint FormId = 0,
+    string? EditorId = null,
+    IReadOnlyList<int>? BipedSlots = null);
 public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
 
 /// <summary>
@@ -73,6 +83,30 @@ public sealed record PluginRewriteResult(
     int PathsRewritten,
     IReadOnlyList<string> PatchedPluginPaths,
     IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Outcome of generating a minimal Bethesda override patch ESP that lists the original
+/// plugin as its master and contains only the patched ARMA records (no full-copy).
+/// </summary>
+public sealed record PatchPluginGenerationResult(
+    int PluginsProcessed,
+    int ArmaRecordsIncluded,
+    IReadOnlyList<string> PatchPluginPaths,
+    IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Full parsed descriptor for a single ARMA record — carries everything the patch
+/// generator needs: the original record bytes (header + data), the FormID, editor ID,
+/// biped-slot set, and the mesh paths that were rewritten.
+/// </summary>
+internal sealed record ArmaRecordDescriptor(
+    uint FormId,
+    string PluginFileName,
+    string? EditorId,
+    IReadOnlyList<int> BipedSlots,
+    IReadOnlyList<string> MeshPaths,
+    byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
+    byte[] OriginalDataBytes);           // The record data payload (not including header)
 public sealed record MeshDependencyMapEntry(
     string Mesh,
     IReadOnlyList<string> Textures,
@@ -2587,12 +2621,6 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 {
     private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
 
-    // Regex matches paths like "meshes/armor/iron/ironarmor_0.nif"
-    private static readonly System.Text.RegularExpressions.Regex MeshPathPattern =
-        new(@"meshes[\\/][^\x00""<>|?*\x01-\x1F]{1,260}\.nif",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-            System.Text.RegularExpressions.RegexOptions.Compiled);
-
     public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
         var pluginFiles = new List<string>();
@@ -2613,7 +2641,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
         foreach (var pluginFile in pluginFiles)
         {
-            var addons = await ScanPluginForMeshPathsAsync(pluginFile, cancellationToken);
+            var addons = await ScanPluginForArmaRecordsAsync(pluginFile, cancellationToken);
             armorAddons.AddRange(addons);
         }
 
@@ -2624,29 +2652,52 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             guidance);
     }
 
-    private async Task<IReadOnlyList<PluginArmorAddon>> ScanPluginForMeshPathsAsync(string pluginPath, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<PluginArmorAddon>> ScanPluginForArmaRecordsAsync(
+        string pluginPath, CancellationToken cancellationToken)
     {
         try
         {
             var bytes = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
-            // Read the binary as Latin-1 so all byte values survive the round-trip.
-            var content = System.Text.Encoding.Latin1.GetString(bytes);
+            var descriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
+            var pluginName  = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
 
-            var meshPaths = MeshPathPattern.Matches(content)
-                .Select(m => m.Value.Replace('\\', '/'))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            if (descriptors.Count > 0)
+            {
+                return descriptors
+                    .Select(d => new PluginArmorAddon(
+                        pluginName,
+                        d.MeshPaths,
+                        d.FormId,
+                        d.EditorId,
+                        d.BipedSlots.Count > 0 ? d.BipedSlots : null))
+                    .ToList();
+            }
 
-            if (meshPaths.Count == 0) return [];
-
-            var recordType = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
-            return [new PluginArmorAddon(recordType, meshPaths)];
+            // Fallback: regex scan for .nif paths when no structured ARMA records are found.
+            // Handles simplified or non-standard plugin layouts (e.g., test fixtures, LE plugins
+            // whose header did not pass the SSE detection heuristic).
+            return RegexScanForNifPaths(bytes, pluginName);
         }
         catch (IOException)
         {
             return [];
         }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex NifPathRegex =
+        new(@"meshes/[^\x00\x01-\x1f""<>|:*?\\]+\.nif",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static IReadOnlyList<PluginArmorAddon> RegexScanForNifPaths(byte[] bytes, string pluginName)
+    {
+        var text  = System.Text.Encoding.Latin1.GetString(bytes);
+        var paths = NifPathRegex.Matches(text)
+            .Select(m => m.Value.Replace('\\', '/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (paths.Count == 0) return [];
+        return [new PluginArmorAddon(pluginName, paths)];
     }
 
     private static string BuildPatchGuidance(IReadOnlyList<PluginArmorAddon> addons, string targetBody, int pluginCount)
@@ -2662,10 +2713,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         }
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Found {addons.Count} plugin record(s) with mesh paths. Run patch-armor.pas to auto-rewrite matching ArmorAddon (ARMA) records for {targetBody}:");
+        sb.AppendLine($"Found {addons.Count} ARMA record(s) with mesh paths. Run patch-armor.pas to auto-rewrite matching ArmorAddon (ARMA) records for {targetBody}:");
         foreach (var addon in addons)
         {
-            sb.AppendLine($"  Plugin: {addon.RecordType}");
+            var edidLabel  = addon.EditorId is not null ? $" [{addon.EditorId}]" : string.Empty;
+            var formIdHex  = addon.FormId != 0 ? $" (FormID: {addon.FormId:X8})" : string.Empty;
+            sb.AppendLine($"  Plugin: {addon.RecordType}{edidLabel}{formIdHex}");
             foreach (var path in addon.DetectedMeshPaths.Take(10))
             {
                 sb.AppendLine($"    {path}");
@@ -3074,6 +3127,633 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     }
 }
 
+/// <summary>
+/// Walks the binary content of a Bethesda plugin file (ESP/ESM/ESL) and extracts
+/// a structured <see cref="ArmaRecordDescriptor"/> for every uncompressed ARMA record.
+/// Supports both Skyrim LE (20-byte record headers) and SSE (24-byte headers).
+/// </summary>
+internal static class BinaryArmaParser
+{
+    private const int SseHeaderSize = 24;
+    private const int LeHeaderSize  = 20;
+    private const int SubrecordHeaderSize = 6;
+    private const uint FlagCompressed = 0x00040000u;
+
+    // Biped-slot subrecord tags (BOD2 = SSE, BODT = LE)
+    private static readonly HashSet<string> BipedSubrecords =
+        new(StringComparer.Ordinal) { "BOD2", "BODT" };
+
+    private static readonly HashSet<string> MeshSubrecords =
+        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
+
+    /// <summary>Extracts all ARMA record descriptors from a plugin byte array.</summary>
+    public static IReadOnlyList<ArmaRecordDescriptor> ExtractArmaRecords(byte[] bytes)
+    {
+        if (bytes.Length < 4) return [];
+        var headerSize = DetectHeaderSize(bytes);
+        var pluginFileName = string.Empty;   // filled in by callers that know the filename
+        return WalkRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+    }
+
+    /// <summary>
+    /// Overload that also accepts a plugin file name so descriptors carry a meaningful
+    /// <see cref="ArmaRecordDescriptor.PluginFileName"/> value.
+    /// </summary>
+    public static IReadOnlyList<ArmaRecordDescriptor> ExtractArmaRecords(byte[] bytes, string pluginFileName)
+    {
+        if (bytes.Length < 4) return [];
+        var headerSize = DetectHeaderSize(bytes);
+        return WalkRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+    }
+
+    // ── Header-size detection (same logic as BinaryPluginRewriteService) ─────
+
+    internal static int DetectHeaderSize(byte[] bytes)
+    {
+        if (bytes.Length < 4 ||
+            bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return SseHeaderSize;
+        }
+
+        if (bytes.Length > 23 &&
+            bytes[20] == 'H' && bytes[21] == 'E' && bytes[22] == 'D' && bytes[23] == 'R')
+        {
+            return LeHeaderSize;
+        }
+
+        return SseHeaderSize;
+    }
+
+    // ── Tree walk ─────────────────────────────────────────────────────────────
+
+    private static List<ArmaRecordDescriptor> WalkRecords(
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+    {
+        var results = new List<ArmaRecordDescriptor>();
+        int pos = start;
+
+        while (pos < end)
+        {
+            if (pos + headerSize > end) break;
+
+            var tag    = ReadTag(bytes, pos);
+            var field4 = ReadUInt32Le(bytes, pos + 4);
+
+            if (string.Equals(tag, "GRUP", StringComparison.Ordinal))
+            {
+                var groupTotal = (int)field4;
+                if (groupTotal < headerSize || pos + groupTotal > end) break;
+
+                // Recurse into GRUP content.
+                results.AddRange(WalkRecords(
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+
+                pos += groupTotal;
+            }
+            else
+            {
+                var dataSize  = (int)field4;
+                int totalSize = headerSize + dataSize;
+                if (pos + totalSize > end) break;
+
+                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                {
+                    var flags = ReadUInt32Le(bytes, pos + 8);
+                    if ((flags & FlagCompressed) == 0 && dataSize > 0)
+                    {
+                        var desc = ParseArmaRecord(
+                            bytes, pos, dataSize, headerSize, pluginFileName);
+                        if (desc is not null) results.Add(desc);
+                    }
+                }
+
+                pos += totalSize;
+            }
+        }
+
+        return results;
+    }
+
+    // ── ARMA record parser ────────────────────────────────────────────────────
+
+    private static ArmaRecordDescriptor? ParseArmaRecord(
+        byte[] bytes, int recordStart, int dataSize, int headerSize, string pluginFileName)
+    {
+        // Extract FormID from record header (bytes 12–15).
+        var formId = ReadUInt32Le(bytes, recordStart + 12);
+
+        string? editorId    = null;
+        var bipedSlots      = new List<int>();
+        var meshPaths       = new List<string>();
+
+        int pos = recordStart + headerSize;
+        int end = pos + dataSize;
+
+        while (pos + SubrecordHeaderSize <= end)
+        {
+            var subTag  = ReadTag(bytes, pos);
+            var subSize = ReadUInt16Le(bytes, pos + 4);
+
+            if (pos + SubrecordHeaderSize + subSize > end) break;
+
+            int dataStart = pos + SubrecordHeaderSize;
+
+            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && subSize > 0)
+            {
+                int nullIdx = IndexOfNull(bytes, dataStart, subSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                editorId    = System.Text.Encoding.ASCII.GetString(bytes, dataStart, strLen);
+            }
+            else if (BipedSubrecords.Contains(subTag) && subSize >= 4)
+            {
+                // BOD2: 4-byte slot flags + 4-byte general flags.
+                // BODT: 4-byte slot flags + 4-byte general flags + 4-byte skill (LE only).
+                var slotFlags = ReadUInt32Le(bytes, dataStart);
+                for (int i = 0; i < 32; i++)
+                {
+                    if (((slotFlags >> i) & 1u) != 0)
+                    {
+                        bipedSlots.Add(30 + i);
+                    }
+                }
+            }
+            else if (MeshSubrecords.Contains(subTag) && subSize > 0)
+            {
+                int nullIdx = IndexOfNull(bytes, dataStart, subSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                var path    = System.Text.Encoding.ASCII
+                    .GetString(bytes, dataStart, strLen)
+                    .Replace('\\', '/');
+                if (!string.IsNullOrEmpty(path))
+                {
+                    meshPaths.Add(path);
+                }
+            }
+
+            pos += SubrecordHeaderSize + subSize;
+        }
+
+        // Build a copy of the original record header and data bytes so PatchPluginWriter
+        // can reuse the original bytes when building override records.
+        var headerBytes = bytes[recordStart..(recordStart + headerSize)];
+        var dataBytes   = bytes[(recordStart + headerSize)..(recordStart + headerSize + dataSize)];
+
+        return new ArmaRecordDescriptor(
+            formId,
+            pluginFileName,
+            editorId,
+            bipedSlots,
+            meshPaths,
+            headerBytes,
+            dataBytes);
+    }
+
+    // ── Binary helpers ────────────────────────────────────────────────────────
+
+    private static string ReadTag(byte[] bytes, int offset) =>
+        System.Text.Encoding.ASCII.GetString(bytes, offset, 4);
+
+    private static uint ReadUInt32Le(byte[] bytes, int offset) =>
+        (uint)(bytes[offset]
+             | (bytes[offset + 1] << 8)
+             | (bytes[offset + 2] << 16)
+             | (bytes[offset + 3] << 24));
+
+    private static ushort ReadUInt16Le(byte[] bytes, int offset) =>
+        (ushort)(bytes[offset] | (bytes[offset + 1] << 8));
+
+    private static int IndexOfNull(byte[] bytes, int start, int length)
+    {
+        for (int i = 0; i < length; i++)
+        {
+            if (bytes[start + i] == 0) return i;
+        }
+        return -1;
+    }
+}
+
+/// <summary>
+/// Generates a minimal Bethesda override/patch ESP that:
+/// <list type="bullet">
+///   <item>Contains a TES4 header listing the original plugin as its single master file.</item>
+///   <item>Holds only the ARMA records that actually had mesh paths rewritten — no extra records.</item>
+///   <item>Uses the same FormIDs as the originals (master index 0 = original plugin).</item>
+/// </list>
+/// The result can be placed in the Data folder alongside the original plugin as a standard
+/// Bethesda override without replacing any other records.
+/// </summary>
+internal static class PatchPluginWriter
+{
+    private const int SseHeaderSize = 24;
+    private const int SubrecordHeaderSize = 6;
+
+    private static readonly HashSet<string> MeshSubrecords =
+        new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
+
+    /// <summary>
+    /// Builds the raw bytes for a minimal patch ESP.
+    /// </summary>
+    /// <param name="masterPluginFileName">
+    ///   The file name (with extension) of the original plugin, e.g. "MyArmor.esp".
+    ///   Listed as the sole MAST entry in the TES4 header.
+    /// </param>
+    /// <param name="descriptors">
+    ///   Parsed ARMA descriptors from <see cref="BinaryArmaParser.ExtractArmaRecords"/>.
+    ///   Only records that have at least one mesh path in <paramref name="rewriteMap"/>
+    ///   are included in the patch plugin.
+    /// </param>
+    /// <param name="rewriteMap">
+    ///   Path-rewrite map (lowercase forward-slash normalised keys to new path values).
+    /// </param>
+    /// <param name="headerSize">Record header size (24 for SSE, 20 for LE).</param>
+    /// <returns>Raw bytes of the patch ESP, ready to write to disk.</returns>
+    public static (byte[] PluginBytes, int ArmaRecordsIncluded) BuildPatchPlugin(
+        string masterPluginFileName,
+        IReadOnlyList<ArmaRecordDescriptor> descriptors,
+        IReadOnlyDictionary<string, string> rewriteMap,
+        int headerSize = SseHeaderSize)
+    {
+        using var ms = new MemoryStream();
+
+        // ── 1. TES4 record ────────────────────────────────────────────────────
+        var tes4Data = BuildTes4Data(masterPluginFileName);
+        WriteFlatRecord(ms, "TES4", tes4Data, formId: 0, headerSize: headerSize);
+
+        // ── 2. ARMA GRUP + patched records ────────────────────────────────────
+        var armaBuffers = new List<byte[]>();
+
+        foreach (var desc in descriptors)
+        {
+            // Rewrite the ARMA data with updated mesh paths.
+            var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap);
+            if (rewritten == 0) continue;   // no relevant paths — skip this record
+
+            // Build a full ARMA record (header + new data).
+            armaBuffers.Add(BuildArmaRecord(desc, newData, headerSize));
+        }
+
+        if (armaBuffers.Count == 0)
+        {
+            // Nothing to patch — return an empty plugin (just the TES4 header).
+            return (ms.ToArray(), 0);
+        }
+
+        // Wrap all ARMA records in a top-level GRUP.
+        int grupContentLen = armaBuffers.Sum(b => b.Length);
+        int grupTotalSize  = headerSize + grupContentLen;
+
+        // GRUP header.
+        WriteTag(ms, "GRUP");
+        WriteUInt32Le(ms, (uint)grupTotalSize);       // field4 = total size
+        WriteTag(ms, "ARMA");                         // label = "ARMA" (top-level group)
+        WriteUInt32Le(ms, 0);                         // groupType = 0 (top-level record type)
+        if (headerSize == SseHeaderSize)
+        {
+            WriteUInt32Le(ms, 0);                     // VC info (SSE extra 4 bytes)
+            WriteUInt32Le(ms, 0);                     // timestamp / unk
+        }
+
+        foreach (var buf in armaBuffers)
+        {
+            ms.Write(buf, 0, buf.Length);
+        }
+
+        return (ms.ToArray(), armaBuffers.Count);
+    }
+
+    // ── TES4 data builder ─────────────────────────────────────────────────────
+
+    private static byte[] BuildTes4Data(string masterPluginFileName)
+    {
+        using var ms = new MemoryStream();
+
+        // HEDR subrecord: float32 version(1.70) + int32 numRecords(0) + uint32 nextObjectID(0x800)
+        using (var hedrMs = new MemoryStream(12))
+        {
+            WriteFloat32Le(hedrMs, 1.70f);
+            WriteUInt32Le(hedrMs, 0);
+            WriteUInt32Le(hedrMs, 0x800);
+            WriteSubrecord(ms, "HEDR", hedrMs.ToArray());
+        }
+
+        // CNAM: author name (null-terminated).
+        WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
+
+        // MAST + DATA pair: lists the original plugin as a master.
+        WriteSubrecord(ms, "MAST",
+            System.Text.Encoding.ASCII.GetBytes(masterPluginFileName + '\0'));
+        WriteSubrecord(ms, "DATA", new byte[8]);  // 8 zero bytes (always follows MAST)
+
+        return ms.ToArray();
+    }
+
+    // ── Record/subrecord writers ──────────────────────────────────────────────
+
+    private static void WriteFlatRecord(
+        MemoryStream ms, string tag, byte[] data, uint formId, int headerSize)
+    {
+        WriteTag(ms, tag);
+        WriteUInt32Le(ms, (uint)data.Length);    // dataSize
+        WriteUInt32Le(ms, 0);                     // flags
+        WriteUInt32Le(ms, formId);               // FormID
+        WriteUInt32Le(ms, 0);                    // VC info 1
+
+        if (headerSize == SseHeaderSize)
+        {
+            WriteUInt32Le(ms, 0);                // Form version / VC info 2 (SSE extra field)
+        }
+
+        ms.Write(data, 0, data.Length);
+    }
+
+    private static byte[] BuildArmaRecord(
+        ArmaRecordDescriptor desc, byte[] newData, int headerSize)
+    {
+        using var ms = new MemoryStream(headerSize + newData.Length);
+
+        // Copy the tag ("ARMA") from the original header bytes.
+        ms.Write(desc.OriginalRecordHeaderBytes, 0, 4);
+        WriteUInt32Le(ms, (uint)newData.Length);                        // new dataSize
+        ms.Write(desc.OriginalRecordHeaderBytes, 8, headerSize - 8);    // flags, FormID, VC...
+        ms.Write(newData, 0, newData.Length);
+
+        return ms.ToArray();
+    }
+
+    private static void WriteSubrecord(MemoryStream ms, string tag, byte[] data)
+    {
+        WriteTag(ms, tag);
+        WriteUInt16Le(ms, (ushort)data.Length);
+        ms.Write(data, 0, data.Length);
+    }
+
+    // ── ARMA data rewrite (mirrors BinaryPluginRewriteService.RewriteArmaSubrecords) ─
+
+    internal static (byte[] NewData, int PathsRewritten) RewriteArmaData(
+        byte[] dataBytes,
+        IReadOnlyDictionary<string, string> rewriteMap)
+    {
+        using var ms  = new MemoryStream(dataBytes.Length);
+        int pos       = 0;
+        int end       = dataBytes.Length;
+        int rewritten = 0;
+
+        while (pos + SubrecordHeaderSize <= end)
+        {
+            var subTag  = System.Text.Encoding.ASCII.GetString(dataBytes, pos, 4);
+            var subSize = (ushort)(dataBytes[pos + 4] | (dataBytes[pos + 5] << 8));
+
+            if (pos + SubrecordHeaderSize + subSize > end) break;
+
+            if (MeshSubrecords.Contains(subTag) && subSize > 0)
+            {
+                int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, subSize);
+                int strLen   = nullIdx >= 0 ? nullIdx : subSize;
+                var meshPath = System.Text.Encoding.ASCII
+                    .GetString(dataBytes, pos + SubrecordHeaderSize, strLen)
+                    .Replace('\\', '/')
+                    .ToLowerInvariant();
+
+                if (!string.IsNullOrEmpty(meshPath) &&
+                    rewriteMap.TryGetValue(meshPath, out var newPath))
+                {
+                    var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
+                    WriteTag(ms, subTag);
+                    WriteUInt16Le(ms, (ushort)newBytes.Length);
+                    ms.Write(newBytes, 0, newBytes.Length);
+                    rewritten++;
+                }
+                else
+                {
+                    ms.Write(dataBytes, pos, SubrecordHeaderSize + subSize);
+                }
+            }
+            else
+            {
+                ms.Write(dataBytes, pos, SubrecordHeaderSize + subSize);
+            }
+
+            pos += SubrecordHeaderSize + subSize;
+        }
+
+        if (pos < end)
+        {
+            ms.Write(dataBytes, pos, end - pos);
+        }
+
+        return (ms.ToArray(), rewritten);
+    }
+
+    // ── Binary helpers ────────────────────────────────────────────────────────
+
+    private static void WriteTag(MemoryStream ms, string tag)
+    {
+        var encoded = System.Text.Encoding.ASCII.GetBytes(tag);
+        ms.Write(encoded, 0, Math.Min(4, encoded.Length));
+        // Pad if tag is shorter than 4 characters (should not happen in practice).
+        for (int i = encoded.Length; i < 4; i++) ms.WriteByte(0);
+    }
+
+    private static void WriteUInt32Le(MemoryStream ms, uint value)
+    {
+        ms.WriteByte((byte)(value));
+        ms.WriteByte((byte)(value >> 8));
+        ms.WriteByte((byte)(value >> 16));
+        ms.WriteByte((byte)(value >> 24));
+    }
+
+    private static void WriteUInt16Le(MemoryStream ms, ushort value)
+    {
+        ms.WriteByte((byte)(value));
+        ms.WriteByte((byte)(value >> 8));
+    }
+
+    private static void WriteFloat32Le(MemoryStream ms, float value)
+    {
+        var bits = System.BitConverter.GetBytes(value);
+        if (!System.BitConverter.IsLittleEndian)
+            System.Array.Reverse(bits);
+        ms.Write(bits, 0, 4);
+    }
+
+    private static int IndexOfNull(byte[] bytes, int start, int length)
+    {
+        for (int i = 0; i < length; i++)
+        {
+            if (bytes[start + i] == 0) return i;
+        }
+        return -1;
+    }
+}
+
+/// <summary>
+/// Generates a plain-text README.txt summarising what SlideSmith produced, where to put each
+/// file, and what manual steps (if any) are still required.
+/// </summary>
+internal static class ConversionReadmeGenerator
+{
+    public static string Generate(
+        ConversionRequest request,
+        ImportedArmor armor,
+        ConvertedMesh mesh,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis,
+        IReadOnlyList<string> outputFiles,
+        IReadOnlyDictionary<string, string> rewriteMap,
+        bool patchEspGenerated)
+    {
+        var sb = new System.Text.StringBuilder();
+        var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "ConvertedArmor";
+        var now       = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm UTC");
+
+        sb.AppendLine("=============================================================");
+        sb.AppendLine($"  SlideSmith Conversion Package — {armorName}");
+        sb.AppendLine($"  Generated: {now}");
+        sb.AppendLine("=============================================================");
+        sb.AppendLine();
+
+        // ── What was converted ─────────────────────────────────────────────
+        sb.AppendLine("WHAT WAS CONVERTED");
+        sb.AppendLine("------------------");
+        sb.AppendLine($"  Armor/clothing: {armorName}");
+        sb.AppendLine($"  Target body:    {request.TargetBody}");
+        sb.AppendLine($"  Mesh strategy:  {mesh.Strategy}");
+        sb.AppendLine($"  Meshes in:      {armor.MeshFiles.Count}");
+        sb.AppendLine($"  Textures in:    {armor.TextureFiles.Count}");
+        sb.AppendLine($"  Plugins in:     {pluginAnalysis.ScannedPlugins.Count}");
+        sb.AppendLine();
+
+        // ── Files generated ────────────────────────────────────────────────
+        sb.AppendLine("FILES GENERATED");
+        sb.AppendLine("---------------");
+
+        var nifFiles   = outputFiles.Where(f => f.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)).ToList();
+        var bsdFiles   = outputFiles.Where(f => f.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase)).ToList();
+        var ospFiles   = outputFiles.Where(f => f.EndsWith(".osp", StringComparison.OrdinalIgnoreCase)).ToList();
+        var espFiles   = outputFiles.Where(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)).ToList();
+        var xmlFiles   = outputFiles.Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).ToList();
+        var pasFiles   = outputFiles.Where(f => f.EndsWith(".pas", StringComparison.OrdinalIgnoreCase)).ToList();
+        var fomodFiles = outputFiles.Where(f => f.Contains("fomod", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        void ListFiles(IEnumerable<string> files, string label)
+        {
+            var list = files.ToList();
+            if (list.Count == 0) return;
+            sb.AppendLine($"  [{label}]");
+            foreach (var f in list)
+                sb.AppendLine($"    {Path.GetFileName(f)}");
+        }
+
+        ListFiles(nifFiles,   "Converted Meshes");
+        ListFiles(espFiles,   "Plugin Files");
+        ListFiles(ospFiles,   "BodySlide Project");
+        ListFiles(bsdFiles,   "BodySlide Slider Data");
+        ListFiles(xmlFiles,   "Physics Configs");
+        ListFiles(pasFiles,   "xEdit Script");
+        ListFiles(fomodFiles, "FOMOD Installer");
+        sb.AppendLine();
+
+        // ── How to install ─────────────────────────────────────────────────
+        sb.AppendLine("HOW TO INSTALL");
+        sb.AppendLine("--------------");
+        sb.AppendLine("  OPTION A — FOMOD (recommended):");
+        sb.AppendLine("    Copy the entire output folder into your Skyrim Data folder");
+        sb.AppendLine("    and enable via your mod manager using the included FOMOD installer.");
+        sb.AppendLine();
+        sb.AppendLine("  OPTION B — Manual:");
+        sb.AppendLine($"    1. Copy converted .nif files to:  Data\\meshes\\slidesmith\\{request.TargetBody.ToLowerInvariant()}\\");
+        sb.AppendLine("    2. Copy physics configs (.xml) to: Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
+        sb.AppendLine("                                       Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
+        if (bsdFiles.Count > 0)
+        {
+            sb.AppendLine($"    3. Copy BodySlide files (.osp, .bsd) to:");
+            sb.AppendLine($"         Data\\CalienteTools\\BodySlide\\SliderSets\\{bodySlideProject.ProjectName}.osp");
+            sb.AppendLine($"         Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\*.bsd");
+        }
+
+        sb.AppendLine();
+
+        // ── Plugin patching instructions ───────────────────────────────────
+        sb.AppendLine("PLUGIN PATCH");
+        sb.AppendLine("------------");
+        if (patchEspGenerated && espFiles.Count > 0)
+        {
+            var patchEspName = espFiles
+                .FirstOrDefault(f => f.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase))
+                ?? espFiles[0];
+            sb.AppendLine($"  A minimal override patch ESP has been generated:");
+            sb.AppendLine($"    {Path.GetFileName(patchEspName)}");
+            sb.AppendLine();
+            sb.AppendLine("  This patch contains ONLY the ARMA records that needed mesh-path updates.");
+            sb.AppendLine("  It lists the original plugin as its master and does NOT replace it.");
+            sb.AppendLine("  Load order: place this patch AFTER the original plugin.");
+            if (rewriteMap.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  Rewired paths:");
+                foreach (var (from, to) in rewriteMap.Take(10))
+                    sb.AppendLine($"    {from}  →  {to}");
+                if (rewriteMap.Count > 10)
+                    sb.AppendLine($"    ... and {rewriteMap.Count - 10} more");
+            }
+        }
+        else if (pasFiles.Count > 0)
+        {
+            sb.AppendLine("  No binary plugin was provided so a patch ESP could not be auto-generated.");
+            sb.AppendLine("  Use the included xEdit script (patch-armor.pas) to apply mesh-path");
+            sb.AppendLine("  rewrites manually via SSEEdit / TES5Edit:");
+            sb.AppendLine("    1. Open SSEEdit with the original armor plugin loaded.");
+            sb.AppendLine("    2. From the Tools menu choose 'Apply Script'.");
+            sb.AppendLine("    3. Select patch-armor.pas and run it.");
+        }
+        else
+        {
+            sb.AppendLine("  No plugin was detected. Add the converted meshes to an existing .esp");
+            sb.AppendLine($"  or create a new patch plugin in xEdit targeting {request.TargetBody}.");
+        }
+
+        sb.AppendLine();
+
+        // ── BodySlide instructions ─────────────────────────────────────────
+        if (bsdFiles.Count > 0)
+        {
+            sb.AppendLine("BODYSLIDE");
+            sb.AppendLine("---------");
+            sb.AppendLine($"  BodySlide project: {bodySlideProject.ProjectName}");
+            sb.AppendLine($"  Target body:       {request.TargetBody}");
+            sb.AppendLine($"  Sliders included:  {bodySlideProject.Sliders.Count}");
+            sb.AppendLine();
+            sb.AppendLine("  To build in BodySlide:");
+            sb.AppendLine($"    1. Open BodySlide and search for '{bodySlideProject.ProjectName}'.");
+            sb.AppendLine("    2. Select your body preset and click 'Build'.");
+            sb.AppendLine("    3. For physics sliders, also build the _1 (high-weight) variant.");
+            sb.AppendLine();
+        }
+
+        // ── Warnings / manual steps ────────────────────────────────────────
+        sb.AppendLine("NOTES & MANUAL STEPS");
+        sb.AppendLine("--------------------");
+        sb.AppendLine("  * Vertex transforms are heuristic — inspect converted meshes in");
+        sb.AppendLine("    Outfit Studio or NifSkope and fix any clipping or floating geometry.");
+        sb.AppendLine("  * Physics configs use tuned defaults. Adjust spring/damping values");
+        sb.AppendLine("    in the .xml files to match the cloth simulation feel you want.");
+        if (pluginAnalysis.ArmorAddons.Count > 0 && !patchEspGenerated)
+        {
+            sb.AppendLine("  * ARMA records were detected but no patch ESP was auto-generated.");
+            sb.AppendLine("    Run the included xEdit script (patch-armor.pas) manually.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("=============================================================");
+        sb.AppendLine("  Generated by SlideSmith — https://github.com/JosephsDeadish/");
+        sb.AppendLine("  Bodyslide-converter-tool-non-python-");
+        sb.AppendLine("=============================================================");
+
+        return sb.ToString();
+    }
+}
+
 internal sealed class LocalExportService : IExportService
 {
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
@@ -3216,6 +3896,7 @@ internal sealed class LocalExportService : IExportService
         outputFiles.Add(triHighPath);
 
         // Write plugin patch guidance + rewrite instructions when plugins were found.
+        bool patchEspGenerated = false;
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
             var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
@@ -3243,20 +3924,55 @@ internal sealed class LocalExportService : IExportService
                 cancellationToken);
             outputFiles.Add(xEditScriptPath);
 
-            // True binary plugin record rewriting: parse the ESP/ESM/ESL binary,
-            // locate every ARMA record, and rewrite MOD2/MOD3/MOD4/MOD5 mesh path
-            // subrecords directly.  Output goes to <name>_patched.esp which the user
-            // can drop straight into their Data folder.
             if (pluginRewriteMap.Count > 0)
             {
                 var sourcePluginPaths = EnumeratePluginFiles(armor.SourcePath);
                 if (sourcePluginPaths.Count > 0)
                 {
+                    // Normalise the rewrite map (lowercase / forward-slash keys) for both
+                    // the full-copy rewriter and the new minimal patch generator.
+                    var normMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (k, v) in pluginRewriteMap)
+                        normMap[k.Replace('\\', '/').ToLowerInvariant()] = v;
+
+                    // ── Existing: full-copy patched plugin (_patched.esp) ──────────────
+                    // Kept for compatibility; users who want a single self-contained plugin
+                    // can still use this file.
                     var rewriter = new BinaryPluginRewriteService();
                     var rewriteResult = await rewriter.RewriteAsync(
                         sourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
-
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
+
+                    // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
+                    // This patch contains ONLY the touched ARMA records and lists the
+                    // original plugin as its single master.  It is a proper Bethesda
+                    // override plugin that can be loaded after the original in any order.
+                    foreach (var pluginPath in sourcePluginPaths)
+                    {
+                        try
+                        {
+                            var pluginBytes  = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
+                            var headerSize   = BinaryArmaParser.DetectHeaderSize(pluginBytes);
+                            var pluginName   = Path.GetFileName(pluginPath) ?? pluginPath;
+                            var descriptors  = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
+
+                            var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+                                pluginName, descriptors, normMap, headerSize);
+
+                            if (included > 0)
+                            {
+                                var baseName       = Path.GetFileNameWithoutExtension(pluginPath);
+                                var patchPath      = Path.Combine(outputDirectory, $"{baseName}_SlidesmithPatch.esp");
+                                await File.WriteAllBytesAsync(patchPath, patchBytes, cancellationToken);
+                                outputFiles.Add(patchPath);
+                                patchEspGenerated = true;
+                            }
+                        }
+                        catch (Exception ex) when (ex is IOException or InvalidDataException)
+                        {
+                            // Non-fatal — patch generation skipped for this plugin.
+                        }
+                    }
                 }
             }
         }
@@ -3307,6 +4023,18 @@ internal sealed class LocalExportService : IExportService
             cancellationToken);
         outputFiles.Add(fomodModuleConfigPath);
         outputFiles.Add(fomodInfoPath);
+
+        // Write a human-readable README.txt explaining the generated files, where to
+        // install them, and what manual steps may still be required.  This satisfies
+        // the Stage 7 README requirement from the issue spec.
+        var readmePath = Path.Combine(outputDirectory, "README.txt");
+        await File.WriteAllTextAsync(
+            readmePath,
+            ConversionReadmeGenerator.Generate(
+                request, armor, mesh, bodySlideProject,
+                pluginAnalysis, outputFiles, pluginRewriteMap, patchEspGenerated),
+            cancellationToken);
+        outputFiles.Add(readmePath);
 
         var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
         var cache = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
