@@ -1846,81 +1846,82 @@ public sealed class PluginPatchGuidanceTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
 
-        [Fact]
-        public async Task PluginPatches_PreservesRelativePluginPathStyle_AndStagesUnderMeshesRoot()
+    [Fact]
+    public async Task PluginPatches_PreservesRelativePluginPathStyle_AndStagesUnderMeshesRoot()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "RelativePaths.esp");
+        // Intentionally omit "meshes/" to verify rewrite paths preserve plugin-relative model style.
+        var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("armor/iron/ironarmor_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        var nifPath = Path.Combine(workingDirectory, "ironarmor_0.nif");
+        await File.WriteAllTextAsync(nifPath, "mesh");
+
+        try
         {
-            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-            var outputDirectory  = Path.Combine(workingDirectory, "output");
-            Directory.CreateDirectory(workingDirectory);
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
 
-            var espPath = Path.Combine(workingDirectory, "RelativePaths.esp");
-            var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("armor/iron/ironarmor_0.nif");
-            await File.WriteAllBytesAsync(espPath, pluginBytes);
+            Assert.True(result.Success);
+            var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            Assert.True(File.Exists(patchPath));
 
-            var nifPath = Path.Combine(workingDirectory, "ironarmor_0.nif");
-            await File.WriteAllTextAsync(nifPath, "mesh");
+            var content = await File.ReadAllTextAsync(patchPath);
+            Assert.Contains("armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("meshes/slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
 
-            try
-            {
-                var orchestrator = StandaloneConversionModules.CreateDefault();
-                var result = await orchestrator.ConvertAsync(
-                    new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
-
-                Assert.True(result.Success);
-                var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
-                Assert.True(File.Exists(patchPath));
-
-                var content = await File.ReadAllTextAsync(patchPath);
-                Assert.Contains("armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("meshes/slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
-
-                var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
-                Assert.True(File.Exists(stagedMeshPath), "Converted mesh should still stage under Data/meshes root.");
-            }
-            finally
-            {
-                Directory.Delete(workingDirectory, recursive: true);
-            }
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+            Assert.True(File.Exists(stagedMeshPath), "Converted mesh should still stage under Data/meshes root.");
         }
-
-        private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
+        finally
         {
-            var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
-            var tes4 = BuildSseRecord("TES4", []);
-            var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
-            return [..tes4, ..arma];
+            Directory.Delete(workingDirectory, recursive: true);
         }
+    }
 
-        private static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
-        {
-            var buf = new byte[24 + data.Length];
-            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
-            WriteUInt32Le(buf, 4, (uint)data.Length);
-            WriteUInt32Le(buf, 8, 0u);
-            WriteUInt32Le(buf, 12, formId);
-            data.CopyTo(buf, 24);
-            return buf;
-        }
+    private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
+    {
+        var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+        var tes4 = BuildSseRecord("TES4", []);
+        var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
+        return [..tes4, ..arma];
+    }
 
-        private static byte[] BuildSubrecord(string tag, byte[] data)
-        {
-            var buf = new byte[6 + data.Length];
-            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
-            buf[4] = (byte)(data.Length & 0xFF);
-            buf[5] = (byte)((data.Length >> 8) & 0xFF);
-            data.CopyTo(buf, 6);
-            return buf;
-        }
+    private static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
+    {
+        var buf = new byte[24 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)data.Length);
+        WriteUInt32Le(buf, 8, 0u);
+        WriteUInt32Le(buf, 12, formId);
+        data.CopyTo(buf, 24);
+        return buf;
+    }
 
-        private static void WriteUInt32Le(byte[] bytes, int offset, uint value)
-        {
-            bytes[offset]     = (byte)(value & 0xFF);
-            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
-            bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
-            bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
-        }
+    private static byte[] BuildSubrecord(string tag, byte[] data)
+    {
+        var buf = new byte[6 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+        buf[4] = (byte)(data.Length & 0xFF);
+        buf[5] = (byte)((data.Length >> 8) & 0xFF);
+        data.CopyTo(buf, 6);
+        return buf;
+    }
+
+    private static void WriteUInt32Le(byte[] bytes, int offset, uint value)
+    {
+        bytes[offset]     = (byte)(value & 0xFF);
+        bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
+        bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
+        bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
     }
 }
 
