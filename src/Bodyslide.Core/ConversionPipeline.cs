@@ -1310,6 +1310,39 @@ public interface IWeightSolverService
     Task<WeightSolverReport> SolveAsync(WeightedMesh mesh, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Generates a simplified ground (world-drop) NIF for the converted armor.
+/// The ground mesh is the NIF referenced by the ARMO MODL subrecord — the item shown on the
+/// ground when the player drops or finds the armor as loot.
+/// </summary>
+public interface IGroundMeshGeneratorService
+{
+    /// <summary>
+    /// Produces ground-mesh NIF bytes from the source equipped-mesh bytes.
+    /// When <paramref name="sourceNifBytes"/> is empty, returns a minimal valid NIF stub.
+    /// </summary>
+    Task<byte[]> GenerateAsync(byte[] sourceNifBytes, string meshType, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Synthesises a new self-contained ESP plugin from scratch when no source plugin exists for
+/// the converted armor piece.  The generated plugin registers the converted NIF paths in fresh
+/// ARMO + ARMA records so the item can be installed directly by mod managers.
+/// </summary>
+public interface IScratchPluginGeneratorService
+{
+    /// <summary>
+    /// Builds a minimal standalone ESP containing one ARMO and one ARMA record.
+    /// Returns <c>null</c> when generation is not applicable (e.g. no converted NIF paths provided).
+    /// </summary>
+    (byte[] PluginBytes, string FileName)? Generate(
+        string armorName,
+        string targetBody,
+        IReadOnlyList<string> convertedNifRelativePaths,
+        IReadOnlyList<int> bipedSlots,
+        string? groundMeshRelativePath);
+}
+
 public sealed class ConversionOrchestrator(
     IArmorImportService importer,
     IBodyDetectionService bodyDetector,
@@ -1534,6 +1567,43 @@ public sealed class ConversionOrchestrator(
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
+            // Biped slot passthrough — supplement the mesh-analysis-driven partition list with any
+            // additional equipment slots declared in the source plugin's BOD2/BODT subrecords.
+            // Slots already present in the rebuilt list are silently skipped; only genuinely new
+            // slots from the plugin data are appended.
+            var pluginBipedSlots = pluginAnalysis.ArmorAddons
+                .Where(a => a.BipedSlots is not null)
+                .SelectMany(a => a.BipedSlots!)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (pluginBipedSlots.Count > 0)
+            {
+                var existingSlotNumbers = new HashSet<int>(
+                    partitions.Partitions.Select(label =>
+                    {
+                        var colon = label.IndexOf(':');
+                        return colon > 0 && int.TryParse(label[..colon], out var n) ? n : -1;
+                    }).Where(n => n >= 0));
+
+                var augmented = partitions.Partitions.ToList();
+                foreach (var slot in pluginBipedSlots)
+                {
+                    if (!existingSlotNumbers.Contains(slot) &&
+                        KnownPartitionSlotNames.TryGetValue(slot, out var slotName))
+                    {
+                        augmented.Add($"{slot}:{slotName}");
+                    }
+                }
+
+                if (augmented.Count > partitions.Partitions.Count)
+                {
+                    partitions = new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions);
+                }
+
+                steps.Add($"biped-slots-passthrough:{string.Join(',', pluginBipedSlots)}");
+            }
+
             var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
 
@@ -1576,6 +1646,20 @@ public sealed class ConversionOrchestrator(
             }
         }
     }
+
+    // Biped partition slot names — mirrors BasicPartitionRebuildingService.PartitionSlots so
+    // the passthrough logic can produce labelled slot strings without coupling to that class.
+    private static readonly IReadOnlyDictionary<int, string> KnownPartitionSlotNames =
+        new Dictionary<int, string>
+        {
+            [30] = "Head",       [31] = "Hair",      [32] = "Body",     [33] = "Hands",
+            [34] = "Forearms",   [35] = "Amulet",    [36] = "Ring",     [37] = "Feet",
+            [38] = "Calves",     [39] = "Shield",    [40] = "Tail",     [41] = "LongHair",
+            [42] = "Circlet",    [43] = "Ears",      [44] = "Dragon Head",
+            [45] = "Dragon LWing", [46] = "Dragon RWing", [47] = "Dragon Body",
+            [48] = "Dragon Tail", [49] = "Dragon Leg", [50] = "Dragon Claws",
+            [54] = "DecapHead",  [55] = "Decap",     [56] = "Genitals"
+        };
 }
 
 public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
@@ -1743,7 +1827,9 @@ public static class StandaloneConversionModules
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
             new AnimationDrivenPoseSimulationService(),
-            new LocalExportService(),
+            new LocalExportService(
+                groundMeshGen: new BasicGroundMeshGeneratorService(),
+                scratchPluginGen: new BasicScratchPluginGeneratorService()),
             raceCompatService: new BasicRaceCompatibilityService(),
             normalRecalcService: new BasicNormalRecalculationService(),
             weightSolverService: new BasicWeightSolverService());
@@ -1954,6 +2040,231 @@ internal sealed class BasicWeightSolverService : IWeightSolverService
             FixedUnderweightCount: under,
             DisconnectedVertexCount: disc,
             WasRepaired: wasRepaired));
+    }
+}
+
+/// <summary>
+/// Produces a ground-mesh NIF for dropped/world-placed armor items by proxy-copying the source
+/// equipped NIF bytes.  This matches the common Skyrim modding practice of reusing the equipped
+/// mesh as the world-drop item.  When source bytes are unavailable, a minimal valid NIF stub is
+/// returned so the MODL path always resolves to a file Skyrim can parse.
+/// </summary>
+internal sealed class BasicGroundMeshGeneratorService : IGroundMeshGeneratorService
+{
+    public Task<byte[]> GenerateAsync(byte[] sourceNifBytes, string meshType, CancellationToken cancellationToken)
+        => Task.FromResult(sourceNifBytes.Length > 0 ? sourceNifBytes.ToArray() : BuildMinimalNifStub());
+
+    /// <summary>
+    /// Builds a minimal valid Skyrim NIF 20.2.0.7 stub with zero blocks.
+    /// Layout: ASCII header line + version bytes + endian + user version + block count (0) +
+    /// user version 2 + export info strings + block type table + string table + groups count.
+    /// </summary>
+    internal static byte[] BuildMinimalNifStub()
+    {
+        using var ms = new MemoryStream();
+        var enc = System.Text.Encoding.ASCII;
+
+        ms.Write(enc.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        ms.Write(new byte[] { 0x14, 0x02, 0x00, 0x07 }); // version 20.2.0.7
+        ms.WriteByte(0x01);                                // endian: little-endian
+        ms.Write(BitConverter.GetBytes(12u));              // user version: 12 (Skyrim)
+        ms.Write(BitConverter.GetBytes(0u));               // num blocks: 0
+        ms.Write(BitConverter.GetBytes(130u));             // user version 2: 130 (Skyrim SE)
+        ms.WriteByte(0x00);                                // author (empty null-terminated string)
+        ms.WriteByte(0x00);                                // process script (empty)
+        ms.WriteByte(0x00);                                // export script (empty)
+        ms.Write(BitConverter.GetBytes((ushort)0));        // num block types: 0
+        ms.Write(BitConverter.GetBytes(0u));               // num strings: 0
+        ms.Write(BitConverter.GetBytes(0u));               // max string length: 0
+        ms.Write(BitConverter.GetBytes(0u));               // num groups: 0
+
+        return ms.ToArray();
+    }
+}
+
+/// <summary>
+/// Synthesises a minimal standalone ESL-flagged ESP containing a single ARMO + ARMA record pair
+/// that points to the converted NIF files.  Generated when the source mod folder does not include
+/// an existing plugin to patch, enabling the converted meshes to be installed as a standalone mod.
+/// </summary>
+internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGeneratorService
+{
+    // FormIDs: TES4 = 0x000, ARMO = 0x801, ARMA = 0x802
+    private const uint ArmoFormId = 0x00000801u;
+    private const uint ArmaFormId = 0x00000802u;
+
+    // All scratch plugins use SSE 24-byte record headers.
+    private const int SseHeader = 24;
+
+    // ESL flag — prevents the plugin consuming a load-order slot.
+    private const uint EslFlag = 0x00000200u;
+
+    public (byte[] PluginBytes, string FileName)? Generate(
+        string armorName,
+        string targetBody,
+        IReadOnlyList<string> convertedNifRelativePaths,
+        IReadOnlyList<int> bipedSlots,
+        string? groundMeshRelativePath)
+    {
+        if (convertedNifRelativePaths.Count == 0) return null;
+
+        var primaryPath = convertedNifRelativePaths[0];
+        if (string.IsNullOrWhiteSpace(primaryPath)) return null;
+
+        // Compute BOD2 slot bitmask (bit N = slot 30+N).
+        uint slotMask = 0;
+        foreach (var slot in bipedSlots)
+        {
+            if (slot >= 30 && slot <= 61)
+                slotMask |= 1u << (slot - 30);
+        }
+        if (slotMask == 0) slotMask = 0x4; // default: body slot 32
+
+        // ── ARMA record data ──────────────────────────────────────────────────
+        using var armaDataMs = new MemoryStream();
+        var edidArma = SanitizeEdid($"SlideSmith_{armorName}_ARMA");
+        WriteSubrecord(armaDataMs, "EDID", System.Text.Encoding.ASCII.GetBytes(edidArma + '\0'));
+
+        using (var bod2Ms = new MemoryStream(8))
+        {
+            WriteUInt32Le(bod2Ms, slotMask);
+            WriteUInt32Le(bod2Ms, 0u); // armor type: 0 = light armor
+            WriteSubrecord(armaDataMs, "BOD2", bod2Ms.ToArray());
+        }
+
+        // Equipped mesh paths (MOD2 = male, MOD3 = female).
+        WriteSubrecord(armaDataMs, "MOD2", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+        WriteSubrecord(armaDataMs, "MOD3", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+
+        // 1st-person mesh (MOD4/MOD5) — same path; overridable by the user.
+        WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+        WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+
+        var armaRecord = BuildRecord("ARMA", armaDataMs.ToArray(), ArmaFormId);
+
+        // ── ARMO record data ──────────────────────────────────────────────────
+        using var armoDataMs = new MemoryStream();
+        var edidArmo = SanitizeEdid($"SlideSmith_{armorName}");
+        WriteSubrecord(armoDataMs, "EDID", System.Text.Encoding.ASCII.GetBytes(edidArmo + '\0'));
+        WriteSubrecord(armoDataMs, "FULL", System.Text.Encoding.ASCII.GetBytes(armorName + '\0'));
+
+        if (!string.IsNullOrWhiteSpace(groundMeshRelativePath))
+        {
+            WriteSubrecord(armoDataMs, "MODL",
+                System.Text.Encoding.ASCII.GetBytes(groundMeshRelativePath + '\0'));
+        }
+
+        // World model paths (MOD2 = male, MOD3 = female).
+        WriteSubrecord(armoDataMs, "MOD2", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+        WriteSubrecord(armoDataMs, "MOD3", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+
+        // DATA: float32 weight (1.0) + uint32 gold value (0).
+        using (var dataMs = new MemoryStream(8))
+        {
+            WriteFloat32Le(dataMs, 1.0f);
+            WriteUInt32Le(dataMs, 0u);
+            WriteSubrecord(armoDataMs, "DATA", dataMs.ToArray());
+        }
+
+        var armoRecord = BuildRecord("ARMO", armoDataMs.ToArray(), ArmoFormId);
+
+        // ── Assemble ESP ──────────────────────────────────────────────────────
+        using var ms = new MemoryStream();
+        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: 2), formId: 0, flags: EslFlag);
+        WriteGrup(ms, "ARMA", [armaRecord]);
+        WriteGrup(ms, "ARMO", [armoRecord]);
+
+        var safeFileName = SanitizeEdid(armorName).Trim('_');
+        return (ms.ToArray(), $"SlideSmith_{safeFileName}.esp");
+    }
+
+    private static byte[] BuildStandaloneTes4Data(int numRecords)
+    {
+        using var ms = new MemoryStream();
+
+        using (var hedrMs = new MemoryStream(12))
+        {
+            WriteFloat32Le(hedrMs, 1.70f);
+            WriteUInt32Le(hedrMs, (uint)numRecords);
+            WriteUInt32Le(hedrMs, 0x803u); // nextObjectID after ARMO(0x801)+ARMA(0x802)
+            WriteSubrecord(ms, "HEDR", hedrMs.ToArray());
+        }
+
+        WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
+        // No MAST/DATA — standalone plugin with no masters.
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildRecord(string tag, byte[] data, uint formId, uint flags = 0)
+    {
+        using var ms = new MemoryStream(SseHeader + data.Length);
+        WriteTag(ms, tag);
+        WriteUInt32Le(ms, (uint)data.Length);
+        WriteUInt32Le(ms, flags);
+        WriteUInt32Le(ms, formId);
+        WriteUInt32Le(ms, 0u); // VC1
+        WriteUInt32Le(ms, 0u); // form version (SSE extra field)
+        ms.Write(data);
+        return ms.ToArray();
+    }
+
+    private static void WriteRecord(
+        MemoryStream ms, string tag, byte[] data, uint formId, uint flags = 0)
+    {
+        ms.Write(BuildRecord(tag, data, formId, flags));
+    }
+
+    private static void WriteGrup(MemoryStream ms, string label, List<byte[]> records)
+    {
+        int contentLen = records.Sum(b => b.Length);
+        int totalSize  = SseHeader + contentLen;
+        WriteTag(ms, "GRUP");
+        WriteUInt32Le(ms, (uint)totalSize);
+        WriteTag(ms, label);
+        WriteUInt32Le(ms, 0u);  // groupType = 0 (top-level)
+        WriteUInt32Le(ms, 0u);  // VC info
+        WriteUInt32Le(ms, 0u);  // timestamp
+        foreach (var rec in records) ms.Write(rec);
+    }
+
+    private static void WriteSubrecord(MemoryStream ms, string tag, byte[] data)
+    {
+        WriteTag(ms, tag);
+        WriteUInt16Le(ms, (ushort)Math.Min(data.Length, ushort.MaxValue));
+        ms.Write(data);
+    }
+
+    private static void WriteTag(MemoryStream ms, string tag)
+    {
+        var b = System.Text.Encoding.ASCII.GetBytes(tag);
+        ms.Write(b, 0, Math.Min(4, b.Length));
+        for (int i = b.Length; i < 4; i++) ms.WriteByte(0);
+    }
+
+    private static void WriteUInt32Le(MemoryStream ms, uint v)
+    {
+        ms.WriteByte((byte)v); ms.WriteByte((byte)(v >> 8));
+        ms.WriteByte((byte)(v >> 16)); ms.WriteByte((byte)(v >> 24));
+    }
+
+    private static void WriteUInt16Le(MemoryStream ms, ushort v)
+    {
+        ms.WriteByte((byte)v); ms.WriteByte((byte)(v >> 8));
+    }
+
+    private static void WriteFloat32Le(MemoryStream ms, float v)
+    {
+        var bits = BitConverter.GetBytes(v);
+        if (!BitConverter.IsLittleEndian) Array.Reverse(bits);
+        ms.Write(bits);
+    }
+
+    // Sanitises a string to a valid Bethesda editor ID (ASCII alphanumeric + underscore, ≤255).
+    private static string SanitizeEdid(string raw)
+    {
+        var chars = raw.Select(ch => char.IsLetterOrDigit(ch) || ch == '_' ? ch : '_').ToArray();
+        var result = new string(chars);
+        return result.Length > 255 ? result[..255] : result;
     }
 }
 
@@ -5472,7 +5783,9 @@ internal static class ConversionReadmeGenerator
     }
 }
 
-internal sealed class LocalExportService : IExportService
+internal sealed class LocalExportService(
+    IGroundMeshGeneratorService? groundMeshGen = null,
+    IScratchPluginGeneratorService? scratchPluginGen = null) : IExportService
 {
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
         ConversionRequest request,
@@ -5550,6 +5863,30 @@ internal sealed class LocalExportService : IExportService
             pluginRewriteMap,
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
+
+        // Generate ground mesh NIF files for the converted armor.
+        // The ground mesh is used as the ARMO MODL field — the item that appears when the
+        // armor is dropped or spawned as loot.  Each converted NIF gets a companion
+        // <stem>_ground.nif written alongside it under the same slidesmith/<body>/ directory.
+        // When groundMeshGen is not registered this step is silently skipped.
+        string? groundMeshRelativePath = null;
+        if (groundMeshGen is not null && writtenNifs.Count > 0)
+        {
+            var primaryNifPath    = writtenNifs[0];
+            var primaryNifBytes   = await File.ReadAllBytesAsync(primaryNifPath, cancellationToken);
+            var groundNifBytes    = await groundMeshGen.GenerateAsync(primaryNifBytes, analysis.MeshType, cancellationToken);
+
+            var stem              = Path.GetFileNameWithoutExtension(primaryNifPath);
+            var safeBodyToken     = BuildSafeBodyToken(request.TargetBody);
+            groundMeshRelativePath = $"meshes/slidesmith/{safeBodyToken}/{stem}_ground.nif";
+
+            var groundAbsPath = Path.Combine(
+                outputDirectory,
+                groundMeshRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(groundAbsPath)!);
+            await File.WriteAllBytesAsync(groundAbsPath, groundNifBytes, cancellationToken);
+            outputFiles.Add(groundAbsPath);
+        }
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
@@ -5715,6 +6052,35 @@ internal sealed class LocalExportService : IExportService
                         }
                     }
                 }
+            }
+        }
+
+        // Generate a scratch ESP when no source plugin exists for this armor.
+        // This enables the converted meshes to be installed as a new standalone mod without
+        // requiring the user to create ARMO/ARMA records in xEdit manually.
+        if (pluginAnalysis.ScannedPlugins.Count == 0 && scratchPluginGen is not null && writtenNifs.Count > 0)
+        {
+            var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmithArmor";
+            var bipedSlots = pluginAnalysis.ArmorAddons
+                .Where(a => a.BipedSlots is not null)
+                .SelectMany(a => a.BipedSlots!)
+                .Distinct()
+                .OrderBy(s => s)
+                .ToList();
+
+            var safeBodyToken  = BuildSafeBodyToken(request.TargetBody);
+            var pluginNifPaths = writtenNifs
+                .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")
+                .ToList();
+
+            var scratchResult = scratchPluginGen.Generate(
+                armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath);
+
+            if (scratchResult is var (pluginBytes, pluginFileName))
+            {
+                var espPath = Path.Combine(outputDirectory, pluginFileName);
+                await File.WriteAllBytesAsync(espPath, pluginBytes, cancellationToken);
+                outputFiles.Add(espPath);
             }
         }
 
@@ -6744,21 +7110,23 @@ internal sealed class LocalExportService : IExportService
 
     private static string BuildPluginConvertedMeshPath(string targetBody, string fileName, string originalPath)
     {
+        var safeBodyToken = BuildSafeBodyToken(targetBody);
+        var rewrittenRelative = $"slidesmith/{safeBodyToken}/{fileName}";
+        return HasPluginMeshesPrefix(originalPath)
+            ? $"meshes/{rewrittenRelative}"
+            : rewrittenRelative;
+    }
+
+    // Converts a target-body name into a filesystem-safe lowercase token (alphanumeric + hyphen).
+    internal static string BuildSafeBodyToken(string targetBody)
+    {
         var safeBodyToken = new string(targetBody
             .Trim()
             .ToLowerInvariant()
             .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
             .ToArray())
             .Trim('-');
-        if (string.IsNullOrWhiteSpace(safeBodyToken))
-        {
-            safeBodyToken = "target";
-        }
-
-        var rewrittenRelative = $"slidesmith/{safeBodyToken}/{fileName}";
-        return HasPluginMeshesPrefix(originalPath)
-            ? $"meshes/{rewrittenRelative}"
-            : rewrittenRelative;
+        return string.IsNullOrWhiteSpace(safeBodyToken) ? "target" : safeBodyToken;
     }
 
     private static bool HasPluginMeshesPrefix(string pluginPath)

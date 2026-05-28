@@ -7089,4 +7089,617 @@ public sealed class ConversionReadmeGeneratorTests
         }
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BasicGroundMeshGeneratorService tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed class BasicGroundMeshGeneratorServiceTests
+{
+    [Fact]
+    public async Task GenerateAsync_WithSourceBytes_ReturnsCopy()
+    {
+        var service = new BasicGroundMeshGeneratorService();
+        var source  = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+
+        var result = await service.GenerateAsync(source, "plate", CancellationToken.None);
+
+        Assert.Equal(source, result);
+        // Must be a copy, not the same reference.
+        Assert.False(ReferenceEquals(source, result));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_EmptySourceBytes_ReturnsNifStub()
+    {
+        var service = new BasicGroundMeshGeneratorService();
+
+        var result = await service.GenerateAsync([], "cloth", CancellationToken.None);
+
+        Assert.NotEmpty(result);
+        // Stub must start with the Gamebryo header string.
+        var header = System.Text.Encoding.ASCII.GetString(result, 0, 8);
+        Assert.Equal("Gamebryo", header);
+    }
+
+    [Fact]
+    public void BuildMinimalNifStub_StartsWithGamebryoHeader()
+    {
+        var stub = BasicGroundMeshGeneratorService.BuildMinimalNifStub();
+
+        var header = System.Text.Encoding.ASCII.GetString(stub, 0, 8);
+        Assert.Equal("Gamebryo", header);
+    }
+
+    [Fact]
+    public void BuildMinimalNifStub_ContainsVersionBytes()
+    {
+        var stub = BasicGroundMeshGeneratorService.BuildMinimalNifStub();
+
+        // Version 20.2.0.7 appears after the header line ending with '\n' (0x0A).
+        var headerEnd = Array.IndexOf(stub, (byte)0x0A);
+        Assert.True(headerEnd > 0 && headerEnd + 4 < stub.Length);
+        Assert.Equal(0x14, stub[headerEnd + 1]); // 20
+        Assert.Equal(0x02, stub[headerEnd + 2]); //  2
+        Assert.Equal(0x00, stub[headerEnd + 3]); //  0
+        Assert.Equal(0x07, stub[headerEnd + 4]); //  7
+    }
+
+    [Fact]
+    public async Task GenerateAsync_DifferentMeshTypes_ProduceSameLengthCopy()
+    {
+        var service = new BasicGroundMeshGeneratorService();
+        var source  = new byte[256];
+        new Random(42).NextBytes(source);
+
+        var plate  = await service.GenerateAsync(source, "plate", CancellationToken.None);
+        var cloth  = await service.GenerateAsync(source, "cloth", CancellationToken.None);
+
+        Assert.Equal(source.Length, plate.Length);
+        Assert.Equal(source.Length, cloth.Length);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// BasicScratchPluginGeneratorService tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed class BasicScratchPluginGeneratorServiceTests
+{
+    [Fact]
+    public void Generate_EmptyNifPaths_ReturnsNull()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate("IronArmor", "CBBE", [], [], null);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Generate_ValidInput_ReturnsBytesAndFileName()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32, 33, 37],
+            "meshes/slidesmith/cbbe/ironarmor_0_ground.nif");
+
+        Assert.NotNull(result);
+        var (bytes, fileName) = result!.Value;
+        Assert.NotEmpty(bytes);
+        Assert.Equal("SlideSmith_IronArmor.esp", fileName);
+    }
+
+    [Fact]
+    public void Generate_PluginStartsWithTES4Record()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var tag = System.Text.Encoding.ASCII.GetString(bytes, 0, 4);
+        Assert.Equal("TES4", tag);
+    }
+
+    [Fact]
+    public void Generate_PluginHasESLFlag()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        // TES4 flags are at offset 8 (4-byte tag + 4-byte data size).
+        var flags = (uint)(bytes[8] | (bytes[9] << 8) | (bytes[10] << 16) | (bytes[11] << 24));
+        Assert.True((flags & 0x200u) != 0, "ESL flag (0x200) must be set in TES4 header.");
+    }
+
+    [Fact]
+    public void Generate_PluginContainsARMAGrup()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("ARMA", pluginText);
+    }
+
+    [Fact]
+    public void Generate_PluginContainsARMOGrup()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("ARMO", pluginText);
+    }
+
+    [Fact]
+    public void Generate_PluginContainsBOD2WithCorrectSlotMask()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        // Body(32)=bit2=0x4, Hands(33)=bit3=0x8, Feet(37)=bit7=0x80 → mask=0x8C
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32, 33, 37],
+            null);
+
+        var (bytes, _) = result!.Value;
+        // Search for "BOD2" subrecord tag and read the 4-byte mask after the 6-byte header.
+        for (int i = 0; i + 14 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'B' && bytes[i + 1] == 'O' && bytes[i + 2] == 'D' && bytes[i + 3] == '2')
+            {
+                var mask = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                Assert.Equal(0x8Cu, mask);
+                return;
+            }
+        }
+        Assert.Fail("BOD2 subrecord not found in generated ESP.");
+    }
+
+    [Fact]
+    public void Generate_NoBipedSlots_DefaultsToBodySlot32()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [], // no biped slots
+            null);
+
+        var (bytes, _) = result!.Value;
+        for (int i = 0; i + 14 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'B' && bytes[i + 1] == 'O' && bytes[i + 2] == 'D' && bytes[i + 3] == '2')
+            {
+                var mask = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                Assert.Equal(0x4u, mask); // bit 2 = slot 32 = Body
+                return;
+            }
+        }
+        Assert.Fail("BOD2 subrecord not found in generated ESP.");
+    }
+
+    [Fact]
+    public void Generate_WithGroundMeshPath_ContainsMODLPath()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        const string groundPath = "meshes/slidesmith/cbbe/ironarmor_ground.nif";
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            groundPath);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("ironarmor_ground.nif", pluginText);
+    }
+
+    [Fact]
+    public void Generate_FileNameSanitisesSpecialCharacters()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "Iron Armor (Heavy)", "CBBE",
+            ["meshes/slidesmith/cbbe/iron_0.nif"],
+            [32],
+            null);
+
+        var (_, fileName) = result!.Value;
+        // File name should only contain safe characters (no spaces or parentheses).
+        Assert.DoesNotContain(" ", fileName);
+        Assert.DoesNotContain("(", fileName);
+        Assert.DoesNotContain(")", fileName);
+    }
+
+    [Fact]
+    public void Generate_PluginBytesHaveNonZeroLength()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "Dragonplate", "3BA",
+            ["meshes/slidesmith/3ba/dragonplate_0.nif", "meshes/slidesmith/3ba/dragonplate_1.nif"],
+            [32, 33],
+            "meshes/slidesmith/3ba/dragonplate_ground.nif");
+
+        var (bytes, _) = result!.Value;
+        // A minimal ESP must be at least 200 bytes (TES4 + two GRUPs + two records).
+        Assert.True(bytes.Length >= 200, $"Expected >=200 bytes, got {bytes.Length}");
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Biped slot passthrough tests (ConversionOrchestrator integration)
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed class BipedSlotPassthroughTests
+{
+    // Fake partition rebuilder that always returns only slot 32 (Body).
+    private sealed class BodyOnlyPartitionRebuilder : IPartitionRebuildingService
+    {
+        public Task<PartitionRebuildingResult> RebuildAsync(
+            WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
+            => Task.FromResult(new PartitionRebuildingResult(true, ["32:Body"], []));
+    }
+
+    // Fake plugin analysis that injects biped slots into returned armor addons.
+    private sealed class FakePluginAnalysisService(IReadOnlyList<int> slots) : IPluginAnalysisService
+    {
+        public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken ct)
+        {
+            var addon = new PluginArmorAddon("ARMA", [], FormId: 1, EditorId: "FakeARMA", BipedSlots: slots);
+            return Task.FromResult(new PluginAnalysisResult(
+                ScannedPlugins: ["FakePlugin.esp"],
+                ArmorAddons: [addon],
+                PatchGuidance: string.Empty));
+        }
+    }
+
+    private static ConversionOrchestrator BuildOrchestrator(IReadOnlyList<int> pluginBipedSlots)
+    {
+        return new ConversionOrchestrator(
+            new LocalArmorImportService(),
+            new SignatureBodyDetectionService(),
+            new BasicMeshAnalysisService(),
+            new BasicCageGenerationService(),
+            new StrategyMeshConversionService(),
+            new BasicWeightTransferService(),
+            new BasicSkeletonMappingService(),
+            new BasicMorphGenerationService(),
+            new BodyOnlyPartitionRebuilder(),
+            new BasicClippingDetectionService(),
+            new BasicAutoCorrectionService(),
+            new BasicPhysicsSupportService(),
+            new BodySlideOspProjectService(),
+            new BasicTextureAnalysisService(),
+            new FakePluginAnalysisService(pluginBipedSlots),
+            new VanillaArmorLookupService(),
+            new SimplifiedVoxelCollisionService(),
+            new BasicArmorRegionBindingService(),
+            new AnimationDrivenPoseSimulationService(),
+            new LocalExportService());
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WhenPluginHasExtraSlots_StepContainsBipedSlotsPassthrough()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var orchestrator = BuildOrchestrator([32, 33, 37]);
+            var request      = new ConversionRequest(nifPath, "CBBE", OutputDirectory: tmpDir);
+            var result       = await orchestrator.ConvertAsync(request);
+
+            var passthroughStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
+
+            Assert.NotNull(passthroughStep);
+            Assert.Contains("32", passthroughStep);
+            Assert.Contains("33", passthroughStep);
+            Assert.Contains("37", passthroughStep);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WhenPluginSlotsAlreadyCovered_NoPassthroughAugmentation()
+    {
+        // If plugin only has slot 32 (already in the Body-only rebuilder output), no new slots added.
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var orchestrator = BuildOrchestrator([32]); // slot 32 already present
+            var request      = new ConversionRequest(nifPath, "CBBE", OutputDirectory: tmpDir);
+            var result       = await orchestrator.ConvertAsync(request);
+
+            // biped-slots-passthrough step still emitted (slots were present in plugin),
+            // but partition list stays unchanged (no new slots appended).
+            var passthroughStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
+            Assert.NotNull(passthroughStep);
+
+            var partitionStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("partitions:", StringComparison.Ordinal));
+            Assert.NotNull(partitionStep);
+            // Partition step should still contain exactly one entry ("32:Body").
+            Assert.Contains("32:Body", partitionStep);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WhenNoPluginBipedSlots_NoBipedSlotsPassthroughStep()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var orchestrator = BuildOrchestrator([]); // no biped slots in plugin
+            var request      = new ConversionRequest(nifPath, "CBBE", OutputDirectory: tmpDir);
+            var result       = await orchestrator.ConvertAsync(request);
+
+            var passthroughStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
+            Assert.Null(passthroughStep);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LocalExportService ground mesh + scratch plugin generation tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+public sealed class LocalExportServiceGroundMeshTests
+{
+    [Fact]
+    public async Task ExportAsync_WithGroundMeshGen_WritesGroundNifFile()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service  = new LocalExportService(groundMeshGen: new BasicGroundMeshGeneratorService());
+            var (outputDir, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var groundNifs = files.Where(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.NotEmpty(groundNifs);
+            Assert.True(File.Exists(groundNifs[0]), "Ground NIF file should exist on disk.");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithGroundMeshGen_GroundNifContainsSourceBytes()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var sourceBytes = new byte[64];
+        new Random(1).NextBytes(sourceBytes);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, sourceBytes);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: new BasicGroundMeshGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var groundNif = files.FirstOrDefault(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(groundNif);
+            var written = await File.ReadAllBytesAsync(groundNif!);
+            Assert.Equal(sourceBytes, written);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithoutGroundMeshGen_NoGroundNifProduced()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var service = new LocalExportService(); // no ground mesh service
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var groundNifs = files.Where(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.Empty(groundNifs);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithScratchPluginGen_WritesScratchEsp_WhenNoSourcePlugin()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var espFiles = files.Where(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.NotEmpty(espFiles);
+            Assert.True(File.Exists(espFiles[0]), "Scratch ESP should exist on disk.");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_ScratchEspFileName_ContainsArmorName()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "ironarmor_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var espFile = files.FirstOrDefault(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(espFile);
+            Assert.Contains("ironarmor", Path.GetFileName(espFile), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_ScratchEspHasTES4AndARMAAndARMOBlocks()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var espFile = files.First(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase));
+            var espBytes = await File.ReadAllBytesAsync(espFile);
+            var espText  = System.Text.Encoding.ASCII.GetString(espBytes);
+
+            Assert.Contains("TES4", espText);
+            Assert.Contains("ARMA", espText);
+            Assert.Contains("ARMO", espText);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static async Task<(string OutputDir, IReadOnlyList<string> Files)> RunExportAsync(
+        LocalExportService service,
+        string nifPath,
+        string tmpDir,
+        string targetBody)
+    {
+        var outputDir = Path.Combine(tmpDir, "output");
+        Directory.CreateDirectory(outputDir);
+
+        var request  = new ConversionRequest(nifPath, targetBody, OutputDirectory: outputDir);
+        var armor    = new ImportedArmor(nifPath, [nifPath], [], [], []);
+        var analysis = new MeshAnalysis("plate", false, 1);
+        var mesh     = new ConvertedMesh("plate", "direct-copy", 1,
+            new Dictionary<string, double>());
+        var morphs   = new MorphSet("low", "high", true);
+        var physics  = new PhysicsConfig("none");
+        var clipping = new ClippingReport(false, [], []);
+        var correction = new CorrectionResult(false, "not-required");
+        var bodySlideProject = new BodySlideProject("TestProject", targetBody,
+            ["Belly", "Breast"], "<BodySlideProject/>");
+        var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+        var textureSummary = new TextureSummary(0, [], [], []);
+        var poseSimulation = new PoseSimulationResult(
+            [], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+
+        return await service.ExportAsync(
+            request, armor, analysis, mesh, morphs, physics,
+            clipping, correction, bodySlideProject, pluginAnalysis,
+            textureSummary, poseSimulation, ["step1"], CancellationToken.None);
+    }
+}
+
+// ── LocalExportService.BuildSafeBodyToken unit tests ─────────────────────────
+
+public sealed class BuildSafeBodyTokenTests
+{
+    [Theory]
+    [InlineData("CBBE",  "cbbe")]
+    [InlineData("3BA",   "3ba")]
+    [InlineData("BHUNP", "bhunp")]
+    [InlineData("SAM Light", "sam-light")]
+    [InlineData("",      "target")]
+    [InlineData("  ",    "target")]
+    public void BuildSafeBodyToken_ConvertsToExpectedToken(string input, string expected)
+    {
+        var result = LocalExportService.BuildSafeBodyToken(input);
+        Assert.Equal(expected, result);
+    }
+}
 }
