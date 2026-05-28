@@ -1768,7 +1768,12 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("\"ProposedPatchSteps\"", content, StringComparison.Ordinal);
             Assert.Contains("\"XEditAction\"",        content, StringComparison.Ordinal);
             Assert.Contains("\"PlacementNote\"",      content, StringComparison.Ordinal);
+            Assert.Contains("\"RewriteMappings\"",    content, StringComparison.Ordinal);
+            Assert.Contains("meshes/slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("xEdit",                  content, StringComparison.Ordinal);
+
+            var rewrittenMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+            Assert.True(File.Exists(rewrittenMeshPath), "Converted mesh should be staged at the rewritten plugin path.");
         }
         finally
         {
@@ -2620,6 +2625,7 @@ public sealed class PoseSimulationAndPreviewTests
                 Assert.Contains("unit ",        content, StringComparison.Ordinal);
                 Assert.Contains("Initialize",   content, StringComparison.Ordinal);
                 Assert.Contains("Finalize",     content, StringComparison.Ordinal);
+                Assert.Contains("SetEditValue", content, StringComparison.Ordinal);
             }
         }
         finally

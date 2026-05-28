@@ -2636,13 +2636,13 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         }
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Found {addons.Count} plugin record(s) with mesh paths. Update each ArmorAddon (ARMA) record to reference the converted {targetBody} meshes:");
+        sb.AppendLine($"Found {addons.Count} plugin record(s) with mesh paths. Run patch-armor.pas to auto-rewrite matching ArmorAddon (ARMA) records for {targetBody}:");
         foreach (var addon in addons)
         {
             sb.AppendLine($"  Plugin: {addon.RecordType}");
             foreach (var path in addon.DetectedMeshPaths.Take(10))
             {
-                sb.AppendLine($"    {path}  →  [replace with {targetBody} converted path]");
+                sb.AppendLine($"    {path}");
             }
 
             if (addon.DetectedMeshPaths.Count > 10)
@@ -2723,6 +2723,14 @@ internal sealed class LocalExportService : IExportService
         var writtenNifs = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
+        var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
+        var stagedPluginMeshes = await StageConvertedMeshesForPluginRewriteAsync(
+            outputDirectory,
+            writtenNifs,
+            pluginRewriteMap,
+            cancellationToken);
+        outputFiles.AddRange(stagedPluginMeshes);
+
         // Carry source support assets (textures, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
         var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
@@ -2788,16 +2796,19 @@ internal sealed class LocalExportService : IExportService
         outputFiles.Add(triLowPath);
         outputFiles.Add(triHighPath);
 
-        // Write plugin patch guidance when plugins were found.
+        // Write plugin patch guidance + rewrite instructions when plugins were found.
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
             var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
-            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody);
+            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
             var patchOutput = new
             {
                 pluginAnalysis.ScannedPlugins,
                 pluginAnalysis.ArmorAddons,
                 pluginAnalysis.PatchGuidance,
+                RewriteMappings = pluginRewriteMap
+                    .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
+                    .ToList(),
                 ProposedPatchSteps = proposedSteps
             };
             await File.WriteAllTextAsync(pluginPatchPath,
@@ -2809,7 +2820,7 @@ internal sealed class LocalExportService : IExportService
             // the ARMA record patches directly from SSEEdit / TES5Edit without manual edits.
             var xEditScriptPath = Path.Combine(outputDirectory, "patch-armor.pas");
             await File.WriteAllTextAsync(xEditScriptPath,
-                BuildXEditScript(pluginAnalysis, request.TargetBody),
+                BuildXEditScript(pluginAnalysis, request.TargetBody, pluginRewriteMap),
                 cancellationToken);
             outputFiles.Add(xEditScriptPath);
         }
@@ -3302,12 +3313,99 @@ internal sealed class LocalExportService : IExportService
 
     // ── Plugin guidance helpers ───────────────────────────────────────────────
 
+    private static IReadOnlyDictionary<string, string> BuildPluginRewriteMap(
+        PluginAnalysisResult pluginAnalysis,
+        string targetBody,
+        IReadOnlyList<string> writtenNifPaths)
+    {
+        var convertedByFileName = writtenNifPaths
+            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
+
+        var rewrites = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var originalPath in pluginAnalysis.ArmorAddons.SelectMany(a => a.DetectedMeshPaths))
+        {
+            var normalisedOriginal = originalPath.Replace('\\', '/');
+            var fileName = Path.GetFileName(normalisedOriginal);
+            if (string.IsNullOrWhiteSpace(fileName) || !convertedByFileName.ContainsKey(fileName))
+            {
+                continue;
+            }
+
+            rewrites[normalisedOriginal] = BuildPluginConvertedMeshPath(targetBody, fileName);
+        }
+
+        return rewrites;
+    }
+
+    private static string BuildPluginConvertedMeshPath(string targetBody, string fileName)
+    {
+        var safeBodyToken = new string(targetBody
+            .Trim()
+            .ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray())
+            .Trim('-');
+        if (string.IsNullOrWhiteSpace(safeBodyToken))
+        {
+            safeBodyToken = "target";
+        }
+
+        return $"meshes/slidesmith/{safeBodyToken}/{fileName}";
+    }
+
+    private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
+        string outputDirectory,
+        IReadOnlyList<string> writtenNifPaths,
+        IReadOnlyDictionary<string, string> pluginRewriteMap,
+        CancellationToken cancellationToken)
+    {
+        if (pluginRewriteMap.Count == 0 || writtenNifPaths.Count == 0)
+        {
+            return [];
+        }
+
+        var sourceByFileName = writtenNifPaths
+            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var staged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rewrittenPath in pluginRewriteMap.Values)
+        {
+            var fileName = Path.GetFileName(rewrittenPath);
+            if (string.IsNullOrWhiteSpace(fileName) || !sourceByFileName.TryGetValue(fileName, out var sourcePath))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.Combine(
+                outputDirectory,
+                rewrittenPath.Replace('/', Path.DirectorySeparatorChar));
+            var destinationDirectory = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationDirectory))
+            {
+                Directory.CreateDirectory(destinationDirectory);
+            }
+
+            await using var source = File.OpenRead(sourcePath);
+            await using var destination = File.Create(destinationPath);
+            await source.CopyToAsync(destination, cancellationToken);
+            staged.Add(destinationPath);
+        }
+
+        return staged.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     /// <summary>
     /// Builds a structured list of per-mesh xEdit patch steps from the plugin analysis result.
-    /// Each step identifies the plugin, the detected mesh path, the proposed action, and the
-    /// converted mesh placement note — without directly editing the ESP binary.
+    /// Each step identifies the plugin, the detected mesh path, and the rewritten target mesh path.
     /// </summary>
-    private static IReadOnlyList<object> BuildProposedPatchSteps(PluginAnalysisResult pluginAnalysis, string targetBody)
+    private static IReadOnlyList<object> BuildProposedPatchSteps(
+        PluginAnalysisResult pluginAnalysis,
+        string targetBody,
+        IReadOnlyDictionary<string, string> pluginRewriteMap)
     {
         var steps = new List<object>();
 
@@ -3315,17 +3413,21 @@ internal sealed class LocalExportService : IExportService
         {
             foreach (var meshPath in addon.DetectedMeshPaths)
             {
-                // Armor meshes keep the same relative path after conversion —
-                // the converted NIF replaces the file at the same game-data location.
                 var normalised = meshPath.Replace('\\', '/');
+                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
                 steps.Add(new
                 {
                     Plugin = addon.RecordType,
                     RecordType = "ArmorAddon (ARMA)",
                     OriginalMeshPath = normalised,
-                    ProposedMeshPath = normalised,
-                    PlacementNote = $"Copy the {targetBody}-converted NIF to this same path in your game data folder.",
-                    XEditAction = "Open in xEdit → locate ARMA record → verify Worn Armor mesh path matches the converted file location.",
+                    ProposedMeshPath = rewrittenPath ?? normalised,
+                    RewriteReady = hasRewrite,
+                    PlacementNote = hasRewrite
+                        ? $"Use patch-armor.pas to rewrite ARMA path to {rewrittenPath} and keep the converted NIF at that path."
+                        : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
+                    XEditAction = hasRewrite
+                        ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMA mesh paths."
+                        : "Open in xEdit and patch this ARMA mesh path manually.",
                     Tool = "xEdit"
                 });
             }
@@ -3877,31 +3979,47 @@ internal sealed class LocalExportService : IExportService
     /// <summary>
     /// Generates a runnable xEdit Pascal (Delphi) automation script that iterates all
     /// loaded plugins, finds ARMA (ArmorAddon) records whose mesh paths match those
-    /// detected during plugin analysis, and reports them with the converted-file placement
-    /// instruction. Drop the output file into the Edit Scripts folder of SSEEdit/TES5Edit
+    /// detected during plugin analysis, and rewrites them to the converted mesh paths.
+    /// Drop the output file into the Edit Scripts folder of SSEEdit/TES5Edit
     /// and run it from the Tools → Apply Script menu.
     /// </summary>
-    private static string BuildXEditScript(PluginAnalysisResult pluginAnalysis, string targetBody)
+    private static string BuildXEditScript(
+        PluginAnalysisResult pluginAnalysis,
+        string targetBody,
+        IReadOnlyDictionary<string, string> pluginRewriteMap)
     {
-        var allPaths = pluginAnalysis.ArmorAddons
+        var oldPaths = pluginAnalysis.ArmorAddons
             .SelectMany(a => a.DetectedMeshPaths)
+            .Select(path => path.Replace('\\', '/'))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // Build the const array declarations.
-        var pathDecls = new System.Text.StringBuilder();
-        for (var i = 0; i < allPaths.Count; i++)
+        var rewritePairs = oldPaths
+            .Select(oldPath => new
+            {
+                OldPath = oldPath,
+                NewPath = pluginRewriteMap.TryGetValue(oldPath, out var rewrittenPath)
+                    ? rewrittenPath
+                    : oldPath
+            })
+            .ToList();
+
+        var oldPathDecls = new System.Text.StringBuilder();
+        var newPathDecls = new System.Text.StringBuilder();
+        for (var i = 0; i < rewritePairs.Count; i++)
         {
-            pathDecls.AppendLine($"  cPaths[{i}] := '{allPaths[i].Replace("'", "''")}';");
+            oldPathDecls.AppendLine($"  cOldPaths[{i}] := '{rewritePairs[i].OldPath.Replace("'", "''")}';");
+            newPathDecls.AppendLine($"  cNewPaths[{i}] := '{rewritePairs[i].NewPath.Replace("'", "''").Replace('/', '\\')}';");
         }
 
-        var pathCount = allPaths.Count;
+        var pathCount = rewritePairs.Count;
+        var rewriteReadyCount = rewritePairs.Count(pair => !string.Equals(pair.OldPath, pair.NewPath, StringComparison.OrdinalIgnoreCase));
         var safeTarget = targetBody.Replace("'", "''");
 
         return $$"""
             { ============================================================ }
-            { SlideSmith v0.1 — Auto-generated xEdit Armor Patcher Script  }
+            { SlideSmith v0.1 — Auto-generated xEdit Armor Rewrite Script  }
             { Target body : {{safeTarget}}                                  }
             {                                                               }
             { HOW TO USE                                                    }
@@ -3909,9 +4027,8 @@ internal sealed class LocalExportService : IExportService
             {   2. Open SSEEdit and load the plugins you want to patch.     }
             {   3. Select all plugins in the tree, then:                    }
             {        Tools → Apply Script → SlideSmith_patch-armor          }
-            {   4. Inspect the Messages tab for detected ARMA records.      }
-            {   5. If a mesh path is listed, ensure the converted NIF file  }
-            {      is placed at that same path in your game data folder.    }
+            {   4. Script rewrites matching ARMA mesh paths automatically.  }
+            {   5. Save plugin changes in xEdit after review.               }
             { ============================================================ }
 
             unit SlideSmith_patch_armor;
@@ -3920,19 +4037,51 @@ internal sealed class LocalExportService : IExportService
             implementation
 
             var
-              cPaths: array[0..{{Math.Max(pathCount - 1, 0)}}] of string;
+              cOldPaths: array[0..{{Math.Max(pathCount - 1, 0)}}] of string;
+              cNewPaths: array[0..{{Math.Max(pathCount - 1, 0)}}] of string;
+              gPatchedCount: Integer;
 
             procedure InitPaths;
             begin
-            {{pathDecls}}end;
+            {{oldPathDecls}}{{newPathDecls}}end;
+
+            function NormalizeMeshPath(const value: string): string;
+            begin
+              Result := LowerCase(StringReplace(value, '\', '/', [rfReplaceAll]));
+            end;
+
+            procedure TryRewriteModelPath(e: IwbElement; const pathName: string);
+            var
+              i: Integer;
+              modelEl: IwbElement;
+              meshPath: string;
+            begin
+              modelEl := ElementByPath(e, pathName);
+              if not Assigned(modelEl) then
+                Exit;
+
+              meshPath := GetEditValue(modelEl);
+              for i := 0 to High(cOldPaths) do begin
+                if NormalizeMeshPath(meshPath) = NormalizeMeshPath(cOldPaths[i]) then begin
+                  if not SameText(meshPath, cNewPaths[i]) then begin
+                    SetEditValue(modelEl, cNewPaths[i]);
+                    AddMessage('[PATCHED] ' + Name(e) + ' | ' + pathName + ': ' + meshPath + ' -> ' + cNewPaths[i]);
+                    Inc(gPatchedCount);
+                  end;
+                  Break;
+                end;
+              end;
+            end;
 
             function Initialize: Integer;
             begin
               AddMessage('==============================================');
-              AddMessage('SlideSmith v0.1 Armor Patcher');
+              AddMessage('SlideSmith v0.1 Armor Rewrite');
               AddMessage('Target body: {{safeTarget}}');
               AddMessage('Detected mesh paths: {{pathCount}}');
+              AddMessage('Rewrite-ready paths: {{rewriteReadyCount}}');
               AddMessage('==============================================');
+              gPatchedCount := 0;
               InitPaths;
               Result := 0;
             end;
@@ -3946,35 +4095,14 @@ internal sealed class LocalExportService : IExportService
               Result := 0;
               sig := Signature(e);
               if sig <> 'ARMA' then exit;
-
-              // Check Female World Model (MOD2) and Male World Model (MOD2)
-              for i := 0 to High(cPaths) do begin
-
-                modelEl := ElementByPath(e, 'Female World Model\MOD2');
-                if Assigned(modelEl) then begin
-                  meshPath := GetEditValue(modelEl);
-                  if SameText(meshPath, cPaths[i]) then begin
-                    AddMessage('[ARMA] ' + Name(e) + ' | Female mesh: ' + meshPath);
-                    AddMessage('  → Place {{safeTarget}}-converted NIF at this path in game data.');
-                  end;
-                end;
-
-                modelEl := ElementByPath(e, 'Male World Model\MOD2');
-                if Assigned(modelEl) then begin
-                  meshPath := GetEditValue(modelEl);
-                  if SameText(meshPath, cPaths[i]) then begin
-                    AddMessage('[ARMA] ' + Name(e) + ' | Male mesh: ' + meshPath);
-                    AddMessage('  → Place {{safeTarget}}-converted NIF at this path in game data.');
-                  end;
-                end;
-
-              end;
+              TryRewriteModelPath(e, 'Female World Model\MOD2');
+              TryRewriteModelPath(e, 'Male World Model\MOD2');
             end;
 
             function Finalize: Integer;
             begin
-              AddMessage('SlideSmith patch verification complete.');
-              AddMessage('All ARMA records with matching paths have been identified.');
+              AddMessage('SlideSmith patch rewriting complete.');
+              AddMessage('Total ARMA model paths rewritten: ' + IntToStr(gPatchedCount));
               Result := 0;
             end;
 
