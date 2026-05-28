@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using Microsoft.Web.WebView2.WinForms;
 using System.Text;
 using System.Windows.Forms;
 
@@ -26,12 +27,17 @@ public sealed class MainForm : Form
     private readonly Label _statusLabel;
     private readonly Label _presetDetailsLabel;
     private readonly ProgressBar _progressBar;
+    private readonly TabControl _resultsTabControl;
+    private readonly TabPage _previewTabPage;
+    private readonly Panel _previewPanel;
+    private readonly Label _previewStatusLabel;
     private readonly BatchConversionRunner _batchRunner;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
     private string? _lastPreviewPath;
     private string? _lastBatchReportPath;
+    private WebView2? _previewWebView;
 
     public MainForm()
     {
@@ -285,13 +291,13 @@ public sealed class MainForm : Form
         _openOutputButton.Click += (_, _) => OpenOutputDirectory();
         _openPreviewButton = new Button
         {
-            Text = "Open preview",
+            Text = "Show preview",
             Width = 110,
             Height = 34,
             Enabled = false,
             Margin = new Padding(0, 0, 8, 0),
         };
-        _openPreviewButton.Click += (_, _) => OpenPreviewReport();
+        _openPreviewButton.Click += async (_, _) => await ShowPreviewReportAsync();
         _openBatchReportButton = new Button
         {
             Text = "Batch report",
@@ -339,14 +345,35 @@ public sealed class MainForm : Form
             ReadOnly = true,
             Font = new Font("Consolas", 9f),
         };
+        _resultsTabControl = new TabControl
+        {
+            Dock = DockStyle.Fill,
+        };
+        var logTabPage = new TabPage("Log");
+        logTabPage.Controls.Add(_logTextBox);
+        _previewTabPage = new TabPage("Preview");
+        _previewPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+        };
+        _previewStatusLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+        };
+        _previewPanel.Controls.Add(_previewStatusLabel);
+        _previewTabPage.Controls.Add(_previewPanel);
+        _resultsTabControl.TabPages.Add(logTabPage);
+        _resultsTabControl.TabPages.Add(_previewTabPage);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
-        bottomPanel.Controls.Add(_logTextBox, 0, 2);
+        bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
         layout.Controls.Add(bottomPanel, 0, 6);
 
         RefreshModeState();
         UpdatePresetDetails();
         UpdatePathActionStates();
+        ShowPreviewStatus("Run a conversion to render preview.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert.");
     }
 
@@ -503,6 +530,7 @@ public sealed class MainForm : Form
             _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
             _lastBatchReportPath = GetBatchReportPath(input, output, effectiveTargetBody);
             UpdatePathActionStates();
+            await LoadPreviewInAppAsync(_lastPreviewPath);
 
             AppendLog($"Converted {results.Count} armor item(s).");
             if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
@@ -624,20 +652,81 @@ public sealed class MainForm : Form
         });
     }
 
-    private void OpenPreviewReport()
+    private async Task ShowPreviewReportAsync()
     {
         if (!File.Exists(_lastPreviewPath))
         {
-            MessageBox.Show(this, "No preview report is currently available.", "Open preview", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "No preview report is currently available.", "Show preview", MessageBoxButtons.OK, MessageBoxIcon.Information);
             UpdatePathActionStates();
             return;
         }
 
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        await LoadPreviewInAppAsync(_lastPreviewPath);
+        _resultsTabControl.SelectedTab = _previewTabPage;
+    }
+
+    private async Task LoadPreviewInAppAsync(string? previewPath)
+    {
+        if (string.IsNullOrWhiteSpace(previewPath) || !File.Exists(previewPath))
         {
-            FileName = _lastPreviewPath,
-            UseShellExecute = true,
-        });
+            ShowPreviewStatus("No preview report is currently available.");
+            return;
+        }
+
+        if (!await EnsurePreviewWebViewReadyAsync())
+        {
+            ShowPreviewStatus("Embedded preview is unavailable (WebView2 runtime missing).");
+            return;
+        }
+
+        try
+        {
+            _previewWebView!.Visible = true;
+            _previewStatusLabel.Visible = false;
+            _previewWebView.Source = new Uri(previewPath, UriKind.Absolute);
+        }
+        catch (Exception ex)
+        {
+            ShowPreviewStatus($"Failed to load in-app preview: {ex.Message}");
+        }
+    }
+
+    private async Task<bool> EnsurePreviewWebViewReadyAsync()
+    {
+        if (_previewWebView is not null)
+        {
+            return true;
+        }
+
+        try
+        {
+            _previewWebView = new WebView2
+            {
+                Dock = DockStyle.Fill,
+                Visible = false,
+            };
+            _previewPanel.Controls.Add(_previewWebView);
+            _previewWebView.BringToFront();
+            await _previewWebView.EnsureCoreWebView2Async();
+            return true;
+        }
+        catch
+        {
+            _previewWebView?.Dispose();
+            _previewWebView = null;
+            return false;
+        }
+    }
+
+    private void ShowPreviewStatus(string message)
+    {
+        if (_previewWebView is not null)
+        {
+            _previewWebView.Visible = false;
+        }
+
+        _previewStatusLabel.Text = message;
+        _previewStatusLabel.Visible = true;
     }
 
     private void OpenBatchReport()

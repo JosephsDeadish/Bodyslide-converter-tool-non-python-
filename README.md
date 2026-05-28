@@ -41,7 +41,7 @@ dotnet run --project src/Bodyslide.Desktop
 
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
 # optional profile/source override, optional output zip, cancel in-progress conversion, open output folder,
-# and quick-open generated preview/batch reports when available
+# embedded in-app preview pane for generated preview.html, and quick-open batch reports when available
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
