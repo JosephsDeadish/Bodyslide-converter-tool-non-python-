@@ -38,13 +38,29 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
 
 if (!TryParseRequest(args, out var request, out var error))
 {
-    Console.WriteLine(error);
+    if (!string.IsNullOrEmpty(error))
+    {
+        Console.WriteLine(error);
+    }
+
+    Console.WriteLine("SlideSmith v0.1 — Bodyslide Armor Converter");
+    Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
     Console.WriteLine("  SlideSmith --input <armor path|folder|zip> [--target <body>] [--output <directory>] [--preset <name>] [--profile <profile>] [--source <body>] [--output-zip]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
+    Console.WriteLine();
+    Console.WriteLine("Drag a .nif file or folder onto SlideSmith.exe, or run it from a command prompt.");
+
+    if (args.Length == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Press any key to exit...");
+        Console.ReadKey(intercept: true);
+    }
+
     return;
 }
 
