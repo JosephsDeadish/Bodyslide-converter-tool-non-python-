@@ -2327,6 +2327,62 @@ public sealed class NifOutputAndSourceOverrideTests
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_WithNearBodySurfaceVertex_AppliesShrinkwrapClearanceProjection()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "shrinkwrap_projection.nif");
+        var sourceVertices = new List<(float X, float Y, float Z)>
+        {
+            (-0.50f, 0.00f, 0.00f),
+            ( 0.50f, 0.00f, 0.00f),
+            ( 0.00f,-0.50f, 0.00f),
+            ( 0.00f, 0.50f, 0.00f),
+            ( 0.00f, 0.00f, 1.00f),
+            ( 0.116f,0.00f, 0.82f) // chest-height vertex just outside baseline envelope
+        };
+        await SyntheticNifTestData.WriteAsync(inputFile, sourceVertices);
+
+        static float RadialDistanceFromCenter(IReadOnlyList<(float X, float Y, float Z)> vertices, int index)
+        {
+            var minX = vertices.Min(v => v.X);
+            var maxX = vertices.Max(v => v.X);
+            var minY = vertices.Min(v => v.Y);
+            var maxY = vertices.Max(v => v.Y);
+            var centerX = (minX + maxX) * 0.5f;
+            var centerY = (minY + maxY) * 0.5f;
+            var dx = vertices[index].X - centerX;
+            var dy = vertices[index].Y - centerY;
+            return MathF.Sqrt(dx * dx + dy * dy);
+        }
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "Vanilla", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "shrinkwrap_projection.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+
+            var sourceRadial = RadialDistanceFromCenter(sourceRead, 5);
+            var transformedRadial = RadialDistanceFromCenter(transformedRead, 5);
+            Assert.True(
+                transformedRadial >= sourceRadial + 0.005f,
+                $"Expected shrinkwrap projection to push the near-surface vertex outward (source={sourceRadial:F4}, transformed={transformedRadial:F4}).");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     // ── --source override ─────────────────────────────────────────────────────
 
     [Fact]

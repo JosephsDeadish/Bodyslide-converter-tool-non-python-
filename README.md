@@ -182,6 +182,8 @@ Implemented from issue scope:
 
 - **morph-aware clipping region detection** — clipping detection now evaluates per-region morph intensity with mesh-type thresholds (instead of mesh-type-only flags), normalizes equivalent regions (e.g. hips→pelvis), and auto-flags armpit risk when shoulder/arm/chest pressure is high; this produces more realistic region highlights before auto-correction
 
+- **shrinkwrap clearance projection pass** — NIF vertex transformation now enforces a per-region body-envelope minimum radius with adaptive clearance after animation-driven push-out, so near-surface vertices are projected outward instead of lingering on the clipping boundary
+
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
 ## Current built-in presets (36 total)

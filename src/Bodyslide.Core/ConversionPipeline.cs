@@ -6111,6 +6111,22 @@ internal sealed class LocalExportService : IExportService
         await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
     }
 
+    private static readonly IReadOnlyDictionary<string, float> ShrinkwrapBaseRadius =
+        new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"] = 0.040f,
+            ["calves"] = 0.058f,
+            ["thighs"] = 0.088f,
+            ["butt"] = 0.100f,
+            ["pelvis"] = 0.105f,
+            ["belly"] = 0.095f,
+            ["waist"] = 0.075f,
+            ["chest"] = 0.115f,
+            ["breasts"] = 0.115f,
+            ["shoulders"] = 0.095f,
+            ["arms"] = 0.055f,
+        };
+
     private static byte[] TryApplyNifVertexTransform(byte[] sourceBytes, IReadOnlyDictionary<string, double> regionalMorphing)
     {
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
@@ -6205,12 +6221,80 @@ internal sealed class LocalExportService : IExportService
                 }
             }
 
+            // Shrinkwrap/collision-aware projection: ensure vertices sit outside the body
+            // envelope with a small clearance, even if the animation-driven pass reports
+            // little or no penetration for this region.
+            if (regionalMorphing.Count > 0)
+            {
+                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
+                ApplyShrinkwrapProjection(
+                    centerX,
+                    centerY,
+                    normScale,
+                    shrinkRegion,
+                    regionalMorphing,
+                    clearanceNorm,
+                    ref transformedX,
+                    ref transformedY);
+            }
+
             Array.Copy(BitConverter.GetBytes(transformedX), 0, transformed, offset, 4);
             Array.Copy(BitConverter.GetBytes(transformedY), 0, transformed, offset + 4, 4);
             Array.Copy(BitConverter.GetBytes(transformedZ), 0, transformed, offset + 8, 4);
         }
 
         return transformed;
+    }
+
+    internal static void ApplyShrinkwrapProjection(
+        float centerX,
+        float centerY,
+        float normScale,
+        string region,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        float clearanceNorm,
+        ref float transformedX,
+        ref float transformedY)
+    {
+        if (normScale <= 0.0001f)
+        {
+            return;
+        }
+
+        if (!ShrinkwrapBaseRadius.TryGetValue(region, out var baseRadius))
+        {
+            baseRadius = 0.080f;
+        }
+
+        var regionMorph = regionalMorphing.TryGetValue(region, out var mappedFactor)
+            ? (float)mappedFactor
+            : 1.0f;
+        if (!float.IsFinite(regionMorph) || regionMorph <= 0.010f)
+        {
+            regionMorph = 1.0f;
+        }
+
+        var minimumRadius = (baseRadius * regionMorph + MathF.Max(0f, clearanceNorm)) * normScale;
+        var dx = transformedX - centerX;
+        var dy = transformedY - centerY;
+        var radialDistance = MathF.Sqrt(dx * dx + dy * dy);
+
+        if (radialDistance >= minimumRadius)
+        {
+            return;
+        }
+
+        if (radialDistance <= 0.0001f)
+        {
+            transformedX = centerX + minimumRadius;
+            transformedY = centerY;
+            return;
+        }
+
+        var scale = minimumRadius / radialDistance;
+        transformedX = centerX + (dx * scale);
+        transformedY = centerY + (dy * scale);
     }
 
     private static double AverageMorph(IReadOnlyDictionary<string, double> field, params string[] regions)
