@@ -8174,4 +8174,328 @@ public sealed class ScratchPluginFirstPersonPathTests
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Correction service tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class AutoCorrectionServiceTests
+{
+    [Fact]
+    public async Task CorrectAsync_NoClipping_ReturnsFalseAndNoCorrectedMorphing()
+    {
+        var service = new BasicAutoCorrectionService();
+        var mesh = new ConvertedMesh("plate", "cage+transform", 2, new Dictionary<string, double>
+        {
+            ["chest"] = 1.05
+        });
+        var clipping = new ClippingReport(false, [], ["pose-simulation"]);
+
+        var result = await service.CorrectAsync(mesh, clipping, CancellationToken.None);
+
+        Assert.False(result.Applied);
+        Assert.Equal("none", result.Method);
+        Assert.Null(result.CorrectedMorphing);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_WithClipping_InflatesClippingRegions()
+    {
+        var service = new BasicAutoCorrectionService();
+        var originalMorphing = new Dictionary<string, double>
+        {
+            ["chest"] = 1.12,
+            ["waist"] = 1.03,
+        };
+        var mesh = new ConvertedMesh("plate", "cage+transform", 2, originalMorphing);
+        var clipping = new ClippingReport(true, ["chest"], ["pose-simulation"]);
+
+        var result = await service.CorrectAsync(mesh, clipping, CancellationToken.None);
+
+        Assert.True(result.Applied);
+        Assert.Equal("local-inflation+adaptive-normal-offset", result.Method);
+        Assert.NotNull(result.CorrectedMorphing);
+        // chest should be inflated above original
+        Assert.True(result.CorrectedMorphing["chest"] > originalMorphing["chest"]);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_PlateArmor_InflatesMoreThanCloth()
+    {
+        var service = new BasicAutoCorrectionService();
+        var regionClipping = new ClippingReport(true, ["chest"], ["pose-simulation"]);
+
+        var plateMesh = new ConvertedMesh("plate", "rigid-island+cage", 2, new Dictionary<string, double> { ["chest"] = 1.10 });
+        var clothMesh = new ConvertedMesh("cloth", "shrinkwrap+smooth", 2, new Dictionary<string, double> { ["chest"] = 1.10 });
+
+        var plateResult = await service.CorrectAsync(plateMesh, regionClipping, CancellationToken.None);
+        var clothResult = await service.CorrectAsync(clothMesh, regionClipping, CancellationToken.None);
+
+        Assert.NotNull(plateResult.CorrectedMorphing);
+        Assert.NotNull(clothResult.CorrectedMorphing);
+        Assert.True(plateResult.CorrectedMorphing["chest"] > clothResult.CorrectedMorphing["chest"]);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_ChestClipping_SpillsToArmpits()
+    {
+        var service = new BasicAutoCorrectionService();
+        var mesh = new ConvertedMesh("leather", "cage+transform", 2, new Dictionary<string, double>
+        {
+            ["chest"]   = 1.10,
+            ["armpits"] = 1.02,
+        });
+        var clipping = new ClippingReport(true, ["chest"], ["pose-simulation"]);
+
+        var result = await service.CorrectAsync(mesh, clipping, CancellationToken.None);
+
+        Assert.NotNull(result.CorrectedMorphing);
+        // armpits should be spill-inflated by the chest correction
+        Assert.True(result.CorrectedMorphing.ContainsKey("armpits"));
+        Assert.True(result.CorrectedMorphing["armpits"] > mesh.RegionalMorphing["armpits"]);
+    }
+
+    [Fact]
+    public async Task CorrectAsync_CorrectedMorphingDoesNotExceedCap()
+    {
+        var service = new BasicAutoCorrectionService();
+        var mesh = new ConvertedMesh("plate", "cage+transform", 2, new Dictionary<string, double>
+        {
+            ["chest"] = 1.59, // already near the cap of 1.60
+        });
+        var clipping = new ClippingReport(true, ["chest", "armpits", "shoulders"], ["pose-simulation"]);
+
+        var result = await service.CorrectAsync(mesh, clipping, CancellationToken.None);
+
+        Assert.NotNull(result.CorrectedMorphing);
+        foreach (var factor in result.CorrectedMorphing.Values)
+        {
+            Assert.True(factor <= 1.60, $"Factor {factor} exceeds cap of 1.60");
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Morph generation service tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class MorphGenerationServiceTests
+{
+    [Theory]
+    [InlineData("3BA",   15)]
+    [InlineData("CBBE",  12)]
+    [InlineData("BHUNP", 14)]
+    [InlineData("HIMBO",  8)]
+    [InlineData("Vanilla", 5)]
+    public async Task GenerateAsync_KnownBody_ReturnsCorrectSliderCount(string targetBody, int expectedSliders)
+    {
+        var service = new BasicMorphGenerationService();
+        var mesh = new WeightedMesh("cloth", "heat-map", false);
+
+        var result = await service.GenerateAsync(mesh, targetBody, CancellationToken.None);
+
+        Assert.Equal(expectedSliders, result.SliderCount);
+        Assert.True(result.BodySlideCompatible);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_UnknownBody_ReturnsFallbackSliderCount()
+    {
+        var service = new BasicMorphGenerationService();
+        var mesh = new WeightedMesh("cloth", "heat-map", false);
+
+        var result = await service.GenerateAsync(mesh, "CustomBodyXYZ", CancellationToken.None);
+
+        Assert.True(result.SliderCount > 0);
+        Assert.True(result.BodySlideCompatible);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PhysicsEnabledWithTransferredWeights_HighMatchRatio()
+    {
+        var service = new BasicMorphGenerationService();
+        var physMesh = new WeightedMesh("physics-enabled", "heat-map", PhysicsWeightsTransferred: true);
+        var plainMesh = new WeightedMesh("physics-enabled", "heat-map", PhysicsWeightsTransferred: false);
+
+        var physResult  = await service.GenerateAsync(physMesh,  "3BA", CancellationToken.None);
+        var plainResult = await service.GenerateAsync(plainMesh, "3BA", CancellationToken.None);
+
+        Assert.True(physResult.SourceBodyMatchRatio > plainResult.SourceBodyMatchRatio,
+            "Physics mesh with transferred weights should score higher match ratio.");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_LowMorphLabelContainsSliderCount()
+    {
+        var service = new BasicMorphGenerationService();
+        var mesh = new WeightedMesh("cloth", "heat-map", false);
+
+        var result = await service.GenerateAsync(mesh, "3BA", CancellationToken.None);
+
+        Assert.Contains("15", result.LowMorph, StringComparison.Ordinal);
+        Assert.Contains("15", result.HighMorph, StringComparison.Ordinal);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-correction + voxel feedback loop integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class CorrectionFeedbackLoopTests
+{
+    private static ConversionOrchestrator BuildOrchestrator(
+        IMeshConversionService? meshConverter = null,
+        IAutoCorrectionService? autoCorrection = null,
+        IVoxelCollisionService? voxelCollision = null)
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        return new ConversionOrchestrator(
+            new LocalArmorImportService(),
+            new SignatureBodyDetectionService(),
+            new BasicMeshAnalysisService(),
+            new BasicCageGenerationService(),
+            meshConverter ?? new StrategyMeshConversionService(),
+            new BasicWeightTransferService(),
+            new BasicSkeletonMappingService(),
+            new BasicMorphGenerationService(),
+            new BasicPartitionRebuildingService(),
+            new BasicClippingDetectionService(),
+            autoCorrection ?? new BasicAutoCorrectionService(),
+            new BasicPhysicsSupportService(),
+            new BodySlideOspProjectService(),
+            new BasicTextureAnalysisService(),
+            new BasicPluginAnalysisService(),
+            new VanillaArmorLookupService(),
+            voxelCollision ?? new SimplifiedVoxelCollisionService(),
+            new BasicArmorRegionBindingService(),
+            new AnimationDrivenPoseSimulationService(),
+            new LocalExportService());
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithCorrectionFeedback_StepListIncludesCorrectionApplied()
+    {
+        // Use a mesh conversion service that returns high morphing so clipping fires.
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        var orchestrator = BuildOrchestrator(
+            meshConverter: new ForcedClippingMeshConversionService(),
+            autoCorrection: new BasicAutoCorrectionService());
+
+        var result = await orchestrator.ConvertAsync(
+            new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
+
+        // The pipeline should emit "correction-applied:..." when clipping was corrected.
+        Assert.True(result.Success);
+        Assert.Contains(result.Steps, s => s.StartsWith("correction-applied:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithVoxelPushOut_StepListIncludesVoxelPushApplied()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        // Force voxel penetrations so the feedback loop fires.
+        var orchestrator = BuildOrchestrator(
+            meshConverter: new ForcedClippingMeshConversionService(),
+            voxelCollision: new AlwaysPenetratingVoxelCollisionService());
+
+        var result = await orchestrator.ConvertAsync(
+            new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains(result.Steps, s => s.StartsWith("voxel-push-applied:", StringComparison.Ordinal));
+    }
+
+    // Mesh conversion service that forces high regional morphing to trigger clipping.
+    private sealed class ForcedClippingMeshConversionService : IMeshConversionService
+    {
+        public Task<ConvertedMesh> ConvertAsync(
+            ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage,
+            string targetBody, string? deformationProfile, string? sourceBody, CancellationToken ct) =>
+            Task.FromResult(new ConvertedMesh(
+                analysis.MeshType,
+                "forced-clipping",
+                analysis.MeshCount,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"]     = 1.30,  // above all clipping thresholds
+                    ["breasts"]   = 1.28,
+                    ["shoulders"] = 1.25,
+                    ["armpits"]   = 1.22,
+                    ["waist"]     = 1.20,
+                    ["butt"]      = 1.25,
+                    ["pelvis"]    = 1.22,
+                    ["thighs"]    = 1.18,
+                }));
+    }
+
+    // Voxel service that always reports penetrations in the chest region.
+    private sealed class AlwaysPenetratingVoxelCollisionService : IVoxelCollisionService
+    {
+        public Task<VoxelCollisionResult> ComputeAsync(
+            ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new VoxelCollisionResult(
+                true,
+                ["chest", "waist"],
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = 3.0,
+                    ["waist"] = 1.5,
+                },
+                8));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vanilla body OSP slider tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class VanillaBodyOspSliderTests
+{
+    [Fact]
+    public async Task GenerateAsync_VanillaTarget_ProducesNonEmptySliderList()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "ironarmor_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+        var converted = new ConvertedMesh("plate", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "Vanilla", CancellationToken.None);
+
+        Assert.NotEmpty(project.Sliders);
+        Assert.Contains("Belly", project.Sliders);
+        Assert.Contains("WaistWidth", project.Sliders);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_VanillaTarget_OspXmlContainsSliders()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "ironarmor_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+        var converted = new ConvertedMesh("plate", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "Vanilla", CancellationToken.None);
+
+        Assert.Contains("<Slider", project.OspXml, StringComparison.Ordinal);
+    }
+}
+
 }

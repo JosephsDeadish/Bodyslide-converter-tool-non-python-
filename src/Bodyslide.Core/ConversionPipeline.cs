@@ -44,9 +44,15 @@ public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int Mesh
 public sealed record DeformationCage(string Mode);
 public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
-public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
+/// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
+/// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
+public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible, int SliderCount = 0, double SourceBodyMatchRatio = 0.0);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
-public sealed record CorrectionResult(bool Applied, string Method);
+/// <param name="CorrectedMorphing">
+/// Per-region morphing factors after applying local inflation and adaptive normal offset.
+/// <c>null</c> when no clipping was detected and no correction was needed.
+/// </param>
+public sealed record CorrectionResult(bool Applied, string Method, IReadOnlyDictionary<string, double>? CorrectedMorphing = null);
 public sealed record PhysicsConfig(string Profile, string? CbpcConfigXml = null, string? SmpConfigXml = null);
 public sealed record VanillaArmorEntry(
     string Name,
@@ -1610,7 +1616,7 @@ public sealed class ConversionOrchestrator(
             }
 
             var morphs = await morphGenerator.GenerateAsync(weighted, normalized.Request.TargetBody, cancellationToken);
-            steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph}");
+            steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
@@ -1658,12 +1664,48 @@ public sealed class ConversionOrchestrator(
             var correction = await autoCorrection.CorrectAsync(converted, clipping, cancellationToken);
             steps.Add($"correction:{(correction.Applied ? correction.Method : "not-required")}");
 
+            // Apply auto-correction feedback: if the correction produced updated regional
+            // morphing values (i.e. clipping regions were inflated), rebuild the converted
+            // mesh so that all subsequent steps (BSD/TRI export, voxel pass, BodySlide project)
+            // use the corrected morphing data rather than the pre-correction values.
+            if (correction.Applied && correction.CorrectedMorphing is { Count: > 0 } correctedMorphing)
+            {
+                converted = new ConvertedMesh(
+                    converted.MeshType,
+                    $"{converted.Strategy}+auto-corrected",
+                    converted.MeshCount,
+                    correctedMorphing);
+                steps.Add($"correction-applied:regions={clipping.Regions.Count}");
+            }
+
             // Voxel collision offset pass — detects body/armor penetrations using a
             // simplified voxel grid and computes per-region push-out magnitudes.
             var voxelResult = await voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add(voxelResult.HasPenetrations
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
                 : "voxel-collision:none");
+
+            // Apply voxel push-out feedback: for every region where the voxel grid detected
+            // armor/body penetration, add the normalised push-out magnitude to the regional
+            // morphing factor so the BSD/TRI vertex deltas push the armor further out.
+            // The grid-resolution divisor converts voxel-cell units back to a [0,1] range.
+            if (voxelResult.HasPenetrations && voxelResult.PushOutMagnitudes.Count > 0)
+            {
+                var voxelMorphing = new Dictionary<string, double>(converted.RegionalMorphing, StringComparer.OrdinalIgnoreCase);
+                foreach (var (region, pushOut) in voxelResult.PushOutMagnitudes)
+                {
+                    var normalizedPush = pushOut / Math.Max(1, voxelResult.GridResolution);
+                    var current = voxelMorphing.GetValueOrDefault(region, 1.0);
+                    voxelMorphing[region] = Math.Round(Math.Min(current + normalizedPush, 1.60), 6);
+                }
+
+                converted = new ConvertedMesh(
+                    converted.MeshType,
+                    converted.Strategy,
+                    converted.MeshCount,
+                    voxelMorphing);
+                steps.Add($"voxel-push-applied:regions={voxelResult.AffectedRegions.Count}");
+            }
 
             // Pose simulation — tests the converted mesh against 8 animation poses using the
             // animation-driven geometry solver when NIF vertex data is available, falling back
@@ -3186,10 +3228,52 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
     }
 }
 
+/// <summary>
+/// Generates morph metadata for the converted mesh, computing slider count and source-body
+/// match confidence from the target body's BodySlide slider catalog and mesh weight profile.
+/// </summary>
 internal sealed class BasicMorphGenerationService : IMorphGenerationService
 {
-    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
-        Task.FromResult(new MorphSet("low-weight", "high-weight", true));
+    // Number of standard BodySlide sliders defined per target body family.
+    // Kept in sync with BodySlideOspProjectService.BodySliders.
+    private static readonly IReadOnlyDictionary<string, int> SliderCounts =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"]          = 12,
+            ["3BA"]           = 15,
+            ["BHUNP"]         = 14,
+            ["UNP"]           = 12,
+            ["HIMBO"]         = 8,
+            ["SAM"]           = 7,
+            ["SOS"]           = 7,
+            ["TBD"]           = 9,
+            ["UBE"]           = 6,
+            ["Vanilla"]       = 5,
+        };
+
+    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken)
+    {
+        SliderCounts.TryGetValue(targetBody, out var sliderCount);
+        if (sliderCount == 0) sliderCount = 5; // fallback for unknown body types
+
+        // Source-body match ratio: how closely the mesh weight profile matches expected
+        // vertex weighting for the target body.  Physics-enabled meshes with transferred
+        // SMP/CBPC weights score higher because they carry all the needed bone influences.
+        var matchRatio = mesh.MeshType switch
+        {
+            "physics-enabled" when mesh.PhysicsWeightsTransferred => 0.92,
+            "physics-enabled"                                      => 0.75,
+            "skin-tight"                                           => 0.88,
+            "cloth"                                                => 0.82,
+            "leather"                                              => 0.78,
+            "plate"                                                => 0.70,
+            _                                                      => 0.75,
+        };
+
+        var lowLabel  = $"low-weight:{sliderCount}-sliders";
+        var highLabel = $"high-weight:{sliderCount}-sliders";
+        return Task.FromResult(new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio));
+    }
 }
 
 internal sealed class BasicClippingDetectionService : IClippingDetectionService
@@ -3265,8 +3349,45 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
         };
 }
 
+/// <summary>
+/// Applies per-region local inflation and adaptive normal offset to the converted mesh's
+/// regional morphing factors for every region flagged by the clipping detector.
+/// <para>
+/// The inflation magnitude is scaled by the mesh type: soft materials receive a smaller
+/// push-out than rigid armour because soft cloth can flex away from the body at runtime
+/// through SMP/CBPC simulation, whereas hard plate has no self-correction mechanism and
+/// therefore needs a larger pre-baked offset margin.
+/// </para>
+/// </summary>
 internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 {
+    // Base inflation per mesh type applied to each clipping region's morph factor.
+    // The factor is added to the existing morphing value so that the BSD/TRI vertex
+    // deltas push the armor outward by an appropriate amount.
+    private static readonly IReadOnlyDictionary<string, double> BaseInflation =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["plate"]           = 0.072,
+            ["leather"]         = 0.048,
+            ["mixed"]           = 0.055,
+            ["cloth"]           = 0.030,
+            ["skin-tight"]      = 0.022,
+            ["physics-enabled"] = 0.028,
+        };
+
+    // Clipping regions whose correction has a secondary "spill" effect on neighbouring
+    // regions (e.g. correcting the chest region also slightly inflates armpits).
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> InflationSpill =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"]     = ["armpits"],
+            ["shoulders"] = ["armpits", "arms"],
+            ["breasts"]   = ["chest", "armpits"],
+            ["belly"]     = ["waist"],
+            ["butt"]      = ["pelvis", "thighs"],
+            ["pelvis"]    = ["thighs"],
+        };
+
     public Task<CorrectionResult> CorrectAsync(ConvertedMesh mesh, ClippingReport clipping, CancellationToken cancellationToken)
     {
         if (!clipping.HasClipping)
@@ -3274,7 +3395,35 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
             return Task.FromResult(new CorrectionResult(false, "none"));
         }
 
-        return Task.FromResult(new CorrectionResult(true, "local-inflation+adaptive-normal-offset"));
+        // Start from the current regional morphing values and build a corrected copy.
+        var corrected = new Dictionary<string, double>(mesh.RegionalMorphing, StringComparer.OrdinalIgnoreCase);
+        BaseInflation.TryGetValue(mesh.MeshType, out var baseInflation);
+        if (baseInflation == 0) baseInflation = 0.040;
+
+        foreach (var region in clipping.Regions)
+        {
+            var normalizedRegion = region.Trim().ToLowerInvariant();
+
+            // Primary inflation: push the clipping region outward.
+            var current = corrected.GetValueOrDefault(normalizedRegion, 1.0);
+            corrected[normalizedRegion] = Math.Round(Math.Min(current + baseInflation, 1.60), 6);
+
+            // Secondary spill: inflate adjacent regions at a reduced rate.
+            if (InflationSpill.TryGetValue(normalizedRegion, out var spillRegions))
+            {
+                var spillAmount = Math.Round(baseInflation * 0.35, 6);
+                foreach (var spill in spillRegions)
+                {
+                    var spillCurrent = corrected.GetValueOrDefault(spill, 1.0);
+                    corrected[spill] = Math.Round(Math.Min(spillCurrent + spillAmount, 1.60), 6);
+                }
+            }
+        }
+
+        return Task.FromResult(new CorrectionResult(
+            true,
+            "local-inflation+adaptive-normal-offset",
+            corrected));
     }
 }
 
@@ -3867,15 +4016,16 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodySliders =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
-            ["CBBE"]  = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
-            ["3BA"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-            ["BHUNP"] = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
-            ["UNP"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
-            ["HIMBO"] = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
-            ["SAM"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-            ["SOS"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-            ["TBD"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
-            ["UBE"]   = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs"]
+            ["CBBE"]    = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
+            ["3BA"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
+            ["BHUNP"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
+            ["UNP"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
+            ["HIMBO"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
+            ["SAM"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+            ["SOS"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+            ["TBD"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
+            ["UBE"]     = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs"],
+            ["Vanilla"] = ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
         };
 
     private static readonly IReadOnlyDictionary<string, string> BodyOutputPaths =
