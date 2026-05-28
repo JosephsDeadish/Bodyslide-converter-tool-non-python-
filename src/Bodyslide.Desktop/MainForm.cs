@@ -9,16 +9,31 @@ public sealed class MainForm : Form
     private readonly TextBox _inputTextBox;
     private readonly TextBox _outputTextBox;
     private readonly ComboBox _presetComboBox;
+    private readonly ComboBox _targetComboBox;
+    private readonly ComboBox _profileComboBox;
+    private readonly ComboBox _sourceComboBox;
     private readonly TextBox _logTextBox;
     private readonly Button _convertButton;
+    private readonly Button _cancelButton;
+    private readonly Button _clearLogButton;
+    private readonly Button _openOutputButton;
+    private readonly RadioButton _usePresetRadio;
+    private readonly RadioButton _useCustomTargetRadio;
+    private readonly CheckBox _outputZipCheckBox;
+    private readonly Label _statusLabel;
+    private readonly ProgressBar _progressBar;
     private readonly BatchConversionRunner _batchRunner;
+
+    private CancellationTokenSource? _activeConversion;
+    private string? _lastOutputDirectory;
 
     public MainForm()
     {
         Text = "SlideSmith v0.1";
-        Width = 900;
-        Height = 650;
+        Width = 960;
+        Height = 760;
         StartPosition = FormStartPosition.CenterScreen;
+        MinimumSize = new Size(860, 680);
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
 
@@ -26,9 +41,11 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 7,
             Padding = new Padding(12),
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -54,34 +71,59 @@ public sealed class MainForm : Form
         dropPanel.Controls.Add(dropLabel);
         layout.Controls.Add(dropPanel, 0, 0);
 
-        var inputRow = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 3,
-            AutoSize = true,
-        };
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        inputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        inputRow.Controls.Add(new Label { Text = "Input", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
-        _inputTextBox = new TextBox { Dock = DockStyle.Fill, AllowDrop = true };
+        var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
+        _inputTextBox.AllowDrop = true;
         _inputTextBox.DragEnter += OnDragEnter;
         _inputTextBox.DragDrop += OnDragDrop;
-        inputRow.Controls.Add(_inputTextBox, 1, 0);
         var browseInputButton = new Button { Text = "Browse...", AutoSize = true };
         browseInputButton.Click += (_, _) => BrowseInput();
         inputRow.Controls.Add(browseInputButton, 2, 0);
         layout.Controls.Add(inputRow, 0, 1);
 
-        var presetRow = new TableLayoutPanel
+        var modeRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            WrapContents = false,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        _usePresetRadio = new RadioButton
+        {
+            Text = "Use preset",
+            AutoSize = true,
+            Checked = true,
+        };
+        _useCustomTargetRadio = new RadioButton
+        {
+            Text = "Use custom target",
+            AutoSize = true,
+        };
+        _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
+        _useCustomTargetRadio.CheckedChanged += (_, _) => RefreshModeState();
+        modeRow.Controls.Add(_usePresetRadio);
+        modeRow.Controls.Add(_useCustomTargetRadio);
+        layout.Controls.Add(modeRow, 0, 2);
+
+        var conversionOptionsPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 2,
             AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
         };
-        presetRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        presetRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        presetRow.Controls.Add(new Label { Text = "Preset", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+
+        var leftOptions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+        };
+        leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        leftOptions.Controls.Add(new Label { Text = "Preset", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
         _presetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -95,52 +137,177 @@ public sealed class MainForm : Form
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        presetRow.Controls.Add(_presetComboBox, 1, 0);
-        layout.Controls.Add(presetRow, 0, 2);
+        leftOptions.Controls.Add(_presetComboBox, 1, 0);
 
-        var outputRow = new TableLayoutPanel
+        leftOptions.Controls.Add(new Label { Text = "Target Body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        _targetComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _targetComboBox.Items.Add(body.Name);
+        }
+        if (_targetComboBox.Items.Count > 0)
+        {
+            _targetComboBox.SelectedIndex = 0;
+        }
+        leftOptions.Controls.Add(_targetComboBox, 1, 1);
+        conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
+
+        var rightOptions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+        };
+        rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        rightOptions.Controls.Add(new Label { Text = "Profile (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        _profileComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        _profileComboBox.Items.Add("(auto)");
+        foreach (var profile in DeformationProfileModifier.All.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            _profileComboBox.Items.Add(profile);
+        }
+        _profileComboBox.SelectedIndex = 0;
+        rightOptions.Controls.Add(_profileComboBox, 1, 0);
+
+        rightOptions.Controls.Add(new Label { Text = "Source Body (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        _sourceComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        _sourceComboBox.Items.Add("(auto)");
+        foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _sourceComboBox.Items.Add(body.Name);
+        }
+        _sourceComboBox.SelectedIndex = 0;
+        rightOptions.Controls.Add(_sourceComboBox, 1, 1);
+        conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
+        layout.Controls.Add(conversionOptionsPanel, 0, 3);
+
+        var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
+        var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
+        browseOutputButton.Click += (_, _) => BrowseOutput();
+        outputRow.Controls.Add(browseOutputButton, 2, 0);
+        layout.Controls.Add(outputRow, 0, 4);
+
+        var actionRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
+            WrapContents = true,
+        };
+        _outputZipCheckBox = new CheckBox
+        {
+            Text = "Create output zip",
+            AutoSize = true,
+            Margin = new Padding(0, 8, 12, 0),
+        };
+        _convertButton = new Button
+        {
+            Text = "Convert",
+            Width = 110,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _convertButton.Click += async (_, _) => await ConvertAsync();
+        _cancelButton = new Button
+        {
+            Text = "Cancel",
+            Width = 90,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _cancelButton.Click += (_, _) => CancelConversion();
+        _clearLogButton = new Button
+        {
+            Text = "Clear log",
+            Width = 90,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _clearLogButton.Click += (_, _) => ClearLog();
+        _openOutputButton = new Button
+        {
+            Text = "Open output",
+            Width = 110,
+            Height = 34,
+            Enabled = false,
+        };
+        _openOutputButton.Click += (_, _) => OpenOutputDirectory();
+        actionRow.Controls.Add(_outputZipCheckBox);
+        actionRow.Controls.Add(_convertButton);
+        actionRow.Controls.Add(_cancelButton);
+        actionRow.Controls.Add(_clearLogButton);
+        actionRow.Controls.Add(_openOutputButton);
+        layout.Controls.Add(actionRow, 0, 5);
+
+        var bottomPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+        };
+        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        bottomPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        _statusLabel = new Label
+        {
+            AutoSize = true,
+            Text = "Ready.",
+            Margin = new Padding(0, 4, 0, 2),
+        };
+        _progressBar = new ProgressBar
+        {
+            Dock = DockStyle.Top,
+            Height = 14,
+            Style = ProgressBarStyle.Continuous,
+            Value = 0,
+        };
+        _logTextBox = new TextBox
+        {
+            Multiline = true,
+            ScrollBars = ScrollBars.Vertical,
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            Font = new Font("Consolas", 9f),
+        };
+        bottomPanel.Controls.Add(_statusLabel, 0, 0);
+        bottomPanel.Controls.Add(_progressBar, 0, 1);
+        bottomPanel.Controls.Add(_logTextBox, 0, 2);
+        layout.Controls.Add(bottomPanel, 0, 6);
+
+        RefreshModeState();
+        AppendLog("Ready. Choose input, configure options, then click Convert.");
+    }
+
+    private static TableLayoutPanel CreateThreeColumnRow(string labelText, out TextBox textBox)
+    {
+        var row = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 3,
             AutoSize = true,
         };
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        outputRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        outputRow.Controls.Add(new Label { Text = "Output (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
-        _outputTextBox = new TextBox { Dock = DockStyle.Fill };
-        outputRow.Controls.Add(_outputTextBox, 1, 0);
-        var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
-        browseOutputButton.Click += (_, _) => BrowseOutput();
-        outputRow.Controls.Add(browseOutputButton, 2, 0);
-        layout.Controls.Add(outputRow, 0, 3);
-
-        var bottomPanel = new Panel { Dock = DockStyle.Fill };
-        _convertButton = new Button
-        {
-            Text = "Convert",
-            Width = 120,
-            Height = 35,
-            Top = 4,
-            Left = 0,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left,
-        };
-        _convertButton.Click += async (_, _) => await ConvertAsync();
-        bottomPanel.Controls.Add(_convertButton);
-
-        _logTextBox = new TextBox
-        {
-            Multiline = true,
-            ScrollBars = ScrollBars.Vertical,
-            Dock = DockStyle.Bottom,
-            Height = 360,
-            ReadOnly = true,
-            Font = new Font("Consolas", 9f),
-        };
-        bottomPanel.Controls.Add(_logTextBox);
-        layout.Controls.Add(bottomPanel, 0, 4);
-
-        AppendLog("Ready. Choose input, pick a preset, then click Convert.");
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.Controls.Add(new Label { Text = labelText, Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        textBox = new TextBox { Dock = DockStyle.Fill };
+        row.Controls.Add(textBox, 1, 0);
+        return row;
     }
 
     private void BrowseInput()
@@ -206,11 +373,22 @@ public sealed class MainForm : Form
         AppendLog($"Input selected: {dropped[0]}");
     }
 
+    private void RefreshModeState()
+    {
+        var usingPreset = _usePresetRadio.Checked;
+        _presetComboBox.Enabled = usingPreset;
+        _targetComboBox.Enabled = !usingPreset;
+    }
+
     private async Task ConvertAsync()
     {
         var input = _inputTextBox.Text.Trim();
-        var preset = _presetComboBox.SelectedItem?.ToString();
         var output = string.IsNullOrWhiteSpace(_outputTextBox.Text) ? null : _outputTextBox.Text.Trim();
+        var usingPreset = _usePresetRadio.Checked;
+        var preset = _presetComboBox.SelectedItem?.ToString();
+        var target = _targetComboBox.SelectedItem?.ToString();
+        var profile = ReadOptionalComboValue(_profileComboBox);
+        var sourceOverride = ReadOptionalComboValue(_sourceComboBox);
 
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -224,25 +402,37 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(preset))
+        if (usingPreset && string.IsNullOrWhiteSpace(preset))
         {
             MessageBox.Show(this, "Please select a preset.", "Missing preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        _convertButton.Enabled = false;
-        UseWaitCursor = true;
-        AppendLog("Starting conversion...");
+        if (!usingPreset && string.IsNullOrWhiteSpace(target))
+        {
+            MessageBox.Show(this, "Please select a target body.", "Missing target body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _activeConversion = new CancellationTokenSource();
+        SetBusyState(isBusy: true);
+        _statusLabel.Text = "Converting...";
+        AppendLog($"Starting conversion ({(usingPreset ? $"preset: {preset}" : $"target: {target}")})...");
 
         try
         {
             var request = new ConversionRequest(
                 InputPath: input,
-                TargetBody: string.Empty,
+                TargetBody: usingPreset ? string.Empty : target!,
                 OutputDirectory: output,
-                Preset: preset);
+                Preset: usingPreset ? preset : null,
+                OutputZip: _outputZipCheckBox.Checked,
+                DeformationProfile: profile,
+                SourceBodyOverride: sourceOverride);
 
-            var results = await _batchRunner.ConvertAsync(request);
+            var results = await Task.Run(async () => await _batchRunner.ConvertAsync(request, _activeConversion.Token));
+            _lastOutputDirectory = GetBestOutputDirectory(results);
+            _openOutputButton.Enabled = !string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory);
 
             AppendLog($"Converted {results.Count} armor item(s).");
             foreach (var result in results)
@@ -256,18 +446,99 @@ public sealed class MainForm : Form
                 AppendLog(builder.ToString().TrimEnd());
             }
 
+            _statusLabel.Text = "Conversion complete.";
             MessageBox.Show(this, "Conversion complete.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Conversion cancelled.");
+            _statusLabel.Text = "Conversion cancelled.";
         }
         catch (Exception ex)
         {
             AppendLog($"Conversion failed: {ex.Message}");
+            _statusLabel.Text = "Conversion failed.";
             MessageBox.Show(this, $"Conversion failed:\n{ex.Message}", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
-            UseWaitCursor = false;
-            _convertButton.Enabled = true;
+            _activeConversion?.Dispose();
+            _activeConversion = null;
+            SetBusyState(isBusy: false);
         }
+    }
+
+    private void CancelConversion()
+    {
+        if (_activeConversion is null)
+        {
+            return;
+        }
+
+        _cancelButton.Enabled = false;
+        _activeConversion.Cancel();
+        AppendLog("Cancellation requested...");
+        _statusLabel.Text = "Cancelling...";
+    }
+
+    private void SetBusyState(bool isBusy)
+    {
+        _convertButton.Enabled = !isBusy;
+        _cancelButton.Enabled = isBusy;
+        _clearLogButton.Enabled = !isBusy;
+        _openOutputButton.Enabled = !isBusy && !string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory);
+        UseWaitCursor = isBusy;
+        _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
+        _progressBar.Value = isBusy ? 0 : 100;
+    }
+
+    private void OpenOutputDirectory()
+    {
+        if (string.IsNullOrWhiteSpace(_lastOutputDirectory) || !Directory.Exists(_lastOutputDirectory))
+        {
+            MessageBox.Show(this, "No output folder is currently available.", "Open output", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = _lastOutputDirectory,
+            UseShellExecute = true,
+        });
+    }
+
+    private void ClearLog()
+    {
+        _logTextBox.Clear();
+    }
+
+    private static string? ReadOptionalComboValue(ComboBox comboBox)
+    {
+        var selected = comboBox.SelectedItem?.ToString();
+        if (string.IsNullOrWhiteSpace(selected) || selected.Equals("(auto)", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return selected;
+    }
+
+    private static string? GetBestOutputDirectory(IReadOnlyList<ConversionResult> results)
+    {
+        if (results.Count == 0)
+        {
+            return null;
+        }
+
+        var first = results[0].OutputDirectory;
+        if (results.All(r => string.Equals(r.OutputDirectory, first, StringComparison.OrdinalIgnoreCase)))
+        {
+            return first;
+        }
+
+        return Directory.Exists(first)
+            ? first
+            : Path.GetDirectoryName(first);
     }
 
     private void AppendLog(string message)

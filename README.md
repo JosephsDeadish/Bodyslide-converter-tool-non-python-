@@ -26,7 +26,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 ## Projects
 
 - `/src/Bodyslide.Core` - conversion pipeline + modules
-- `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop + preset selector + convert button)
+- `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or custom target mode, optional profile/source override, output-zip toggle, convert/cancel)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
 
@@ -38,6 +38,9 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
+
+# GUI features: drag/drop input, choose preset or custom target, optional profile/source override,
+# optional output zip, cancel in-progress conversion, and open output folder after conversion
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
