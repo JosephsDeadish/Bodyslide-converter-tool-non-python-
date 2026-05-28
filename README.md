@@ -176,6 +176,8 @@ Implemented from issue scope:
 
 - **non-stub BodySlide morph payloads** — generated `.bsd` and `.tri` files now include populated vertex counts and deterministic per-vertex delta payloads for each slider/weight variant instead of header-only stub files, so exports are immediately consumable by BodySlide tooling
 
+- **ARMO ground-model synthesis** — when an ARMO record has rewritten `MOD2`/`MOD3` world model paths but no `MODL` ground mesh subrecord, plugin rewrite now auto-appends `MODL` using the rewritten world model path so dropped-item world meshes stay aligned with converted armor outputs
+
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
 ## Current built-in presets (36 total)

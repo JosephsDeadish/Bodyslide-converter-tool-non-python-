@@ -4702,16 +4702,42 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(1, pathsRewritten);
+        Assert.Equal(2, pathsRewritten);
 
         var descriptors = BinaryArmaParser.ExtractArmoRecords(patched);
         Assert.Single(descriptors);
-        Assert.Contains(newPath, descriptors[0].MeshPaths);
+        Assert.Equal(2, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
 
         var armoOffset = FindTopLevelRecordOffset(patched, "ARMO", headerSize: 24);
         Assert.True(armoOffset >= 0, "Patched plugin should still contain ARMO record.");
         var flags = ReadUInt32Le(patched, armoOffset + 8);
         Assert.True((flags & 0x00040000u) != 0, "Compressed-flag bit should remain set.");
+    }
+
+    [Fact]
+    public void RewritePlugin_ArmoWithoutModl_GeneratesGroundMeshFromRewrittenWorldModel()
+    {
+        const string origPath = "meshes/armor/steel/steel_w.nif\0";
+        const string newPath  = "meshes/slidesmith/cbbe/steel_w.nif";
+
+        byte[] mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+        byte[] plugin = BuildMinimalPlugin_SseWithArmo(mod2Data);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/steel/steel_w.nif"] = newPath
+        };
+
+        var (patched, armaPatched, pathsRewritten, warnings) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Empty(warnings);
+        Assert.Equal(1, armaPatched);
+        Assert.Equal(2, pathsRewritten);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(patched);
+        Assert.Single(descriptors);
+        Assert.Equal(2, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
     }
 
     // ── RewriteAsync integration ──────────────────────────────────────────────
@@ -5590,6 +5616,23 @@ public sealed class PatchPluginWriterTests
         Assert.Equal(0, (ushort)(newData[14] | (newData[15] << 8)));
     }
 
+    [Fact]
+    public void RewriteArmaData_ArmoWithoutModl_GeneratesModlFromRewrittenMod2()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_w.nif\0"));
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_w.nif"] = "meshes/slidesmith/cbbe/iron_w.nif"
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(mod2, rewriteMap, "ARMO");
+
+        Assert.Equal(2, rewritten);
+        Assert.Contains("MODL", System.Text.Encoding.Latin1.GetString(newData), StringComparison.Ordinal);
+        Assert.Equal(2, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_w.nif"));
+    }
+
     // ── BuildPatchPlugin ──────────────────────────────────────────────────────
 
     [Fact]
@@ -5930,6 +5973,36 @@ public sealed class PatchPluginWriterTests
         buf[offset + 1] = (byte)(value >> 8);
         buf[offset + 2] = (byte)(value >> 16);
         buf[offset + 3] = (byte)(value >> 24);
+    }
+
+    private static int CountSubrecordPathOccurrences(byte[] recordData, string expectedPath)
+    {
+        var count = 0;
+        var pos = 0;
+        var expected = expectedPath.Replace('\\', '/');
+
+        while (pos + 6 <= recordData.Length)
+        {
+            var size = recordData[pos + 4] | (recordData[pos + 5] << 8);
+            if (pos + 6 + size > recordData.Length)
+            {
+                break;
+            }
+
+            var tag = System.Text.Encoding.ASCII.GetString(recordData, pos, 4);
+            if (size > 0 && (tag == "MOD2" || tag == "MOD3" || tag == "MODL"))
+            {
+                var path = System.Text.Encoding.ASCII.GetString(recordData, pos + 6, size).TrimEnd('\0').Replace('\\', '/');
+                if (path.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                }
+            }
+
+            pos += 6 + size;
+        }
+
+        return count;
     }
 }
 

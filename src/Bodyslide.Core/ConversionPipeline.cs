@@ -3689,7 +3689,7 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
                     if (workData.Length > 0)
                     {
-                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap);
+                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap, tag);
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
@@ -3799,7 +3799,7 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
                     if (workData.Length > 0)
                     {
-                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap);
+                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap, tag);
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
@@ -3852,7 +3852,8 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     /// </summary>
     internal static (byte[] NewData, int PathsRewritten)
         RewriteArmaSubrecords(byte[] bytes, int dataStart, int dataSize,
-                              IReadOnlyDictionary<string, string> rewriteMap)
+                              IReadOnlyDictionary<string, string> rewriteMap,
+                              string? recordType = null)
     {
         using var ms = new MemoryStream(dataSize);
         int pos       = dataStart;
@@ -3860,6 +3861,9 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         int rewritten = 0;
         int? pendingExtendedSize = null;
         byte[]? pendingExtendedPrefix = null;
+        bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
+        bool sawModl = false;
+        string? generatedModlPath = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -3885,6 +3889,11 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
             if (MeshSubrecordTypes.Contains(subType) && effectiveSubSize > 0)
             {
+                if (isArmo && string.Equals(subType, "MODL", StringComparison.Ordinal))
+                {
+                    sawModl = true;
+                }
+
                 // Read null-terminated ASCII path string from the subrecord data.
                 int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, effectiveSubSize);
                 int strLen  = nullIdx >= 0 ? nullIdx : effectiveSubSize;
@@ -3900,6 +3909,14 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
                     WriteSubrecordWithExtendedSize(ms, subType, newBytes);
                     rewritten++;
+
+                    if (isArmo &&
+                        generatedModlPath is null &&
+                        (string.Equals(subType, "MOD2", StringComparison.Ordinal) ||
+                         string.Equals(subType, "MOD3", StringComparison.Ordinal)))
+                    {
+                        generatedModlPath = newPath;
+                    }
                 }
                 else
                 {
@@ -3934,6 +3951,13 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         if (pos < end)
         {
             ms.Write(bytes, pos, end - pos);
+        }
+
+        if (isArmo && !sawModl && !string.IsNullOrWhiteSpace(generatedModlPath))
+        {
+            var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
+            WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
+            rewritten++;
         }
 
         return (ms.ToArray(), rewritten);
@@ -4539,7 +4563,7 @@ internal static class PatchPluginWriter
 
         foreach (var desc in descriptors)
         {
-            var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap);
+            var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap, "ARMA");
             if (rewritten == 0) continue;
 
             armaBuffers.Add(BuildArmaRecord(desc, newData, headerSize));
@@ -4552,7 +4576,7 @@ internal static class PatchPluginWriter
         {
             foreach (var desc in armoDescriptors)
             {
-                var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap);
+                var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap, "ARMO");
                 if (rewritten == 0) continue;
 
                 armoBuffers.Add(BuildArmoRecord(desc, newData, headerSize));
@@ -4703,7 +4727,8 @@ internal static class PatchPluginWriter
 
     internal static (byte[] NewData, int PathsRewritten) RewriteArmaData(
         byte[] dataBytes,
-        IReadOnlyDictionary<string, string> rewriteMap)
+        IReadOnlyDictionary<string, string> rewriteMap,
+        string? recordType = null)
     {
         using var ms  = new MemoryStream(dataBytes.Length);
         int pos       = 0;
@@ -4711,6 +4736,9 @@ internal static class PatchPluginWriter
         int rewritten = 0;
         int? pendingExtendedSize = null;
         byte[]? pendingExtendedPrefix = null;
+        bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
+        bool sawModl = false;
+        string? generatedModlPath = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -4736,6 +4764,11 @@ internal static class PatchPluginWriter
 
             if (MeshSubrecords.Contains(subTag) && effectiveSubSize > 0)
             {
+                if (isArmo && string.Equals(subTag, "MODL", StringComparison.Ordinal))
+                {
+                    sawModl = true;
+                }
+
                 int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, effectiveSubSize);
                 int strLen   = nullIdx >= 0 ? nullIdx : effectiveSubSize;
                 var meshPath = System.Text.Encoding.ASCII
@@ -4749,6 +4782,14 @@ internal static class PatchPluginWriter
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
                     WriteSubrecordWithExtendedSize(ms, subTag, newBytes);
                     rewritten++;
+
+                    if (isArmo &&
+                        generatedModlPath is null &&
+                        (string.Equals(subTag, "MOD2", StringComparison.Ordinal) ||
+                         string.Equals(subTag, "MOD3", StringComparison.Ordinal)))
+                    {
+                        generatedModlPath = newPath;
+                    }
                 }
                 else
                 {
@@ -4782,6 +4823,13 @@ internal static class PatchPluginWriter
         if (pos < end)
         {
             ms.Write(dataBytes, pos, end - pos);
+        }
+
+        if (isArmo && !sawModl && !string.IsNullOrWhiteSpace(generatedModlPath))
+        {
+            var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
+            WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
+            rewritten++;
         }
 
         return (ms.ToArray(), rewritten);
