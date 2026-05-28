@@ -2307,8 +2307,8 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
 
         // 1st-person mesh (MOD4 = male 1st-person, MOD5 = female 1st-person).
         // Skyrim loads a separate NIF for the first-person camera; we derive its path by
-        // inserting the "_1stperson" suffix before the file extension so that the user
-        // can later supply a real _1stperson mesh at that path without touching the plugin.
+        // inserting the "_1stperson" suffix before the file extension. The export step stages
+        // a fallback copy at that path so the generated plugin is immediately usable.
         var fpExt          = Path.GetExtension(primaryPath);                     // ".nif"
         var fpStem         = primaryPath[..^fpExt.Length];                       // "meshes/slidesmith/..."
         var firstPersonPath = $"{fpStem}_1stperson{fpExt}";                     // "..._1stperson.nif"
@@ -6301,6 +6301,11 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
 
+        var scratchPluginMeshes = pluginAnalysis.ScannedPlugins.Count == 0
+            ? await StageScratchPluginMeshesAsync(outputDirectory, writtenNifs, request.TargetBody, cancellationToken)
+            : [];
+        outputFiles.AddRange(scratchPluginMeshes);
+
         // Generate ground mesh NIF files for the converted armor.
         // The ground mesh is used as the ARMO MODL field — the item that appears when the
         // armor is dropped or spawned as loot.  Each converted NIF gets a companion
@@ -7639,13 +7644,71 @@ internal sealed class LocalExportService(
                 Directory.CreateDirectory(destinationDirectory);
             }
 
-            await using var source = File.OpenRead(sourcePath);
-            await using var destination = File.Create(destinationPath);
-            await source.CopyToAsync(destination, cancellationToken);
+            await CopyFileAsync(sourcePath, destinationPath, cancellationToken);
             staged.Add(destinationPath);
         }
 
         return staged.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static async Task<IReadOnlyList<string>> StageScratchPluginMeshesAsync(
+        string outputDirectory,
+        IReadOnlyList<string> writtenNifPaths,
+        string targetBody,
+        CancellationToken cancellationToken)
+    {
+        if (writtenNifPaths.Count == 0)
+        {
+            return [];
+        }
+
+        var safeBodyToken = BuildSafeBodyToken(targetBody);
+        var staged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sourcePath in writtenNifPaths.Where(path =>
+                     Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)))
+        {
+            var fileName = Path.GetFileName(sourcePath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+
+            var stagedRelativePath = $"meshes/slidesmith/{safeBodyToken}/{fileName}";
+            var stagedAbsolutePath = Path.Combine(
+                outputDirectory,
+                stagedRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            await CopyFileAsync(sourcePath, stagedAbsolutePath, cancellationToken);
+            staged.Add(stagedAbsolutePath);
+
+            var extension = Path.GetExtension(fileName);
+            if (string.IsNullOrWhiteSpace(extension))
+            {
+                continue;
+            }
+
+            var firstPersonFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_1stperson{extension}";
+            var firstPersonAbsolutePath = Path.Combine(
+                outputDirectory,
+                $"meshes/slidesmith/{safeBodyToken}/{firstPersonFileName}".Replace('/', Path.DirectorySeparatorChar));
+            await CopyFileAsync(sourcePath, firstPersonAbsolutePath, cancellationToken);
+            staged.Add(firstPersonAbsolutePath);
+        }
+
+        return staged.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static async Task CopyFileAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            Directory.CreateDirectory(destinationDirectory);
+        }
+
+        await using var source = File.OpenRead(sourcePath);
+        await using var destination = File.Create(destinationPath);
+        await source.CopyToAsync(destination, cancellationToken);
     }
 
     /// <summary>

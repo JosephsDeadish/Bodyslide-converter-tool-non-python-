@@ -7751,6 +7751,64 @@ public sealed class LocalExportServiceGroundMeshTests
     }
 
     [Fact]
+    public async Task ExportAsync_WithScratchPluginGen_StagesScratchPluginMeshPath()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var sourceBytes = new byte[64];
+        new Random(7).NextBytes(sourceBytes);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, sourceBytes);
+
+        try
+        {
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var stagedMesh = files.FirstOrDefault(f => f.EndsWith(
+                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_0.nif",
+                StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(stagedMesh);
+            Assert.True(File.Exists(stagedMesh), "Scratch-plugin mesh path should exist on disk.");
+            Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(stagedMesh!));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithScratchPluginGen_WritesFallbackFirstPersonNif()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var sourceBytes = new byte[64];
+        new Random(11).NextBytes(sourceBytes);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, sourceBytes);
+
+        try
+        {
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+            var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
+
+            var firstPersonMesh = files.FirstOrDefault(f => f.EndsWith(
+                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_0_1stperson.nif",
+                StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(firstPersonMesh);
+            Assert.True(File.Exists(firstPersonMesh), "Fallback first-person NIF should exist on disk.");
+            Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(firstPersonMesh!));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_ScratchEspFileName_ContainsArmorName()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
