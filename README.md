@@ -2,7 +2,7 @@
 
 This repository contains the SlideSmith .NET conversion toolset (current version `0.1`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
-- import scan (single `.nif`, armor folder, or zipped archive)
+- import scan (single `.nif`, armor folder, or archive input: `.zip` / `.tar` / `.tar.gz` / `.tgz`)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -122,7 +122,7 @@ Each successful conversion produces the following files in the output directory:
 | `preview.svg` | Standalone static body silhouette render with region heatmap colours for sharing/embed use outside the interactive report |
 | `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls (swap body profile, rotate view, adjust sliders) |
 | `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
-| `batch-report.json` | Root batch summary when input is a folder or `.zip` (total/success/fail counts and per-armor results) |
+| `batch-report.json` | Root batch summary when input is a folder or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`) (total/success/fail counts and per-armor results) |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
 | `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
@@ -131,7 +131,7 @@ When a matching cache entry exists in the selected output folder for the same ar
 ## Issue #2 progress comparison
 
 Implemented from issue scope:
-- import scan across single mesh, folder, and zip archive
+- import scan across single mesh, folder, and archive input (`.zip`, `.tar`, `.tar.gz`, `.tgz`)
 - batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
 - body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
@@ -147,7 +147,7 @@ Implemented from issue scope:
 - **vanilla recommended profile auto-apply** — when the vanilla armor database identifies a match and no explicit `--profile` was provided, its `RecommendedProfile` is automatically applied (emits `vanilla-profile:<name>` step)
 - **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step
 - **geometry signature scan** — lightweight NIF vertex-count/bounds sampling now feeds body detection evidence (`verts:<count>`) and adds a `spatial-geometry` fallback for armor region binding when readable mesh coordinates are available
-- **batch summary report** — converting a directory or `.zip` now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
+- **batch summary report** — converting a directory or archive input (`.zip`, `.tar`, `.tar.gz`, `.tgz`) now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
 - **live preview HTML** (`preview.html`) — self-contained browser-openable file with an inline SVG body silhouette where each region is colour-coded by morph factor (blue→green→yellow→orange→red scale), plus regional morphing table, BodySlide slider list, physics-node list, pose-clipping risk summary, and interactive controls to swap body profile, rotate view, and adjust sliders; replaces the old metadata-only `preview-renders.json`
 - **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that rewrites matching ARMA world + first-person mesh paths to the generated SlideSmith mesh targets (with rewrite logging)
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
@@ -293,4 +293,4 @@ If no penetrations are detected the step emits `voxel-collision:none`.
 
 
 
-If the input is a directory or `.zip` archive, all `.nif` files are converted in one run and exported into per-armor output folders.
+If the input is a directory or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`), all `.nif` files are converted in one run and exported into per-armor output folders.

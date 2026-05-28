@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security;
@@ -1759,12 +1760,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken = default,
         IProgress<BatchProgressUpdate>? progress = null)
     {
-        if (File.Exists(request.InputPath) && Path.GetExtension(request.InputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+        if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
-            var extractedArchive = Path.Combine(Path.GetTempPath(), "bodyslide-batch-extract", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(extractedArchive);
-            ZipFile.ExtractToDirectory(request.InputPath, extractedArchive);
-
+            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract");
             try
             {
                 return await ConvertDirectoryMeshesAsync(request, extractedArchive, progress, cancellationToken);
@@ -2494,11 +2492,9 @@ internal sealed class LocalArmorImportService : IArmorImportService
         var sourcePath = fullInputPath;
         string? temporaryWorkspace = null;
 
-        if (File.Exists(fullInputPath) && Path.GetExtension(fullInputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+        if (ArchiveExtractionHelper.IsSupportedArchive(fullInputPath))
         {
-            temporaryWorkspace = Path.Combine(Path.GetTempPath(), "bodyslide-extract", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(temporaryWorkspace);
-            ZipFile.ExtractToDirectory(fullInputPath, temporaryWorkspace);
+            temporaryWorkspace = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(fullInputPath, "bodyslide-extract");
             sourcePath = temporaryWorkspace;
         }
 
@@ -2615,6 +2611,56 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         return null;
+    }
+}
+
+internal static class ArchiveExtractionHelper
+{
+    private static readonly string[] SupportedArchiveSuffixes = [".zip", ".tar", ".tgz", ".tar.gz"];
+
+    public static bool IsSupportedArchive(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        return SupportedArchiveSuffixes.Any(suffix =>
+            path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string ExtractToTemporaryWorkspace(string archivePath, string tempFolderPrefix)
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), tempFolderPrefix, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        ExtractArchive(archivePath, tempDirectory);
+        return tempDirectory;
+    }
+
+    private static void ExtractArchive(string archivePath, string destinationDirectory)
+    {
+        if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            ZipFile.ExtractToDirectory(archivePath, destinationDirectory);
+            return;
+        }
+
+        if (archivePath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
+        {
+            TarFile.ExtractToDirectory(archivePath, destinationDirectory, overwriteFiles: true);
+            return;
+        }
+
+        if (archivePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase) ||
+            archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+        {
+            using var archiveStream = File.OpenRead(archivePath);
+            using var gzipStream = new GZipStream(archiveStream, CompressionMode.Decompress);
+            TarFile.ExtractToDirectory(gzipStream, destinationDirectory, overwriteFiles: true);
+            return;
+        }
+
+        throw new NotSupportedException($"Unsupported archive format: {archivePath}");
     }
 }
 

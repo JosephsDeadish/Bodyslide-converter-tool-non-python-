@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using System.Formats.Tar;
 using System.IO.Compression;
 
 namespace Bodyslide.Core.Tests;
@@ -113,6 +114,41 @@ public sealed class ConversionOrchestratorTests
 
             var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
             var results = await runner.ConvertAsync(new ConversionRequest(zipPath, "CBBE", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_ConvertsAllNifsInTarGzArchive()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sourceDirectory = Path.Combine(workingDirectory, "source");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var tarPath = Path.Combine(workingDirectory, "mod-pack.tar");
+        var tarGzPath = Path.Combine(workingDirectory, "mod-pack.tar.gz");
+        Directory.CreateDirectory(sourceDirectory);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "armor_one.nif"), "mesh");
+            await File.WriteAllTextAsync(Path.Combine(sourceDirectory, "armor_two.nif"), "mesh");
+
+            TarFile.CreateFromDirectory(sourceDirectory, tarPath, includeBaseDirectory: false);
+            await using (var tarStream = File.OpenRead(tarPath))
+            await using (var gzipFileStream = File.Create(tarGzPath))
+            await using (var gzipStream = new GZipStream(gzipFileStream, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                await tarStream.CopyToAsync(gzipStream);
+            }
+
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var results = await runner.ConvertAsync(new ConversionRequest(tarGzPath, "CBBE", outputDirectory));
 
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));

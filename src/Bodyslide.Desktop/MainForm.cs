@@ -78,7 +78,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Text = "Drag and drop a .nif file, .zip archive, or armor folder here",
+            Text = "Drag and drop a .nif file, archive (.zip/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
         layout.Controls.Add(dropPanel, 0, 0);
@@ -398,7 +398,7 @@ public sealed class MainForm : Form
     {
         using var fileDialog = new OpenFileDialog
         {
-            Filter = "NIF/ZIP Files (*.nif;*.zip)|*.nif;*.zip|All Files (*.*)|*.*",
+            Filter = "NIF/Archive Files (*.nif;*.zip;*.tar;*.tar.gz;*.tgz)|*.nif;*.zip;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };
@@ -805,7 +805,7 @@ public sealed class MainForm : Form
     {
         var isBatchInput =
             Directory.Exists(inputPath) ||
-            (File.Exists(inputPath) && Path.GetExtension(inputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase));
+            (File.Exists(inputPath) && IsSupportedArchivePath(inputPath));
         if (!isBatchInput || string.IsNullOrWhiteSpace(targetBody))
         {
             return null;
@@ -815,6 +815,14 @@ public sealed class MainForm : Form
             Path.Combine(Environment.CurrentDirectory, "output", targetBody, "batch");
         var batchReportPath = Path.Combine(rootOutput, "batch-report.json");
         return File.Exists(batchReportPath) ? batchReportPath : null;
+    }
+
+    private static bool IsSupportedArchivePath(string path)
+    {
+        return path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+               path.EndsWith(".tar", StringComparison.OrdinalIgnoreCase) ||
+               path.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase) ||
+               path.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase);
     }
 
     private void AppendLog(string message)
