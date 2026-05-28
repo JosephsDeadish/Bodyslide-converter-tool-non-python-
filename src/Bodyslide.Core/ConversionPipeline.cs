@@ -182,6 +182,142 @@ internal sealed record MeshGeometrySignature(
     public float Height => MaxZ - MinZ;
 }
 
+internal sealed record NifBlockGraphNode(
+    int Index,
+    string TypeName,
+    int StartOffset,
+    int EndOffset,
+    IReadOnlyList<int> ReferencedBlockIndices);
+
+internal sealed record NifBlockGraph(IReadOnlyList<NifBlockGraphNode> Nodes)
+{
+    public IReadOnlyList<NifBlockGraphNode> GeometryCandidates =>
+        Nodes.Where(static node =>
+                node.TypeName.Contains("TriShapeData", StringComparison.Ordinal) ||
+                node.TypeName.Contains("TriStripsData", StringComparison.Ordinal) ||
+                node.TypeName.Contains("GeometryData", StringComparison.Ordinal) ||
+                node.TypeName.Contains("Mesh", StringComparison.Ordinal))
+            .ToList();
+}
+
+internal static class NifBlockGraphParser
+{
+    private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
+    private static readonly string[] LikelyBlockTypeTokens =
+    [
+        "TriShape", "TriStrips", "Geometry", "Mesh", "Node", "Skin", "Data", "Controller", "Property"
+    ];
+
+    public static bool TryParse(byte[] bytes, out NifBlockGraph? graph)
+    {
+        graph = null;
+
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var typeCandidates = FindBlockTypeCandidates(bytes);
+        if (typeCandidates.Count == 0)
+        {
+            return false;
+        }
+
+        var nodes = new List<NifBlockGraphNode>(typeCandidates.Count);
+        for (var index = 0; index < typeCandidates.Count; index++)
+        {
+            var (startOffset, typeName) = typeCandidates[index];
+            var endOffset = index + 1 < typeCandidates.Count
+                ? typeCandidates[index + 1].Offset
+                : bytes.Length;
+
+            if (endOffset <= startOffset)
+            {
+                continue;
+            }
+
+            var references = CollectReferences(bytes, startOffset, endOffset, typeCandidates.Count);
+            nodes.Add(new NifBlockGraphNode(index, typeName, startOffset, endOffset, references));
+        }
+
+        if (nodes.Count == 0)
+        {
+            return false;
+        }
+
+        graph = new NifBlockGraph(nodes);
+        return true;
+    }
+
+    private static List<(int Offset, string TypeName)> FindBlockTypeCandidates(byte[] bytes)
+    {
+        var matches = new List<(int Offset, string TypeName)>();
+        var seenOffsets = new HashSet<int>();
+
+        for (var offset = 0; offset < bytes.Length - 2; offset++)
+        {
+            if (bytes[offset] != (byte)'N' || bytes[offset + 1] != (byte)'i')
+            {
+                continue;
+            }
+
+            var end = offset + 2;
+            while (end < bytes.Length && IsAsciiWordCharacter((char)bytes[end]) && (end - offset) <= 64)
+            {
+                end++;
+            }
+
+            var length = end - offset;
+            if (length < 4 || length > 64)
+            {
+                continue;
+            }
+
+            var typeName = System.Text.Encoding.ASCII.GetString(bytes, offset, length);
+            if (!IsLikelyBlockTypeName(typeName) || !seenOffsets.Add(offset))
+            {
+                continue;
+            }
+
+            matches.Add((offset, typeName));
+        }
+
+        matches.Sort(static (left, right) => left.Offset.CompareTo(right.Offset));
+        return matches;
+    }
+
+    private static bool IsLikelyBlockTypeName(string value)
+    {
+        if (!value.StartsWith("Ni", StringComparison.Ordinal) || value.Length < 4)
+        {
+            return false;
+        }
+
+        return LikelyBlockTypeTokens.Any(token => value.Contains(token, StringComparison.Ordinal));
+    }
+
+    private static List<int> CollectReferences(byte[] bytes, int startOffset, int endOffset, int blockCount)
+    {
+        var references = new HashSet<int>();
+        var scanStart = Math.Max(startOffset, 0);
+        var scanEnd = Math.Min(endOffset - sizeof(int), bytes.Length - sizeof(int));
+
+        for (var offset = scanStart; offset <= scanEnd; offset += sizeof(int))
+        {
+            var candidate = BitConverter.ToInt32(bytes, offset);
+            if (candidate >= 0 && candidate < blockCount)
+            {
+                references.Add(candidate);
+            }
+        }
+
+        return references.OrderBy(static value => value).ToList();
+    }
+
+    private static bool IsAsciiWordCharacter(char value) =>
+        char.IsLetterOrDigit(value) || value == '_' || value == '-';
+}
+
 internal static class VanillaBodySignatureDatabase
 {
     // Typical vertex counts per body type are well-known in the modding community.
@@ -276,6 +412,12 @@ internal static class NifGeometrySignatureReader
             }
         }
 
+        var graphSignature = TryReadBlockGraphVertexBlock(bytes);
+        if (graphSignature is not null)
+        {
+            return graphSignature;
+        }
+
         return TryReadHeuristicVertexBlock(bytes);
     }
 
@@ -303,6 +445,13 @@ internal static class NifGeometrySignatureReader
                     return true;
                 }
             }
+        }
+
+        if (TryLocateVertexBlockFromGraph(bytes, out var graphVertexDataOffset, out var graphVertexCount))
+        {
+            vertexDataOffset = graphVertexDataOffset;
+            vertexCount = graphVertexCount;
+            return true;
         }
 
         var scanLimit = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
@@ -347,6 +496,110 @@ internal static class NifGeometrySignatureReader
 
         var vertexCount = BitConverter.ToInt32(bytes, countOffset);
         return BuildSignature(bytes, countOffset + sizeof(int), vertexCount);
+    }
+
+    private static MeshGeometrySignature? TryReadBlockGraphVertexBlock(byte[] bytes)
+    {
+        if (!TryLocateVertexBlockFromGraph(bytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return null;
+        }
+
+        return BuildSignature(bytes, vertexDataOffset, vertexCount);
+    }
+
+    private static bool TryLocateVertexBlockFromGraph(byte[] bytes, out int vertexDataOffset, out int vertexCount)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        {
+            return false;
+        }
+
+        var bestScore = int.MinValue;
+        var bestCount = 0;
+        var bestOffset = -1;
+        var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
+
+        foreach (var node in preferredNodes)
+        {
+            var score = GetBlockVertexCandidateScore(node.TypeName);
+            if (score <= 0)
+            {
+                continue;
+            }
+
+            var scanStart = Math.Max(node.StartOffset, 0);
+            var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
+
+            for (var offset = scanStart; offset <= scanEnd; offset += sizeof(int))
+            {
+                var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+                {
+                    continue;
+                }
+
+                var candidate = BuildSignature(bytes, offset + sizeof(int), candidateVertexCount);
+                if (candidate is null)
+                {
+                    continue;
+                }
+
+                if (score > bestScore || (score == bestScore && candidate.VertexCount > bestCount))
+                {
+                    bestScore = score;
+                    bestCount = candidate.VertexCount;
+                    bestOffset = offset + sizeof(int);
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
+    private static int GetBlockVertexCandidateScore(string typeName)
+    {
+        if (typeName.Contains("TriShapeData", StringComparison.Ordinal))
+        {
+            return 10;
+        }
+
+        if (typeName.Contains("TriStripsData", StringComparison.Ordinal))
+        {
+            return 9;
+        }
+
+        if (typeName.Contains("GeometryData", StringComparison.Ordinal))
+        {
+            return 8;
+        }
+
+        if (typeName.Contains("Mesh", StringComparison.Ordinal))
+        {
+            return 7;
+        }
+
+        if (typeName.Contains("Shape", StringComparison.Ordinal))
+        {
+            return 4;
+        }
+
+        if (typeName.Contains("Geometry", StringComparison.Ordinal))
+        {
+            return 3;
+        }
+
+        return 0;
     }
 
     private static MeshGeometrySignature? TryReadHeuristicVertexBlock(byte[] bytes)

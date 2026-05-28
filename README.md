@@ -139,9 +139,10 @@ Implemented from issue scope:
 - **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that iterates ARMA records, matches detected mesh paths, and emits placement instructions — drop it into the Edit Scripts folder and run via Tools → Apply Script
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
+- **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
 
 Remaining gap versus full issue vision:
-- deformation/physics and vertex transformation remain heuristic/rule-based; a full NIF block graph parser and true animation-driven geometry solver are still not implemented
+- deformation/physics and vertex transformation still remain heuristic/rule-based overall; a true animation-driven geometry solver is still not implemented
 
 ## Current built-in presets (27 total)
 
