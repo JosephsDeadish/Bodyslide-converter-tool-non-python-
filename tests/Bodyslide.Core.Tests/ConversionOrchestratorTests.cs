@@ -4175,6 +4175,13 @@ public sealed class PoseSimulationAndPreviewTests
             Assert.Contains("<svg ",            html, StringComparison.Ordinal);
             Assert.Contains("SlideSmith",       html, StringComparison.Ordinal);
             Assert.Contains("CBBE",             html, StringComparison.Ordinal);
+
+            var previewSvgPath = Path.Combine(outputDirectory, "preview.svg");
+            Assert.True(File.Exists(previewSvgPath), "preview.svg was not written.");
+
+            var svg = await File.ReadAllTextAsync(previewSvgPath);
+            Assert.Contains("<svg ", svg, StringComparison.Ordinal);
+            Assert.Contains("region-box-", svg, StringComparison.Ordinal);
         }
         finally
         {

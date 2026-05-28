@@ -118,6 +118,7 @@ Each successful conversion produces the following files in the output directory:
 | `<PluginName>_SlidesmithPatch.esp` | **Minimal override patch ESP** — contains ONLY the patched ARMA records and lists the original plugin as its master; proper Bethesda override plugin safe to load after the original; only produced when at least one ARMA path matched the rewrite map |
 | `README.txt` | Human-readable installation guide: lists all generated files, where to put them, how to apply the patch ESP, how to build BodySlide morphs, and any manual finishing steps required |
 | `texture-summary.json` | Texture audit: DDS count per type (diffuse/normal/specular/glow/parallax/roughness/subsurface), missing normal maps |
+| `preview.svg` | Standalone static body silhouette render with region heatmap colours for sharing/embed use outside the interactive report |
 | `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls (swap body profile, rotate view, adjust sliders) |
 | `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
 | `batch-report.json` | Root batch summary when input is a folder or `.zip` (total/success/fail counts and per-armor results) |

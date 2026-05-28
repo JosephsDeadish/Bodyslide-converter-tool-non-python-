@@ -6285,6 +6285,12 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(poseReportPath);
 
+        // Write a standalone SVG render so mod pages/tooling can embed a static preview
+        // without opening the interactive HTML report.
+        var previewSvgPath = Path.Combine(outputDirectory, "preview.svg");
+        await File.WriteAllTextAsync(previewSvgPath, BuildPreviewSvg(mesh), cancellationToken);
+        outputFiles.Add(previewSvgPath);
+
         // Write interactive SVG preview HTML — body silhouette with regions colour-coded
         // by morph factor, plus slider, physics and pose-risk tables. This replaces the
         // old metadata-only preview-renders.json with a file that can be opened directly
@@ -7769,6 +7775,44 @@ internal sealed class LocalExportService(
     /// Generates a self-contained HTML file with an inline SVG body silhouette colour-coded by
     /// regional morph factor, plus slider, physics, and pose-simulation-risk tables.
     /// </summary>
+    private static string BuildPreviewSvg(ConvertedMesh mesh)
+    {
+        var orderedRegions = mesh.RegionalMorphing
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var regionDomIds = orderedRegions.ToDictionary(
+            pair => pair.Key,
+            pair => ToDomIdToken(pair.Key),
+            StringComparer.OrdinalIgnoreCase);
+
+        var svgParts = new System.Text.StringBuilder();
+        svgParts.AppendLine("""  <g id="preview-body-root">""");
+        svgParts.AppendLine("""    <rect x="76" y="54" width="48" height="262" rx="10" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""    <circle cx="100" cy="20" r="18" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""    <rect x="42" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""    <rect x="146" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+
+        var drawnRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, factor) in orderedRegions)
+        {
+            if (!RegionShapes.TryGetValue(region, out var shape)) continue;
+            if (!drawnRegions.Add(region)) continue;
+
+            var colour = MorphColour(factor);
+            var opacity = Math.Clamp(0.45 + Math.Abs(factor - 1.0) * 1.2, 0.4, 0.85);
+            var domId = regionDomIds[region];
+            svgParts.AppendLine($"""    <rect id="region-box-{domId}" data-region="{HtmlEncode(region)}" x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
+            svgParts.AppendLine($"""    <text id="region-label-{domId}" x="{shape.X + shape.W / 2}" y="{shape.Y + shape.H / 2 + 4}" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">{shape.Label}</text>""");
+        }
+        svgParts.AppendLine("""  </g>""");
+
+        return $$"""
+            <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
+            {{svgParts}}</svg>
+            """;
+    }
+
     private static string BuildPreviewHtml(
         ConversionRequest request,
         ImportedArmor armor,
