@@ -4096,7 +4096,13 @@ internal sealed class LocalExportService : IExportService
               sig := Signature(e);
               if sig <> 'ARMA' then exit;
               TryRewriteModelPath(e, 'Female World Model\MOD2');
+              TryRewriteModelPath(e, 'Female World Model\MOD2 - Model Filename');
               TryRewriteModelPath(e, 'Male World Model\MOD2');
+              TryRewriteModelPath(e, 'Male World Model\MOD2 - Model Filename');
+              TryRewriteModelPath(e, 'Female 1st Person\MOD4');
+              TryRewriteModelPath(e, 'Female 1st Person\MOD4 - Model Filename');
+              TryRewriteModelPath(e, 'Male 1st Person\MOD4');
+              TryRewriteModelPath(e, 'Male 1st Person\MOD4 - Model Filename');
             end;
 
             function Finalize: Integer;

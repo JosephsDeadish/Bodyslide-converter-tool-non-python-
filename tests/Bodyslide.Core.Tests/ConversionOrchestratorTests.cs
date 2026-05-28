@@ -2626,6 +2626,7 @@ public sealed class PoseSimulationAndPreviewTests
                 Assert.Contains("Initialize",   content, StringComparison.Ordinal);
                 Assert.Contains("Finalize",     content, StringComparison.Ordinal);
                 Assert.Contains("SetEditValue", content, StringComparison.Ordinal);
+                Assert.Contains("1st Person",   content, StringComparison.Ordinal);
             }
         }
         finally
