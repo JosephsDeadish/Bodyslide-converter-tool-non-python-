@@ -6053,20 +6053,23 @@ internal sealed class LocalExportService(
         string? groundMeshRelativePath = null;
         if (groundMeshGen is not null && writtenNifs.Count > 0)
         {
-            var primaryNifPath    = writtenNifs[0];
-            var primaryNifBytes   = await File.ReadAllBytesAsync(primaryNifPath, cancellationToken);
-            var groundNifBytes    = await groundMeshGen.GenerateAsync(primaryNifBytes, analysis.MeshType, cancellationToken);
+            var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+            foreach (var writtenNifPath in writtenNifs)
+            {
+                var sourceNifBytes = await File.ReadAllBytesAsync(writtenNifPath, cancellationToken);
+                var groundNifBytes = await groundMeshGen.GenerateAsync(sourceNifBytes, analysis.MeshType, cancellationToken);
 
-            var stem              = Path.GetFileNameWithoutExtension(primaryNifPath);
-            var safeBodyToken     = BuildSafeBodyToken(request.TargetBody);
-            groundMeshRelativePath = $"meshes/slidesmith/{safeBodyToken}/{stem}_ground.nif";
+                var stem = Path.GetFileNameWithoutExtension(writtenNifPath);
+                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{stem}_ground.nif";
+                groundMeshRelativePath ??= groundRelativePath;
 
-            var groundAbsPath = Path.Combine(
-                outputDirectory,
-                groundMeshRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(groundAbsPath)!);
-            await File.WriteAllBytesAsync(groundAbsPath, groundNifBytes, cancellationToken);
-            outputFiles.Add(groundAbsPath);
+                var groundAbsPath = Path.Combine(
+                    outputDirectory,
+                    groundRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(groundAbsPath)!);
+                await File.WriteAllBytesAsync(groundAbsPath, groundNifBytes, cancellationToken);
+                outputFiles.Add(groundAbsPath);
+            }
         }
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)

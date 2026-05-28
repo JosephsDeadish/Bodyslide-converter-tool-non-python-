@@ -7566,6 +7566,35 @@ public sealed class LocalExportServiceGroundMeshTests
     }
 
     [Fact]
+    public async Task ExportAsync_WithGroundMeshGen_WritesGroundNifForEachConvertedMesh()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var lowPath  = Path.Combine(tmpDir, "iron_0.nif");
+        var highPath = Path.Combine(tmpDir, "iron_1.nif");
+        await File.WriteAllBytesAsync(lowPath,  new byte[64]);
+        await File.WriteAllBytesAsync(highPath, new byte[64]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: new BasicGroundMeshGeneratorService());
+            var (_, files) = await RunExportAsync(service, [lowPath, highPath], tmpDir, "CBBE");
+
+            var groundNifs = files
+                .Where(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            Assert.Equal(2, groundNifs.Count);
+            Assert.Contains(groundNifs, p => p.EndsWith("iron_0_ground.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(groundNifs, p => p.EndsWith("iron_1_ground.nif", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_WithoutGroundMeshGen_NoGroundNifProduced()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -7670,14 +7699,24 @@ public sealed class LocalExportServiceGroundMeshTests
         string nifPath,
         string tmpDir,
         string targetBody)
+        => await RunExportAsync(service, [nifPath], tmpDir, targetBody);
+
+    private static async Task<(string OutputDir, IReadOnlyList<string> Files)> RunExportAsync(
+        LocalExportService service,
+        IReadOnlyList<string> nifPaths,
+        string tmpDir,
+        string targetBody)
     {
         var outputDir = Path.Combine(tmpDir, "output");
         Directory.CreateDirectory(outputDir);
 
-        var request  = new ConversionRequest(nifPath, targetBody, OutputDirectory: outputDir);
-        var armor    = new ImportedArmor(nifPath, [nifPath], [], [], []);
-        var analysis = new MeshAnalysis("plate", false, 1);
-        var mesh     = new ConvertedMesh("plate", "direct-copy", 1,
+        var primaryInput = nifPaths[0];
+        var meshCount = nifPaths.Count;
+
+        var request  = new ConversionRequest(primaryInput, targetBody, OutputDirectory: outputDir);
+        var armor    = new ImportedArmor(primaryInput, nifPaths, [], [], []);
+        var analysis = new MeshAnalysis("plate", false, meshCount);
+        var mesh     = new ConvertedMesh("plate", "direct-copy", meshCount,
             new Dictionary<string, double>());
         var morphs   = new MorphSet("low", "high", true);
         var physics  = new PhysicsConfig("none");
