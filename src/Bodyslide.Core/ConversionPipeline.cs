@@ -258,7 +258,11 @@ internal sealed record BodySignatureTemplate(
     IReadOnlyList<string> TextureTokens,
     IReadOnlyList<string> PhysicsTokens,
     int VertexCountMin = 0,
-    int VertexCountMax = 0);
+    int VertexCountMax = 0,
+    double HeightToWidthRatioMin = 0,
+    double HeightToWidthRatioMax = 0,
+    double DepthToWidthRatioMin = 0,
+    double DepthToWidthRatioMax = 0);
 
 internal readonly record struct MeshVertex(float X, float Y, float Z);
 
@@ -421,15 +425,15 @@ internal static class VanillaBodySignatureDatabase
     // 3BA:   ~10032 (CBBE base with physics), TBD: ~7680, SAM: ~5984, SOS: ~6274, UBE: ~7000
     public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
     [
-        new("CBBE",  ["cbbe", "caliente"],        ["femalebody_1", "femalebody_0"], [],           6800, 7100),
-        new("UNP",   ["unp", "unpb"],             ["femalebody"],                  [],           5900, 6200),
-        new("HIMBO", ["himbo", "male"],           ["malebody"],                    [],           6600, 7100),
-        new("BHUNP", ["bhunp"],                   ["femalebody"],                  [],           9800, 10400),
-        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc"], 9800, 10400),
-        new("TBD",   ["tbd"],                     ["femalebody"],                  [],           7400, 7900),
-        new("SAM",   ["sam", "samlight"],         ["malebody"],                    [],           5800, 6200),
-        new("SOS",   ["sos", "soslight"],         ["malebody"],                    ["smp"],      6100, 6500),
-        new("UBE",   ["ube"],                     ["femalebody"],                  [],           6800, 7200)
+        new("CBBE",  ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
+        new("UNP",   ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
+        new("HIMBO", ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
+        new("BHUNP", ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
+        new("3BA",   ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
+        new("TBD",   ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
+        new("SAM",   ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
+        new("SOS",   ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
+        new("UBE",   ["ube"],                      ["femalebody"],                  [],            6800, 7200, 4.3, 7.4, 0.30, 0.80)
     ];
 }
 
@@ -1551,6 +1555,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double PhysicsExpectationBoostValue = 0.10;
     private const double BoneSignatureWeight = 0.10;
     private const double VertexCountWeight = 0.15;
+    private const double BoundingRatioWeight = 0.05;
 
     // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
@@ -1649,12 +1654,21 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         }
 
         double vertexSignatureScore = 0;
+        double boundingRatioScore = 0;
         if (geometrySignature is not null)
         {
             vertexSignatureScore = ScoreVertexCount(template, geometrySignature.VertexCount);
             if (vertexSignatureScore > 0)
             {
                 evidence.Add($"verts:{geometrySignature.VertexCount}");
+            }
+
+            boundingRatioScore = ScoreBoundingRatios(template, geometrySignature);
+            if (boundingRatioScore > 0)
+            {
+                var heightToWidth = geometrySignature.Height / Math.Max(geometrySignature.Width, 0.0001f);
+                var depthToWidth = geometrySignature.Depth / Math.Max(geometrySignature.Width, 0.0001f);
+                evidence.Add($"bounds:h/w={heightToWidth:F2},d/w={depthToWidth:F2}");
             }
         }
 
@@ -1665,10 +1679,48 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (physicsHitRatio * PhysicsTokenWeight) +
             (boneSignatureScore * BoneSignatureWeight) +
             (vertexSignatureScore * VertexCountWeight) +
+            (boundingRatioScore * BoundingRatioWeight) +
             physicsExpectationBoost,
             0,
             1);
         return (template, score, evidence);
+    }
+
+    private static double ScoreBoundingRatios(BodySignatureTemplate template, MeshGeometrySignature signature)
+    {
+        if (signature.Width <= 0.0001f)
+        {
+            return 0;
+        }
+
+        var heightToWidth = signature.Height / signature.Width;
+        var depthToWidth = signature.Depth / signature.Width;
+
+        var heightScore = ScoreRatioRange(heightToWidth, template.HeightToWidthRatioMin, template.HeightToWidthRatioMax);
+        var depthScore = ScoreRatioRange(depthToWidth, template.DepthToWidthRatioMin, template.DepthToWidthRatioMax);
+        return (heightScore + depthScore) / 2d;
+    }
+
+    private static double ScoreRatioRange(double value, double min, double max)
+    {
+        if (min <= 0 || max <= min || !double.IsFinite(value))
+        {
+            return 0;
+        }
+
+        if (value >= min && value <= max)
+        {
+            return 1d;
+        }
+
+        var distance = value < min ? (min - value) : (value - max);
+        var tolerance = Math.Max(0.1d, (max - min) / 2d);
+        if (distance >= tolerance)
+        {
+            return 0;
+        }
+
+        return Math.Round(1d - (distance / tolerance), 4);
     }
 
     private static double ScoreVertexCount(BodySignatureTemplate template, int vertexCount)
@@ -2960,8 +3012,8 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
     /// <summary>
     /// Rebuilds the entire plugin file, rewriting matching ARMA/ARMO mesh-path subrecords.
-    /// Compressed records are transparently decompressed, patched, and written back
-    /// uncompressed (FlagCompressed cleared) so every record remains readable.
+    /// Compressed records are transparently decompressed, patched, and re-compressed so
+    /// the original compression flag state is preserved whenever possible.
     /// Returns (patched_bytes, arma_and_armo_records_patched, paths_rewritten, warnings).
     /// </summary>
     internal static (byte[] Patched, int ArmaPatched, int PathsRewritten, IReadOnlyList<string> Warnings)
@@ -3032,13 +3084,27 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
-                        // Write record header with FlagCompressed cleared + updated data size.
+                        var recordDataToWrite = newData;
+                        var newFlags = flags;
+                        if (compressed)
+                        {
+                            var recompressed = TryCompressRecord(newData, warnings, tag);
+                            if (recompressed is not null)
+                            {
+                                recordDataToWrite = recompressed;
+                                newFlags = flags | FlagCompressed;
+                            }
+                            else
+                            {
+                                newFlags = flags & ~FlagCompressed;
+                            }
+                        }
+
                         ms.Write(bytes, pos, 4);                                    // tag
-                        WriteUInt32Le(ms, (uint)newData.Length);                    // new dataSize
-                        var newFlags = flags & ~FlagCompressed;
-                        WriteUInt32Le(ms, newFlags);                                // flags (cleared)
+                        WriteUInt32Le(ms, (uint)recordDataToWrite.Length);          // new dataSize
+                        WriteUInt32Le(ms, newFlags);                                // flags
                         ms.Write(bytes, pos + 12, headerSize - 12);                // FormID..rest
-                        ms.Write(newData, 0, newData.Length);
+                        ms.Write(recordDataToWrite, 0, recordDataToWrite.Length);
                     }
                     else
                     {
@@ -3128,12 +3194,27 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
+                        var recordDataToWrite = newData;
+                        var newFlags = flags;
+                        if (compressed)
+                        {
+                            var recompressed = TryCompressRecord(newData, warnings, tag);
+                            if (recompressed is not null)
+                            {
+                                recordDataToWrite = recompressed;
+                                newFlags = flags | FlagCompressed;
+                            }
+                            else
+                            {
+                                newFlags = flags & ~FlagCompressed;
+                            }
+                        }
+
                         ms.Write(bytes, pos, 4);                                    // tag
-                        WriteUInt32Le(ms, (uint)newData.Length);                    // new dataSize
-                        var newFlags = flags & ~FlagCompressed;
-                        WriteUInt32Le(ms, newFlags);                                // flags (cleared)
+                        WriteUInt32Le(ms, (uint)recordDataToWrite.Length);          // new dataSize
+                        WriteUInt32Le(ms, newFlags);                                // flags
                         ms.Write(bytes, pos + 12, headerSize - 12);                // FormID..rest
-                        ms.Write(newData, 0, newData.Length);
+                        ms.Write(recordDataToWrite, 0, recordDataToWrite.Length);
                     }
                     else
                     {
@@ -3278,6 +3359,34 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 int n = zlib.Read(result, totalRead, uncompressedSize - totalRead);
                 if (n == 0) break;
                 totalRead += n;
+            }
+
+            /// <summary>
+            /// Compresses rewritten record data back into Bethesda's compressed-record payload format:
+            /// uint32LE uncompressed-size prefix + zlib-compressed bytes.
+            /// </summary>
+            private static byte[]? TryCompressRecord(
+                byte[] uncompressedData, List<string> warnings, string recordTag)
+            {
+                try
+                {
+                    using var compressedStream = new MemoryStream();
+                    using (var zlib = new ZLibStream(compressedStream, CompressionLevel.Fastest, leaveOpen: true))
+                    {
+                        zlib.Write(uncompressedData, 0, uncompressedData.Length);
+                    }
+
+                    var compressedBytes = compressedStream.ToArray();
+                    var payload = new byte[4 + compressedBytes.Length];
+                    BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)uncompressedData.Length);
+                    compressedBytes.CopyTo(payload, 4);
+                    return payload;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Could not compress {recordTag} record after patching: {ex.Message}");
+                    return null;
+                }
             }
             return totalRead > 0 ? result : null;
         }

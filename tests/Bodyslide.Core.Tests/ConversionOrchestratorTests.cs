@@ -1674,6 +1674,18 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public void AllTemplates_HaveBoundingRatioRanges()
+    {
+        Assert.All(VanillaBodySignatureDatabase.Templates, t =>
+        {
+            Assert.True(t.HeightToWidthRatioMin > 0, $"{t.Body} should define HeightToWidthRatioMin.");
+            Assert.True(t.HeightToWidthRatioMax > t.HeightToWidthRatioMin, $"{t.Body} HeightToWidthRatioMax must exceed Min.");
+            Assert.True(t.DepthToWidthRatioMin > 0, $"{t.Body} should define DepthToWidthRatioMin.");
+            Assert.True(t.DepthToWidthRatioMax > t.DepthToWidthRatioMin, $"{t.Body} DepthToWidthRatioMax must exceed Min.");
+        });
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_UsesGeometryVertexCountEvidence()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1691,6 +1703,7 @@ public sealed class BodySignatureVertexCountTests
 
             Assert.Equal("CBBE", result.Body);
             Assert.Contains(result.Evidence, evidence => evidence.Equals("verts:6942", StringComparison.Ordinal));
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("bounds:h/w=", StringComparison.Ordinal));
         }
         finally
         {
@@ -3113,10 +3126,8 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
-    public void RewriteArmaSubrecords_CompressedFlagSkipped_ReturnsUnchanged()
+    public void RewriteArmaSubrecords_EmptyData_ReturnsUnchanged()
     {
-        // The RewritePlugin call skips compressed ARMA; this tests the raw subrecord
-        // function with an empty data block — should produce 0 rewrites and no crash.
         var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
             [], 0, 0, rewriteMap);
@@ -3198,6 +3209,70 @@ public sealed class BinaryPluginRewriteServiceTests
         // Verify patched content is present.
         var content = System.Text.Encoding.Latin1.GetString(patched);
         Assert.Contains(newPath, content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RewritePlugin_CompressedArmaWithMatchingPath_PreservesCompressionFlag()
+    {
+        const string origPath = "meshes/armor/iron/iron_0.nif\0";
+        const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+        byte[] mod2Data   = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+        byte[] armaRecord = BuildCompressedRecord(mod2Data, tag: "ARMA", headerSize: 24);
+        byte[] plugin     = [..BuildMinimalPlugin_SseNoArma(), ..armaRecord];
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = newPath
+        };
+
+        var (patched, armaPatched, pathsRewritten, warnings) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Empty(warnings);
+        Assert.Equal(1, armaPatched);
+        Assert.Equal(1, pathsRewritten);
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(patched);
+        Assert.Single(descriptors);
+        Assert.Contains(newPath, descriptors[0].MeshPaths);
+
+        var armaOffset = FindTopLevelRecordOffset(patched, "ARMA", headerSize: 24);
+        Assert.True(armaOffset >= 0, "Patched plugin should still contain ARMA record.");
+        var flags = ReadUInt32Le(patched, armaOffset + 8);
+        Assert.True((flags & 0x00040000u) != 0, "Compressed-flag bit should remain set.");
+    }
+
+    [Fact]
+    public void RewritePlugin_CompressedArmoWithMatchingPath_PreservesCompressionFlag()
+    {
+        const string origPath = "meshes/armor/iron/iron_w.nif\0";
+        const string newPath  = "meshes/slidesmith/cbbe/iron_w.nif";
+
+        byte[] mod2Data   = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath));
+        byte[] armoRecord = BuildCompressedRecord(mod2Data, tag: "ARMO", headerSize: 24);
+        byte[] plugin     = [..BuildMinimalPlugin_SseNoArma(), ..armoRecord];
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_w.nif"] = newPath
+        };
+
+        var (patched, armaPatched, pathsRewritten, warnings) =
+            BinaryPluginRewriteService.RewritePlugin(plugin, 24, rewriteMap);
+
+        Assert.Empty(warnings);
+        Assert.Equal(1, armaPatched);
+        Assert.Equal(1, pathsRewritten);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(patched);
+        Assert.Single(descriptors);
+        Assert.Contains(newPath, descriptors[0].MeshPaths);
+
+        var armoOffset = FindTopLevelRecordOffset(patched, "ARMO", headerSize: 24);
+        Assert.True(armoOffset >= 0, "Patched plugin should still contain ARMO record.");
+        var flags = ReadUInt32Le(patched, armoOffset + 8);
+        Assert.True((flags & 0x00040000u) != 0, "Compressed-flag bit should remain set.");
     }
 
     // ── RewriteAsync integration ──────────────────────────────────────────────
@@ -3540,6 +3615,36 @@ public sealed class BinaryPluginRewriteServiceTests
         buf[offset + 1] = (byte)(value >> 8);
         buf[offset + 2] = (byte)(value >> 16);
         buf[offset + 3] = (byte)(value >> 24);
+    }
+
+    private static uint ReadUInt32Le(byte[] buf, int offset) =>
+        (uint)(buf[offset]
+             | (buf[offset + 1] << 8)
+             | (buf[offset + 2] << 16)
+             | (buf[offset + 3] << 24));
+
+    private static int FindTopLevelRecordOffset(byte[] pluginBytes, string recordTag, int headerSize = 24)
+    {
+        var pos = 0;
+        while (pos + headerSize <= pluginBytes.Length)
+        {
+            var tag = System.Text.Encoding.ASCII.GetString(pluginBytes, pos, 4);
+            var dataSize = (int)ReadUInt32Le(pluginBytes, pos + 4);
+            var totalSize = headerSize + dataSize;
+            if (totalSize <= 0 || pos + totalSize > pluginBytes.Length)
+            {
+                break;
+            }
+
+            if (string.Equals(tag, recordTag, StringComparison.Ordinal))
+            {
+                return pos;
+            }
+
+            pos += totalSize;
+        }
+
+        return -1;
     }
 }
 
