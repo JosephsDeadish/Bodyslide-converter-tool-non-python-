@@ -16,11 +16,13 @@ public sealed class MainForm : Form
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
     private readonly Button _clearLogButton;
+    private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
     private readonly Label _statusLabel;
+    private readonly Label _presetDetailsLabel;
     private readonly ProgressBar _progressBar;
     private readonly BatchConversionRunner _batchRunner;
 
@@ -75,9 +77,29 @@ public sealed class MainForm : Form
         _inputTextBox.AllowDrop = true;
         _inputTextBox.DragEnter += OnDragEnter;
         _inputTextBox.DragDrop += OnDragDrop;
+        _inputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
         var browseInputButton = new Button { Text = "Browse...", AutoSize = true };
         browseInputButton.Click += (_, _) => BrowseInput();
-        inputRow.Controls.Add(browseInputButton, 2, 0);
+        _openInputButton = new Button
+        {
+            Text = "Open",
+            AutoSize = true,
+            Enabled = false,
+            Margin = new Padding(6, 0, 0, 0),
+        };
+        _openInputButton.Click += (_, _) => OpenInputPath();
+        var inputActions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            Dock = DockStyle.Fill,
+        };
+        inputActions.Controls.Add(browseInputButton);
+        inputActions.Controls.Add(_openInputButton);
+        inputRow.Controls.Add(inputActions, 2, 0);
         layout.Controls.Add(inputRow, 0, 1);
 
         var modeRow = new FlowLayoutPanel
@@ -133,11 +155,19 @@ public sealed class MainForm : Form
         {
             _presetComboBox.Items.Add(preset.Name);
         }
+        _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
         }
         leftOptions.Controls.Add(_presetComboBox, 1, 0);
+        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        _presetDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+        };
+        leftOptions.Controls.Add(_presetDetailsLabel, 1, 2);
 
         leftOptions.Controls.Add(new Label { Text = "Target Body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _targetComboBox = new ComboBox
@@ -195,6 +225,7 @@ public sealed class MainForm : Form
         layout.Controls.Add(conversionOptionsPanel, 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
+        _outputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
         var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += (_, _) => BrowseOutput();
         outputRow.Controls.Add(browseOutputButton, 2, 0);
@@ -290,6 +321,8 @@ public sealed class MainForm : Form
         layout.Controls.Add(bottomPanel, 0, 6);
 
         RefreshModeState();
+        UpdatePresetDetails();
+        UpdatePathActionStates();
         AppendLog("Ready. Choose input, configure options, then click Convert.");
     }
 
@@ -370,6 +403,7 @@ public sealed class MainForm : Form
         }
 
         _inputTextBox.Text = dropped[0];
+        UpdatePathActionStates();
         AppendLog($"Input selected: {dropped[0]}");
     }
 
@@ -378,6 +412,14 @@ public sealed class MainForm : Form
         var usingPreset = _usePresetRadio.Checked;
         _presetComboBox.Enabled = usingPreset;
         _targetComboBox.Enabled = !usingPreset;
+        if (usingPreset && TryGetSelectedPreset(out var preset))
+        {
+            var targetIndex = _targetComboBox.FindStringExact(preset.TargetBody);
+            if (targetIndex >= 0)
+            {
+                _targetComboBox.SelectedIndex = targetIndex;
+            }
+        }
     }
 
     private async Task ConvertAsync()
@@ -433,7 +475,7 @@ public sealed class MainForm : Form
             var cancellationToken = _activeConversion.Token;
             var results = await Task.Run(() => _batchRunner.ConvertAsync(request, cancellationToken));
             _lastOutputDirectory = GetBestOutputDirectory(results);
-            _openOutputButton.Enabled = !string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory);
+            UpdatePathActionStates();
 
             AppendLog($"Converted {results.Count} armor item(s).");
             foreach (var result in results)
@@ -487,15 +529,52 @@ public sealed class MainForm : Form
         _convertButton.Enabled = !isBusy;
         _cancelButton.Enabled = isBusy;
         _clearLogButton.Enabled = !isBusy;
-        _openOutputButton.Enabled = !isBusy && !string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory);
+        _openInputButton.Enabled = !isBusy && InputPathExists();
+        _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
         UseWaitCursor = isBusy;
         _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
-        _progressBar.Value = isBusy ? 0 : 100;
+        _progressBar.Value = 0;
+    }
+
+    private void OpenInputPath()
+    {
+        var inputPath = _inputTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(inputPath))
+        {
+            MessageBox.Show(this, "No input path is currently selected.", "Open input", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (Directory.Exists(inputPath))
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = inputPath,
+                UseShellExecute = true,
+            });
+            return;
+        }
+
+        if (File.Exists(inputPath))
+        {
+            var quotedPath = inputPath.Replace("\"", "\\\"", StringComparison.Ordinal);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{quotedPath}\"",
+                UseShellExecute = true,
+            });
+            return;
+        }
+
+        MessageBox.Show(this, "Input path was not found.", "Open input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        UpdatePathActionStates();
     }
 
     private void OpenOutputDirectory()
     {
-        if (string.IsNullOrWhiteSpace(_lastOutputDirectory) || !Directory.Exists(_lastOutputDirectory))
+        var outputDirectory = GetPreferredOutputDirectoryForOpen();
+        if (outputDirectory is null)
         {
             MessageBox.Show(this, "No output folder is currently available.", "Open output", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -503,7 +582,7 @@ public sealed class MainForm : Form
 
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
-            FileName = _lastOutputDirectory,
+            FileName = outputDirectory,
             UseShellExecute = true,
         });
     }
@@ -552,5 +631,51 @@ public sealed class MainForm : Form
         }
 
         _logTextBox.AppendText(Environment.NewLine + timestamped);
+    }
+
+    private void UpdatePresetDetails()
+    {
+        if (!TryGetSelectedPreset(out var preset))
+        {
+            _presetDetailsLabel.Text = "—";
+            return;
+        }
+
+        _presetDetailsLabel.Text = $"Target: {preset.TargetBody} | Deformation: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
+    }
+
+    private bool TryGetSelectedPreset(out ConversionPreset preset)
+    {
+        preset = default!;
+        var selectedPreset = _presetComboBox.SelectedItem?.ToString();
+        return !string.IsNullOrWhiteSpace(selectedPreset) && PresetCatalog.TryGet(selectedPreset, out preset);
+    }
+
+    private bool InputPathExists()
+    {
+        var inputPath = _inputTextBox.Text.Trim();
+        return File.Exists(inputPath) || Directory.Exists(inputPath);
+    }
+
+    private string? GetPreferredOutputDirectoryForOpen()
+    {
+        if (!string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory))
+        {
+            return _lastOutputDirectory;
+        }
+
+        var userSelectedOutput = _outputTextBox.Text.Trim();
+        return Directory.Exists(userSelectedOutput) ? userSelectedOutput : null;
+    }
+
+    private void UpdatePathActionStates()
+    {
+        if (_activeConversion is not null)
+        {
+            return;
+        }
+
+        _openInputButton.Enabled = InputPathExists();
+        _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
     }
 }

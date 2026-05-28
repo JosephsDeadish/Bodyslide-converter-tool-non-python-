@@ -39,8 +39,8 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
 
-# GUI features: drag/drop input, choose preset or custom target, optional profile/source override,
-# optional output zip, cancel in-progress conversion, and open output folder after conversion
+# GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
+# optional profile/source override, optional output zip, cancel in-progress conversion, and open output folder
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
