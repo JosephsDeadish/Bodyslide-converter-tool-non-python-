@@ -4954,7 +4954,8 @@ internal sealed class LocalExportService : IExportService
         supportFiles.AddRange(armor.PhysicsFiles);
         supportFiles.AddRange(armor.BodyReferenceFiles.Where(path =>
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
-            Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase)));
+            Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
         supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath));
         supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath));
 
