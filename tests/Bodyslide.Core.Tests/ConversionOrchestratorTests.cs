@@ -919,7 +919,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestMorphGenerator : IMorphGenerationService
     {
-        public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken) =>
+        public Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
             Task.FromResult(new MorphSet("low", "high", true));
     }
 
@@ -8285,7 +8285,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
     }
     private sealed class TestRigidMorphGenerator : IMorphGenerationService
     {
-        public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken ct) =>
+        public Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken ct) =>
             Task.FromResult(new MorphSet("low", "high", true));
     }
     private sealed class TestRigidPartitionRebuilder : IPartitionRebuildingService
@@ -8552,8 +8552,9 @@ public sealed class MorphGenerationServiceTests
     {
         var service = new BasicMorphGenerationService();
         var mesh = new WeightedMesh("cloth", "heat-map", false);
+        var armor = new ImportedArmor("input", [], [], [], []);
 
-        var result = await service.GenerateAsync(mesh, targetBody, CancellationToken.None);
+        var result = await service.GenerateAsync(mesh, armor, targetBody, CancellationToken.None);
 
         Assert.Equal(expectedSliders, result.SliderCount);
         Assert.True(result.BodySlideCompatible);
@@ -8564,8 +8565,9 @@ public sealed class MorphGenerationServiceTests
     {
         var service = new BasicMorphGenerationService();
         var mesh = new WeightedMesh("cloth", "heat-map", false);
+        var armor = new ImportedArmor("input", [], [], [], []);
 
-        var result = await service.GenerateAsync(mesh, "CustomBodyXYZ", CancellationToken.None);
+        var result = await service.GenerateAsync(mesh, armor, "CustomBodyXYZ", CancellationToken.None);
 
         Assert.True(result.SliderCount > 0);
         Assert.True(result.BodySlideCompatible);
@@ -8577,9 +8579,10 @@ public sealed class MorphGenerationServiceTests
         var service = new BasicMorphGenerationService();
         var physMesh = new WeightedMesh("physics-enabled", "heat-map", PhysicsWeightsTransferred: true);
         var plainMesh = new WeightedMesh("physics-enabled", "heat-map", PhysicsWeightsTransferred: false);
+        var armor = new ImportedArmor("input", [], [], [], []);
 
-        var physResult  = await service.GenerateAsync(physMesh,  "3BA", CancellationToken.None);
-        var plainResult = await service.GenerateAsync(plainMesh, "3BA", CancellationToken.None);
+        var physResult  = await service.GenerateAsync(physMesh, armor, "3BA", CancellationToken.None);
+        var plainResult = await service.GenerateAsync(plainMesh, armor, "3BA", CancellationToken.None);
 
         Assert.True(physResult.SourceBodyMatchRatio > plainResult.SourceBodyMatchRatio,
             "Physics mesh with transferred weights should score higher match ratio.");
@@ -8590,8 +8593,9 @@ public sealed class MorphGenerationServiceTests
     {
         var service = new BasicMorphGenerationService();
         var mesh = new WeightedMesh("cloth", "heat-map", false);
+        var armor = new ImportedArmor("input", [], [], [], []);
 
-        var result = await service.GenerateAsync(mesh, "3BA", CancellationToken.None);
+        var result = await service.GenerateAsync(mesh, armor, "3BA", CancellationToken.None);
 
         Assert.Contains("15", result.LowMorph, StringComparison.Ordinal);
         Assert.Contains("15", result.HighMorph, StringComparison.Ordinal);
@@ -8757,6 +8761,104 @@ public sealed class VanillaBodyOspSliderTests
         var project = await service.GenerateAsync(armor, converted, "Vanilla", CancellationToken.None);
 
         Assert.Contains("<Slider", project.OspXml, StringComparison.Ordinal);
+    }
+}
+
+public sealed class CustomBodyProfileSupportTests
+{
+    [Fact]
+    public async Task ImportAsync_LoadsCustomBodyProfileFromSlidesmithBodyJson()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        await File.WriteAllBytesAsync(Path.Combine(tmpDir, "armor_0.nif"), new byte[64]);
+        await File.WriteAllTextAsync(
+            Path.Combine(tmpDir, "myfollower.slidesmith-body.json"),
+            """
+            {
+              "name": "MyFollower",
+              "detectionTokens": ["myfollower", "customshape"],
+              "sliderNames": ["Waist", "Hips", "Bust"],
+              "physicsProfile": "smp",
+              "gender": "male",
+              "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
+              "transformationField": {
+                "chest": 1.14,
+                "waist": 0.95,
+                "pelvis": 1.08
+              }
+            }
+            """);
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            var profile = Assert.Single(armor.CustomBodyProfiles ?? []);
+            Assert.Equal("MyFollower", profile.Name);
+            Assert.Equal("male", profile.Gender);
+            Assert.Equal("smp", profile.PhysicsProfile);
+            Assert.Contains("NPC L Pec", profile.PhysicsBones ?? []);
+            Assert.Equal(3, profile.SliderNames?.Count);
+            Assert.Equal(1.14, profile.TransformationField["chest"]);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_CustomBodyProfileFile_UsesCustomDetectionAndTargetSettings()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDir = Path.Combine(tmpDir, "output");
+        Directory.CreateDirectory(tmpDir);
+        var inputFile = Path.Combine(tmpDir, "myfollower_armor_0.nif");
+        await File.WriteAllBytesAsync(inputFile, new byte[64]);
+        await File.WriteAllTextAsync(
+            Path.Combine(tmpDir, "myfollower.slidesmith-body.json"),
+            """
+            {
+              "name": "MyFollower",
+              "detectionTokens": ["myfollower"],
+              "sliderNames": ["Waist", "Hips", "Bust"],
+              "physicsProfile": "smp",
+              "gender": "male",
+              "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
+              "bodyOutputPath": "meshes\\actors\\character\\character assets male\\",
+              "transformationField": {
+                "chest": 1.16,
+                "waist": 0.94,
+                "pelvis": 1.07,
+                "shoulders": 1.10
+              }
+            }
+            """);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "MyFollower", outputDir));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, step => step == "custom-bodies:1");
+            Assert.Contains(result.Steps, step => step.StartsWith("detected-body:MyFollower@", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, step => step.Contains("sliders=3", StringComparison.Ordinal));
+
+            var ospFile = Assert.Single(Directory.GetFiles(outputDir, "*.osp"));
+            var ospXml = await File.ReadAllTextAsync(ospFile);
+            Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
+            Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
+            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));
+            Assert.False(File.Exists(Path.Combine(outputDir, "cbpc-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 }
 

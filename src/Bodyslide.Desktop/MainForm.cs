@@ -184,7 +184,7 @@ public sealed class MainForm : Form
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList,
+            DropDownStyle = ComboBoxStyle.DropDown,
         };
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -237,7 +237,7 @@ public sealed class MainForm : Form
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList,
+            DropDownStyle = ComboBoxStyle.DropDown,
         };
         _sourceComboBox.Items.Add("(auto)");
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
@@ -496,11 +496,13 @@ public sealed class MainForm : Form
         var output = string.IsNullOrWhiteSpace(_outputTextBox.Text) ? null : _outputTextBox.Text.Trim();
         var usingPreset = _usePresetRadio.Checked;
         var preset = _presetComboBox.SelectedItem?.ToString();
-        var target = _targetComboBox.SelectedItem?.ToString();
+        var target = string.IsNullOrWhiteSpace(_targetComboBox.Text) ? _targetComboBox.SelectedItem?.ToString() : _targetComboBox.Text.Trim();
         var selectedPresets = CombineSelections(preset, ParseDelimitedValues(_presetBatchTextBox.Text));
         var selectedTargets = CombineSelections(target, ParseDelimitedValues(_targetBatchTextBox.Text));
         var profile = ReadOptionalComboValue(_profileComboBox);
-        var sourceOverride = ReadOptionalComboValue(_sourceComboBox);
+        var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : _sourceComboBox.Text.Trim();
 
         if (string.IsNullOrWhiteSpace(input))
         {

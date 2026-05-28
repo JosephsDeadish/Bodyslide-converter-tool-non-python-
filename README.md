@@ -4,6 +4,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 
 - import scan (single `.nif`, armor folder, or archive input: `.zip` / `.tar` / `.tar.gz` / `.tgz`)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
 - mesh conversion strategy selection
@@ -76,6 +77,9 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 # show supported body types with detection tokens and vertex-count hints
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
+
+# target a custom body profile discovered from a nearby *.slidesmith-body.json file
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "MyFollowerBody"
 ```
 
 ## GitHub Actions (automatic build)
@@ -103,6 +107,22 @@ Pass `--profile <name>` to scale regional morphs toward or away from the neutral
 | petite | 0.75 | Smallest overall body dimensions |
 | muscular | 1.25 | Strongest amplification of all dimensions |
 | anime | 1.45 | Heavily amplified stylised anime proportions |
+
+## Custom body profiles
+
+Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/archive contents to register a named custom body for that conversion run. Supported fields include:
+
+- `name`
+- `detectionTokens`
+- `textureTokens`
+- `physicsTokens`
+- `vertexCountMin` / `vertexCountMax`
+- `transformationField` (`chest`, `waist`, `pelvis`, `legs`, `shoulders`, `breasts`, `butt`, `belly`, `arms`, `thighs`, `calves`)
+- `sliderNames`
+- `physicsBones`
+- `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
+- `gender` (`female` or `male`)
+- `bodyOutputPath`
 
 ## Output files
 
@@ -163,6 +183,7 @@ Implemented from issue scope:
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
 - **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
 - **support asset carry-forward** — export now copies scanned textures, material files (`.bgsm`/`.bgem`), physics files, plugin files, and body-reference files (`.tri`/`.osp` plus skeleton `.nif`) into the output tree using source-relative paths so converted packs include required sidecar assets
+- **external custom body profiles** — import now auto-loads nearby `*.slidesmith-body.json` files so conversions can target named custom bodies with custom detection tokens, transformation fields, slider sets, male/female BodySlide metadata, and per-body physics defaults instead of falling back to a generic `CUSTOM` output
 
 - **animation-driven geometry solver** — `AnimationDrivenGeometrySolver` applies linear-blend skinning (LBS) across 8 canonical poses using anatomically-derived per-region bone rotations (sagittal Z-Y plane), computing per-region body-envelope penetration depth; `AnimationDrivenPoseSimulationService` reads source mesh vertices from NIF files, runs the solver, and feeds push-out corrections back into the vertex transform pass; heuristic fallback used when no mesh data is available — all vertex transformations are now pose-informed rather than purely morph-threshold based
 

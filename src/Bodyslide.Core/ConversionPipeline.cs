@@ -32,7 +32,8 @@ public sealed record ImportedArmor(
     IReadOnlyList<string> PhysicsFiles,
     IReadOnlyList<string> BodyReferenceFiles,
     string? TemporaryWorkspace = null,
-    IReadOnlyList<WeightVariantPair>? WeightVariantPairs = null);
+    IReadOnlyList<WeightVariantPair>? WeightVariantPairs = null,
+    IReadOnlyList<CustomBodyProfile>? CustomBodyProfiles = null);
 public sealed record BodyDetectionReport(string Body, double Confidence, IReadOnlyList<string> Evidence);
 /// <summary>
 /// Headgear sub-classification values.  Only populated when <c>MeshType</c> is <c>"headgear"</c>.
@@ -431,6 +432,21 @@ public static class RequestNormalizer
 
 /// <summary>Exposes supported body type names and vertex-count hints for display / tooling consumers.</summary>
 public sealed record BodyTypeInfo(string Name, IReadOnlyList<string> DetectionTokens, int VertexCountMin, int VertexCountMax);
+
+/// <summary>Defines an externally supplied custom body profile used to extend detection and targeting.</summary>
+public sealed record CustomBodyProfile(
+    string Name,
+    IReadOnlyList<string> DetectionTokens,
+    IReadOnlyList<string> TextureTokens,
+    IReadOnlyList<string> PhysicsTokens,
+    int VertexCountMin,
+    int VertexCountMax,
+    IReadOnlyDictionary<string, double> TransformationField,
+    IReadOnlyList<string>? SliderNames = null,
+    IReadOnlyList<string>? PhysicsBones = null,
+    string? PhysicsProfile = null,
+    string? BodyOutputPath = null,
+    string Gender = "female");
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -1142,6 +1158,15 @@ internal static class NifGeometrySignatureReader
 
 internal static class BodyTransformationFieldCatalog
 {
+    private static readonly IReadOnlyDictionary<string, double> FallbackField =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"]     = 1.02,  ["waist"]    = 0.99,  ["pelvis"]   = 1.02,
+            ["legs"]      = 1.01,  ["shoulders"] = 1.00,
+            ["breasts"]   = 1.02,  ["butt"]     = 1.01,  ["belly"]    = 1.01,
+            ["arms"]      = 1.00,  ["thighs"]   = 1.01,  ["calves"]   = 1.01
+        };
+
     // Regions match the BodySlide slider taxonomy: 5 structural + 6 shape-specific.
     // Values are expansion multipliers relative to the vanilla body (1.0 = no change).
     private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> Fields =
@@ -1219,20 +1244,203 @@ internal static class BodyTransformationFieldCatalog
             }
         };
 
-    public static IReadOnlyDictionary<string, double> Resolve(string targetBody)
+    public static IReadOnlyDictionary<string, double> Resolve(string targetBody) => Resolve(targetBody, armor: null);
+
+    public static IReadOnlyDictionary<string, double> Resolve(string targetBody, ImportedArmor? armor)
     {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            return customProfile.TransformationField;
+        }
+
         if (Fields.TryGetValue(targetBody, out var profile))
         {
             return profile;
         }
 
-        return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        return FallbackField;
+    }
+
+    internal static IReadOnlyDictionary<string, double> CreateFallbackField() =>
+        new Dictionary<string, double>(FallbackField, StringComparer.OrdinalIgnoreCase);
+}
+
+internal static class CustomBodyProfileSupport
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> RegionAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["chest"]     = 1.02,  ["waist"]    = 0.99,  ["pelvis"]   = 1.02,
-            ["legs"]      = 1.01,  ["shoulders"] = 1.00,
-            ["breasts"]   = 1.02,  ["butt"]     = 1.01,  ["belly"]    = 1.01,
-            ["arms"]      = 1.00,  ["thighs"]   = 1.01,  ["calves"]   = 1.01
+            ["hips"] = "pelvis",
+            ["hip"] = "pelvis",
+            ["torso"] = "chest",
+            ["abdomen"] = "belly",
+            ["glutes"] = "butt",
+            ["leg"] = "legs",
+            ["thigh"] = "thighs",
+            ["calf"] = "calves",
+            ["arm"] = "arms",
+            ["shoulder"] = "shoulders",
+            ["breast"] = "breasts"
         };
+
+    public static bool IsProfileFile(string path) =>
+        path.EndsWith(".slidesmith-body.json", StringComparison.OrdinalIgnoreCase);
+
+    public static IReadOnlyList<CustomBodyProfile> LoadProfiles(IReadOnlyList<string> filePaths)
+    {
+        if (filePaths.Count == 0)
+        {
+            return [];
+        }
+
+        var profiles = new List<CustomBodyProfile>();
+        foreach (var filePath in filePaths)
+        {
+            var profile = TryLoadProfile(filePath);
+            if (profile is not null)
+            {
+                profiles.Add(profile);
+            }
+        }
+
+        return profiles
+            .GroupBy(static profile => profile.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.Last())
+            .OrderBy(static profile => profile.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static bool TryGetProfile(ImportedArmor? armor, string bodyName, out CustomBodyProfile profile)
+    {
+        profile = default!;
+        if (armor?.CustomBodyProfiles is not { Count: > 0 } profiles)
+        {
+            return false;
+        }
+
+        profile = profiles.FirstOrDefault(profile =>
+            string.Equals(profile.Name, bodyName, StringComparison.OrdinalIgnoreCase))!;
+        return profile is not null;
+    }
+
+    public static IEnumerable<BodySignatureTemplate> GetSignatureTemplates(ImportedArmor? armor) =>
+        armor?.CustomBodyProfiles?.Select(static profile => new BodySignatureTemplate(
+            profile.Name,
+            profile.DetectionTokens,
+            profile.TextureTokens,
+            profile.PhysicsTokens,
+            profile.VertexCountMin,
+            profile.VertexCountMax,
+            3.0,
+            8.5,
+            0.25,
+            1.20)) ?? [];
+
+    private static CustomBodyProfile? TryLoadProfile(string filePath)
+    {
+        try
+        {
+            var raw = File.ReadAllText(filePath);
+            var dto = JsonSerializer.Deserialize<CustomBodyProfileDto>(raw, JsonOptions);
+            return CreateProfile(dto);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static CustomBodyProfile? CreateProfile(CustomBodyProfileDto? dto)
+    {
+        if (dto is null || string.IsNullOrWhiteSpace(dto.Name))
+        {
+            return null;
+        }
+
+        var name = dto.Name.Trim();
+        var detectionTokens = NormalizeStringList(dto.DetectionTokens);
+        if (detectionTokens.Count == 0)
+        {
+            detectionTokens = [name];
+        }
+
+        var field = NormalizeTransformationField(dto.TransformationField);
+        var gender = string.Equals(dto.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female";
+        var physicsProfile = string.IsNullOrWhiteSpace(dto.PhysicsProfile) ? "none" : dto.PhysicsProfile.Trim();
+
+        return new CustomBodyProfile(
+            name,
+            detectionTokens,
+            NormalizeStringList(dto.TextureTokens),
+            NormalizeStringList(dto.PhysicsTokens),
+            Math.Max(0, dto.VertexCountMin),
+            Math.Max(dto.VertexCountMin, dto.VertexCountMax),
+            field,
+            NormalizeNullableStringList(dto.SliderNames),
+            NormalizeNullableStringList(dto.PhysicsBones),
+            physicsProfile,
+            string.IsNullOrWhiteSpace(dto.BodyOutputPath) ? null : dto.BodyOutputPath.Trim(),
+            gender);
+    }
+
+    private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
+    {
+        var normalized = new Dictionary<string, double>(BodyTransformationFieldCatalog.CreateFallbackField(), StringComparer.OrdinalIgnoreCase);
+        if (rawField is null || rawField.Count == 0)
+        {
+            return normalized;
+        }
+
+        foreach (var (key, value) in rawField)
+        {
+            if (string.IsNullOrWhiteSpace(key) || double.IsNaN(value) || double.IsInfinity(value) || value <= 0)
+            {
+                continue;
+            }
+
+            var normalizedKey = RegionAliases.TryGetValue(key.Trim(), out var alias)
+                ? alias
+                : key.Trim();
+            normalized[normalizedKey] = Math.Round(Math.Clamp(value, 0.4, 2.5), 4);
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<string> NormalizeStringList(IEnumerable<string>? values) =>
+        values?
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+    private static IReadOnlyList<string>? NormalizeNullableStringList(IEnumerable<string>? values)
+    {
+        var normalized = NormalizeStringList(values);
+        return normalized.Count == 0 ? null : normalized;
+    }
+
+    private sealed class CustomBodyProfileDto
+    {
+        public string? Name { get; init; }
+        public string[]? DetectionTokens { get; init; }
+        public string[]? TextureTokens { get; init; }
+        public string[]? PhysicsTokens { get; init; }
+        public int VertexCountMin { get; init; }
+        public int VertexCountMax { get; init; }
+        public Dictionary<string, double>? TransformationField { get; init; }
+        public string[]? SliderNames { get; init; }
+        public string[]? PhysicsBones { get; init; }
+        public string? PhysicsProfile { get; init; }
+        public string? BodyOutputPath { get; init; }
+        public string? Gender { get; init; }
     }
 }
 
@@ -1271,7 +1479,7 @@ public interface IWeightTransferService
 
 public interface IMorphGenerationService
 {
-    Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken);
+    Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken);
 }
 
 public interface IClippingDetectionService
@@ -1538,6 +1746,10 @@ public sealed class ConversionOrchestrator(
 
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
+            if (armor.CustomBodyProfiles is { Count: > 0 } customBodies)
+            {
+                steps.Add($"custom-bodies:{customBodies.Count}");
+            }
 
             // Weight variant pair detection — report how many _0/_1 mesh pairs were found.
             var weightPairs = armor.WeightVariantPairs ?? [];
@@ -1721,7 +1933,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"skeleton-warnings:unsupported-bones={string.Join('+', skeletonMapping.UnsupportedBones)}");
             }
 
-            var morphs = await morphGenerator.GenerateAsync(weighted, normalized.Request.TargetBody, cancellationToken);
+            var morphs = await morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
@@ -1822,7 +2034,10 @@ public sealed class ConversionOrchestrator(
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
 
-            var physicsProfile = normalized.Preset?.PhysicsProfile ?? "smp+cbpc";
+            var physicsProfile = normalized.Preset?.PhysicsProfile
+                ?? (CustomBodyProfileSupport.TryGetProfile(armor, normalized.Request.TargetBody, out var customTargetProfile)
+                    ? customTargetProfile.PhysicsProfile ?? "none"
+                    : "smp+cbpc");
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
             steps.Add($"physics:{physics.Profile}");
 
@@ -2709,8 +2924,20 @@ internal sealed class LocalArmorImportService : IArmorImportService
                     fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase));
             })
             .ToList();
+        var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
+            EnumerateFiles(supportScanRoot, [".json"])
+                .Where(CustomBodyProfileSupport.IsProfileFile)
+                .ToArray());
 
-        return Task.FromResult(new ImportedArmor(sourcePath, meshFiles, textureFiles, physicsFiles, bodyReferenceFiles, temporaryWorkspace, DetectWeightVariantPairs(meshFiles)));
+        return Task.FromResult(new ImportedArmor(
+            sourcePath,
+            meshFiles,
+            textureFiles,
+            physicsFiles,
+            bodyReferenceFiles,
+            temporaryWorkspace,
+            DetectWeightVariantPairs(meshFiles),
+            customBodyProfiles));
     }
 
     /// <summary>
@@ -2893,6 +3120,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
+            .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
             .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
@@ -3246,13 +3474,13 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         IReadOnlyDictionary<string, double> baseField;
         if (!string.IsNullOrWhiteSpace(sourceBody))
         {
-            var sourceField = BodyTransformationFieldCatalog.Resolve(sourceBody);
-            var targetField = BodyTransformationFieldCatalog.Resolve(targetBody);
+            var sourceField = BodyTransformationFieldCatalog.Resolve(sourceBody, armor);
+            var targetField = BodyTransformationFieldCatalog.Resolve(targetBody, armor);
             baseField = ComputeSourceTargetDelta(sourceField, targetField);
         }
         else
         {
-            baseField = BodyTransformationFieldCatalog.Resolve(targetBody);
+            baseField = BodyTransformationFieldCatalog.Resolve(targetBody, armor);
         }
 
         var profileField = DeformationProfileModifier.Apply(baseField, deformationProfile);
@@ -3419,7 +3647,10 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
         // target body's simulation to drive the armor correctly.  Only injected when
         // the target body requires physics bones AND the mesh is not headgear
         // (headgear is body-independent and does not need physics influences).
-        TargetPhysicsBoneMap.TryGetValue(targetBody, out var targetPhysBones);
+        var hasCustomProfile = CustomBodyProfileSupport.TryGetProfile(sourceArmor, targetBody, out var customProfile);
+        var targetPhysBones = hasCustomProfile
+            ? customProfile.PhysicsBones
+            : TargetPhysicsBoneMap.TryGetValue(targetBody, out var builtInBones) ? builtInBones : null;
         if (analysis.HeadgearSubType is not null)
             targetPhysBones = null;
 
@@ -3489,10 +3720,11 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
             ["Vanilla"]       = 5,
         };
 
-    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken cancellationToken)
+    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
-        SliderCounts.TryGetValue(targetBody, out var sliderCount);
-        if (sliderCount == 0) sliderCount = 5; // fallback for unknown body types
+        var sliderCount = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile)
+            ? customProfile.SliderNames?.Count ?? 5
+            : SliderCounts.TryGetValue(targetBody, out var builtInCount) ? builtInCount : 5;
 
         // Source-body match ratio: how closely the mesh weight profile matches expected
         // vertex weighting for the target body.  Physics-enabled meshes with transferred
@@ -3684,7 +3916,8 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
-        var isMale  = MaleBodies.Contains(targetBody);
+        var isMale  = MaleBodies.Contains(targetBody) ||
+            (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
         var tuning = BuildSolverTuning(mesh);
 
@@ -3865,8 +4098,18 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
     public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
-        BodyPhysicsBoneSupport.TryGetValue(targetBody, out var targetPhysicsBones);
-        targetPhysicsBones ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlySet<string> targetPhysicsBones;
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+            customProfile.PhysicsBones is { Count: > 0 } customPhysicsBones)
+        {
+            targetPhysicsBones = customPhysicsBones.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            targetPhysicsBones = BodyPhysicsBoneSupport.TryGetValue(targetBody, out var builtInBones)
+                ? builtInBones
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
 
         var allTargetBones = CommonBones.Concat(targetPhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -4285,14 +4528,22 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         var projectName = new string(rawName.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ').ToArray()).Trim();
         if (string.IsNullOrWhiteSpace(projectName)) projectName = "ConvertedArmor";
 
-        var sliders = BodySliders.TryGetValue(targetBody, out var bodySliders)
-            ? bodySliders
-            : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
+        var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
+        var sliders = customProfileFound
+            ? customProfile.SliderNames ?? ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"]
+            : BodySliders.TryGetValue(targetBody, out var bodySliders)
+                ? bodySliders
+                : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
 
-        BodyOutputPaths.TryGetValue(targetBody, out var outputPath);
-        outputPath ??= @"meshes\actors\character\character assets\";
+        var outputPath = customProfileFound && !string.IsNullOrWhiteSpace(customProfile.BodyOutputPath)
+            ? customProfile.BodyOutputPath
+            : BodyOutputPaths.TryGetValue(targetBody, out var builtInOutputPath)
+                ? builtInOutputPath
+                : @"meshes\actors\character\character assets\";
 
-        var isMale = MaleBodies.Contains(targetBody);
+        var isMale = customProfileFound
+            ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase)
+            : MaleBodies.Contains(targetBody);
         var gender = isMale ? "male" : "female";
         var outputFile0 = isMale ? "malebody_0.nif" : "femalebody_0.nif";
         var outputFile1 = isMale ? "malebody_1.nif" : "femalebody_1.nif";
@@ -8396,6 +8647,13 @@ internal sealed class LocalExportService(
                 bodyName => bodyName,
                 bodyName => BodyTransformationFieldCatalog.Resolve(bodyName),
                 StringComparer.OrdinalIgnoreCase);
+        if (armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
+        {
+            foreach (var customProfile in customProfiles.OrderBy(static profile => profile.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                availableBodyProfiles[customProfile.Name] = customProfile.TransformationField;
+            }
+        }
 
         var previewProfiles = new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
