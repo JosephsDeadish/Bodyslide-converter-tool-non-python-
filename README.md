@@ -40,6 +40,7 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 dotnet run --project src/Bodyslide.Desktop
 
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
+# optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # optional profile/source override, optional output zip, cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, and quick-open batch reports when available
 
@@ -51,6 +52,12 @@ dotnet run --project src/Bodyslide.Standalone -- "<armor path>" "<target body>" 
 
 # named mode with preset support
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path|folder|zip>" --preset "3BA Curvy" --output "<optional output directory>"
+
+# convert one armor to multiple target bodies in one run
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --targets "CBBE,3BA,HIMBO" --output "<optional output directory>"
+
+# convert one armor to multiple built-in presets in one run
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --presets "3BA Curvy,HIMBO Lean,UNP Petite" --output "<optional output directory>"
 
 # apply a deformation profile (overrides the preset's built-in profile)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --profile curvy
@@ -128,6 +135,8 @@ Each successful conversion produces the following files in the output directory:
 
 When a matching cache entry exists in the selected output folder for the same armor mesh + target body, the converter now reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps.
 
+When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each requested body/preset is exported into its own subfolder under the selected output root so multiple conversions never overwrite each other.
+
 ## Issue #2 progress comparison
 
 Implemented from issue scope:
@@ -204,6 +213,8 @@ Implemented from issue scope:
 - **target physics bone injection** — `BasicWeightTransferService` now auto-populates `WeightedMesh.TargetPhysicsBones` from a per-body-type map so downstream physics and BodySlide steps know exactly which bones the target skeleton drives; 3BA and BHUNP targets receive 9 female SMP bones (NPC L/R Breast01–03, L/R Butt, Belly); UNP and TBD targets receive 5 CBPC bones (NPC L/R Breast01, L/R Butt, Belly); HIMBO, SAM, and SOS targets receive 3 male SMP bones (NPC L/R Pec, Belly); headgear meshes always suppress physics bone injection; unknown body types return a null `TargetPhysicsBones` list; the orchestrator logs a `physics-injection:` step immediately after weight transfer
 
 - **scratch-plugin mesh staging** — when no source plugin exists, export now stages converted meshes into the exact `meshes/slidesmith/<body>/...` paths referenced by the generated standalone ESP and also writes fallback `_1stperson.nif` copies so the MOD2/MOD3/MOD4/MOD5 paths all resolve without any manual file moves or extra mesh authoring
+
+- **single-armor multi-target batch conversion** — CLI now supports `--targets "<body1,body2,...>"` and `--presets "<preset1,preset2,...>"`, and the desktop app exposes matching batch-entry fields for preset/target mode; one armor (or one folder/archive batch) can now be converted into multiple body outputs in a single run, with each target/preset written into its own output subfolder to avoid collisions
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, headgear sub-type/partition handling, ground mesh NIF output, biped slot passthrough, scratch plugin generation for plugin-free inputs, first-person mesh paths, rigid island detection, and target physics bone injection).
 

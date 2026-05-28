@@ -838,35 +838,22 @@ public sealed class MainForm : Form
             return null;
         }
 
-        var separator = Path.DirectorySeparatorChar;
-        var candidateSegments = normalized[0]
-            .TrimEnd(separator, Path.AltDirectorySeparatorChar)
-            .Split(separator, Path.AltDirectorySeparatorChar)
-            .ToList();
-
-        for (var index = 1; index < normalized.Length && candidateSegments.Count > 0; index++)
+        var candidate = normalized[0];
+        while (!string.IsNullOrWhiteSpace(candidate))
         {
-            var comparisonSegments = normalized[index]
-                .TrimEnd(separator, Path.AltDirectorySeparatorChar)
-                .Split(separator, Path.AltDirectorySeparatorChar);
-
-            var shared = 0;
-            while (shared < candidateSegments.Count &&
-                   shared < comparisonSegments.Length &&
-                   string.Equals(candidateSegments[shared], comparisonSegments[shared], StringComparison.OrdinalIgnoreCase))
+            var matchPrefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var allMatch = normalized.All(path =>
+                string.Equals(path, candidate, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase));
+            if (allMatch)
             {
-                shared++;
+                return candidate;
             }
 
-            candidateSegments = candidateSegments.Take(shared).ToList();
+            candidate = Path.GetDirectoryName(candidate);
         }
 
-        if (candidateSegments.Count == 0)
-        {
-            return null;
-        }
-
-        return string.Join(separator, candidateSegments);
+        return null;
     }
 
     private void AppendLog(string message)

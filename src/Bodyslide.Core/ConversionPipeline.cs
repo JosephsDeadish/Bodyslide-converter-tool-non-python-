@@ -338,7 +338,7 @@ public static class RequestNormalizer
         return (request, null);
     }
 
-    public static IReadOnlyList<NormalizedConversionRequest> Expand(ConversionRequest request)
+    internal static IReadOnlyList<NormalizedConversionRequest> Expand(ConversionRequest request)
     {
         var expanded = new List<NormalizedConversionRequest>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1944,7 +1944,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
                 Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
-            var resultsWithPaths = await ConvertMeshSetAsync(meshFiles, variant.Request, rootOutput, variants.Count, progress, cancellationToken);
+            var resultsWithPaths = await ConvertMeshSetAsync(meshFiles, variant.Request, rootOutput, meshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             return resultsWithPaths.Select(x => x.Result).ToList();
         }

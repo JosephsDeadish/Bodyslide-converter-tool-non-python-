@@ -174,30 +174,30 @@ static bool ShouldPauseOnExit(string[] args)
         return true;
     }
 
-    static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
-        string.IsNullOrWhiteSpace(value)
-            ? []
-            : value
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+    return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
+}
 
-    static IReadOnlyList<string> CombineSelections(string? singleValue, IReadOnlyList<string> multiValues)
-    {
-        var combined = new List<string>();
-        if (!string.IsNullOrWhiteSpace(singleValue))
-        {
-            combined.Add(singleValue);
-        }
-
-        combined.AddRange(multiValues);
-        return combined
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
+static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
+    string.IsNullOrWhiteSpace(value)
+        ? []
+        : value
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+static IReadOnlyList<string> CombineSelections(string? singleValue, IReadOnlyList<string> multiValues)
+{
+    var combined = new List<string>();
+    if (!string.IsNullOrWhiteSpace(singleValue))
+    {
+        combined.Add(singleValue);
     }
 
-    return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
+    combined.AddRange(multiValues);
+    return combined
+        .Where(static value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 }
 
 static void PauseBeforeExit()
