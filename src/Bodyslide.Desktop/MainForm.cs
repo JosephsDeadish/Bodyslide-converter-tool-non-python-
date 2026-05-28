@@ -18,6 +18,8 @@ public sealed class MainForm : Form
     private readonly Button _clearLogButton;
     private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
+    private readonly Button _openPreviewButton;
+    private readonly Button _openBatchReportButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
@@ -28,6 +30,8 @@ public sealed class MainForm : Form
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
+    private string? _lastPreviewPath;
+    private string? _lastBatchReportPath;
 
     public MainForm()
     {
@@ -276,13 +280,33 @@ public sealed class MainForm : Form
             Width = 110,
             Height = 34,
             Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
         };
         _openOutputButton.Click += (_, _) => OpenOutputDirectory();
+        _openPreviewButton = new Button
+        {
+            Text = "Open preview",
+            Width = 110,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _openPreviewButton.Click += (_, _) => OpenPreviewReport();
+        _openBatchReportButton = new Button
+        {
+            Text = "Batch report",
+            Width = 110,
+            Height = 34,
+            Enabled = false,
+        };
+        _openBatchReportButton.Click += (_, _) => OpenBatchReport();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_convertButton);
         actionRow.Controls.Add(_cancelButton);
         actionRow.Controls.Add(_clearLogButton);
         actionRow.Controls.Add(_openOutputButton);
+        actionRow.Controls.Add(_openPreviewButton);
+        actionRow.Controls.Add(_openBatchReportButton);
         layout.Controls.Add(actionRow, 0, 5);
 
         var bottomPanel = new TableLayoutPanel
@@ -431,6 +455,7 @@ public sealed class MainForm : Form
         var target = _targetComboBox.SelectedItem?.ToString();
         var profile = ReadOptionalComboValue(_profileComboBox);
         var sourceOverride = ReadOptionalComboValue(_sourceComboBox);
+        var effectiveTargetBody = ResolveEffectiveTargetBody(usingPreset, target);
 
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -475,9 +500,19 @@ public sealed class MainForm : Form
             var cancellationToken = _activeConversion.Token;
             var results = await Task.Run(() => _batchRunner.ConvertAsync(request, cancellationToken));
             _lastOutputDirectory = GetBestOutputDirectory(results);
+            _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
+            _lastBatchReportPath = GetBatchReportPath(input, output, effectiveTargetBody);
             UpdatePathActionStates();
 
             AppendLog($"Converted {results.Count} armor item(s).");
+            if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
+            {
+                AppendLog($"Preview report available: {_lastPreviewPath}");
+            }
+            if (!string.IsNullOrWhiteSpace(_lastBatchReportPath))
+            {
+                AppendLog($"Batch report available: {_lastBatchReportPath}");
+            }
             foreach (var result in results)
             {
                 var builder = new StringBuilder();
@@ -531,6 +566,8 @@ public sealed class MainForm : Form
         _clearLogButton.Enabled = !isBusy;
         _openInputButton.Enabled = !isBusy && InputPathExists();
         _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
+        _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
+        _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         UseWaitCursor = isBusy;
         _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
         _progressBar.Value = 0;
@@ -587,6 +624,38 @@ public sealed class MainForm : Form
         });
     }
 
+    private void OpenPreviewReport()
+    {
+        if (!File.Exists(_lastPreviewPath))
+        {
+            MessageBox.Show(this, "No preview report is currently available.", "Open preview", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdatePathActionStates();
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = _lastPreviewPath,
+            UseShellExecute = true,
+        });
+    }
+
+    private void OpenBatchReport()
+    {
+        if (!File.Exists(_lastBatchReportPath))
+        {
+            MessageBox.Show(this, "No batch report is currently available.", "Open batch report", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            UpdatePathActionStates();
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = _lastBatchReportPath,
+            UseShellExecute = true,
+        });
+    }
+
     private void ClearLog()
     {
         _logTextBox.Clear();
@@ -621,6 +690,31 @@ public sealed class MainForm : Form
             : Path.GetDirectoryName(first);
     }
 
+    private static string? GetFirstExistingOutputFile(IReadOnlyList<ConversionResult> results, string fileName)
+    {
+        return results
+            .SelectMany(r => r.OutputFiles)
+            .FirstOrDefault(path =>
+                Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(path));
+    }
+
+    private static string? GetBatchReportPath(string inputPath, string? outputPath, string targetBody)
+    {
+        var isBatchInput =
+            Directory.Exists(inputPath) ||
+            (File.Exists(inputPath) && Path.GetExtension(inputPath).Equals(".zip", StringComparison.OrdinalIgnoreCase));
+        if (!isBatchInput || string.IsNullOrWhiteSpace(targetBody))
+        {
+            return null;
+        }
+
+        var rootOutput = outputPath ??
+            Path.Combine(Environment.CurrentDirectory, "output", targetBody, "batch");
+        var batchReportPath = Path.Combine(rootOutput, "batch-report.json");
+        return File.Exists(batchReportPath) ? batchReportPath : null;
+    }
+
     private void AppendLog(string message)
     {
         var timestamped = $"[{DateTime.Now:HH:mm:ss}] {message}";
@@ -651,6 +745,16 @@ public sealed class MainForm : Form
         return !string.IsNullOrWhiteSpace(selectedPreset) && PresetCatalog.TryGet(selectedPreset, out preset);
     }
 
+    private string ResolveEffectiveTargetBody(bool usingPreset, string? customTargetBody)
+    {
+        if (usingPreset && TryGetSelectedPreset(out var preset))
+        {
+            return preset.TargetBody;
+        }
+
+        return customTargetBody ?? string.Empty;
+    }
+
     private bool InputPathExists()
     {
         var inputPath = _inputTextBox.Text.Trim();
@@ -677,5 +781,7 @@ public sealed class MainForm : Form
 
         _openInputButton.Enabled = InputPathExists();
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
+        _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
+        _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
     }
 }

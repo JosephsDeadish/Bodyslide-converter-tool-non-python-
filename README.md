@@ -20,7 +20,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - **plugin scanning** — binary-scans `.esp`/`.esm`/`.esl` sidecar files for NIF mesh paths and generates patch guidance
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
-- preview metadata output (`preview-renders.json`) for downstream rendering integration
+- live preview HTML output (`preview.html`) with region heatmap and conversion context
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 
 ## Projects
@@ -40,7 +40,8 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 dotnet run --project src/Bodyslide.Desktop
 
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
-# optional profile/source override, optional output zip, cancel in-progress conversion, and open output folder
+# optional profile/source override, optional output zip, cancel in-progress conversion, open output folder,
+# and quick-open generated preview/batch reports when available
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
@@ -109,7 +110,9 @@ Each successful conversion produces the following files in the output directory:
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
 | `plugin-patches.json` | Detected mesh paths from sidecar plugins + structured xEdit patch guidance (`ProposedPatchSteps` with per-mesh actions, no ESP is written) |
 | `texture-summary.json` | Texture audit: DDS count per type (diffuse/normal/specular/glow/parallax/subsurface), missing normal maps |
-| `preview-renders.json` | Metadata-only preview descriptor: target body, mesh type, regional morph values, active physics nodes, slider list, and per-view capture hints (no actual render) |
+| `preview.html` | Browser-openable live preview report with regional morph heatmap, slider data, and pose-clipping summary |
+| `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
+| `batch-report.json` | Root batch summary when input is a folder or `.zip` (total/success/fail counts and per-armor results) |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
 | `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
