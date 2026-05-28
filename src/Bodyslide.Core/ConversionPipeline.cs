@@ -71,18 +71,39 @@ public sealed record PluginArmorAddon(
     uint FormId = 0,
     string? EditorId = null,
     IReadOnlyList<int>? BipedSlots = null);
-public sealed record PluginAnalysisResult(IReadOnlyList<string> ScannedPlugins, IReadOnlyList<PluginArmorAddon> ArmorAddons, string PatchGuidance);
+
+/// <summary>
+/// Describes a single ARMO (Armor) record found in a plugin file.
+/// Carries FormID, EditorID, and detected mesh paths (MOD2/MOD3 world models).
+/// </summary>
+public sealed record PluginArmorRecord(
+    string RecordType,
+    IReadOnlyList<string> DetectedMeshPaths,
+    uint FormId = 0,
+    string? EditorId = null);
+
+/// <summary>
+/// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
+/// ARMO armor records (world/inventory models), and patch guidance text.
+/// <c>ArmorRecords</c> is null when the plugin binary does not contain ARMO records.
+/// </summary>
+public sealed record PluginAnalysisResult(
+    IReadOnlyList<string> ScannedPlugins,
+    IReadOnlyList<PluginArmorAddon> ArmorAddons,
+    string PatchGuidance,
+    IReadOnlyList<PluginArmorRecord>? ArmorRecords = null);
 
 /// <summary>
 /// Outcome of the binary plugin rewrite pass: how many plugins were processed,
-/// how many ARMA records were patched, and the paths of the rewritten plugin files.
+/// how many ARMA and ARMO records were patched, and the paths of the rewritten plugin files.
 /// </summary>
 public sealed record PluginRewriteResult(
     int PluginsProcessed,
     int ArmaRecordsPatched,
     int PathsRewritten,
     IReadOnlyList<string> PatchedPluginPaths,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    int ArmoRecordsPatched = 0);
 
 /// <summary>
 /// Outcome of generating a minimal Bethesda override patch ESP that lists the original
@@ -107,6 +128,20 @@ internal sealed record ArmaRecordDescriptor(
     IReadOnlyList<string> MeshPaths,
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
     byte[] OriginalDataBytes);           // The record data payload (not including header)
+
+/// <summary>
+/// Full parsed descriptor for a single ARMO (Armor) record — carries everything the
+/// patch generator needs to emit a valid override record: original header bytes, data
+/// bytes, FormID, editor ID, and the mesh paths found in MOD2/MOD3 subrecords.
+/// </summary>
+internal sealed record ArmoRecordDescriptor(
+    uint FormId,
+    string PluginFileName,
+    string? EditorId,
+    IReadOnlyList<string> MeshPaths,
+    byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
+    byte[] OriginalDataBytes);           // The record data payload (not including header)
+
 public sealed record MeshDependencyMapEntry(
     string Mesh,
     IReadOnlyList<string> Textures,
@@ -2637,33 +2672,39 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             pluginFiles.Add(armor.SourcePath);
         }
 
-        var armorAddons = new List<PluginArmorAddon>();
+        var armorAddons  = new List<PluginArmorAddon>();
+        var armorRecords = new List<PluginArmorRecord>();
 
         foreach (var pluginFile in pluginFiles)
         {
-            var addons = await ScanPluginForArmaRecordsAsync(pluginFile, cancellationToken);
+            var (addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
             armorAddons.AddRange(addons);
+            armorRecords.AddRange(records);
         }
 
         var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count);
         return new PluginAnalysisResult(
             pluginFiles.Select(f => Path.GetFileName(f) ?? f).ToList(),
             armorAddons,
-            guidance);
+            guidance,
+            armorRecords.Count > 0 ? armorRecords : null);
     }
 
-    private static async Task<IReadOnlyList<PluginArmorAddon>> ScanPluginForArmaRecordsAsync(
-        string pluginPath, CancellationToken cancellationToken)
+    private static async Task<(IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
+        ScanPluginAsync(string pluginPath, CancellationToken cancellationToken)
     {
         try
         {
-            var bytes = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
-            var descriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
-            var pluginName  = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
+            var bytes      = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
+            var pluginName = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
 
-            if (descriptors.Count > 0)
+            // ── ARMA records (ArmorAddon) ──────────────────────────────────────
+            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
+            List<PluginArmorAddon> addons;
+
+            if (armaDescriptors.Count > 0)
             {
-                return descriptors
+                addons = armaDescriptors
                     .Select(d => new PluginArmorAddon(
                         pluginName,
                         d.MeshPaths,
@@ -2672,15 +2713,27 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                         d.BipedSlots.Count > 0 ? d.BipedSlots : null))
                     .ToList();
             }
+            else
+            {
+                // Fallback: regex scan when no structured ARMA records found.
+                addons = RegexScanForNifPaths(bytes, pluginName).ToList();
+            }
 
-            // Fallback: regex scan for .nif paths when no structured ARMA records are found.
-            // Handles simplified or non-standard plugin layouts (e.g., test fixtures, LE plugins
-            // whose header did not pass the SSE detection heuristic).
-            return RegexScanForNifPaths(bytes, pluginName);
+            // ── ARMO records (Armor — world/inventory models) ──────────────────
+            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes);
+            var records = armoDescriptors
+                .Select(d => new PluginArmorRecord(
+                    pluginName,
+                    d.MeshPaths,
+                    d.FormId,
+                    d.EditorId))
+                .ToList();
+
+            return (addons, records);
         }
         catch (IOException)
         {
-            return [];
+            return ([], []);
         }
     }
 
@@ -2736,11 +2789,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
 /// <summary>
 /// Performs true binary rewriting of Bethesda .esp/.esm/.esl plugin files:
-/// parses the binary record structure, locates ARMA (ArmorAddon) records,
-/// rewrites MOD2/MOD3/MOD4/MOD5 mesh path subrecords to point at the
-/// converted SlideSmith meshes, and writes a patched plugin copy to the
-/// output directory. Supports both Skyrim LE (20-byte record headers) and
-/// Skyrim SE / Special Edition (24-byte record headers).
+/// parses the binary record structure, locates ARMA (ArmorAddon) and ARMO (Armor)
+/// records, rewrites MOD2/MOD3/MOD4/MOD5 mesh path subrecords to point at the
+/// converted SlideSmith meshes, and writes a patched plugin copy to the output
+/// directory.  Compressed records (bit 18 set) are decompressed, patched, and
+/// written back uncompressed so every record is always readable by the engine.
+/// Supports both Skyrim LE (20-byte record headers) and SSE (24-byte headers).
 /// </summary>
 internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 {
@@ -2751,8 +2805,12 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     // size of a subrecord header: 4-byte type tag + 2-byte data length
     private const int SubrecordHeaderSize = 6;
 
-    // Bit 18 of flags = zlib-compressed record data; skip these.
+    // Bit 18 of flags = zlib-compressed record data.
     private const uint FlagCompressed = 0x00040000u;
+
+    // Record types whose mesh-path subrecords (MOD2/MOD3/MOD4/MOD5) we rewrite.
+    private static readonly HashSet<string> ArmorRecordTypes = new(StringComparer.Ordinal)
+        { "ARMA", "ARMO" };
 
     // ARMA subrecord types that hold NIF mesh file paths.
     private static readonly HashSet<string> MeshSubrecordTypes = new(StringComparer.Ordinal)
@@ -2849,8 +2907,10 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     // ── File-level rewrite ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Rebuilds the entire plugin file, rewriting matching ARMA mesh-path subrecords.
-    /// Returns (patched_bytes, arma_records_patched, paths_rewritten, warnings).
+    /// Rebuilds the entire plugin file, rewriting matching ARMA/ARMO mesh-path subrecords.
+    /// Compressed records are transparently decompressed, patched, and written back
+    /// uncompressed (FlagCompressed cleared) so every record remains readable.
+    /// Returns (patched_bytes, arma_and_armo_records_patched, paths_rewritten, warnings).
     /// </summary>
     internal static (byte[] Patched, int ArmaPatched, int PathsRewritten, IReadOnlyList<string> Warnings)
         RewritePlugin(byte[] bytes, int headerSize, IReadOnlyDictionary<string, string> rewriteMap)
@@ -2898,28 +2958,39 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 int totalSize = headerSize + dataSize;
                 if (pos + totalSize > bytes.Length) break;
 
-                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                if (ArmorRecordTypes.Contains(tag))
                 {
                     var flags      = ReadUInt32Le(bytes, pos + 8);
                     bool compressed = (flags & FlagCompressed) != 0;
 
-                    if (!compressed && dataSize >= 0)
+                    byte[] workData;
+                    if (compressed && dataSize > 4)
                     {
-                        var (newData, rp) =
-                            RewriteArmaSubrecords(bytes, pos + headerSize, dataSize, rewriteMap);
+                        var decompressed = TryDecompressRecord(bytes, pos + headerSize, dataSize, warnings, tag);
+                        workData = decompressed ?? [];
+                    }
+                    else
+                    {
+                        workData = bytes[(pos + headerSize)..(pos + headerSize + dataSize)];
+                    }
 
+                    if (workData.Length > 0)
+                    {
+                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap);
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
-                        // Write ARMA header with (possibly updated) data size.
-                        ms.Write(bytes, pos, 4);                              // "ARMA"
-                        WriteUInt32Le(ms, (uint)newData.Length);               // new dataSize
-                        ms.Write(bytes, pos + 8, headerSize - 8);             // flags..rest
+                        // Write record header with FlagCompressed cleared + updated data size.
+                        ms.Write(bytes, pos, 4);                                    // tag
+                        WriteUInt32Le(ms, (uint)newData.Length);                    // new dataSize
+                        var newFlags = flags & ~FlagCompressed;
+                        WriteUInt32Le(ms, newFlags);                                // flags (cleared)
+                        ms.Write(bytes, pos + 12, headerSize - 12);                // FormID..rest
                         ms.Write(newData, 0, newData.Length);
                     }
                     else
                     {
-                        // Compressed ARMA: copy verbatim.
+                        // Could not read/decompress — copy verbatim.
                         ms.Write(bytes, pos, totalSize);
                     }
                 }
@@ -2983,22 +3054,33 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 int totalSize = headerSize + dataSize;
                 if (pos + totalSize > end) break;
 
-                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                if (ArmorRecordTypes.Contains(tag))
                 {
                     var flags      = ReadUInt32Le(bytes, pos + 8);
                     bool compressed = (flags & FlagCompressed) != 0;
 
-                    if (!compressed && dataSize >= 0)
+                    byte[] workData;
+                    if (compressed && dataSize > 4)
                     {
-                        var (newData, rp) =
-                            RewriteArmaSubrecords(bytes, pos + headerSize, dataSize, rewriteMap);
+                        var decompressed = TryDecompressRecord(bytes, pos + headerSize, dataSize, warnings, tag);
+                        workData = decompressed ?? [];
+                    }
+                    else
+                    {
+                        workData = bytes[(pos + headerSize)..(pos + headerSize + dataSize)];
+                    }
 
+                    if (workData.Length > 0)
+                    {
+                        var (newData, rp) = RewriteArmaSubrecords(workData, 0, workData.Length, rewriteMap);
                         pathsRewritten += rp;
                         if (rp > 0) armaPatched++;
 
-                        ms.Write(bytes, pos, 4);
-                        WriteUInt32Le(ms, (uint)newData.Length);
-                        ms.Write(bytes, pos + 8, headerSize - 8);
+                        ms.Write(bytes, pos, 4);                                    // tag
+                        WriteUInt32Le(ms, (uint)newData.Length);                    // new dataSize
+                        var newFlags = flags & ~FlagCompressed;
+                        WriteUInt32Le(ms, newFlags);                                // flags (cleared)
+                        ms.Write(bytes, pos + 12, headerSize - 12);                // FormID..rest
                         ms.Write(newData, 0, newData.Length);
                     }
                     else
@@ -3018,11 +3100,12 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         return (ms.ToArray(), armaPatched, pathsRewritten, warnings);
     }
 
-    // ── ARMA subrecord rewrite ────────────────────────────────────────────────
+    // ── ARMA/ARMO subrecord rewrite ───────────────────────────────────────────
 
     /// <summary>
-    /// Walks the subrecords of a single ARMA record, replacing the data string of
+    /// Walks the subrecords of a single ARMA or ARMO record, replacing the data string of
     /// MOD2 / MOD3 / MOD4 / MOD5 subrecords when the path is in <paramref name="rewriteMap"/>.
+    /// The <paramref name="bytes"/> slice begins at the record data start (after the record header).
     /// Returns (new_data_bytes, paths_rewritten).
     /// </summary>
     internal static (byte[] NewData, int PathsRewritten)
@@ -3083,6 +3166,45 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         return (ms.ToArray(), rewritten);
     }
 
+    // ── Compressed-record helper ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Attempts to zlib-decompress a compressed Bethesda record payload.
+    /// The payload starts with a 4-byte little-endian uncompressed-data size,
+    /// followed by the zlib-compressed bytes.  Returns <see langword="null"/> on
+    /// any error (corrupt data, over-size limit, etc.) and appends a warning.
+    /// </summary>
+    private static byte[]? TryDecompressRecord(
+        byte[] bytes, int offset, int compressedSize, List<string> warnings, string recordTag)
+    {
+        if (compressedSize < 4) return null;
+        try
+        {
+            // First 4 bytes = uncompressed data size (uint32 LE).
+            int uncompressedSize = (int)ReadUInt32Le(bytes, offset);
+            // Sanity cap: 64 MiB max.
+            if (uncompressedSize <= 0 || uncompressedSize > 64 * 1024 * 1024) return null;
+
+            using var compressed = new System.IO.MemoryStream(bytes, offset + 4, compressedSize - 4);
+            using var zlib = new System.IO.Compression.ZLibStream(
+                compressed, System.IO.Compression.CompressionMode.Decompress);
+            var result = new byte[uncompressedSize];
+            int totalRead = 0;
+            while (totalRead < uncompressedSize)
+            {
+                int n = zlib.Read(result, totalRead, uncompressedSize - totalRead);
+                if (n == 0) break;
+                totalRead += n;
+            }
+            return totalRead > 0 ? result : null;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Could not decompress {recordTag} record at offset {offset}: {ex.Message}");
+            return null;
+        }
+    }
+
     // ── Binary helpers ────────────────────────────────────────────────────────
 
     private static string ReadTag(byte[] bytes, int offset) =>
@@ -3129,7 +3251,9 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
 
 /// <summary>
 /// Walks the binary content of a Bethesda plugin file (ESP/ESM/ESL) and extracts
-/// a structured <see cref="ArmaRecordDescriptor"/> for every uncompressed ARMA record.
+/// structured <see cref="ArmaRecordDescriptor"/> and <see cref="ArmoRecordDescriptor"/>
+/// objects for every ARMA and ARMO record.  Compressed records (bit 18 set) are
+/// transparently decompressed via ZLibStream so no record is silently skipped.
 /// Supports both Skyrim LE (20-byte record headers) and SSE (24-byte headers).
 /// </summary>
 internal static class BinaryArmaParser
@@ -3146,13 +3270,17 @@ internal static class BinaryArmaParser
     private static readonly HashSet<string> MeshSubrecords =
         new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
 
+    // ARMO only uses MOD2 (male world model) and MOD3 (female world model).
+    private static readonly HashSet<string> ArmoMeshSubrecords =
+        new(StringComparer.Ordinal) { "MOD2", "MOD3" };
+
     /// <summary>Extracts all ARMA record descriptors from a plugin byte array.</summary>
     public static IReadOnlyList<ArmaRecordDescriptor> ExtractArmaRecords(byte[] bytes)
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
         var pluginFileName = string.Empty;   // filled in by callers that know the filename
-        return WalkRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
     }
 
     /// <summary>
@@ -3163,7 +3291,26 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+    }
+
+    /// <summary>Extracts all ARMO record descriptors from a plugin byte array.</summary>
+    public static IReadOnlyList<ArmoRecordDescriptor> ExtractArmoRecords(byte[] bytes)
+    {
+        if (bytes.Length < 4) return [];
+        var headerSize = DetectHeaderSize(bytes);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, string.Empty);
+    }
+
+    /// <summary>
+    /// Overload that also accepts a plugin file name so descriptors carry a meaningful
+    /// <see cref="ArmoRecordDescriptor.PluginFileName"/> value.
+    /// </summary>
+    public static IReadOnlyList<ArmoRecordDescriptor> ExtractArmoRecords(byte[] bytes, string pluginFileName)
+    {
+        if (bytes.Length < 4) return [];
+        var headerSize = DetectHeaderSize(bytes);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
     }
 
     // ── Header-size detection (same logic as BinaryPluginRewriteService) ─────
@@ -3185,9 +3332,9 @@ internal static class BinaryArmaParser
         return SseHeaderSize;
     }
 
-    // ── Tree walk ─────────────────────────────────────────────────────────────
+    // ── ARMA tree walk ────────────────────────────────────────────────────────
 
-    private static List<ArmaRecordDescriptor> WalkRecords(
+    private static List<ArmaRecordDescriptor> WalkArmaRecords(
         byte[] bytes, int start, int end, int headerSize, string pluginFileName)
     {
         var results = new List<ArmaRecordDescriptor>();
@@ -3206,7 +3353,7 @@ internal static class BinaryArmaParser
                 if (groupTotal < headerSize || pos + groupTotal > end) break;
 
                 // Recurse into GRUP content.
-                results.AddRange(WalkRecords(
+                results.AddRange(WalkArmaRecords(
                     bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
 
                 pos += groupTotal;
@@ -3217,13 +3364,14 @@ internal static class BinaryArmaParser
                 int totalSize = headerSize + dataSize;
                 if (pos + totalSize > end) break;
 
-                if (string.Equals(tag, "ARMA", StringComparison.Ordinal))
+                if (string.Equals(tag, "ARMA", StringComparison.Ordinal) && dataSize > 0)
                 {
                     var flags = ReadUInt32Le(bytes, pos + 8);
-                    if ((flags & FlagCompressed) == 0 && dataSize > 0)
+                    byte[] dataBytes = GetRecordData(bytes, pos, dataSize, headerSize, flags);
+                    if (dataBytes.Length > 0)
                     {
                         var desc = ParseArmaRecord(
-                            bytes, pos, dataSize, headerSize, pluginFileName);
+                            bytes, pos, dataBytes, headerSize, pluginFileName);
                         if (desc is not null) results.Add(desc);
                     }
                 }
@@ -3235,25 +3383,114 @@ internal static class BinaryArmaParser
         return results;
     }
 
+    // ── ARMO tree walk ────────────────────────────────────────────────────────
+
+    private static List<ArmoRecordDescriptor> WalkArmoRecords(
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+    {
+        var results = new List<ArmoRecordDescriptor>();
+        int pos = start;
+
+        while (pos < end)
+        {
+            if (pos + headerSize > end) break;
+
+            var tag    = ReadTag(bytes, pos);
+            var field4 = ReadUInt32Le(bytes, pos + 4);
+
+            if (string.Equals(tag, "GRUP", StringComparison.Ordinal))
+            {
+                var groupTotal = (int)field4;
+                if (groupTotal < headerSize || pos + groupTotal > end) break;
+
+                results.AddRange(WalkArmoRecords(
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+
+                pos += groupTotal;
+            }
+            else
+            {
+                var dataSize  = (int)field4;
+                int totalSize = headerSize + dataSize;
+                if (pos + totalSize > end) break;
+
+                if (string.Equals(tag, "ARMO", StringComparison.Ordinal) && dataSize > 0)
+                {
+                    var flags = ReadUInt32Le(bytes, pos + 8);
+                    byte[] dataBytes = GetRecordData(bytes, pos, dataSize, headerSize, flags);
+                    if (dataBytes.Length > 0)
+                    {
+                        var desc = ParseArmoRecord(
+                            bytes, pos, dataBytes, headerSize, pluginFileName);
+                        if (desc is not null) results.Add(desc);
+                    }
+                }
+
+                pos += totalSize;
+            }
+        }
+
+        return results;
+    }
+
+    // ── Data extractor (handles compressed records) ───────────────────────────
+
+    /// <summary>
+    /// Returns the record's data bytes, decompressing them if the compressed flag is set.
+    /// Returns an empty array if decompression fails or the data is unusable.
+    /// </summary>
+    private static byte[] GetRecordData(byte[] bytes, int recordStart, int dataSize, int headerSize, uint flags)
+    {
+        int dataOffset = recordStart + headerSize;
+
+        if ((flags & FlagCompressed) != 0)
+        {
+            if (dataSize < 4) return [];
+            try
+            {
+                int uncompressedSize = (int)ReadUInt32Le(bytes, dataOffset);
+                if (uncompressedSize <= 0 || uncompressedSize > 64 * 1024 * 1024) return [];
+
+                using var compressed = new System.IO.MemoryStream(bytes, dataOffset + 4, dataSize - 4);
+                using var zlib = new System.IO.Compression.ZLibStream(
+                    compressed, System.IO.Compression.CompressionMode.Decompress);
+                var result = new byte[uncompressedSize];
+                int totalRead = 0;
+                while (totalRead < uncompressedSize)
+                {
+                    int n = zlib.Read(result, totalRead, uncompressedSize - totalRead);
+                    if (n == 0) break;
+                    totalRead += n;
+                }
+                return totalRead > 0 ? result : [];
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
+        return bytes[dataOffset..(dataOffset + dataSize)];
+    }
+
     // ── ARMA record parser ────────────────────────────────────────────────────
 
     private static ArmaRecordDescriptor? ParseArmaRecord(
-        byte[] bytes, int recordStart, int dataSize, int headerSize, string pluginFileName)
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
     {
-        // Extract FormID from record header (bytes 12–15).
         var formId = ReadUInt32Le(bytes, recordStart + 12);
 
         string? editorId    = null;
         var bipedSlots      = new List<int>();
         var meshPaths       = new List<string>();
 
-        int pos = recordStart + headerSize;
-        int end = pos + dataSize;
+        int pos = 0;
+        int end = dataBytes.Length;
 
         while (pos + SubrecordHeaderSize <= end)
         {
-            var subTag  = ReadTag(bytes, pos);
-            var subSize = ReadUInt16Le(bytes, pos + 4);
+            var subTag  = ReadTag(dataBytes, pos);
+            var subSize = ReadUInt16Le(dataBytes, pos + 4);
 
             if (pos + SubrecordHeaderSize + subSize > end) break;
 
@@ -3261,43 +3498,37 @@ internal static class BinaryArmaParser
 
             if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && subSize > 0)
             {
-                int nullIdx = IndexOfNull(bytes, dataStart, subSize);
+                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
                 int strLen  = nullIdx >= 0 ? nullIdx : subSize;
-                editorId    = System.Text.Encoding.ASCII.GetString(bytes, dataStart, strLen);
+                editorId    = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen);
             }
             else if (BipedSubrecords.Contains(subTag) && subSize >= 4)
             {
-                // BOD2: 4-byte slot flags + 4-byte general flags.
-                // BODT: 4-byte slot flags + 4-byte general flags + 4-byte skill (LE only).
-                var slotFlags = ReadUInt32Le(bytes, dataStart);
+                var slotFlags = ReadUInt32Le(dataBytes, dataStart);
                 for (int i = 0; i < 32; i++)
                 {
                     if (((slotFlags >> i) & 1u) != 0)
-                    {
                         bipedSlots.Add(30 + i);
-                    }
                 }
             }
             else if (MeshSubrecords.Contains(subTag) && subSize > 0)
             {
-                int nullIdx = IndexOfNull(bytes, dataStart, subSize);
+                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
                 int strLen  = nullIdx >= 0 ? nullIdx : subSize;
                 var path    = System.Text.Encoding.ASCII
-                    .GetString(bytes, dataStart, strLen)
+                    .GetString(dataBytes, dataStart, strLen)
                     .Replace('\\', '/');
                 if (!string.IsNullOrEmpty(path))
-                {
                     meshPaths.Add(path);
-                }
             }
 
             pos += SubrecordHeaderSize + subSize;
         }
 
-        // Build a copy of the original record header and data bytes so PatchPluginWriter
-        // can reuse the original bytes when building override records.
         var headerBytes = bytes[recordStart..(recordStart + headerSize)];
-        var dataBytes   = bytes[(recordStart + headerSize)..(recordStart + headerSize + dataSize)];
+        // Store the original raw bytes (which may be compressed); callers that need
+        // plain data use GetRecordData separately.
+        var originalData = bytes[(recordStart + headerSize)..(recordStart + headerSize + (int)ReadUInt32Le(bytes, recordStart + 4))];
 
         return new ArmaRecordDescriptor(
             formId,
@@ -3306,7 +3537,60 @@ internal static class BinaryArmaParser
             bipedSlots,
             meshPaths,
             headerBytes,
-            dataBytes);
+            dataBytes);   // decompressed (or raw) data — PatchPluginWriter uses this
+    }
+
+    // ── ARMO record parser ────────────────────────────────────────────────────
+
+    private static ArmoRecordDescriptor? ParseArmoRecord(
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
+    {
+        var formId = ReadUInt32Le(bytes, recordStart + 12);
+
+        string? editorId = null;
+        var meshPaths    = new List<string>();
+
+        int pos = 0;
+        int end = dataBytes.Length;
+
+        while (pos + SubrecordHeaderSize <= end)
+        {
+            var subTag  = ReadTag(dataBytes, pos);
+            var subSize = ReadUInt16Le(dataBytes, pos + 4);
+
+            if (pos + SubrecordHeaderSize + subSize > end) break;
+
+            int dataStart = pos + SubrecordHeaderSize;
+
+            if (string.Equals(subTag, "EDID", StringComparison.Ordinal) && subSize > 0)
+            {
+                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                editorId    = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen);
+            }
+            else if (ArmoMeshSubrecords.Contains(subTag) && subSize > 0)
+            {
+                int nullIdx = IndexOfNull(dataBytes, dataStart, subSize);
+                int strLen  = nullIdx >= 0 ? nullIdx : subSize;
+                var path    = System.Text.Encoding.ASCII
+                    .GetString(dataBytes, dataStart, strLen)
+                    .Replace('\\', '/');
+                if (!string.IsNullOrEmpty(path))
+                    meshPaths.Add(path);
+            }
+
+            pos += SubrecordHeaderSize + subSize;
+        }
+
+        var headerBytes = bytes[recordStart..(recordStart + headerSize)];
+
+        return new ArmoRecordDescriptor(
+            formId,
+            pluginFileName,
+            editorId,
+            meshPaths,
+            headerBytes,
+            dataBytes);   // decompressed (or raw) data
     }
 
     // ── Binary helpers ────────────────────────────────────────────────────────
@@ -3336,9 +3620,10 @@ internal static class BinaryArmaParser
 /// <summary>
 /// Generates a minimal Bethesda override/patch ESP that:
 /// <list type="bullet">
-///   <item>Contains a TES4 header listing the original plugin as its single master file.</item>
-///   <item>Holds only the ARMA records that actually had mesh paths rewritten — no extra records.</item>
+///   <item>Contains a TES4 header (with ESL flag 0x200) listing the original plugin as its single master file.</item>
+///   <item>Holds only the ARMA and ARMO records that actually had mesh paths rewritten — no extra records.</item>
 ///   <item>Uses the same FormIDs as the originals (master index 0 = original plugin).</item>
+///   <item>Reports the accurate record count in the HEDR subrecord.</item>
 /// </list>
 /// The result can be placed in the Data folder alongside the original plugin as a standard
 /// Bethesda override without replacing any other records.
@@ -3347,6 +3632,9 @@ internal static class PatchPluginWriter
 {
     private const int SseHeaderSize = 24;
     private const int SubrecordHeaderSize = 6;
+
+    // ESL flag — bit 9 of TES4 record flags; prevents consuming a load-order slot.
+    private const uint EslFlag = 0x00000200u;
 
     private static readonly HashSet<string> MeshSubrecords =
         new(StringComparer.Ordinal) { "MOD2", "MOD3", "MOD4", "MOD5" };
@@ -3367,72 +3655,81 @@ internal static class PatchPluginWriter
     ///   Path-rewrite map (lowercase forward-slash normalised keys to new path values).
     /// </param>
     /// <param name="headerSize">Record header size (24 for SSE, 20 for LE).</param>
+    /// <param name="armoDescriptors">
+    ///   Optional ARMO record descriptors extracted from the same plugin.
+    ///   Emitted into a separate ARMO GRUP when any paths match.
+    /// </param>
     /// <returns>Raw bytes of the patch ESP, ready to write to disk.</returns>
     public static (byte[] PluginBytes, int ArmaRecordsIncluded) BuildPatchPlugin(
         string masterPluginFileName,
         IReadOnlyList<ArmaRecordDescriptor> descriptors,
         IReadOnlyDictionary<string, string> rewriteMap,
-        int headerSize = SseHeaderSize)
+        int headerSize = SseHeaderSize,
+        IReadOnlyList<ArmoRecordDescriptor>? armoDescriptors = null)
     {
-        using var ms = new MemoryStream();
-
-        // ── 1. TES4 record ────────────────────────────────────────────────────
-        var tes4Data = BuildTes4Data(masterPluginFileName);
-        WriteFlatRecord(ms, "TES4", tes4Data, formId: 0, headerSize: headerSize);
-
-        // ── 2. ARMA GRUP + patched records ────────────────────────────────────
+        // ── 1. Build patched ARMA record buffers ──────────────────────────────
         var armaBuffers = new List<byte[]>();
 
         foreach (var desc in descriptors)
         {
-            // Rewrite the ARMA data with updated mesh paths.
             var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap);
-            if (rewritten == 0) continue;   // no relevant paths — skip this record
+            if (rewritten == 0) continue;
 
-            // Build a full ARMA record (header + new data).
             armaBuffers.Add(BuildArmaRecord(desc, newData, headerSize));
         }
 
-        if (armaBuffers.Count == 0)
+        // ── 2. Build patched ARMO record buffers ──────────────────────────────
+        var armoBuffers = new List<byte[]>();
+
+        if (armoDescriptors is not null)
         {
-            // Nothing to patch — return an empty plugin (just the TES4 header).
+            foreach (var desc in armoDescriptors)
+            {
+                var (newData, rewritten) = RewriteArmaData(desc.OriginalDataBytes, rewriteMap);
+                if (rewritten == 0) continue;
+
+                armoBuffers.Add(BuildArmoRecord(desc, newData, headerSize));
+            }
+        }
+
+        int totalRecords = armaBuffers.Count + armoBuffers.Count;
+
+        // ── 3. TES4 record (ESL-flagged, accurate numRecords) ─────────────────
+        using var ms = new MemoryStream();
+        var tes4Data = BuildTes4Data(masterPluginFileName, totalRecords);
+        WriteFlatRecord(ms, "TES4", tes4Data, formId: 0, headerSize: headerSize, flags: EslFlag);
+
+        if (totalRecords == 0)
+        {
             return (ms.ToArray(), 0);
         }
 
-        // Wrap all ARMA records in a top-level GRUP.
-        int grupContentLen = armaBuffers.Sum(b => b.Length);
-        int grupTotalSize  = headerSize + grupContentLen;
-
-        // GRUP header.
-        WriteTag(ms, "GRUP");
-        WriteUInt32Le(ms, (uint)grupTotalSize);       // field4 = total size
-        WriteTag(ms, "ARMA");                         // label = "ARMA" (top-level group)
-        WriteUInt32Le(ms, 0);                         // groupType = 0 (top-level record type)
-        if (headerSize == SseHeaderSize)
+        // ── 4. ARMA GRUP ──────────────────────────────────────────────────────
+        if (armaBuffers.Count > 0)
         {
-            WriteUInt32Le(ms, 0);                     // VC info (SSE extra 4 bytes)
-            WriteUInt32Le(ms, 0);                     // timestamp / unk
+            WriteRecordGrup(ms, "ARMA", armaBuffers, headerSize);
         }
 
-        foreach (var buf in armaBuffers)
+        // ── 5. ARMO GRUP ──────────────────────────────────────────────────────
+        if (armoBuffers.Count > 0)
         {
-            ms.Write(buf, 0, buf.Length);
+            WriteRecordGrup(ms, "ARMO", armoBuffers, headerSize);
         }
 
-        return (ms.ToArray(), armaBuffers.Count);
+        return (ms.ToArray(), totalRecords);
     }
 
     // ── TES4 data builder ─────────────────────────────────────────────────────
 
-    private static byte[] BuildTes4Data(string masterPluginFileName)
+    private static byte[] BuildTes4Data(string masterPluginFileName, int numRecords = 0)
     {
         using var ms = new MemoryStream();
 
-        // HEDR subrecord: float32 version(1.70) + int32 numRecords(0) + uint32 nextObjectID(0x800)
+        // HEDR subrecord: float32 version(1.70) + int32 numRecords + uint32 nextObjectID(0x800)
         using (var hedrMs = new MemoryStream(12))
         {
             WriteFloat32Le(hedrMs, 1.70f);
-            WriteUInt32Le(hedrMs, 0);
+            WriteUInt32Le(hedrMs, (uint)numRecords);   // accurate count of non-GRUP, non-TES4 records
             WriteUInt32Le(hedrMs, 0x800);
             WriteSubrecord(ms, "HEDR", hedrMs.ToArray());
         }
@@ -3448,14 +3745,37 @@ internal static class PatchPluginWriter
         return ms.ToArray();
     }
 
+    // ── GRUP writer ───────────────────────────────────────────────────────────
+
+    private static void WriteRecordGrup(
+        MemoryStream ms, string groupLabel, List<byte[]> recordBuffers, int headerSize)
+    {
+        int grupContentLen = recordBuffers.Sum(b => b.Length);
+        int grupTotalSize  = headerSize + grupContentLen;
+
+        WriteTag(ms, "GRUP");
+        WriteUInt32Le(ms, (uint)grupTotalSize);     // field4 = total GRUP size
+        WriteTag(ms, groupLabel);                   // label = record type
+        WriteUInt32Le(ms, 0);                       // groupType = 0 (top-level record type)
+        if (headerSize == SseHeaderSize)
+        {
+            WriteUInt32Le(ms, 0);                   // VC info (SSE extra 4 bytes)
+            WriteUInt32Le(ms, 0);                   // timestamp / unk
+        }
+
+        foreach (var buf in recordBuffers)
+            ms.Write(buf, 0, buf.Length);
+    }
+
     // ── Record/subrecord writers ──────────────────────────────────────────────
 
     private static void WriteFlatRecord(
-        MemoryStream ms, string tag, byte[] data, uint formId, int headerSize)
+        MemoryStream ms, string tag, byte[] data, uint formId, int headerSize,
+        uint flags = 0)
     {
         WriteTag(ms, tag);
         WriteUInt32Le(ms, (uint)data.Length);    // dataSize
-        WriteUInt32Le(ms, 0);                     // flags
+        WriteUInt32Le(ms, flags);                // flags (e.g. ESL = 0x200)
         WriteUInt32Le(ms, formId);               // FormID
         WriteUInt32Le(ms, 0);                    // VC info 1
 
@@ -3472,10 +3792,34 @@ internal static class PatchPluginWriter
     {
         using var ms = new MemoryStream(headerSize + newData.Length);
 
-        // Copy the tag ("ARMA") from the original header bytes.
+        // Copy the tag ("ARMA") from the original header bytes; clear FlagCompressed.
         ms.Write(desc.OriginalRecordHeaderBytes, 0, 4);
-        WriteUInt32Le(ms, (uint)newData.Length);                        // new dataSize
-        ms.Write(desc.OriginalRecordHeaderBytes, 8, headerSize - 8);    // flags, FormID, VC...
+        WriteUInt32Le(ms, (uint)newData.Length);
+        // Preserve original flags but clear the compressed bit (data is already plain).
+        var origFlags = (uint)(desc.OriginalRecordHeaderBytes[8]
+                             | (desc.OriginalRecordHeaderBytes[9] << 8)
+                             | (desc.OriginalRecordHeaderBytes[10] << 16)
+                             | (desc.OriginalRecordHeaderBytes[11] << 24));
+        WriteUInt32Le(ms, origFlags & ~0x00040000u);
+        ms.Write(desc.OriginalRecordHeaderBytes, 12, headerSize - 12); // FormID, VC...
+        ms.Write(newData, 0, newData.Length);
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildArmoRecord(
+        ArmoRecordDescriptor desc, byte[] newData, int headerSize)
+    {
+        using var ms = new MemoryStream(headerSize + newData.Length);
+
+        ms.Write(desc.OriginalRecordHeaderBytes, 0, 4);                 // "ARMO"
+        WriteUInt32Le(ms, (uint)newData.Length);
+        var origFlags = (uint)(desc.OriginalRecordHeaderBytes[8]
+                             | (desc.OriginalRecordHeaderBytes[9] << 8)
+                             | (desc.OriginalRecordHeaderBytes[10] << 16)
+                             | (desc.OriginalRecordHeaderBytes[11] << 24));
+        WriteUInt32Le(ms, origFlags & ~0x00040000u);
+        ms.Write(desc.OriginalRecordHeaderBytes, 12, headerSize - 12);
         ms.Write(newData, 0, newData.Length);
 
         return ms.ToArray();
@@ -3488,7 +3832,7 @@ internal static class PatchPluginWriter
         ms.Write(data, 0, data.Length);
     }
 
-    // ── ARMA data rewrite (mirrors BinaryPluginRewriteService.RewriteArmaSubrecords) ─
+    // ── ARMA/ARMO data rewrite (same logic as BinaryPluginRewriteService.RewriteArmaSubrecords) ─
 
     internal static (byte[] NewData, int PathsRewritten) RewriteArmaData(
         byte[] dataBytes,
@@ -3944,20 +4288,23 @@ internal sealed class LocalExportService : IExportService
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
-                    // This patch contains ONLY the touched ARMA records and lists the
+                    // This patch contains ONLY the touched ARMA/ARMO records and lists the
                     // original plugin as its single master.  It is a proper Bethesda
-                    // override plugin that can be loaded after the original in any order.
+                    // override plugin (ESL-flagged) that can be loaded after the original
+                    // in any order without consuming a load order slot.
                     foreach (var pluginPath in sourcePluginPaths)
                     {
                         try
                         {
-                            var pluginBytes  = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
-                            var headerSize   = BinaryArmaParser.DetectHeaderSize(pluginBytes);
-                            var pluginName   = Path.GetFileName(pluginPath) ?? pluginPath;
-                            var descriptors  = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
+                            var pluginBytes    = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
+                            var headerSize     = BinaryArmaParser.DetectHeaderSize(pluginBytes);
+                            var pluginName     = Path.GetFileName(pluginPath) ?? pluginPath;
+                            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
+                            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(pluginBytes, pluginName);
 
                             var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
-                                pluginName, descriptors, normMap, headerSize);
+                                pluginName, armaDescriptors, normMap, headerSize,
+                                armoDescriptors: armoDescriptors);
 
                             if (included > 0)
                             {
@@ -4488,7 +4835,12 @@ internal sealed class LocalExportService : IExportService
 
         var rewrites = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var originalPath in pluginAnalysis.ArmorAddons.SelectMany(a => a.DetectedMeshPaths))
+        // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
+        var allPaths = pluginAnalysis.ArmorAddons
+            .SelectMany(a => a.DetectedMeshPaths)
+            .Concat((pluginAnalysis.ArmorRecords ?? []).SelectMany(r => r.DetectedMeshPaths));
+
+        foreach (var originalPath in allPaths)
         {
             var normalisedOriginal = originalPath.Replace('\\', '/');
             var fileName = Path.GetFileName(normalisedOriginal);
@@ -4565,6 +4917,7 @@ internal sealed class LocalExportService : IExportService
     /// <summary>
     /// Builds a structured list of per-mesh xEdit patch steps from the plugin analysis result.
     /// Each step identifies the plugin, the detected mesh path, and the rewritten target mesh path.
+    /// Covers both ARMA (ArmorAddon) and ARMO (Armor) records.
     /// </summary>
     private static IReadOnlyList<object> BuildProposedPatchSteps(
         PluginAnalysisResult pluginAnalysis,
@@ -4592,6 +4945,30 @@ internal sealed class LocalExportService : IExportService
                     XEditAction = hasRewrite
                         ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMA mesh paths."
                         : "Open in xEdit and patch this ARMA mesh path manually.",
+                    Tool = "xEdit"
+                });
+            }
+        }
+
+        foreach (var record in (pluginAnalysis.ArmorRecords ?? []))
+        {
+            foreach (var meshPath in record.DetectedMeshPaths)
+            {
+                var normalised = meshPath.Replace('\\', '/');
+                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                steps.Add(new
+                {
+                    Plugin = record.RecordType,
+                    RecordType = "Armor (ARMO)",
+                    OriginalMeshPath = normalised,
+                    ProposedMeshPath = rewrittenPath ?? normalised,
+                    RewriteReady = hasRewrite,
+                    PlacementNote = hasRewrite
+                        ? $"Use patch-armor.pas to rewrite ARMO path to {rewrittenPath} and keep the converted NIF at that path."
+                        : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
+                    XEditAction = hasRewrite
+                        ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMO mesh paths."
+                        : "Open in xEdit and patch this ARMO mesh path manually.",
                     Tool = "xEdit"
                 });
             }
@@ -5142,9 +5519,9 @@ internal sealed class LocalExportService : IExportService
 
     /// <summary>
     /// Generates a runnable xEdit Pascal (Delphi) automation script that iterates all
-    /// loaded plugins, finds ARMA (ArmorAddon) records whose mesh paths match those
-    /// detected during plugin analysis, and rewrites them to the converted mesh paths.
-    /// Drop the output file into the Edit Scripts folder of SSEEdit/TES5Edit
+    /// loaded plugins, finds ARMA (ArmorAddon) and ARMO (Armor) records whose mesh paths
+    /// match those detected during plugin analysis, and rewrites them to the converted
+    /// mesh paths.  Drop the output file into the Edit Scripts folder of SSEEdit/TES5Edit
     /// and run it from the Tools → Apply Script menu.
     /// </summary>
     private static string BuildXEditScript(
@@ -5152,9 +5529,16 @@ internal sealed class LocalExportService : IExportService
         string targetBody,
         IReadOnlyDictionary<string, string> pluginRewriteMap)
     {
-        var oldPaths = pluginAnalysis.ArmorAddons
+        // Collect all old paths from ARMA addons AND ARMO armor records.
+        var armaOldPaths = pluginAnalysis.ArmorAddons
             .SelectMany(a => a.DetectedMeshPaths)
-            .Select(path => path.Replace('\\', '/'))
+            .Select(path => path.Replace('\\', '/'));
+
+        var armoOldPaths = (pluginAnalysis.ArmorRecords ?? [])
+            .SelectMany(a => a.DetectedMeshPaths)
+            .Select(path => path.Replace('\\', '/'));
+
+        var oldPaths = armaOldPaths.Concat(armoOldPaths)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -5191,7 +5575,7 @@ internal sealed class LocalExportService : IExportService
             {   2. Open SSEEdit and load the plugins you want to patch.     }
             {   3. Select all plugins in the tree, then:                    }
             {        Tools → Apply Script → SlideSmith_patch-armor          }
-            {   4. Script rewrites matching ARMA mesh paths automatically.  }
+            {   4. Script rewrites matching ARMA and ARMO mesh paths.       }
             {   5. Save plugin changes in xEdit after review.               }
             { ============================================================ }
 
@@ -5258,21 +5642,30 @@ internal sealed class LocalExportService : IExportService
             begin
               Result := 0;
               sig := Signature(e);
-              if sig <> 'ARMA' then exit;
-              TryRewriteModelPath(e, 'Female World Model\MOD2');
-              TryRewriteModelPath(e, 'Female World Model\MOD2 - Model Filename');
-              TryRewriteModelPath(e, 'Male World Model\MOD2');
-              TryRewriteModelPath(e, 'Male World Model\MOD2 - Model Filename');
-              TryRewriteModelPath(e, 'Female 1st Person\MOD4');
-              TryRewriteModelPath(e, 'Female 1st Person\MOD4 - Model Filename');
-              TryRewriteModelPath(e, 'Male 1st Person\MOD4');
-              TryRewriteModelPath(e, 'Male 1st Person\MOD4 - Model Filename');
+              { ── ARMA (ArmorAddon) — world and first-person models ── }
+              if sig = 'ARMA' then begin
+                TryRewriteModelPath(e, 'Female World Model\MOD2');
+                TryRewriteModelPath(e, 'Female World Model\MOD2 - Model Filename');
+                TryRewriteModelPath(e, 'Male World Model\MOD2');
+                TryRewriteModelPath(e, 'Male World Model\MOD2 - Model Filename');
+                TryRewriteModelPath(e, 'Female 1st Person\MOD4');
+                TryRewriteModelPath(e, 'Female 1st Person\MOD4 - Model Filename');
+                TryRewriteModelPath(e, 'Male 1st Person\MOD4');
+                TryRewriteModelPath(e, 'Male 1st Person\MOD4 - Model Filename');
+              end;
+              { ── ARMO (Armor) — inventory/world model ── }
+              if sig = 'ARMO' then begin
+                TryRewriteModelPath(e, 'Male World Model\MOD2 - Model Filename');
+                TryRewriteModelPath(e, 'Male World Model\MOD2');
+                TryRewriteModelPath(e, 'Female World Model\MOD3 - Model Filename');
+                TryRewriteModelPath(e, 'Female World Model\MOD3');
+              end;
             end;
 
             function Finalize: Integer;
             begin
               AddMessage('SlideSmith patch rewriting complete.');
-              AddMessage('Total ARMA model paths rewritten: ' + IntToStr(gPatchedCount));
+              AddMessage('Total ARMA/ARMO model paths rewritten: ' + IntToStr(gPatchedCount));
               Result := 0;
             end;
 

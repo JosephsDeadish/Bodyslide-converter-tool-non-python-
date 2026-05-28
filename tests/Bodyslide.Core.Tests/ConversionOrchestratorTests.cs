@@ -3212,6 +3212,64 @@ public sealed class BinaryPluginRewriteServiceTests
         }
     }
 
+    // ── ARMO record rewrite ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RewriteAsync_ArmoWithMatchingMod2_PatchesPath()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outDir  = Path.Combine(workDir, "out");
+        Directory.CreateDirectory(workDir);
+        Directory.CreateDirectory(outDir);
+
+        try
+        {
+            // Build a minimal plugin that has an ARMO record (not ARMA) with a MOD2 mesh path.
+            const string origPath = "meshes/armor/iron/iron_0.nif";
+            const string newPath  = "meshes/slidesmith/cbbe/iron_0.nif";
+
+            byte[] mod2   = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(origPath + "\0"));
+            byte[] armo   = BuildArmoRecord(mod2, headerSize: 24);
+            byte[] plugin = [..BuildMinimalPlugin_SseNoArma(), ..armo];
+
+            var pluginPath = Path.Combine(workDir, "ArmoTest.esp");
+            await File.WriteAllBytesAsync(pluginPath, plugin);
+
+            var svc    = new BinaryPluginRewriteService();
+            var result = await svc.RewriteAsync(
+                [pluginPath],
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [origPath] = newPath
+                },
+                outDir,
+                CancellationToken.None);
+
+            Assert.Equal(1, result.PluginsProcessed);
+            Assert.Equal(1, result.PathsRewritten);
+            Assert.Single(result.PatchedPluginPaths);
+
+            var patchedContent = System.Text.Encoding.Latin1.GetString(
+                await File.ReadAllBytesAsync(result.PatchedPluginPaths[0]));
+            Assert.Contains(newPath, patchedContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    /// <summary>Builds an ARMO record with a 24-byte SSE record header wrapping subrecord data.</summary>
+    private static byte[] BuildArmoRecord(byte[] subrecordData, int headerSize = 24)
+    {
+        var buf = new byte[headerSize + subrecordData.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)subrecordData.Length);
+        WriteUInt32Le(buf, 12, 0x00000002u); // distinct FormID
+        subrecordData.CopyTo(buf, headerSize);
+        return buf;
+    }
+
     // ── Full pipeline integration ─────────────────────────────────────────────
 
     [Fact]
@@ -3499,6 +3557,73 @@ public sealed class BinaryArmaParserTests
         Assert.Empty(result);
     }
 
+    // ── ARMO (Armor) record extraction ───────────────────────────────────────
+
+    [Fact]
+    public void ExtractArmoRecords_ExtractsMeshPathsFromMod2AndMod3()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_w.nif\0"));
+        byte[] mod3 = BuildSubrecord("MOD3",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_f_w.nif\0"));
+        byte[] data = [..mod2, ..mod3];
+
+        var plugin      = BuildMinimalPlugin_SseWithArmo(data);
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains("meshes/armor/iron/iron_w.nif",   descriptors[0].MeshPaths);
+        Assert.Contains("meshes/armor/iron/iron_f_w.nif", descriptors[0].MeshPaths);
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_EmptyInput_ReturnsEmpty()
+    {
+        var result = BinaryArmaParser.ExtractArmoRecords([]);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_NoArmoRecords_ReturnsEmpty()
+    {
+        // Plugin contains only an ARMA record — ARMO extraction should find nothing.
+        byte[] mod2   = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/a/b.nif\0"));
+        byte[] plugin = BuildMinimalPlugin_SseWithArma(mod2);
+
+        var result = BinaryArmaParser.ExtractArmoRecords(plugin);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ExtractArmaRecords_CompressedRecord_DecompressesAndExtractsPaths()
+    {
+        // Build an ARMA record whose payload is zlib-compressed.
+        byte[] mod2    = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/comp/comp_0.nif\0"));
+        byte[] armaRec = BuildCompressedRecord(mod2, tag: "ARMA", headerSize: 24);
+        byte[] plugin  = [..BuildMinimalPlugin_SseNoArma(), ..armaRec];
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains("meshes/armor/comp/comp_0.nif", descriptors[0].MeshPaths);
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_CompressedRecord_DecompressesAndExtractsPaths()
+    {
+        byte[] mod2    = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/comp/comp_w.nif\0"));
+        byte[] armoRec = BuildCompressedRecord(mod2, tag: "ARMO", headerSize: 24);
+        byte[] plugin  = [..BuildMinimalPlugin_SseNoArma(), ..armoRec];
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin);
+
+        Assert.Single(descriptors);
+        Assert.Contains("meshes/armor/comp/comp_w.nif", descriptors[0].MeshPaths);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>Like BuildMinimalPlugin_SseWithArma but lets the caller set the FormID.</summary>
@@ -3587,6 +3712,49 @@ public sealed class BinaryArmaParserTests
         ms.WriteByte((byte)(value >> 8));
         ms.WriteByte((byte)(value >> 16));
         ms.WriteByte((byte)(value >> 24));
+    }
+
+    /// <summary>Builds a minimal SSE plugin with a single ARMO record (not ARMA) at file top level.</summary>
+    private static byte[] BuildMinimalPlugin_SseWithArmo(byte[] armoSubrecords)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArma();
+        var buf = new byte[24 + armoSubrecords.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)armoSubrecords.Length);
+        WriteUInt32Le(buf, 12, 0x00000002u); // FormID
+        armoSubrecords.CopyTo(buf, 24);
+        return [..tes4, ..buf];
+    }
+
+    /// <summary>
+    /// Builds a record with <paramref name="tag"/> whose payload is the zlib-compressed form of
+    /// <paramref name="uncompressedData"/> (FlagCompressed bit 18 = 0x00040000 set in header flags).
+    /// </summary>
+    private static byte[] BuildCompressedRecord(byte[] uncompressedData, string tag, int headerSize = 24)
+    {
+        // Compress with ZLib.
+        byte[] compressed;
+        using (var ms = new MemoryStream())
+        {
+            using var zlib = new System.IO.Compression.ZLibStream(
+                ms, System.IO.Compression.CompressionLevel.Fastest);
+            zlib.Write(uncompressedData, 0, uncompressedData.Length);
+            zlib.Close();
+            compressed = ms.ToArray();
+        }
+
+        // Payload: uint32LE uncompressed size + compressed bytes.
+        var payload = new byte[4 + compressed.Length];
+        WriteUInt32Le(payload, 0, (uint)uncompressedData.Length);
+        compressed.CopyTo(payload, 4);
+
+        var buf = new byte[headerSize + payload.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)payload.Length);
+        WriteUInt32Le(buf, 8, 0x00040000u);  // FlagCompressed
+        WriteUInt32Le(buf, 12, 0x00000001u); // FormID
+        payload.CopyTo(buf, headerSize);
+        return buf;
     }
 }
 
@@ -3786,6 +3954,129 @@ public sealed class PatchPluginWriterTests
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    // ── ESL flag ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildPatchPlugin_Tes4HasEslFlag()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/a/b.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "ArmorA", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/a/b.nif"] = "meshes/slidesmith/out/b.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            "Plugin.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        // TES4 record header: tag[0..3] | dataSize[4..7] | flags[8..11] | ...
+        var tes4Flags = (uint)(patchBytes[8]
+                             | (patchBytes[9]  << 8)
+                             | (patchBytes[10] << 16)
+                             | (patchBytes[11] << 24));
+        const uint eslFlag = 0x00000200u;
+        Assert.True((tes4Flags & eslFlag) != 0,
+            $"Expected ESL flag 0x200 in TES4 record flags, got 0x{tes4Flags:X8}");
+    }
+
+    // ── HEDR numRecords accuracy ──────────────────────────────────────────────
+
+    [Fact]
+    public void BuildPatchPlugin_HedrNumRecordsMatchesIncludedCount()
+    {
+        // One matching ARMA record → included = 1, numRecords in HEDR should be 1.
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/x/y.nif\0"));
+        var descriptor = BuildDescriptor(0x00000001u, "ArmorX", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/x/y.nif"] = "meshes/slidesmith/y.nif"
+        };
+
+        var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+            "P.esp", [descriptor], rewriteMap, headerSize: 24);
+
+        Assert.Equal(1, included);
+
+        // TES4 record: header(24) | TES4 data starts at 24
+        // TES4 data: HEDR tag[0..3] + size[4..5] (=12) + data[6..17]
+        //   HEDR data: version(float32)[0..3] + numRecords(int32)[4..7] + nextObjectId(uint32)[8..11]
+        // So numRecords is at byte 24 + 6 + 4 = 34
+        int numRecords = patchBytes[34]
+                       | (patchBytes[35] << 8)
+                       | (patchBytes[36] << 16)
+                       | (patchBytes[37] << 24);
+        Assert.Equal(included, numRecords);
+    }
+
+    // ── ARMO GRUP ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildPatchPlugin_WithArmoDescriptors_EmitsArmoGrup()
+    {
+        // ARMO-only: no ARMA descriptors, one ARMO descriptor with a matching path.
+        const string origPath = "meshes/armor/iron/iron_w.nif";
+        const string newPath  = "meshes/slidesmith/cbbe/iron_w.nif";
+
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes(origPath + "\0"));
+        var armoDesc = BuildArmoDescriptor(0x00000010u, "ArmorIron", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [origPath] = newPath
+        };
+
+        var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+            "ArmoOnly.esp",
+            descriptors: [],
+            rewriteMap: rewriteMap,
+            headerSize: 24,
+            armoDescriptors: [armoDesc]);
+
+        Assert.Equal(1, included);
+        var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
+        Assert.Contains("ARMO", asLatin1);
+        Assert.Contains("GRUP", asLatin1);
+        // Confirm the new mesh path appears in the output.
+        Assert.Contains(newPath, asLatin1, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_WithBothArmaAndArmo_EmitsBothGrups()
+    {
+        const string armaOrig = "meshes/arma/a.nif";
+        const string armaNew  = "meshes/slidesmith/a.nif";
+        const string armoOrig = "meshes/armo/b.nif";
+        const string armoNew  = "meshes/slidesmith/b.nif";
+
+        byte[] armaMod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes(armaOrig + "\0"));
+        byte[] armoMod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes(armoOrig + "\0"));
+
+        var armaDesc = BuildDescriptor(0x00000001u, "ArmaRec", armaMod2);
+        var armoDesc = BuildArmoDescriptor(0x00000002u, "ArmoRec", armoMod2);
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [armaOrig] = armaNew,
+            [armoOrig] = armoNew
+        };
+
+        var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
+            "Both.esp", [armaDesc], rewriteMap, headerSize: 24,
+            armoDescriptors: [armoDesc]);
+
+        Assert.Equal(2, included);
+        var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
+        // Both GRUPs must be present.
+        Assert.Contains(armaNew, asLatin1, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(armoNew, asLatin1, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     private static ArmaRecordDescriptor BuildDescriptor(
         uint formId, string editorId, byte[] dataBytes)
     {
@@ -3805,6 +4096,25 @@ public sealed class PatchPluginWriterTests
             OriginalRecordHeaderBytes: header,
             OriginalDataBytes: dataBytes);
     }
+
+    private static ArmoRecordDescriptor BuildArmoDescriptor(
+        uint formId, string editorId, byte[] dataBytes)
+    {
+        var header = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(header, 0);
+        WriteUInt32Le(header, 4, (uint)dataBytes.Length);
+        WriteUInt32Le(header, 8, 0);
+        WriteUInt32Le(header, 12, formId);
+
+        return new ArmoRecordDescriptor(
+            FormId: formId,
+            PluginFileName: "Test.esp",
+            EditorId: editorId,
+            MeshPaths: [],
+            OriginalRecordHeaderBytes: header,
+            OriginalDataBytes: dataBytes);
+    }
+
 
     private static byte[] BuildSubrecord(string tag, byte[] data)
     {
