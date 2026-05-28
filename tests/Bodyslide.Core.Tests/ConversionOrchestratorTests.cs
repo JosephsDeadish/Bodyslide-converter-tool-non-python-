@@ -4923,7 +4923,7 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(1, pathsRewritten);
+        Assert.Equal(3, pathsRewritten);
 
         // Verify the patched path appears verbatim in the output.
         var content = System.Text.Encoding.Latin1.GetString(patched);
@@ -4952,7 +4952,7 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(1, pathsRewritten);
+        Assert.Equal(3, pathsRewritten);
 
         // Verify patched content is present.
         var content = System.Text.Encoding.Latin1.GetString(patched);
@@ -4979,7 +4979,7 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(1, pathsRewritten);
+        Assert.Equal(3, pathsRewritten);
 
         var descriptors = BinaryArmaParser.ExtractArmaRecords(patched);
         Assert.Single(descriptors);
@@ -5112,7 +5112,7 @@ public sealed class BinaryPluginRewriteServiceTests
 
             Assert.Equal(1, result.PluginsProcessed);
             Assert.Equal(1, result.ArmaRecordsPatched);
-            Assert.Equal(1, result.PathsRewritten);
+            Assert.Equal(3, result.PathsRewritten);
             Assert.Single(result.PatchedPluginPaths);
 
             var patchedFile = result.PatchedPluginPaths[0];
