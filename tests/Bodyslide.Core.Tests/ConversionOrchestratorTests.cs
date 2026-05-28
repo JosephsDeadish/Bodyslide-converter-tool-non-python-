@@ -4673,4 +4673,182 @@ public sealed class ConversionReadmeGeneratorTests
             request, armor, mesh, bsProject,
             pluginResult, files, rewriteMap, patchEspGenerated);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Weight-variant synthesis tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithOnlyLowWeightNif_SynthesizesHighWeightVariant()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory   = Path.Combine(workingDirectory, "input");
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+
+        // Only the _0 (low-weight) half is present; the _1 must be synthesised.
+        var mesh0 = Path.Combine(inputDirectory, "armor_0.nif");
+        await File.WriteAllTextAsync(mesh0, "low-weight-only");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // Both variants must be present in the output even though only _0 was provided.
+            Assert.Contains("armor_0.nif", nifFiles);
+            Assert.Contains("armor_1.nif", nifFiles);
+
+            // The log must document that a variant was synthesised.
+            var logPath  = Path.Combine(outputDirectory, "conversion.log");
+            var logLines = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("weight-variants:synthesized=1", logLines);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithOnlyHighWeightNif_SynthesizesLowWeightVariant()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory   = Path.Combine(workingDirectory, "input");
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(inputDirectory);
+
+        // Only the _1 (high-weight) half is present; the _0 must be synthesised.
+        var mesh1 = Path.Combine(inputDirectory, "armor_1.nif");
+        await File.WriteAllTextAsync(mesh1, "high-weight-only");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            Assert.Contains("armor_0.nif", nifFiles);
+            Assert.Contains("armor_1.nif", nifFiles);
+
+            var logPath  = Path.Combine(outputDirectory, "conversion.log");
+            var logLines = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("weight-variants:synthesized=1", logLines);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true,  1.0,  1.0)]   // neutral factor stays neutral
+    [InlineData(true,  1.2,  1.3)]   // synthesising _1: delta 0.2 × 1.5 = 0.3
+    [InlineData(false, 1.2,  1.1)]   // synthesising _0: delta 0.2 × 0.5 = 0.1
+    [InlineData(true,  0.8, 0.7)]    // negative delta amplified: -0.2 × 1.5 = -0.3
+    [InlineData(false, 0.8, 0.9)]    // negative delta attenuated: -0.2 × 0.5 = -0.1
+    public void ScaleMorphsForWeightVariant_ProducesExpectedFactors(
+        bool synthesizingHighWeight, double input, double expectedOutput)
+    {
+        var morphs = new Dictionary<string, double> { ["chest"] = input };
+        var result = LocalExportService.ScaleMorphsForWeightVariant(morphs, synthesizingHighWeight);
+        Assert.Equal(expectedOutput, result["chest"], precision: 5);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Normal map stub generation tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithDiffuseAndNoNormal_GeneratesNormalMapStub()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory   = Path.Combine(workingDirectory, "input");
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        var texDir           = Path.Combine(inputDirectory, "textures", "armor", "iron");
+        Directory.CreateDirectory(Path.Combine(inputDirectory, "meshes", "armor"));
+        Directory.CreateDirectory(texDir);
+
+        // A mesh so the importer finds something to convert.
+        await File.WriteAllTextAsync(
+            Path.Combine(inputDirectory, "meshes", "armor", "iron_0.nif"), "nif-data");
+        // A diffuse texture but no matching _n.dds companion.
+        await File.WriteAllBytesAsync(Path.Combine(texDir, "iron_d.dds"), [0x44, 0x44, 0x53, 0x20]);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            // The tool must have generated a _n.dds stub alongside the diffuse.
+            var normalFiles = Directory.GetFiles(outputDirectory, "*_n.dds", SearchOption.AllDirectories);
+            Assert.NotEmpty(normalFiles);
+            Assert.Contains(normalFiles, f => Path.GetFileName(f).Equals("iron_d_n.dds", StringComparison.OrdinalIgnoreCase));
+
+            // The generated file must contain a valid DDS magic header.
+            var stubBytes = await File.ReadAllBytesAsync(normalFiles[0]);
+            Assert.True(stubBytes.Length >= 128, "DDS stub must be at least 128 bytes (header).");
+            Assert.Equal(0x44, stubBytes[0]); // 'D'
+            Assert.Equal(0x44, stubBytes[1]); // 'D'
+            Assert.Equal(0x53, stubBytes[2]); // 'S'
+            Assert.Equal(0x20, stubBytes[3]); // ' '
+
+            var logText = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion.log"));
+            Assert.Contains("normal-stubs:generated=", logText);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildFlatNormalMapDds_HasValidDdsMagicAndDimensions()
+    {
+        var dds = LocalExportService.BuildFlatNormalMapDds();
+
+        // Must be exactly 128 (header) + 4×4×4 (pixel data) = 192 bytes.
+        Assert.Equal(192, dds.Length);
+
+        // Magic "DDS ".
+        Assert.Equal(0x44, dds[0]);
+        Assert.Equal(0x44, dds[1]);
+        Assert.Equal(0x53, dds[2]);
+        Assert.Equal(0x20, dds[3]);
+
+        // DDS_HEADER.dwSize at offset 4 = 124.
+        var dwSize = (uint)(dds[4] | (dds[5] << 8) | (dds[6] << 16) | (dds[7] << 24));
+        Assert.Equal(124u, dwSize);
+
+        // Height and width at offsets 12 and 16 must both be 4.
+        var dwHeight = (uint)(dds[12] | (dds[13] << 8) | (dds[14] << 16) | (dds[15] << 24));
+        var dwWidth  = (uint)(dds[16] | (dds[17] << 8) | (dds[18] << 16) | (dds[19] << 24));
+        Assert.Equal(4u, dwHeight);
+        Assert.Equal(4u, dwWidth);
+
+        // Pixel data: each pixel should have B=0xFF (Z=1), G=0x80 (Y=0.5), R=0x80 (X=0.5).
+        for (var i = 0; i < 16; i++)
+        {
+            var off = 128 + i * 4;
+            Assert.Equal(0xFF, dds[off]);     // B
+            Assert.Equal(0x80, dds[off + 1]); // G
+            Assert.Equal(0x80, dds[off + 2]); // R
+            Assert.Equal(0xFF, dds[off + 3]); // A
+        }
+    }
 }

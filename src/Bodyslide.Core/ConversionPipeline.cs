@@ -4447,9 +4447,11 @@ internal sealed class LocalExportService : IExportService
 
         // Write converted NIF mesh file(s) to the output directory.
         // When _0/_1 weight variant pairs are detected, both are written as a matched pair.
+        // When only one half is present, the missing variant is synthesised from the available
+        // half using weight-scaled morphs so the game can interpolate between body weights.
         // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
         // detected; otherwise the source bytes are copied through unchanged.
-        var writtenNifs = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
+        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
         var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
@@ -4464,6 +4466,12 @@ internal sealed class LocalExportService : IExportService
         // into the output package so converted outputs stay mod-ready.
         var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
+
+        // Generate flat-normal DDS stubs for any diffuse textures that have no matching _n.dds.
+        // Missing normal maps cause purple-tinted or visually broken surfaces in-game; a flat
+        // stub (pointing straight out in tangent space) prevents that and can be replaced later.
+        var generatedNormals = await GenerateMissingNormalMapStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
+        outputFiles.AddRange(generatedNormals);
 
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
         var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
@@ -4639,6 +4647,14 @@ internal sealed class LocalExportService : IExportService
 
         var logPath = Path.Combine(outputDirectory, "conversion.log");
         await File.WriteAllLinesAsync(logPath, steps, cancellationToken);
+        if (synthesizedVariantCount > 0)
+        {
+            await File.AppendAllTextAsync(logPath, $"weight-variants:synthesized={synthesizedVariantCount}{Environment.NewLine}", cancellationToken);
+        }
+        if (generatedNormals.Count > 0)
+        {
+            await File.AppendAllTextAsync(logPath, $"normal-stubs:generated={generatedNormals.Count}{Environment.NewLine}", cancellationToken);
+        }
         outputFiles.Add(logPath);
 
         var fomodDirectory = Path.Combine(outputDirectory, "fomod");
@@ -4703,18 +4719,30 @@ internal sealed class LocalExportService : IExportService
 
     /// <summary>
     /// Writes source NIF mesh files to the output directory as conversion artifacts.
-    /// Detects _0/_1 weight variant pairs and writes them together so both halves land
-    /// in the same output folder with their original pair naming intact.
-    /// Uses a heuristic vertex-block transform when possible, otherwise falls back to
-    /// byte-for-byte passthrough.
+    /// <para>
+    /// Detects _0/_1 weight variant pairs and writes both halves together.  When only one
+    /// half of a pair exists the missing variant is <em>synthesised</em> from the available
+    /// half: the regional morph factors are scaled so that the high-weight (_1) variant
+    /// amplifies deltas by ×1.5 and the low-weight (_0) variant attenuates them by ×0.5.
+    /// This prevents in-game body-weight interpolation failures (mesh collapse, clipping,
+    /// NPC weight breaks) that occur when only one variant is present.
+    /// </para>
+    /// <para>
+    /// Uses a heuristic vertex-block transform when possible; falls back to byte-for-byte
+    /// passthrough when no readable NIF vertex stream is detected.
+    /// </para>
     /// </summary>
-    private static async Task<IReadOnlyList<string>> WriteConvertedNifsAsync(
+    /// <returns>
+    /// A tuple of the written file paths and the count of synthesised weight variants.
+    /// </returns>
+    private static async Task<(IReadOnlyList<string> Written, int SynthesizedCount)> WriteConvertedNifsAsync(
         ImportedArmor armor,
         ConvertedMesh mesh,
         string outputDirectory,
         CancellationToken cancellationToken)
     {
         var written = new List<string>();
+        var synthesizedCount = 0;
 
         // Build a set of mesh files that are part of a detected _0/_1 pair so we can
         // treat unpaired singletons differently.
@@ -4739,12 +4767,31 @@ internal sealed class LocalExportService : IExportService
                 }
                 else
                 {
-                    // Incomplete pair — treat each half as an individual mesh below.
-                    var onlyHalf = pair.LowWeightMesh ?? pair.HighWeightMesh;
-                    if (onlyHalf is not null)
+                    // Incomplete pair — synthesise the missing weight variant so the game can
+                    // interpolate body weight without mesh collapse or clipping artefacts.
+                    var sourceMesh  = pair.LowWeightMesh ?? pair.HighWeightMesh!;
+                    var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
+                    var ext         = Path.GetExtension(sourceMesh);
+
+                    var destSource = Path.Combine(outputDirectory, Path.GetFileName(sourceMesh)!);
+                    var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
+                    var destSynth  = Path.Combine(outputDirectory, synthName);
+
+                    // Write the existing half with regular morphs.
+                    await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken);
+
+                    // Write the synthesised half with weight-scaled morphs.
+                    var synthMesh = mesh with
                     {
-                        pairedFiles.Remove(onlyHalf);
-                    }
+                        RegionalMorphing = ScaleMorphsForWeightVariant(mesh.RegionalMorphing, isSourceLow),
+                        Strategy         = mesh.Strategy + "+synth-" + (isSourceLow ? "1" : "0")
+                    };
+                    await CopyNifAsync(sourceMesh, destSynth, synthMesh, cancellationToken);
+
+                    pairedFiles.Add(sourceMesh);
+                    written.Add(destSource);
+                    written.Add(destSynth);
+                    synthesizedCount++;
                 }
             }
         }
@@ -4759,8 +4806,142 @@ internal sealed class LocalExportService : IExportService
             written.Add(dest);
         }
 
-        return written;
+        return (written, synthesizedCount);
     }
+
+    /// <summary>
+    /// Scales per-region morph factors to derive the missing weight variant from the available one.
+    /// <list type="bullet">
+    ///   <item>Synthesising <c>_1</c> from <c>_0</c> (<paramref name="synthesizingHighWeight"/>=<see langword="true"/>):
+    ///   the delta above 1.0 is amplified by ×1.5 to represent the heavier body shape.</item>
+    ///   <item>Synthesising <c>_0</c> from <c>_1</c> (<paramref name="synthesizingHighWeight"/>=<see langword="false"/>):
+    ///   the delta is attenuated by ×0.5 to represent the lighter body shape.</item>
+    /// </list>
+    /// A factor of exactly 1.0 (no-change regions) is always preserved.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, double> ScaleMorphsForWeightVariant(
+        IReadOnlyDictionary<string, double> morphs,
+        bool synthesizingHighWeight)
+    {
+        // _1 (high-weight) = bigger shape → amplify deltas by 1.5
+        // _0 (low-weight)  = slimmer shape → attenuate deltas by 0.5
+        var scale = synthesizingHighWeight ? 1.5 : 0.5;
+        return morphs.ToDictionary(
+            kv => kv.Key,
+            kv => Math.Round(1.0 + (kv.Value - 1.0) * scale, 6),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Generates minimal flat tangent-space normal map stubs (4×4 BGRA8 DDS) for every
+    /// diffuse texture that has no corresponding <c>_n.dds</c> in the output package.
+    /// A flat stub prevents purple/missing-normal-map rendering artefacts in-game and
+    /// can be replaced by a proper baked normal map at any time.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> GenerateMissingNormalMapStubsAsync(
+        ImportedArmor armor,
+        TextureSummary textureSummary,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        if (textureSummary.MissingNormals.Count == 0) return [];
+
+        var generated = new List<string>();
+        var missingSet = new HashSet<string>(textureSummary.MissingNormals, StringComparer.OrdinalIgnoreCase);
+        var stubBytes  = BuildFlatNormalMapDds();
+
+        foreach (var texturePath in armor.TextureFiles)
+        {
+            var fileName = Path.GetFileName(texturePath);
+            if (!missingSet.Contains(fileName)) continue;
+            if (!File.Exists(texturePath)) continue;
+
+            // Derive the output path for the stub: same relative location as the copied
+            // diffuse but with the base name suffixed by "_n".
+            var relativePath  = GetSafeRelativeAssetPath(armor.SourcePath, Path.GetFullPath(texturePath));
+            var destDiffuse   = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
+            if (!destDiffuse.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
+            {
+                destDiffuse = Path.Combine(outputDirectory, fileName);
+            }
+
+            var normalStubPath = Path.Combine(
+                Path.GetDirectoryName(destDiffuse) ?? outputDirectory,
+                Path.GetFileNameWithoutExtension(destDiffuse) + "_n.dds");
+
+            if (File.Exists(normalStubPath)) continue;
+
+            var dir = Path.GetDirectoryName(normalStubPath);
+            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+            await File.WriteAllBytesAsync(normalStubPath, stubBytes, cancellationToken);
+            generated.Add(normalStubPath);
+        }
+
+        return generated;
+    }
+
+    /// <summary>
+    /// Builds a minimal 4×4 uncompressed BGRA8 DDS representing a flat tangent-space
+    /// normal map.  Every pixel stores the vector (0.5, 0.5, 1.0) remapped to bytes
+    /// (R=0x80, G=0x80, B=0xFF) which points straight outward from the surface.
+    /// </summary>
+    internal static byte[] BuildFlatNormalMapDds()
+    {
+        const int width         = 4;
+        const int height        = 4;
+        const int bytesPerPixel = 4; // BGRA8888
+        const int headerBytes   = 128; // 4-byte magic + 124-byte DDS_HEADER
+
+        var data = new byte[headerBytes + width * height * bytesPerPixel];
+        var s    = data.AsSpan();
+
+        // ── Magic "DDS " ─────────────────────────────────────────────────────
+        s[0] = 0x44; s[1] = 0x44; s[2] = 0x53; s[3] = 0x20;
+
+        // ── DDS_HEADER (124 bytes starting at offset 4) ──────────────────────
+        WriteDdsLE(s,  4, 124);           // dwSize
+        WriteDdsLE(s,  8, 0x100FU);       // dwFlags: CAPS|HEIGHT|WIDTH|PITCH|PIXELFORMAT
+        WriteDdsLE(s, 12, (uint)height);  // dwHeight
+        WriteDdsLE(s, 16, (uint)width);   // dwWidth
+        WriteDdsLE(s, 20, (uint)(width * bytesPerPixel)); // dwPitchOrLinearSize
+        WriteDdsLE(s, 24, 0);             // dwDepth
+        WriteDdsLE(s, 28, 1);             // dwMipMapCount
+
+        // ── DDS_PIXELFORMAT (32 bytes at offset 76) ──────────────────────────
+        WriteDdsLE(s, 76,  32U);          // dwSize
+        WriteDdsLE(s, 80,  0x41U);        // dwFlags: DDPF_RGB(0x40)|DDPF_ALPHAPIXELS(0x01)
+        WriteDdsLE(s, 84,  0U);           // dwFourCC (uncompressed)
+        WriteDdsLE(s, 88,  32U);          // dwRGBBitCount
+        WriteDdsLE(s, 92,  0x00FF0000U);  // dwRBitMask
+        WriteDdsLE(s, 96,  0x0000FF00U);  // dwGBitMask
+        WriteDdsLE(s, 100, 0x000000FFU);  // dwBBitMask
+        WriteDdsLE(s, 104, 0xFF000000U);  // dwABitMask
+
+        // ── DDS_CAPS ─────────────────────────────────────────────────────────
+        WriteDdsLE(s, 108, 0x1000U);      // dwCaps1: DDSCAPS_TEXTURE
+
+        // ── Pixel data: flat normal (0x80, 0x80, 0xFF) in BGRA byte order ────
+        for (var i = 0; i < width * height; i++)
+        {
+            var off = headerBytes + i * bytesPerPixel;
+            data[off]     = 0xFF; // B  ← Z-component (outward, full)
+            data[off + 1] = 0x80; // G  ← Y-component (neutral)
+            data[off + 2] = 0x80; // R  ← X-component (neutral)
+            data[off + 3] = 0xFF; // A
+        }
+
+        return data;
+    }
+
+    private static void WriteDdsLE(Span<byte> span, int offset, uint value)
+    {
+        span[offset]     = (byte)(value & 0xFF);
+        span[offset + 1] = (byte)((value >> 8) & 0xFF);
+        span[offset + 2] = (byte)((value >> 16) & 0xFF);
+        span[offset + 3] = (byte)((value >> 24) & 0xFF);
+    }
+
 
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,

@@ -102,7 +102,8 @@ Each successful conversion produces the following files in the output directory:
 | File | Description |
 |---|---|
 | `<ArmorName>.nif` | Converted mesh with heuristic in-place vertex transform when a readable NIF vertex block is detected (falls back to safe copy when not detectable) |
-| `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair when both are detected in input |
+| `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair; both halves written when detected, **missing half is auto-synthesised** (morph-delta scaled) when only one is present |
+| `<stem>_n.dds` (stub) | Auto-generated flat tangent-space normal map for any diffuse that lacks a `_n.dds` companion; 4×4 uncompressed BGRA8 DDS, neutral outward-facing vector |
 | `textures/...`, `materials/...` (`*.bgsm`/`*.bgem`), `*.xml`/`*.hkx`, `*.esp`/`*.esm`/`*.esl`, body refs (`*.tri`/`*.osp`) | Source support assets are copied into output with preserved relative paths so converted packages stay runnable |
 | `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
@@ -157,7 +158,11 @@ Implemented from issue scope:
 
 - **generated README.txt** — `ConversionReadmeGenerator` now writes a `README.txt` inside every output package describing: what was converted, all files generated with their purpose, step-by-step manual installation instructions, plugin patch usage (patch ESP or xEdit script fallback), BodySlide build instructions, and notes on manual finishing steps required; satisfies the Stage 7 README requirement from the issue spec
 
-All gaps from issue #2 have now been addressed, including true plugin record rewriting with a proper Bethesda override patch ESP and a generated README.txt per output package.
+- **weight-variant synthesis** — when only one half of a `_0`/`_1` pair is present (e.g. only `armor_0.nif` without `armor_1.nif`, or vice versa), the missing variant is now **auto-generated** rather than skipped; regional morph factors are weight-scaled (×1.5 delta for the high-weight `_1`, ×0.5 delta for the low-weight `_0`) so the game engine can interpolate body weight without mesh collapse, visible clipping, or NPC weight-breaking; emits `weight-variants:synthesized=N` in `conversion.log`
+
+- **flat normal map stub generation** — when a diffuse texture (e.g. `iron_d.dds`) has no matching `_n.dds` companion, a minimal **4×4 flat tangent-space normal map stub** is now auto-generated alongside it; the stub uses an uncompressed BGRA8 DDS (magic + 124-byte DDS_HEADER, all 16 pixels set to the neutral normal vector RGB(128,128,255) pointing straight outward) so surfaces render correctly in-game with no purple-tint artefacts; can be replaced by a baked normal map at any time; emits `normal-stubs:generated=N` in `conversion.log`
+
+All gaps from issue #2 have now been addressed, including true plugin record rewriting with a proper Bethesda override patch ESP, a generated README.txt per output package, weight-variant synthesis for incomplete _0/_1 pairs, and flat normal map stubs for missing _n.dds textures.
 
 ## Current built-in presets (27 total)
 
