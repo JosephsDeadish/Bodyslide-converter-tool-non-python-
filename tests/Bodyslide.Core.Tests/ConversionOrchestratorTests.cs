@@ -1787,6 +1787,64 @@ public sealed class ConversionOrchestratorTests
     }
 
     // -------------------------------------------------------------------------
+    // Gap 11 — ARMA first-person mesh subrecord synthesis
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void BinaryPluginRewriteService_RewriteArmaSubrecords_AppendsMissingFirstPersonSubrecords()
+    {
+        var inputData = BuildMeshSubrecordData(
+            ("MOD2", "meshes/armor/test/female_0.nif"),
+            ("MOD3", "meshes/armor/test/male_0.nif"));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/test/female_0.nif"] = "meshes/slidesmith/3ba/test_female_0.nif",
+            ["meshes/armor/test/male_0.nif"] = "meshes/slidesmith/3ba/test_male_0.nif"
+        };
+
+        var (rewrittenData, pathsRewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            inputData,
+            0,
+            inputData.Length,
+            rewriteMap,
+            "ARMA");
+
+        var paths = ReadMeshSubrecordPaths(rewrittenData);
+        Assert.Equal("meshes/slidesmith/3ba/test_female_0.nif", paths["MOD2"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_male_0.nif", paths["MOD3"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_female_0.nif", paths["MOD4"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_male_0.nif", paths["MOD5"]);
+        Assert.Equal(4, pathsRewritten);
+    }
+
+    [Fact]
+    public void PatchPluginWriter_RewriteArmaData_AppendsMissingFirstPersonSubrecords()
+    {
+        var inputData = BuildMeshSubrecordData(
+            ("MOD2", "meshes/armor/test/female_0.nif"),
+            ("MOD3", "meshes/armor/test/male_0.nif"));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/test/female_0.nif"] = "meshes/slidesmith/3ba/test_female_0.nif",
+            ["meshes/armor/test/male_0.nif"] = "meshes/slidesmith/3ba/test_male_0.nif"
+        };
+
+        var (rewrittenData, pathsRewritten) = PatchPluginWriter.RewriteArmaData(
+            inputData,
+            rewriteMap,
+            "ARMA");
+
+        var paths = ReadMeshSubrecordPaths(rewrittenData);
+        Assert.Equal("meshes/slidesmith/3ba/test_female_0.nif", paths["MOD2"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_male_0.nif", paths["MOD3"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_female_0.nif", paths["MOD4"]);
+        Assert.Equal("meshes/slidesmith/3ba/test_male_0.nif", paths["MOD5"]);
+        Assert.Equal(4, pathsRewritten);
+    }
+
+    // -------------------------------------------------------------------------
     // Gap 9 — DDS auxiliary texture stub generation
     // -------------------------------------------------------------------------
 
@@ -2010,6 +2068,51 @@ public sealed class ConversionOrchestratorTests
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
         return (byte[])method!.Invoke(null, null)!;
+    }
+
+    private static byte[] BuildMeshSubrecordData(params (string Tag, string Path)[] subrecords)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        foreach (var (tag, path) in subrecords)
+        {
+            var bytes = System.Text.Encoding.ASCII.GetBytes(path + '\0');
+            writer.Write(System.Text.Encoding.ASCII.GetBytes(tag));
+            writer.Write((ushort)bytes.Length);
+            writer.Write(bytes);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static Dictionary<string, string> ReadMeshSubrecordPaths(byte[] data)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        int position = 0;
+
+        while (position + 6 <= data.Length)
+        {
+            var tag = System.Text.Encoding.ASCII.GetString(data, position, 4);
+            var size = (ushort)(data[position + 4] | (data[position + 5] << 8));
+            position += 6;
+
+            if (position + size > data.Length)
+            {
+                break;
+            }
+
+            if (tag is "MOD2" or "MOD3" or "MOD4" or "MOD5")
+            {
+                int nullOffset = Array.IndexOf(data, (byte)0, position, size);
+                int length = nullOffset >= 0 ? nullOffset - position : size;
+                result[tag] = System.Text.Encoding.ASCII.GetString(data, position, length);
+            }
+
+            position += size;
+        }
+
+        return result;
     }
 
     /// <summary>

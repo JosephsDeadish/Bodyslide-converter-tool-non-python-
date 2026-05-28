@@ -4845,12 +4845,17 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         int rewritten = 0;
         int? pendingExtendedSize = null;
         byte[]? pendingExtendedPrefix = null;
+        bool isArma = string.Equals(recordType, "ARMA", StringComparison.Ordinal);
         bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
         bool sawModl = false;
         bool sawMod2 = false;
         bool sawMod3 = false;
+        bool sawMod4 = false;
+        bool sawMod5 = false;
         string? generatedModlPath = null;
         string? generatedWorldModelPath = null;
+        string? generatedFirstPersonMod4Path = null;
+        string? generatedFirstPersonMod5Path = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -4888,6 +4893,14 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 {
                     sawMod3 = true;
                 }
+                else if (isArma && string.Equals(subType, "MOD4", StringComparison.Ordinal))
+                {
+                    sawMod4 = true;
+                }
+                else if (isArma && string.Equals(subType, "MOD5", StringComparison.Ordinal))
+                {
+                    sawMod5 = true;
+                }
 
                 // Read null-terminated ASCII path string from the subrecord data.
                 int nullIdx = IndexOfNull(bytes, pos + SubrecordHeaderSize, effectiveSubSize);
@@ -4918,6 +4931,26 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                          string.Equals(subType, "MOD3", StringComparison.Ordinal)))
                     {
                         generatedModlPath = newPath;
+                    }
+
+                    if (isArma && string.Equals(subType, "MOD2", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod4Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subType, "MOD3", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod5Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subType, "MOD4", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod4Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subType, "MOD5", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod5Path ??= newPath;
                     }
                 }
                 else
@@ -4974,6 +5007,26 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
             if (!sawMod3)
             {
                 WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                rewritten++;
+            }
+        }
+
+        if (isArma)
+        {
+            generatedFirstPersonMod4Path ??= generatedFirstPersonMod5Path;
+            generatedFirstPersonMod5Path ??= generatedFirstPersonMod4Path;
+
+            if (!sawMod4 && !string.IsNullOrWhiteSpace(generatedFirstPersonMod4Path))
+            {
+                var mod4Bytes = System.Text.Encoding.ASCII.GetBytes(generatedFirstPersonMod4Path + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD4", mod4Bytes);
+                rewritten++;
+            }
+
+            if (!sawMod5 && !string.IsNullOrWhiteSpace(generatedFirstPersonMod5Path))
+            {
+                var mod5Bytes = System.Text.Encoding.ASCII.GetBytes(generatedFirstPersonMod5Path + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD5", mod5Bytes);
                 rewritten++;
             }
         }
@@ -5754,12 +5807,17 @@ internal static class PatchPluginWriter
         int rewritten = 0;
         int? pendingExtendedSize = null;
         byte[]? pendingExtendedPrefix = null;
+        bool isArma = string.Equals(recordType, "ARMA", StringComparison.Ordinal);
         bool isArmo = string.Equals(recordType, "ARMO", StringComparison.Ordinal);
         bool sawModl = false;
         bool sawMod2 = false;
         bool sawMod3 = false;
+        bool sawMod4 = false;
+        bool sawMod5 = false;
         string? generatedModlPath = null;
         string? generatedWorldModelPath = null;
+        string? generatedFirstPersonMod4Path = null;
+        string? generatedFirstPersonMod5Path = null;
 
         while (pos + SubrecordHeaderSize <= end)
         {
@@ -5797,6 +5855,14 @@ internal static class PatchPluginWriter
                 {
                     sawMod3 = true;
                 }
+                else if (isArma && string.Equals(subTag, "MOD4", StringComparison.Ordinal))
+                {
+                    sawMod4 = true;
+                }
+                else if (isArma && string.Equals(subTag, "MOD5", StringComparison.Ordinal))
+                {
+                    sawMod5 = true;
+                }
 
                 int nullIdx  = IndexOfNull(dataBytes, pos + SubrecordHeaderSize, effectiveSubSize);
                 int strLen   = nullIdx >= 0 ? nullIdx : effectiveSubSize;
@@ -5825,6 +5891,26 @@ internal static class PatchPluginWriter
                          string.Equals(subTag, "MOD3", StringComparison.Ordinal)))
                     {
                         generatedModlPath = newPath;
+                    }
+
+                    if (isArma && string.Equals(subTag, "MOD2", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod4Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subTag, "MOD3", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod5Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subTag, "MOD4", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod4Path ??= newPath;
+                    }
+
+                    if (isArma && string.Equals(subTag, "MOD5", StringComparison.Ordinal))
+                    {
+                        generatedFirstPersonMod5Path ??= newPath;
                     }
                 }
                 else
@@ -5880,6 +5966,26 @@ internal static class PatchPluginWriter
             if (!sawMod3)
             {
                 WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                rewritten++;
+            }
+        }
+
+        if (isArma)
+        {
+            generatedFirstPersonMod4Path ??= generatedFirstPersonMod5Path;
+            generatedFirstPersonMod5Path ??= generatedFirstPersonMod4Path;
+
+            if (!sawMod4 && !string.IsNullOrWhiteSpace(generatedFirstPersonMod4Path))
+            {
+                var mod4Bytes = System.Text.Encoding.ASCII.GetBytes(generatedFirstPersonMod4Path + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD4", mod4Bytes);
+                rewritten++;
+            }
+
+            if (!sawMod5 && !string.IsNullOrWhiteSpace(generatedFirstPersonMod5Path))
+            {
+                var mod5Bytes = System.Text.Encoding.ASCII.GetBytes(generatedFirstPersonMod5Path + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD5", mod5Bytes);
                 rewritten++;
             }
         }

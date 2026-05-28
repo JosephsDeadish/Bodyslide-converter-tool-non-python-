@@ -182,6 +182,8 @@ Implemented from issue scope:
 
 - **ARMO world-model completion from `MODL`** — when an ARMO record includes a rewritten `MODL` ground mesh but is missing `MOD2` and/or `MOD3`, plugin rewrite now auto-appends the missing world model subrecord(s) from that rewritten `MODL` path so inventory/world model lookups stay valid for both male and female model entries
 
+- **ARMA first-person completion from rewritten third-person paths** — when an ARMA record is rewritten but missing `MOD4` and/or `MOD5`, plugin rewrite now auto-appends the missing first-person subrecord(s) from the rewritten `MOD2`/`MOD3` paths so first-person model lookups remain populated after conversion
+
 - **morph-aware clipping region detection** — clipping detection now evaluates per-region morph intensity with mesh-type thresholds (instead of mesh-type-only flags), normalizes equivalent regions (e.g. hips→pelvis), and auto-flags armpit risk when shoulder/arm/chest pressure is high; this produces more realistic region highlights before auto-correction
 
 - **shrinkwrap clearance projection pass** — NIF vertex transformation now enforces a per-region body-envelope minimum radius with adaptive clearance after animation-driven push-out, so near-surface vertices are projected outward instead of lingering on the clipping boundary
