@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Bodyslide.Core/Bodyslide.Core.csproj" />
+    <Project Path="src/Bodyslide.Desktop/Bodyslide.Desktop.csproj" />
     <Project Path="src/Bodyslide.Standalone/Bodyslide.Standalone.csproj" />
   </Folder>
   <Folder Name="/tests/">

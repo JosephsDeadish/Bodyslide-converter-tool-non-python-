@@ -30,7 +30,7 @@ jobs:
         run: dotnet restore BodyslideConverter.slnx
 
       - name: Publish Windows exe
-        run: dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/win-x64
+        run: dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/win-x64
 
       - name: Create GitHub Release and upload exe
         uses: softprops/action-gh-release@v2

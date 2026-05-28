@@ -1,6 +1,6 @@
 # SlideSmith (Standalone, C#)
 
-This repository contains the SlideSmith standalone .NET conversion tool (current version `0.1`) that bundles core conversion stages into one app:
+This repository contains the SlideSmith .NET conversion toolset (current version `0.1`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, armor folder, or zipped archive)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
@@ -25,14 +25,21 @@ This repository contains the SlideSmith standalone .NET conversion tool (current
 
 ## Projects
 
-- `/src/Bodyslide.Core` - standalone conversion pipeline + modules
-- `/src/Bodyslide.Standalone` - runnable app entry point
+- `/src/Bodyslide.Core` - conversion pipeline + modules
+- `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop + preset selector + convert button)
+- `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
 
 ## Run
 
 ```bash
-# build testable executable package (single-file, self-contained)
+# build Windows desktop executable package (single-file, self-contained)
+dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+
+# launch desktop GUI during development (Windows)
+dotnet run --project src/Bodyslide.Desktop
+
+# build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
 
 # simple positional mode
@@ -66,8 +73,8 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, build a Linux executable package, zip it, and upload it as an Actions artifact.
-- **Push to `main`/`master` (post-merge):** build Windows executable package, zip it, and upload as an Actions artifact.
-- **Pull requests:** build Windows executable package, zip it, and upload as an Actions artifact for testing.
+- **Push to `main`/`master` (post-merge):** build Windows desktop executable package, zip it, and upload as an Actions artifact.
+- **Pull requests:** build Windows desktop executable package, zip it, and upload as an Actions artifact for testing.
 
 These are CI build artifacts only (download from the Actions run page). No GitHub Release publishing is performed by this workflow.
 
