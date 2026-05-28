@@ -2991,34 +2991,98 @@ internal sealed class LocalExportService : IExportService
         PoseSimulationResult poseSimulation)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
+        var orderedRegions = mesh.RegionalMorphing
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var baseRegionalFactors = orderedRegions.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+
+        var availableBodyProfiles = BodyTypeCatalog.All
+            .Select(static body => body.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                bodyName => bodyName,
+                bodyName => BodyTransformationFieldCatalog.Resolve(bodyName),
+                StringComparer.OrdinalIgnoreCase);
+
+        var previewProfiles = new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Current conversion"] = baseRegionalFactors
+        };
+        foreach (var (bodyName, bodyField) in availableBodyProfiles)
+        {
+            previewProfiles[bodyName] = bodyField;
+        }
+
+        var profileOptions = new List<string> { "Current conversion" };
+        profileOptions.AddRange(availableBodyProfiles.Keys);
+        var selectedProfile = profileOptions.Contains(request.TargetBody, StringComparer.OrdinalIgnoreCase)
+            ? profileOptions.First(name => string.Equals(name, request.TargetBody, StringComparison.OrdinalIgnoreCase))
+            : "Current conversion";
+        var profileOptionsHtml = string.Join(
+            "",
+            profileOptions.Select(name =>
+            {
+                var selected = string.Equals(name, selectedProfile, StringComparison.OrdinalIgnoreCase) ? " selected" : string.Empty;
+                return $"""<option value="{HtmlEncode(name)}"{selected}>{HtmlEncode(name)}</option>""";
+            }));
+
+        var regionDomIds = orderedRegions.ToDictionary(
+            pair => pair.Key,
+            pair => ToDomIdToken(pair.Key),
+            StringComparer.OrdinalIgnoreCase);
+
+        var baseFactorsJson = JsonSerializer.Serialize(baseRegionalFactors);
+        var previewProfilesJson = JsonSerializer.Serialize(previewProfiles);
+        var regionDomIdsJson = JsonSerializer.Serialize(regionDomIds);
 
         // Build SVG body regions.
         var svgParts = new System.Text.StringBuilder();
         // Draw background body outline.
-        svgParts.AppendLine("""  <rect x="76" y="54" width="48" height="262" rx="10" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
-        svgParts.AppendLine("""  <circle cx="100" cy="20" r="18" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
-        svgParts.AppendLine("""  <rect x="42" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
-        svgParts.AppendLine("""  <rect x="146" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""      <g id="preview-body-root">""");
+        svgParts.AppendLine("""        <rect x="76" y="54" width="48" height="262" rx="10" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""        <circle cx="100" cy="20" r="18" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""        <rect x="42" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
+        svgParts.AppendLine("""        <rect x="146" y="72" width="12" height="72" rx="5" fill="#2a2a4a" stroke="#555" stroke-width="1"/>""");
 
         // Layer coloured overlays for each region that has a morph factor.
         var drawnRegions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (region, factor) in mesh.RegionalMorphing.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var (region, factor) in orderedRegions)
         {
             if (!RegionShapes.TryGetValue(region, out var shape)) continue;
             if (!drawnRegions.Add(region)) continue;
 
             var colour = MorphColour(factor);
             var opacity = Math.Clamp(0.45 + Math.Abs(factor - 1.0) * 1.2, 0.4, 0.85);
-            svgParts.AppendLine($"""  <rect x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
-            svgParts.AppendLine($"""  <text x="{shape.X + shape.W / 2}" y="{shape.Y + shape.H / 2 + 4}" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">{shape.Label}</text>""");
+            var domId = regionDomIds[region];
+            svgParts.AppendLine($"""        <rect id="region-box-{domId}" data-region="{HtmlEncode(region)}" x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
+            svgParts.AppendLine($"""        <text id="region-label-{domId}" x="{shape.X + shape.W / 2}" y="{shape.Y + shape.H / 2 + 4}" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">{shape.Label}</text>""");
         }
+        svgParts.AppendLine("""      </g>""");
 
         // Regional morphing table rows.
         var regionRows = new System.Text.StringBuilder();
-        foreach (var (region, factor) in mesh.RegionalMorphing.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var (region, factor) in orderedRegions)
         {
             var cssClass = factor > 1.20 ? "val-high" : factor > 1.08 ? "val-med" : "val-low";
-            regionRows.AppendLine($"          <tr><td>{HtmlEncode(region)}</td><td class=\"{cssClass}\">{factor:F4}</td></tr>");
+            var domId = regionDomIds[region];
+            regionRows.AppendLine($"          <tr><td>{HtmlEncode(region)}</td><td id=\"factor-{domId}\" class=\"{cssClass}\">{factor:F4}</td></tr>");
+        }
+
+        var sliderRows = new System.Text.StringBuilder();
+        foreach (var (region, _) in orderedRegions)
+        {
+            var domId = regionDomIds[region];
+            sliderRows.AppendLine($"""
+                      <tr>
+                        <td>{HtmlEncode(region)}</td>
+                        <td><input type="range" id="region-slider-{domId}" data-region-slider="true" data-region="{HtmlEncode(region)}" min="0.80" max="1.20" step="0.01" value="1.00"></td>
+                        <td id="region-slider-value-{domId}">1.00x</td>
+                      </tr>
+                """);
         }
 
         // Physics nodes list.
@@ -3079,15 +3143,22 @@ internal sealed class LocalExportService : IExportService
                 .val-high { color: #ff6b6b; font-weight: 700; }
                 .val-med  { color: #ffd93d; }
                 .val-low  { color: #6bcb77; }
+                .controls { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 10px; align-items: center; font-size: .85rem; }
+                .controls label { color: #9ab; }
+                .controls input[type="range"], .controls select { width: 100%; }
+                .slider-table td:nth-child(2) { width: 180px; }
+                .mono { font-family: Consolas, monospace; font-size: .8rem; }
+                .panel button { background: #2a3a4a; color: #fff; border: 1px solid #3a4a5a; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
               </style>
             </head>
             <body>
               <h1>SlideSmith Preview</h1>
-              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}}</p>
+              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}} &nbsp;·&nbsp; interactive preview controls enabled</p>
               <div class="layout">
                 <div class="body-fig">
                   <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
-            {{svgParts}}      </svg>
+            {{svgParts}}
+                  </svg>
                   <div class="legend">
                     <div class="legend-item"><div class="dot" style="background:#3a7bd5"></div><span>Compact</span></div>
                     <div class="legend-item"><div class="dot" style="background:#27ae60"></div><span>Normal</span></div>
@@ -3098,10 +3169,35 @@ internal sealed class LocalExportService : IExportService
                 </div>
                 <div class="panels">
                   <div class="panel">
+                    <h3 style="margin-top:0">Live Controls</h3>
+                    <div class="controls">
+                      <label for="body-profile-select">Swap body</label>
+                      <select id="body-profile-select">{{profileOptionsHtml}}</select>
+                      <span class="mono" id="body-profile-value">{{HtmlEncode(selectedProfile)}}</span>
+
+                      <label for="view-rotation-slider">Rotate view</label>
+                      <input id="view-rotation-slider" type="range" min="-45" max="45" step="1" value="0">
+                      <span class="mono" id="view-rotation-value">0°</span>
+
+                      <label for="global-scale-slider">Adjust sliders</label>
+                      <input id="global-scale-slider" type="range" min="0.70" max="1.30" step="0.01" value="1.00">
+                      <span class="mono" id="global-scale-value">1.00x</span>
+                    </div>
+                    <div style="margin-top:10px">
+                      <button id="reset-preview-controls" type="button">Reset controls</button>
+                    </div>
+                  </div>
+                  <div class="panel">
                     <h3 style="margin-top:0">Regional Morphing</h3>
                     <table>
                       <tr><th>Region</th><th>Factor</th></tr>
             {{regionRows}}        </table>
+                  </div>
+                  <div class="panel">
+                    <h3 style="margin-top:0">Per-Region Tuning</h3>
+                    <table class="slider-table">
+                      <tr><th>Region</th><th>Slider</th><th>Value</th></tr>
+            {{sliderRows}}        </table>
                   </div>
                   <div class="panel">
                     <h3 style="margin-top:0">BodySlide Sliders</h3>
@@ -3113,6 +3209,131 @@ internal sealed class LocalExportService : IExportService
                   </div>
             {{posePanelHtml}}      </div>
               </div>
+              <script>
+                const baseFactors = {{baseFactorsJson}};
+                const previewProfiles = {{previewProfilesJson}};
+                const regionDomIds = {{regionDomIdsJson}};
+                const regionNames = Object.keys(baseFactors);
+
+                let profileFactors = { ...baseFactors };
+                let globalScale = 1.0;
+                const regionAdjustments = Object.fromEntries(regionNames.map(region => [region, 1.0]));
+
+                const profileSelect = document.getElementById('body-profile-select');
+                const profileValue = document.getElementById('body-profile-value');
+                const rotationSlider = document.getElementById('view-rotation-slider');
+                const rotationValue = document.getElementById('view-rotation-value');
+                const globalScaleSlider = document.getElementById('global-scale-slider');
+                const globalScaleValue = document.getElementById('global-scale-value');
+                const resetButton = document.getElementById('reset-preview-controls');
+                const bodyRoot = document.getElementById('preview-body-root');
+
+                function morphColour(factor) {
+                  if (factor < 0.90) return '#3a7bd5';
+                  if (factor < 0.97) return '#27ae60';
+                  if (factor < 1.05) return '#2ecc71';
+                  if (factor < 1.12) return '#f1c40f';
+                  if (factor < 1.20) return '#e67e22';
+                  return '#e74c3c';
+                }
+
+                function valueClass(factor) {
+                  if (factor > 1.20) return 'val-high';
+                  if (factor > 1.08) return 'val-med';
+                  return 'val-low';
+                }
+
+                function opacityFor(factor) {
+                  return Math.max(0.4, Math.min(0.85, 0.45 + Math.abs(factor - 1.0) * 1.2));
+                }
+
+                function effectiveFactor(region) {
+                  const base = Number(profileFactors[region] ?? baseFactors[region] ?? 1.0);
+                  const global = Number(globalScale);
+                  const local = Number(regionAdjustments[region] ?? 1.0);
+                  return base * global * local;
+                }
+
+                function setRotation(degrees) {
+                  bodyRoot.setAttribute('transform', `rotate(${degrees} 100 160)`);
+                  rotationValue.textContent = `${degrees}°`;
+                }
+
+                function renderPreview() {
+                  for (const region of regionNames) {
+                    const factor = effectiveFactor(region);
+                    const domId = regionDomIds[region];
+                    const box = document.getElementById(`region-box-${domId}`);
+                    const factorCell = document.getElementById(`factor-${domId}`);
+                    const sliderValue = document.getElementById(`region-slider-value-${domId}`);
+
+                    if (box) {
+                      const color = morphColour(factor);
+                      box.setAttribute('fill', color);
+                      box.setAttribute('stroke', color);
+                      box.setAttribute('opacity', opacityFor(factor).toFixed(2));
+                    }
+
+                    if (factorCell) {
+                      factorCell.textContent = factor.toFixed(4);
+                      factorCell.className = valueClass(factor);
+                    }
+
+                    if (sliderValue) {
+                      sliderValue.textContent = `${Number(regionAdjustments[region]).toFixed(2)}x`;
+                    }
+                  }
+
+                  globalScaleValue.textContent = `${Number(globalScale).toFixed(2)}x`;
+                }
+
+                profileSelect.addEventListener('change', () => {
+                  const selected = profileSelect.value;
+                  profileFactors = { ...(previewProfiles[selected] ?? baseFactors) };
+                  profileValue.textContent = selected;
+                  renderPreview();
+                });
+
+                rotationSlider.addEventListener('input', () => {
+                  setRotation(Number(rotationSlider.value));
+                });
+
+                globalScaleSlider.addEventListener('input', () => {
+                  globalScale = Number(globalScaleSlider.value);
+                  renderPreview();
+                });
+
+                for (const slider of document.querySelectorAll('input[data-region-slider="true"]')) {
+                  slider.addEventListener('input', () => {
+                    const region = slider.getAttribute('data-region');
+                    if (!region) return;
+                    regionAdjustments[region] = Number(slider.value);
+                    renderPreview();
+                  });
+                }
+
+                resetButton.addEventListener('click', () => {
+                  profileSelect.value = '{{HtmlEncode(selectedProfile)}}';
+                  profileFactors = { ...(previewProfiles[profileSelect.value] ?? baseFactors) };
+                  profileValue.textContent = profileSelect.value;
+                  rotationSlider.value = '0';
+                  setRotation(0);
+                  globalScaleSlider.value = '1.00';
+                  globalScale = 1.0;
+
+                  for (const slider of document.querySelectorAll('input[data-region-slider="true"]')) {
+                    const region = slider.getAttribute('data-region');
+                    if (!region) continue;
+                    slider.value = '1.00';
+                    regionAdjustments[region] = 1.0;
+                  }
+
+                  renderPreview();
+                });
+
+                setRotation(0);
+                renderPreview();
+              </script>
             </body>
             </html>
             """;
@@ -3120,6 +3341,14 @@ internal sealed class LocalExportService : IExportService
 
     private static string HtmlEncode(string value) =>
         System.Net.WebUtility.HtmlEncode(value);
+
+    private static string ToDomIdToken(string value)
+    {
+        var safe = new string(value
+            .Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '-')
+            .ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "region" : safe;
+    }
 
     // ── xEdit Pascal Script ───────────────────────────────────────────────────
 
