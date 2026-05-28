@@ -337,6 +337,18 @@ internal sealed record BodySignatureTemplate(
 
 internal readonly record struct MeshVertex(float X, float Y, float Z);
 
+internal sealed record MeshUvSignature(
+    float MinU,
+    float MaxU,
+    float MinV,
+    float MaxV,
+    int SampleCount)
+{
+    public float Width => MaxU - MinU;
+    public float Height => MaxV - MinV;
+    public float Coverage => Math.Clamp(Width, 0f, 4f) * Math.Clamp(Height, 0f, 4f);
+}
+
 internal sealed record MeshGeometrySignature(
     int VertexCount,
     IReadOnlyList<MeshVertex> SampleVertices,
@@ -345,7 +357,8 @@ internal sealed record MeshGeometrySignature(
     float MinY,
     float MaxY,
     float MinZ,
-    float MaxZ)
+    float MaxZ,
+    MeshUvSignature? UvSignature = null)
 {
     public float Width => MaxX - MinX;
     public float Depth => MaxY - MinY;
@@ -515,8 +528,10 @@ internal static class NifGeometrySignatureReader
     private const int MinPlausibleVertexCount = 256;
     private const int MaxPlausibleVertexCount = 250_000;
     private const float MaxPlausibleCoordinateValue = 8192f;
+    private const float MaxPlausibleUvValue = 4f;
     private const int HeuristicScanByteLimit = 64 * 1024;
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
+    private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
 
     public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
@@ -666,7 +681,14 @@ internal static class NifGeometrySignatureReader
         }
 
         var vertexCount = BitConverter.ToInt32(bytes, countOffset);
-        return BuildSignature(bytes, countOffset + sizeof(int), vertexCount);
+        var vertexDataOffset = countOffset + sizeof(int);
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: true);
     }
 
     private static MeshGeometrySignature? TryReadBlockGraphVertexBlock(byte[] bytes)
@@ -676,7 +698,13 @@ internal static class NifGeometrySignatureReader
             return null;
         }
 
-        return BuildSignature(bytes, vertexDataOffset, vertexCount);
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
     }
 
     private static bool TryLocateVertexBlockFromGraph(byte[] bytes, out int vertexDataOffset, out int vertexCount)
@@ -858,6 +886,133 @@ internal static class NifGeometrySignatureReader
 
     private static bool IsPlausibleCoordinate(float value) =>
         float.IsFinite(value) && Math.Abs(value) <= MaxPlausibleCoordinateValue;
+
+    private static MeshGeometrySignature AttachUvSignature(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        MeshGeometrySignature geometry,
+        bool preferEmbeddedMarker)
+    {
+        if (vertexCount <= 0)
+        {
+            return geometry;
+        }
+
+        var candidates = new List<MeshUvSignature>(3);
+        var sequentialOffset = vertexDataOffset + (vertexCount * 12);
+
+        if (preferEmbeddedMarker &&
+            TryReadEmbeddedUvBlock(bytes, sequentialOffset, out var embedded))
+        {
+            candidates.Add(embedded);
+        }
+
+        if (TryReadUvSignatureFromLayout(bytes, sequentialOffset, sizeof(float) * 2, vertexCount, out var sequential))
+        {
+            candidates.Add(sequential);
+        }
+
+        // Common interleaved format: XYZ (12 bytes) followed by UV (8 bytes) in a 20-byte stride.
+        if (TryReadUvSignatureFromLayout(bytes, vertexDataOffset + 12, 20, vertexCount, out var interleaved))
+        {
+            candidates.Add(interleaved);
+        }
+
+        var best = candidates
+            .OrderByDescending(static candidate => candidate.SampleCount)
+            .ThenByDescending(static candidate => candidate.Coverage)
+            .FirstOrDefault();
+
+        return best is null
+            ? geometry
+            : geometry with { UvSignature = best };
+    }
+
+    private static bool TryReadEmbeddedUvBlock(byte[] bytes, int uvMarkerOffset, out MeshUvSignature signature)
+    {
+        signature = default!;
+        if (uvMarkerOffset < 0 || uvMarkerOffset + EmbeddedUvMarker.Length + sizeof(int) > bytes.Length)
+        {
+            return false;
+        }
+
+        if (!bytes.AsSpan(uvMarkerOffset, EmbeddedUvMarker.Length).SequenceEqual(EmbeddedUvMarker))
+        {
+            return false;
+        }
+
+        var uvCount = BitConverter.ToInt32(bytes, uvMarkerOffset + EmbeddedUvMarker.Length);
+        if (uvCount <= 0)
+        {
+            return false;
+        }
+
+        var dataOffset = uvMarkerOffset + EmbeddedUvMarker.Length + sizeof(int);
+        return TryReadUvSignatureFromLayout(bytes, dataOffset, sizeof(float) * 2, uvCount, out signature);
+    }
+
+    private static bool TryReadUvSignatureFromLayout(
+        byte[] bytes,
+        int firstUvOffset,
+        int strideBytes,
+        int sampleCount,
+        out MeshUvSignature signature)
+    {
+        signature = default!;
+        if (sampleCount <= 0 || strideBytes < sizeof(float) * 2 || firstUvOffset < 0 || firstUvOffset >= bytes.Length)
+        {
+            return false;
+        }
+
+        var minU = float.MaxValue;
+        var minV = float.MaxValue;
+        var maxU = float.MinValue;
+        var maxV = float.MinValue;
+        var validSamples = 0;
+        var invalidSamples = 0;
+        var maxInvalidSamples = Math.Max(8, sampleCount / 8);
+
+        for (var index = 0; index < sampleCount; index++)
+        {
+            var offset = firstUvOffset + (index * strideBytes);
+            if (offset + (sizeof(float) * 2) > bytes.Length)
+            {
+                break;
+            }
+
+            var u = BitConverter.ToSingle(bytes, offset);
+            var v = BitConverter.ToSingle(bytes, offset + sizeof(float));
+
+            if (!IsPlausibleUv(u) || !IsPlausibleUv(v))
+            {
+                invalidSamples++;
+                if (invalidSamples > maxInvalidSamples)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            validSamples++;
+            minU = Math.Min(minU, u);
+            minV = Math.Min(minV, v);
+            maxU = Math.Max(maxU, u);
+            maxV = Math.Max(maxV, v);
+        }
+
+        if (validSamples < 24)
+        {
+            return false;
+        }
+
+        signature = new MeshUvSignature(minU, maxU, minV, maxV, validSamples);
+        return true;
+    }
+
+    private static bool IsPlausibleUv(float value) =>
+        float.IsFinite(value) && value >= -MaxPlausibleUvValue && value <= MaxPlausibleUvValue;
 }
 
 internal static class BodyTransformationFieldCatalog
@@ -1986,6 +2141,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double BoneSignatureWeight = 0.10;
     private const double VertexCountWeight = 0.15;
     private const double BoundingRatioWeight = 0.05;
+    private const double UvSignatureWeight = 0.04;
     private const double BodyReferenceTokenWeight = 0.08;
 
     // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
@@ -2094,6 +2250,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         double vertexSignatureScore = 0;
         double boundingRatioScore = 0;
+        double uvSignatureScore = 0;
         if (geometrySignature is not null)
         {
             vertexSignatureScore = ScoreVertexCount(template, geometrySignature.VertexCount);
@@ -2109,6 +2266,17 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
                 var depthToWidth = geometrySignature.Depth / Math.Max(geometrySignature.Width, 0.0001f);
                 evidence.Add($"bounds:h/w={heightToWidth:F2},d/w={depthToWidth:F2}");
             }
+
+            if (geometrySignature.UvSignature is not null)
+            {
+                uvSignatureScore = ScoreUvSignature(template, geometrySignature.UvSignature);
+                if (uvSignatureScore > 0)
+                {
+                    evidence.Add(
+                        $"uv:u={geometrySignature.UvSignature.MinU:F2}-{geometrySignature.UvSignature.MaxU:F2}," +
+                        $"v={geometrySignature.UvSignature.MinV:F2}-{geometrySignature.UvSignature.MaxV:F2}");
+                }
+            }
         }
 
         var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
@@ -2120,10 +2288,29 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (boneSignatureScore * BoneSignatureWeight) +
             (vertexSignatureScore * VertexCountWeight) +
             (boundingRatioScore * BoundingRatioWeight) +
+            (uvSignatureScore * UvSignatureWeight) +
             physicsExpectationBoost,
             0,
             1);
         return (template, score, evidence);
+    }
+
+    private static double ScoreUvSignature(BodySignatureTemplate template, MeshUvSignature uv)
+    {
+        var width = Math.Max(uv.Width, 0.0001f);
+        var height = Math.Max(uv.Height, 0.0001f);
+        var aspect = height / width;
+        var coverage = uv.Coverage;
+
+        var expectsMaleUvLayout = template.MeshTokens.Any(t => t.Contains("male", StringComparison.OrdinalIgnoreCase))
+                                  && !template.MeshTokens.Any(t => t.Contains("female", StringComparison.OrdinalIgnoreCase));
+
+        var aspectScore = expectsMaleUvLayout
+            ? ScoreRatioRange(aspect, 0.75, 1.35)
+            : ScoreRatioRange(aspect, 0.85, 1.55);
+
+        var coverageScore = ScoreRatioRange(coverage, 0.30, 1.35);
+        return Math.Round((aspectScore * 0.45) + (coverageScore * 0.55), 4);
     }
 
     private static double ScoreBoundingRatios(BodySignatureTemplate template, MeshGeometrySignature signature)

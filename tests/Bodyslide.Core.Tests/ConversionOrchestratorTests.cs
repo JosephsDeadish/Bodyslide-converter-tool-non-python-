@@ -2142,6 +2142,53 @@ internal static class SyntheticNifTestData
         }
     }
 
+    public static IReadOnlyList<(float U, float V)> CreateBodyUvs(int vertexCount)
+    {
+        var uvs = new List<(float U, float V)>(vertexCount);
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var t = vertexCount == 1 ? 0f : (float)index / (vertexCount - 1);
+            var u = (index % 17) / 16f; // 0..1 horizontal packing
+            var v = 0.08f + (t * 0.84f); // keep within 0..1 but avoid degenerate edges
+            uvs.Add((u, v));
+        }
+
+        return uvs;
+    }
+
+    public static async Task WriteWithUvAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyList<(float U, float V)> uvs)
+    {
+        if (vertices.Count != uvs.Count)
+        {
+            throw new ArgumentException("Vertex/UV counts must match.");
+        }
+
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("VERT"));
+        writer.Write(vertices.Count);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("UVS "));
+        writer.Write(uvs.Count);
+        foreach (var (u, v) in uvs)
+        {
+            writer.Write(u);
+            writer.Write(v);
+        }
+    }
+
     public static async Task WriteBlockGraphStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
     {
         await using var stream = File.Create(path);
@@ -3151,6 +3198,33 @@ public sealed class BodySignatureVertexCountTests
 
             Assert.Equal("CBBE", result.Body);
             Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_UsesUvSignatureEvidence()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "cbbe_uv_signature.nif");
+
+        try
+        {
+            var vertices = SyntheticNifTestData.CreateBodyVertices(6942);
+            var uvs = SyntheticNifTestData.CreateBodyUvs(vertices.Count);
+            await SyntheticNifTestData.WriteWithUvAsync(meshPath, vertices, uvs);
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("CBBE", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("uv:u=", StringComparison.Ordinal));
         }
         finally
         {
