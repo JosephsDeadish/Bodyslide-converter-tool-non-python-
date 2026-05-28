@@ -2260,6 +2260,7 @@ public sealed class ExpandedPresetTests
     [InlineData("SOS Athletic",  "SOS")]
     [InlineData("UBE Petite",    "UBE")]
     [InlineData("UBE Curvy",     "UBE")]
+    [InlineData("Vanilla Balanced", "Vanilla")]
     [InlineData("HIMBO Athletic","HIMBO")]
     public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)
     {
@@ -2286,6 +2287,7 @@ public sealed class BodyTransformationFieldTests
     [InlineData("HIMBO")]
     [InlineData("SAM")]
     [InlineData("SOS")]
+    [InlineData("Vanilla")]
     public void BodyTransformationFieldCatalog_AllBodyTypes_Have11Regions(string body)
     {
         var fields = BodyTransformationFieldCatalog.Resolve(body);

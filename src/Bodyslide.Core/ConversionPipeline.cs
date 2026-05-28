@@ -208,6 +208,8 @@ public static class PresetCatalog
         // ── UBE ─────────────────────────────────────────────────────────────
         ["UBE Petite"]        = new("UBE Petite",         "UBE",   "petite",   "none"),
         ["UBE Curvy"]         = new("UBE Curvy",          "UBE",   "curvy",    "none"),
+        // ── Vanilla ─────────────────────────────────────────────────────────
+        ["Vanilla Balanced"]  = new("Vanilla Balanced",   "Vanilla", "balanced", "none"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
@@ -857,6 +859,13 @@ internal static class BodyTransformationFieldCatalog
                 ["legs"]      = 1.04,  ["shoulders"] = 1.06,
                 ["breasts"]   = 1.03,  ["butt"]     = 1.03,  ["belly"]    = 1.01,
                 ["arms"]      = 1.05,  ["thighs"]   = 1.04,  ["calves"]   = 1.03
+            },
+            ["Vanilla"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.00,  ["waist"]    = 1.00,  ["pelvis"]   = 1.00,
+                ["legs"]      = 1.00,  ["shoulders"] = 1.00,
+                ["breasts"]   = 1.00,  ["butt"]     = 1.00,  ["belly"]    = 1.00,
+                ["arms"]      = 1.00,  ["thighs"]   = 1.00,  ["calves"]   = 1.00
             }
         };
 

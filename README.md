@@ -195,6 +195,7 @@ Issue #2 baseline coverage has been expanded substantially (import/dependency sc
 | SOS Athletic | SOS | athletic | smp |
 | UBE Petite | UBE | petite | none |
 | UBE Curvy | UBE | curvy | none |
+| Vanilla Balanced | Vanilla | balanced | none |
 | HIMBO Lean | HIMBO | lean | smp |
 | HIMBO Muscular | HIMBO | muscular | smp |
 | HIMBO Athletic | HIMBO | athletic | smp |
@@ -202,7 +203,7 @@ Issue #2 baseline coverage has been expanded substantially (import/dependency sc
 ## Supported body types
 
 **Female:** CBBE, 3BA, UNP, BHUNP, TBD, UBE  
-**Male:** HIMBO, SAM, SOS  
+**Male:** HIMBO, SAM, SOS, Vanilla  
 **Custom:** any unrecognised body falls back to `CUSTOM` detection
 
 Use `--list-bodies` to see detection tokens and vertex-count hints for each body type.
