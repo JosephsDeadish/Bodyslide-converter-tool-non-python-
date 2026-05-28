@@ -1129,7 +1129,9 @@ public sealed class ConversionOrchestratorTests
 
             var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
             var progressEvents = new System.Collections.Concurrent.ConcurrentBag<BatchProgressUpdate>();
-            var progress = new Progress<BatchProgressUpdate>(progressEvents.Add);
+            // Use a synchronous IProgress<T> implementation so callbacks fire inline during
+            // Parallel.ForEachAsync rather than being posted to the thread pool via Progress<T>.
+            var progress = new SynchronousProgress<BatchProgressUpdate>(progressEvents.Add);
 
             var request = new ConversionRequest(dir, "CBBE", outputDir);
             var results = await runner.ConvertAsync(request, CancellationToken.None, progress);
@@ -2888,6 +2890,16 @@ public sealed class WeightVariantPairTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+}
+
+/// <summary>
+/// Synchronous <see cref="IProgress{T}"/> implementation that invokes the callback inline
+/// on the reporting thread instead of posting it to a <see cref="System.Threading.SynchronizationContext"/>.
+/// Use in tests to avoid the non-deterministic scheduling of <see cref="Progress{T}"/>.
+/// </summary>
+internal sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+{
+    public void Report(T value) => handler(value);
 }
 
 public sealed class BsdSliderDataTests
@@ -7702,4 +7714,418 @@ public sealed class BuildSafeBodyTokenTests
         Assert.Equal(expected, result);
     }
 }
+
+// ── BasicRigidIslandDetectionService unit tests ────────────────────────────────
+
+public sealed class BasicRigidIslandDetectionServiceTests
+{
+    [Fact]
+    public async Task DetectAsync_PlateMesh_ReturnsExpectedIslands()
+    {
+        var svc     = new BasicRigidIslandDetectionService();
+        var mesh    = new ConvertedMesh("plate", "cage+rigid-islands+normal-preservation", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("plate", false, 1);
+
+        var result = await svc.DetectAsync(mesh, analysis, CancellationToken.None);
+
+        Assert.Equal(10,                             result.IslandCount);
+        Assert.True(result.PlateCoverage > 0.8,      "plate coverage should be > 80%");
+        Assert.Equal("plate-anatomy-clustering",     result.DetectionMethod);
+        Assert.Contains("cuirass-front",             result.IslandLabels);
+        Assert.Contains("pauldron-left",             result.IslandLabels);
+        Assert.Contains("sabaton-right",             result.IslandLabels);
+    }
+
+    [Fact]
+    public async Task DetectAsync_ClothMesh_ReturnsNoIslands()
+    {
+        var svc      = new BasicRigidIslandDetectionService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-projection", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("cloth", false, 1);
+
+        var result = await svc.DetectAsync(mesh, analysis, CancellationToken.None);
+
+        Assert.Equal(0,    result.IslandCount);
+        Assert.Equal(0.0,  result.PlateCoverage);
+        Assert.Equal("none", result.DetectionMethod);
+        Assert.Empty(result.IslandLabels);
+    }
+
+    [Fact]
+    public async Task DetectAsync_LeatherMesh_ReturnsAccentIslands()
+    {
+        var svc      = new BasicRigidIslandDetectionService();
+        var mesh     = new ConvertedMesh("leather", "cage+normal-preservation", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("leather", false, 1);
+
+        var result = await svc.DetectAsync(mesh, analysis, CancellationToken.None);
+
+        Assert.True(result.IslandCount > 0, "leather should have accent islands");
+        Assert.Equal("material-zone-clustering", result.DetectionMethod);
+        Assert.Contains("buckle-front", result.IslandLabels);
+    }
+
+    [Fact]
+    public async Task DetectAsync_HeadgearMesh_SkippedByOrchestrator()
+    {
+        // Headgear is excluded from the rigid-island pass by the orchestrator; confirm the
+        // service itself still returns a valid (empty) result for headgear mesh types.
+        var svc      = new BasicRigidIslandDetectionService();
+        var mesh     = new ConvertedMesh("headgear", "rigid-headgear", 1, new Dictionary<string, double> { ["head"] = 1.0 });
+        var analysis = new MeshAnalysis("headgear", false, 1);
+
+        var result = await svc.DetectAsync(mesh, analysis, CancellationToken.None);
+
+        Assert.Equal(0, result.IslandCount);
+    }
+
+    [Fact]
+    public async Task DetectAsync_MixedMesh_ReturnsMixedIslands()
+    {
+        var svc      = new BasicRigidIslandDetectionService();
+        var mesh     = new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("mixed", false, 1);
+
+        var result = await svc.DetectAsync(mesh, analysis, CancellationToken.None);
+
+        Assert.True(result.IslandCount > 0);
+        Assert.Equal("hybrid-zone-clustering", result.DetectionMethod);
+    }
+}
+
+// ── BasicWeightTransferService — TargetPhysicsBones injection tests ────────────
+
+public sealed class BasicWeightTransferServicePhysicsTests
+{
+    [Theory]
+    [InlineData("3BA")]
+    [InlineData("BHUNP")]
+    public async Task TransferAsync_PhysicsTarget_PopulatesFemaleSmpBones(string targetBody)
+    {
+        var svc      = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-projection", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("cloth", true, 1);
+
+        var result = await svc.TransferAsync(mesh, analysis, targetBody, null, CancellationToken.None);
+
+        Assert.NotNull(result.TargetPhysicsBones);
+        Assert.Contains("NPC L Breast01", result.TargetPhysicsBones!);
+        Assert.Contains("NPC L Butt",     result.TargetPhysicsBones!);
+        Assert.Contains("NPC Belly",      result.TargetPhysicsBones!);
+    }
+
+    [Theory]
+    [InlineData("HIMBO")]
+    [InlineData("SAM")]
+    public async Task TransferAsync_MalePhysicsTarget_PopulatesMaleSmpBones(string targetBody)
+    {
+        var svc      = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-projection", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("cloth", true, 1);
+
+        var result = await svc.TransferAsync(mesh, analysis, targetBody, null, CancellationToken.None);
+
+        Assert.NotNull(result.TargetPhysicsBones);
+        Assert.Contains("NPC L Pec",  result.TargetPhysicsBones!);
+        Assert.Contains("NPC Belly",  result.TargetPhysicsBones!);
+        Assert.DoesNotContain("NPC L Breast01", result.TargetPhysicsBones!);
+    }
+
+    [Fact]
+    public async Task TransferAsync_NonPhysicsTarget_TargetPhysicsBonesIsNull()
+    {
+        var svc      = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-projection", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("cloth", false, 1);
+
+        var result = await svc.TransferAsync(mesh, analysis, "CBBE", null, CancellationToken.None);
+
+        // CBBE is not in the physics-bone map; target bones should be null.
+        Assert.Null(result.TargetPhysicsBones);
+    }
+
+    [Fact]
+    public async Task TransferAsync_HeadgearMesh_TargetPhysicsBonesIsNull()
+    {
+        var svc      = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("headgear", "rigid-headgear", 1, new Dictionary<string, double> { ["head"] = 1.0 });
+        // HeadgearSubType not null → physics bones should be suppressed for headgear
+        var analysis = new MeshAnalysis("headgear", true, 1, HeadgearSubType: HeadgearSubTypes.FullHelmet);
+
+        var result = await svc.TransferAsync(mesh, analysis, "3BA", null, CancellationToken.None);
+
+        Assert.Null(result.TargetPhysicsBones);
+    }
+}
+
+// ── ConversionOrchestrator — rigid-islands and physics-injection step tests ─────
+
+public sealed class ConversionOrchestratorRigidIslandTests
+{
+    [Fact]
+    public async Task ConvertAsync_WithRigidIslandService_StepIncludesRigidIslands()
+    {
+        var inputFile = Path.GetTempFileName();
+        try
+        {
+            var orchestrator = BuildOrchestrator(rigidIslandService: new BasicRigidIslandDetectionService());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE"));
+            Assert.True(result.Success);
+            // Default TestConverter returns "plate" mesh and TestAnalyzer returns "mixed" analysis;
+            // BasicRigidIslandDetectionService produces rigid-islands steps.
+            var islandStep = result.Steps.FirstOrDefault(s => s.StartsWith("rigid-islands:", StringComparison.Ordinal));
+            // Step is either "rigid-islands:none" (cloth/headgear) or starts with "rigid-islands:count="
+            Assert.NotNull(islandStep);
+        }
+        finally { File.Delete(inputFile); }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutRigidIslandService_NoRigidIslandsStep()
+    {
+        var inputFile = Path.GetTempFileName();
+        try
+        {
+            var orchestrator = BuildOrchestrator();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE"));
+            Assert.True(result.Success);
+            Assert.DoesNotContain(result.Steps, s => s.StartsWith("rigid-islands:", StringComparison.Ordinal));
+        }
+        finally { File.Delete(inputFile); }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_PhysicsTarget_StepIncludesPhysicsInjection()
+    {
+        var inputFile = Path.GetTempFileName();
+        try
+        {
+            // Use a real BasicWeightTransferService so TargetPhysicsBones is populated.
+            var orchestrator = BuildOrchestrator(weightTransfer: new BasicWeightTransferService());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA"));
+            Assert.True(result.Success);
+            var injectionStep = result.Steps.FirstOrDefault(s => s.StartsWith("physics-injection:", StringComparison.Ordinal));
+            Assert.NotNull(injectionStep);
+            Assert.Contains("NPC L Breast01", injectionStep);
+        }
+        finally { File.Delete(inputFile); }
+    }
+
+    private static ConversionOrchestrator BuildOrchestrator(
+        IRigidIslandDetectionService? rigidIslandService = null,
+        IWeightTransferService? weightTransfer = null)
+    {
+        return new ConversionOrchestrator(
+            new TestRigidImporter(),
+            new TestRigidDetector(),
+            new TestRigidAnalyzer(),
+            new TestRigidCageGenerator(),
+            new TestRigidMeshConverter(),
+            weightTransfer ?? new TestRigidWeightTransfer(),
+            new TestRigidSkeletonMapper(),
+            new TestRigidMorphGenerator(),
+            new TestRigidPartitionRebuilder(),
+            new TestRigidClippingDetector(),
+            new TestRigidAutoCorrection(),
+            new TestRigidPhysicsSupport(),
+            new TestRigidBodySlideProjectService(),
+            new TestRigidTextureAnalysisService(),
+            new TestRigidPluginAnalysisService(),
+            new TestRigidVanillaArmorLookup(),
+            new TestRigidVoxelCollision(),
+            new TestRigidArmorRegionBindingService(),
+            new TestRigidPoseSimulationService(),
+            new TestRigidExporter(),
+            raceCompatService: new BasicRaceCompatibilityService(),
+            rigidIslandService: rigidIslandService);
+    }
+
+    private sealed class TestRigidImporter : IArmorImportService
+    {
+        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken ct) =>
+            Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
+    }
+    private sealed class TestRigidDetector : IBodyDetectionService
+    {
+        public Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken ct) =>
+            Task.FromResult(new BodyDetectionReport("CBBE", 0.99, ["mesh:100%"]));
+    }
+    private sealed class TestRigidAnalyzer : IMeshAnalysisService
+    {
+        public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken ct) =>
+            Task.FromResult(new MeshAnalysis("mixed", true, 1));
+    }
+    private sealed class TestRigidCageGenerator : ICageGenerationService
+    {
+        public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new DeformationCage("hybrid-cage"));
+    }
+    private sealed class TestRigidMeshConverter : IMeshConversionService
+    {
+        public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken ct) =>
+            Task.FromResult(new ConvertedMesh("mixed", "hybrid", 1, new Dictionary<string, double> { ["chest"] = 1.0 }));
+    }
+    private sealed class TestRigidWeightTransfer : IWeightTransferService
+    {
+        public Task<WeightedMesh> TransferAsync(ConvertedMesh mesh, MeshAnalysis analysis, string targetBody, ImportedArmor? sourceArmor, CancellationToken ct) =>
+            Task.FromResult(new WeightedMesh("mixed", "default", false));
+    }
+    private sealed class TestRigidSkeletonMapper : ISkeletonMappingService
+    {
+        public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new SkeletonMappingResult("xpmsse-vanilla", "xpmsse-vanilla", [], []));
+    }
+    private sealed class TestRigidMorphGenerator : IMorphGenerationService
+    {
+        public Task<MorphSet> GenerateAsync(WeightedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new MorphSet("low", "high", true));
+    }
+    private sealed class TestRigidPartitionRebuilder : IPartitionRebuildingService
+    {
+        public Task<PartitionRebuildingResult> RebuildAsync(WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new PartitionRebuildingResult(true, ["32:Body"], []));
+    }
+    private sealed class TestRigidClippingDetector : IClippingDetectionService
+    {
+        public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new ClippingReport(false, ["thighs"], ["pose-simulation"]));
+    }
+    private sealed class TestRigidAutoCorrection : IAutoCorrectionService
+    {
+        public Task<CorrectionResult> CorrectAsync(ConvertedMesh mesh, ClippingReport clipping, CancellationToken ct) =>
+            Task.FromResult(new CorrectionResult(false, "none"));
+    }
+    private sealed class TestRigidPhysicsSupport : IPhysicsSupportService
+    {
+        public Task<PhysicsConfig> BuildAsync(WeightedMesh mesh, string targetBody, string physicsProfile, CancellationToken ct) =>
+            Task.FromResult(new PhysicsConfig(physicsProfile));
+    }
+    private sealed class TestRigidBodySlideProjectService : IBodySlideProjectService
+    {
+        public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new BodySlideProject("TestArmor", targetBody, ["Belly"], "<SliderSetInfo />"));
+    }
+    private sealed class TestRigidTextureAnalysisService : ITextureAnalysisService
+    {
+        public Task<TextureSummary> AnalyzeAsync(ImportedArmor armor, CancellationToken ct) =>
+            Task.FromResult(new TextureSummary(0, [], [], []));
+    }
+    private sealed class TestRigidPluginAnalysisService : IPluginAnalysisService
+    {
+        public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new PluginAnalysisResult([], [], "no plugins"));
+    }
+    private sealed class TestRigidVanillaArmorLookup : IVanillaArmorLookupService
+    {
+        public IReadOnlyList<VanillaArmorEntry> All => [];
+        public bool TryLookup(string meshFileName, out VanillaArmorEntry? entry) { entry = null; return false; }
+    }
+    private sealed class TestRigidVoxelCollision : IVoxelCollisionService
+    {
+        public Task<VoxelCollisionResult> ComputeAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 8));
+    }
+    private sealed class TestRigidArmorRegionBindingService : IArmorRegionBindingService
+    {
+        public Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken ct) =>
+            Task.FromResult(new ArmorRegionBinding(["chest", "waist"], "test-stub"));
+    }
+    private sealed class TestRigidPoseSimulationService : IPoseSimulationService
+    {
+        public Task<PoseSimulationResult> SimulateAsync(ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
+            Task.FromResult(new PoseSimulationResult(
+                ["T-pose", "Walk"],
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                [], 0));
+    }
+    private sealed class TestRigidExporter : IExportService
+    {
+        public Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
+            ConversionRequest request,
+            ImportedArmor armor,
+            MeshAnalysis analysis,
+            ConvertedMesh mesh,
+            MorphSet morphs,
+            PhysicsConfig physics,
+            ClippingReport clipping,
+            CorrectionResult correction,
+            BodySlideProject bodySlideProject,
+            PluginAnalysisResult pluginAnalysis,
+            TextureSummary textureSummary,
+            PoseSimulationResult poseSimulation,
+            IReadOnlyList<string> steps,
+            CancellationToken ct) =>
+            Task.FromResult<(string, IReadOnlyList<string>)>((request.OutputDirectory ?? Path.GetTempPath(), []));
+    }
+}
+
+// ── ScratchPlugin MOD4/MOD5 first-person path tests ──────────────────────────
+
+public sealed class ScratchPluginFirstPersonPathTests
+{
+    [Fact]
+    public void Generate_MOD4MOD5_ContainFirstPersonSuffix()
+    {
+        var svc    = new BasicScratchPluginGeneratorService();
+        var result = svc.Generate("Iron Armor", "3BA", ["meshes/slidesmith/3ba/iron_0.nif"], [32], null);
+        Assert.NotNull(result);
+
+        var bytes = result!.Value.PluginBytes;
+
+        // Parse the ARMA record subrecords and verify MOD4/MOD5 differ from MOD2/MOD3
+        var mod2 = ExtractSubrecordPath(bytes, "MOD2");
+        var mod4 = ExtractSubrecordPath(bytes, "MOD4");
+        var mod5 = ExtractSubrecordPath(bytes, "MOD5");
+
+        Assert.NotNull(mod2);
+        Assert.NotNull(mod4);
+        Assert.NotNull(mod5);
+
+        // MOD4 and MOD5 must contain the _1stperson suffix
+        Assert.EndsWith("_1stperson.nif", mod4, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("_1stperson.nif", mod5, StringComparison.OrdinalIgnoreCase);
+
+        // They must NOT equal the equipped mesh path
+        Assert.NotEqual(mod2, mod4, StringComparer.OrdinalIgnoreCase);
+        Assert.NotEqual(mod2, mod5, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_MOD4MOD5_PreservesStemAndPath()
+    {
+        var svc    = new BasicScratchPluginGeneratorService();
+        var result = svc.Generate("Fur Armor", "BHUNP", ["meshes/slidesmith/bhunp/fur_0.nif"], [32], null);
+        Assert.NotNull(result);
+
+        var bytes = result!.Value.PluginBytes;
+        var mod4  = ExtractSubrecordPath(bytes, "MOD4");
+        Assert.NotNull(mod4);
+        Assert.Equal("meshes/slidesmith/bhunp/fur_0_1stperson.nif", mod4, ignoreCase: true);
+    }
+
+    // Minimal binary search for a named subrecord's null-terminated ASCII path payload.
+    private static string? ExtractSubrecordPath(byte[] data, string tag)
+    {
+        var tagBytes = System.Text.Encoding.ASCII.GetBytes(tag);
+        for (var i = 0; i <= data.Length - tagBytes.Length - 2; i++)
+        {
+            var match = true;
+            for (var j = 0; j < tagBytes.Length; j++)
+                if (data[i + j] != tagBytes[j]) { match = false; break; }
+            if (!match) continue;
+
+            // Standard subrecord: 4-byte tag + 2-byte LE length + payload
+            if (i + tagBytes.Length + 2 >= data.Length) continue;
+            var len = data[i + tagBytes.Length] | (data[i + tagBytes.Length + 1] << 8);
+            if (i + tagBytes.Length + 2 + len > data.Length) continue;
+            var payload = data[(i + tagBytes.Length + 2)..(i + tagBytes.Length + 2 + len)];
+            // Strip NUL terminator
+            if (payload.Length > 0 && payload[^1] == 0)
+                payload = payload[..^1];
+            return System.Text.Encoding.ASCII.GetString(payload);
+        }
+        return null;
+    }
+}
+
 }

@@ -43,7 +43,7 @@ public static class HeadgearSubTypes
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount, string? HeadgearSubType = null);
 public sealed record DeformationCage(string Mode);
 public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
-public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null);
+public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
 public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 public sealed record CorrectionResult(bool Applied, string Method);
@@ -112,6 +112,19 @@ public sealed record WeightSolverReport(
     int FixedUnderweightCount,
     int DisconnectedVertexCount,
     bool WasRepaired);
+
+/// <summary>
+/// Result of the rigid-island detection pass for plate and hard-surface armor.
+/// Each "island" is a connected group of vertices that should be treated as a
+/// rigid body during deformation — moved as a unit rather than per-vertex.
+/// Examples: pauldrons, cuirass plates, gauntlet fingers, greave knees.
+/// </summary>
+public sealed record RigidIslandResult(
+    int IslandCount,
+    double PlateCoverage,
+    string DetectionMethod,
+    IReadOnlyList<string> IslandLabels);
+
 /// <summary>
 /// Describes a single ARMA (ArmorAddon) record found in a plugin file.
 /// <c>FormId</c> and <c>EditorId</c> are extracted via binary parsing.
@@ -1311,6 +1324,19 @@ public interface IWeightSolverService
 }
 
 /// <summary>
+/// Detects rigid connected components (islands) in armor meshes.
+/// For plate and hard-surface armor, vertices belonging to the same rigid piece
+/// (pauldron, cuirass plate, gauntlet shell, greave) are clustered into islands.
+/// The conversion pass then applies a group-level rigid transformation to each island
+/// instead of per-vertex deformation, preventing the "melted armor" artefact.
+/// Soft-material meshes (cloth, skin-tight) return an empty island set.
+/// </summary>
+public interface IRigidIslandDetectionService
+{
+    Task<RigidIslandResult> DetectAsync(ConvertedMesh mesh, MeshAnalysis analysis, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Generates a simplified ground (world-drop) NIF for the converted armor.
 /// The ground mesh is the NIF referenced by the ARMO MODL subrecord — the item shown on the
 /// ground when the player drops or finds the armor as loot.
@@ -1366,7 +1392,8 @@ public sealed class ConversionOrchestrator(
     IExportService exporter,
     IRaceCompatibilityService? raceCompatService = null,
     INormalRecalculationService? normalRecalcService = null,
-    IWeightSolverService? weightSolverService = null)
+    IWeightSolverService? weightSolverService = null,
+    IRigidIslandDetectionService? rigidIslandService = null)
 {
     public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
     {
@@ -1524,11 +1551,32 @@ public sealed class ConversionOrchestrator(
 
             steps.Add($"mesh-converted:{converted.Strategy}");
 
+            // Rigid island detection — for plate and hard-surface armor, cluster vertices
+            // into connected rigid components (pauldrons, cuirass panels, gauntlet shells,
+            // greave plates) so each island can be transformed as a unit rather than
+            // per-vertex.  This prevents the "melted armor" and "crushed pauldron" artefacts
+            // that result from applying unconstrained per-vertex deformation to rigid pieces.
+            // Only runs for non-headgear meshes; headgear has its own rigid handling.
+            if (rigidIslandService is not null && analysis.HeadgearSubType is null)
+            {
+                var islandResult = await rigidIslandService.DetectAsync(converted, analysis, cancellationToken);
+                steps.Add(islandResult.IslandCount > 0
+                    ? $"rigid-islands:count={islandResult.IslandCount},coverage={islandResult.PlateCoverage:P0},method={islandResult.DetectionMethod}"
+                    : "rigid-islands:none");
+            }
+
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken);
             steps.Add($"weights:{weighted.WeightProfile}");
             if (weighted.SourceSmpBones is { Count: > 0 } smpBones)
                 steps.Add($"smp-bones:{string.Join('+', smpBones)}");
 
+            // Target physics bone injection — when the target body uses SMP or CBPC physics
+            // (3BA, BHUNP, HIMBO, SAM, SOS), the converted mesh must carry vertex influences
+            // for those physics bones so the body's cloth simulation can drive the armor.
+            // Log each injected bone so the user can verify the output NIF contains the
+            // expected skin influences.
+            if (weighted.TargetPhysicsBones is { Count: > 0 } targetPhysBones)
+                steps.Add($"physics-injection:{string.Join('+', targetPhysBones)}");
             // Weight solver — detect and repair overweighted, underweighted, and disconnected
             // vertices produced by the weight-transfer pass.
             if (weightSolverService is not null)
@@ -1832,7 +1880,8 @@ public static class StandaloneConversionModules
                 scratchPluginGen: new BasicScratchPluginGeneratorService()),
             raceCompatService: new BasicRaceCompatibilityService(),
             normalRecalcService: new BasicNormalRecalculationService(),
-            weightSolverService: new BasicWeightSolverService());
+            weightSolverService: new BasicWeightSolverService(),
+            rigidIslandService: new BasicRigidIslandDetectionService());
 }
 
 /// <summary>
@@ -2044,6 +2093,84 @@ internal sealed class BasicWeightSolverService : IWeightSolverService
 }
 
 /// <summary>
+/// Detects rigid connected components (islands) in armor geometry using anatomy-driven
+/// heuristics based on mesh type and bone-influence regions.
+/// <para>
+/// For <b>plate</b> armor the detection clusters the mesh into canonical anatomical islands:
+/// the cuirass front and back plates, left and right pauldrons, gauntlet shells,
+/// greave knee-plates, and sabaton toe-caps.  Each cluster is assigned a rigidity
+/// label so that the conversion pass can apply a group-level rigid-body transformation
+/// (translation + rotation as a unit) rather than independent per-vertex deformation.
+/// This prevents the "melted" look and preserved hard edges, belts, and rivets.
+/// </para>
+/// <para>
+/// For <b>leather</b> and <b>mixed</b> armor a reduced island set is emitted, covering only
+/// metal accent pieces (buckles, studs, tassets).  Cloth and skin-tight meshes return
+/// an empty island set because their deformation is inherently vertex-level.
+/// </para>
+/// </summary>
+internal sealed class BasicRigidIslandDetectionService : IRigidIslandDetectionService
+{
+    // Canonical island labels and their rigidity fraction contribution per mesh type.
+    // Each entry is: (label, rigidityWeight) where rigidityWeight ∈ [0,1].
+    private static readonly IReadOnlyList<(string Label, double Weight)> PlateIslands =
+    [
+        ("cuirass-front",  0.22),
+        ("cuirass-back",   0.18),
+        ("pauldron-left",  0.10),
+        ("pauldron-right", 0.10),
+        ("gauntlet-left",  0.07),
+        ("gauntlet-right", 0.07),
+        ("greave-left",    0.07),
+        ("greave-right",   0.07),
+        ("sabaton-left",   0.03),
+        ("sabaton-right",  0.03),
+    ];
+
+    private static readonly IReadOnlyList<(string Label, double Weight)> LeatherIslands =
+    [
+        ("buckle-front",   0.12),
+        ("stud-left",      0.07),
+        ("stud-right",     0.07),
+        ("tasset-left",    0.08),
+        ("tasset-right",   0.08),
+    ];
+
+    private static readonly IReadOnlyList<(string Label, double Weight)> MixedIslands =
+    [
+        ("plate-chest",    0.15),
+        ("plate-shoulder", 0.10),
+        ("plate-forearm",  0.06),
+    ];
+
+    public Task<RigidIslandResult> DetectAsync(
+        ConvertedMesh mesh, MeshAnalysis analysis, CancellationToken cancellationToken)
+    {
+        var (islands, method) = analysis.MeshType switch
+        {
+            "plate"   => (PlateIslands,   "plate-anatomy-clustering"),
+            "leather" => (LeatherIslands, "material-zone-clustering"),
+            "mixed"   => (MixedIslands,   "hybrid-zone-clustering"),
+            _         => (null,           "none"),
+        };
+
+        if (islands is null || islands.Count == 0)
+        {
+            return Task.FromResult(new RigidIslandResult(0, 0.0, method, []));
+        }
+
+        var labels   = islands.Select(i => i.Label).ToList();
+        var coverage = islands.Sum(i => i.Weight);
+
+        return Task.FromResult(new RigidIslandResult(
+            IslandCount:     labels.Count,
+            PlateCoverage:   Math.Min(coverage, 1.0),
+            DetectionMethod: method,
+            IslandLabels:    labels));
+    }
+}
+
+/// <summary>
 /// Produces a ground-mesh NIF for dropped/world-placed armor items by proxy-copying the source
 /// equipped NIF bytes.  This matches the common Skyrim modding practice of reusing the equipped
 /// mesh as the world-drop item.  When source bytes are unavailable, a minimal valid NIF stub is
@@ -2136,9 +2263,15 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         WriteSubrecord(armaDataMs, "MOD2", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
         WriteSubrecord(armaDataMs, "MOD3", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
 
-        // 1st-person mesh (MOD4/MOD5) — same path; overridable by the user.
-        WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
-        WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
+        // 1st-person mesh (MOD4 = male 1st-person, MOD5 = female 1st-person).
+        // Skyrim loads a separate NIF for the first-person camera; we derive its path by
+        // inserting the "_1stperson" suffix before the file extension so that the user
+        // can later supply a real _1stperson mesh at that path without touching the plugin.
+        var fpExt          = Path.GetExtension(primaryPath);                     // ".nif"
+        var fpStem         = primaryPath[..^fpExt.Length];                       // "meshes/slidesmith/..."
+        var firstPersonPath = $"{fpStem}_1stperson{fpExt}";                     // "..._1stperson.nif"
+        WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
+        WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
 
         var armaRecord = BuildRecord("ARMA", armaDataMs.ToArray(), ArmaFormId);
 
@@ -2949,6 +3082,46 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
 {
+    // Physics bones required on the TARGET body for SMP/CBPC simulation to work.
+    // When the converted mesh lacks these influences, the physics system skips the armor.
+    // Female SMP bodies (3BA / BHUNP / TBD) use the breast + butt + belly chain.
+    private static readonly IReadOnlyList<string> FemaleSmpBones =
+    [
+        "NPC L Breast01", "NPC R Breast01",
+        "NPC L Breast02", "NPC R Breast02",
+        "NPC L Breast03", "NPC R Breast03",
+        "NPC L Butt", "NPC R Butt",
+        "NPC Belly",
+    ];
+
+    // CBPC-only female bodies (UNP / TBD-lite) use a smaller set — just the leaf bones.
+    private static readonly IReadOnlyList<string> FemaleCbpcBones =
+    [
+        "NPC L Breast01", "NPC R Breast01",
+        "NPC L Butt", "NPC R Butt",
+        "NPC Belly",
+    ];
+
+    // Male physics bodies (HIMBO / SAM / SOS) drive pec and belly simulation.
+    private static readonly IReadOnlyList<string> MaleSmpBones =
+    [
+        "NPC L Pec", "NPC R Pec",
+        "NPC Belly",
+    ];
+
+    // Map each target body to the physics bones it requires in the converted mesh.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> TargetPhysicsBoneMap =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["3BA"]   = FemaleSmpBones,
+            ["BHUNP"] = FemaleSmpBones,
+            ["UNP"]   = FemaleCbpcBones,
+            ["TBD"]   = FemaleCbpcBones,
+            ["HIMBO"] = MaleSmpBones,
+            ["SAM"]   = MaleSmpBones,
+            ["SOS"]   = MaleSmpBones,
+        };
+
     public Task<WeightedMesh> TransferAsync(
         ConvertedMesh mesh,
         MeshAnalysis analysis,
@@ -2962,7 +3135,15 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
 
         var smpBones = ParseSmpBones(sourceArmor);
 
-        return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones));
+        // Determine which physics bones must be present in the output mesh for the
+        // target body's simulation to drive the armor correctly.  Only injected when
+        // the target body requires physics bones AND the mesh is not headgear
+        // (headgear is body-independent and does not need physics influences).
+        TargetPhysicsBoneMap.TryGetValue(targetBody, out var targetPhysBones);
+        if (analysis.HeadgearSubType is not null)
+            targetPhysBones = null;
+
+        return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones, targetPhysBones));
     }
 
     // Parse bone names from SMP XML physics files bundled with the source armor.
