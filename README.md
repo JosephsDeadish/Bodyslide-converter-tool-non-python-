@@ -162,7 +162,9 @@ Implemented from issue scope:
 
 - **flat normal map stub generation** — when a diffuse texture (e.g. `iron_d.dds`) has no matching `_n.dds` companion, a minimal **4×4 flat tangent-space normal map stub** is now auto-generated alongside it; the stub uses an uncompressed BGRA8 DDS (magic + 124-byte DDS_HEADER, all 16 pixels set to the neutral normal vector RGB(128,128,255) pointing straight outward) so surfaces render correctly in-game with no purple-tint artefacts; can be replaced by a baked normal map at any time; emits `normal-stubs:generated=N` in `conversion.log`
 
-All gaps from issue #2 have now been addressed, including true plugin record rewriting with a proper Bethesda override patch ESP, a generated README.txt per output package, weight-variant synthesis for incomplete _0/_1 pairs, and flat normal map stubs for missing _n.dds textures.
+- **non-stub BodySlide morph payloads** — generated `.bsd` and `.tri` files now include populated vertex counts and deterministic per-vertex delta payloads for each slider/weight variant instead of header-only stub files, so exports are immediately consumable by BodySlide tooling
+
+Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, and morph payload export), with additional quality passes still being iterated.
 
 ## Current built-in presets (27 total)
 

@@ -1575,6 +1575,41 @@ public sealed class BsdSliderDataTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+
+        [Fact]
+        public async Task ConvertAsync_WithDefaultModules_BsdFilesContainVertexDeltaPayload()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var outputDirectory = Path.Combine(workingDirectory, "output");
+            Directory.CreateDirectory(workingDirectory);
+            var inputFile = Path.Combine(workingDirectory, "gauntlets.nif");
+            await File.WriteAllTextAsync(inputFile, "mesh");
+
+            try
+            {
+                var orchestrator = StandaloneConversionModules.CreateDefault();
+                var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+                Assert.True(result.Success);
+                var bsdFile = Directory.GetFiles(outputDirectory, "*.bsd", SearchOption.AllDirectories).First();
+                var bytes = await File.ReadAllBytesAsync(bsdFile);
+
+                var nameLengthOffset = 7;
+                var sliderNameLength = BitConverter.ToUInt16(bytes, nameLengthOffset);
+                var vertexCountOffset = nameLengthOffset + sizeof(ushort) + sliderNameLength;
+                var vertexCount = BitConverter.ToUInt32(bytes, vertexCountOffset);
+                var deltaOffset = vertexCountOffset + sizeof(uint);
+                var expectedDeltaBytes = checked((int)vertexCount * 12);
+
+                Assert.True(vertexCount > 0, "BSD vertex count should be populated.");
+                Assert.Equal(deltaOffset + expectedDeltaBytes, bytes.Length);
+                Assert.Contains(bytes.AsSpan(deltaOffset, expectedDeltaBytes).ToArray(), b => b != 0);
+            }
+            finally
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+        }
     }
 }
 
@@ -1636,6 +1671,52 @@ public sealed class TriMorphFileTests
                 Assert.True(bytes.Length >= 8);
                 var magic = System.Text.Encoding.ASCII.GetString(bytes, 0, 8);
                 Assert.Equal("FRTRI003", magic);
+            }
+
+            [Fact]
+            public async Task ConvertAsync_WithDefaultModules_TriFilesContainMorphDeltaPayload()
+            {
+                var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+                var outputDirectory = Path.Combine(workingDirectory, "output");
+                Directory.CreateDirectory(workingDirectory);
+                var inputFile = Path.Combine(workingDirectory, "helmet.nif");
+                await File.WriteAllTextAsync(inputFile, "mesh");
+
+                try
+                {
+                    var orchestrator = StandaloneConversionModules.CreateDefault();
+                    var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+                    Assert.True(result.Success);
+                    var triFile = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly).First();
+                    var bytes = await File.ReadAllBytesAsync(triFile);
+
+                    var offset = 8;
+                    var vertexCount = BitConverter.ToUInt32(bytes, offset);
+                    offset += sizeof(uint);
+                    var morphCount = BitConverter.ToUInt32(bytes, offset);
+                    offset += sizeof(uint);
+
+                    Assert.True(vertexCount > 0, "TRI vertex count should be populated.");
+                    Assert.True(morphCount > 0, "TRI should include morph entries.");
+
+                    for (var index = 0; index < morphCount; index++)
+                    {
+                        var nameLength = BitConverter.ToUInt16(bytes, offset);
+                        offset += sizeof(ushort) + nameLength;
+                        var deltaCount = BitConverter.ToUInt32(bytes, offset);
+                        offset += sizeof(uint);
+                        Assert.Equal(vertexCount, deltaCount);
+                    }
+
+                    var expectedPayloadBytes = checked((int)morphCount * (int)vertexCount * 6);
+                    Assert.Equal(offset + expectedPayloadBytes, bytes.Length);
+                    Assert.Contains(bytes.AsSpan(offset, expectedPayloadBytes).ToArray(), b => b != 0);
+                }
+                finally
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
             }
         }
         finally
