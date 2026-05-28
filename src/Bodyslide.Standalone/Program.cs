@@ -34,6 +34,7 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
             : string.Empty;
         Console.WriteLine($" - {body.Name,-8} tokens: [{string.Join(", ", body.DetectionTokens)}]{vcRange}");
     }
+    Console.WriteLine(" - all/any/*  alias: convert to every supported body type");
 
     return;
 }
@@ -49,7 +50,7 @@ if (!TryParseRequest(args, out var request, out var error))
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body>] [--targets <body1,body2>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");

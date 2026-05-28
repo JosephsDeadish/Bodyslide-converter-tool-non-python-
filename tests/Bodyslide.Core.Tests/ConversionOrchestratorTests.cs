@@ -70,6 +70,33 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void Expand_TargetAllKeyword_ExpandsToEverySupportedBodyType()
+    {
+        var request = new ConversionRequest("/tmp/in.nif", "all");
+
+        var expanded = RequestNormalizer.Expand(request);
+        var expectedBodies = BodyTypeCatalog.All.Select(static body => body.Name).OrderBy(static body => body).ToArray();
+        var actualBodies = expanded.Select(static variant => variant.Request.TargetBody).OrderBy(static body => body).ToArray();
+
+        Assert.Equal(expectedBodies, actualBodies);
+    }
+
+    [Fact]
+    public void Expand_TargetBodiesAnyKeyword_ExpandsAndDeduplicatesAgainstExplicitBodies()
+    {
+        var request = new ConversionRequest(
+            InputPath: "/tmp/in.nif",
+            TargetBody: "CBBE",
+            TargetBodies: ["any", "CBBE"]);
+
+        var expanded = RequestNormalizer.Expand(request);
+        var expectedBodies = BodyTypeCatalog.All.Select(static body => body.Name).OrderBy(static body => body).ToArray();
+        var actualBodies = expanded.Select(static variant => variant.Request.TargetBody).OrderBy(static body => body).ToArray();
+
+        Assert.Equal(expectedBodies, actualBodies);
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInDirectory()
     {
         var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

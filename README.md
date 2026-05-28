@@ -57,6 +57,9 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path|folder|zip
 # convert one armor to multiple target bodies in one run
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --targets "CBBE,3BA,HIMBO" --output "<optional output directory>"
 
+# convert one armor to every built-in body type in one run
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "all" --output "<optional output directory>"
+
 # convert one armor to multiple built-in presets in one run
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --presets "3BA Curvy,HIMBO Lean,UNP Petite" --output "<optional output directory>"
 
@@ -236,6 +239,7 @@ Implemented from issue scope:
 - **scratch-plugin mesh staging** — when no source plugin exists, export now stages converted meshes into the exact `meshes/slidesmith/<body>/...` paths referenced by the generated standalone ESP and also writes fallback `_1stperson.nif` copies so the MOD2/MOD3/MOD4/MOD5 paths all resolve without any manual file moves or extra mesh authoring
 
 - **single-armor multi-target batch conversion** — CLI now supports `--targets "<body1,body2,...>"` and `--presets "<preset1,preset2,...>"`, and the desktop app exposes matching batch-entry fields for preset/target mode; one armor (or one folder/archive batch) can now be converted into multiple body outputs in a single run, with each target/preset written into its own output subfolder to avoid collisions
+- **all-body target alias** — `--target all` / `--target any` / `--target *` (and the same tokens inside `--targets`) now expand to every supported body type automatically, so one command can export a full multi-body conversion pack without manually listing each body name
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, headgear sub-type/partition handling, ground mesh NIF output, biped slot passthrough, scratch plugin generation for plugin-free inputs, first-person mesh paths, rigid island detection, and target physics bone injection).
 
@@ -286,7 +290,7 @@ Issue #2 baseline coverage has been expanded substantially (import/dependency sc
 **Male:** HIMBO, SAM, SOS, Vanilla  
 **Custom:** any unrecognised body falls back to `CUSTOM` detection
 
-Use `--list-bodies` to see detection tokens and vertex-count hints for each body type.
+Use `--list-bodies` to see detection tokens and vertex-count hints for each body type. Use `all`, `any`, or `*` as a target alias to convert to every listed body in one run.
 
 ## Vanilla armor database
 

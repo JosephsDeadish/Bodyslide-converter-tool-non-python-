@@ -324,6 +324,8 @@ public static class PresetCatalog
 
 public static class RequestNormalizer
 {
+    private static readonly string[] AllTargetAliases = ["all", "any", "*"];
+
     public static (ConversionRequest Request, ConversionPreset? Preset) Normalize(ConversionRequest request)
     {
         if (!string.IsNullOrWhiteSpace(request.Preset))
@@ -381,7 +383,8 @@ public static class RequestNormalizer
                 request.Preset);
         }
 
-        foreach (var targetBody in EnumerateNonEmpty(request.TargetBodies))
+        foreach (var targetBody in EnumerateNonEmpty(request.TargetBodies)
+                     .SelectMany(ExpandTargetSelection))
         {
             AddVariant(
                 request with
@@ -396,13 +399,17 @@ public static class RequestNormalizer
 
         if (!string.IsNullOrWhiteSpace(request.TargetBody))
         {
-            AddVariant(
-                request with
-                {
-                    TargetBodies = null,
-                    Presets = null,
-                },
-                request.TargetBody);
+            foreach (var targetBody in ExpandTargetSelection(request.TargetBody))
+            {
+                AddVariant(
+                    request with
+                    {
+                        TargetBody = targetBody,
+                        TargetBodies = null,
+                        Presets = null,
+                    },
+                    targetBody);
+            }
         }
 
         return expanded;
@@ -411,6 +418,24 @@ public static class RequestNormalizer
     private static IEnumerable<string> EnumerateNonEmpty(IReadOnlyList<string>? values) =>
         values?.Where(static value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase) ??
         [];
+
+    private static IEnumerable<string> ExpandTargetSelection(string targetBody)
+    {
+        var normalized = targetBody.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return [];
+        }
+
+        if (AllTargetAliases.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            return BodyTypeCatalog.All
+                .Select(static body => body.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return [normalized];
+    }
 
     private static string MakeSafePathSegment(string value)
     {
