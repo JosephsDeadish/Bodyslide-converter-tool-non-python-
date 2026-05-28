@@ -1509,11 +1509,37 @@ internal sealed class LocalArmorImportService : IArmorImportService
             var directory = Path.GetDirectoryName(sourcePath);
             if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
             {
+                var modRoot = TryResolveModRootFromMeshesPath(directory);
+                if (!string.IsNullOrWhiteSpace(modRoot))
+                {
+                    return modRoot;
+                }
+
                 return directory;
             }
         }
 
         return sourcePath;
+    }
+
+    private static string? TryResolveModRootFromMeshesPath(string startDirectory)
+    {
+        var current = startDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (string.Equals(Path.GetFileName(current), "meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Path.GetDirectoryName(current);
+                if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+                {
+                    return parent;
+                }
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return null;
     }
 }
 
@@ -4684,26 +4710,18 @@ internal sealed class LocalExportService : IExportService
         static bool IsPlugin(string path) =>
             Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
-        if (File.Exists(sourcePath))
+        var scanRoot = ResolveSupportAssetRoot(sourcePath);
+        if (File.Exists(scanRoot))
         {
-            var sourceDirectory = Path.GetDirectoryName(sourcePath);
-            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
-            {
-                return Directory.GetFiles(sourceDirectory, "*.*", SearchOption.AllDirectories)
-                    .Where(IsPlugin)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-
-            return IsPlugin(sourcePath) ? [Path.GetFullPath(sourcePath)] : [];
+            return IsPlugin(scanRoot) ? [Path.GetFullPath(scanRoot)] : [];
         }
 
-        if (!Directory.Exists(sourcePath))
+        if (!Directory.Exists(scanRoot))
         {
             return [];
         }
 
-        return Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
+        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
             .Where(IsPlugin)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -4714,26 +4732,18 @@ internal sealed class LocalExportService : IExportService
         static bool IsMaterial(string path) =>
             Path.GetExtension(path) is ".bgsm" or ".bgem";
 
-        if (File.Exists(sourcePath))
+        var scanRoot = ResolveSupportAssetRoot(sourcePath);
+        if (File.Exists(scanRoot))
         {
-            var sourceDirectory = Path.GetDirectoryName(sourcePath);
-            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
-            {
-                return Directory.GetFiles(sourceDirectory, "*.*", SearchOption.AllDirectories)
-                    .Where(IsMaterial)
-                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-
-            return IsMaterial(sourcePath) ? [Path.GetFullPath(sourcePath)] : [];
+            return IsMaterial(scanRoot) ? [Path.GetFullPath(scanRoot)] : [];
         }
 
-        if (!Directory.Exists(sourcePath))
+        if (!Directory.Exists(scanRoot))
         {
             return [];
         }
 
-        return Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
+        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
             .Where(IsMaterial)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -4741,6 +4751,8 @@ internal sealed class LocalExportService : IExportService
 
     private static string GetSafeRelativeAssetPath(string sourceRoot, string fullSourcePath)
     {
+        sourceRoot = ResolveSupportAssetRoot(sourceRoot);
+
         if (Directory.Exists(sourceRoot))
         {
             var relative = Path.GetRelativePath(sourceRoot, fullSourcePath);
@@ -4753,6 +4765,46 @@ internal sealed class LocalExportService : IExportService
         }
 
         return Path.GetFileName(fullSourcePath);
+    }
+
+    private static string ResolveSupportAssetRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return sourcePath;
+        }
+
+        if (File.Exists(sourcePath))
+        {
+            var sourceDirectory = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
+            {
+                var modRoot = TryResolveModRootFromMeshesPath(sourceDirectory);
+                return !string.IsNullOrWhiteSpace(modRoot) ? modRoot : sourceDirectory;
+            }
+        }
+
+        return sourcePath;
+    }
+
+    private static string? TryResolveModRootFromMeshesPath(string startDirectory)
+    {
+        var current = startDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (string.Equals(Path.GetFileName(current), "meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Path.GetDirectoryName(current);
+                if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
+                {
+                    return parent;
+                }
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return null;
     }
 
     private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken)
