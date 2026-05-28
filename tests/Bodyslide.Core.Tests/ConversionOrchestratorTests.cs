@@ -399,6 +399,35 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithUnsupportedSkeletonBones_AddsSkeletonWarningStep()
+    {
+        var inputFile = Path.GetTempFileName();
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(
+                exporter: new TestExporter(),
+                skeletonMapper: new UnsupportedSkeletonMapper(["NPC L Breast01", "NPC Belly"]));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(
+                result.Steps,
+                s => string.Equals(
+                    s,
+                    "skeleton-warnings:unsupported-bones=NPC L Breast01+NPC Belly",
+                    StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_PartitionStepRebuildsSlots()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -649,7 +678,9 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
-    private static ConversionOrchestrator BuildTestOrchestrator(IExportService? exporter = null) =>
+    private static ConversionOrchestrator BuildTestOrchestrator(
+        IExportService? exporter = null,
+        ISkeletonMappingService? skeletonMapper = null) =>
         new(
             new TestImporter(),
             new TestDetector(),
@@ -657,7 +688,7 @@ public sealed class ConversionOrchestratorTests
             new TestCageGenerator(),
             new TestConverter(),
             new TestWeightTransfer(),
-            new TestSkeletonMapper(),
+            skeletonMapper ?? new TestSkeletonMapper(),
             new TestMorphGenerator(),
             new TestPartitionRebuilder(),
             new TestClippingDetector(),
@@ -712,6 +743,12 @@ public sealed class ConversionOrchestratorTests
     {
         public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
             Task.FromResult(new SkeletonMappingResult("xpmsse-vanilla", "xpmsse-vanilla", [], []));
+    }
+
+    private sealed class UnsupportedSkeletonMapper(IReadOnlyList<string> unsupportedBones) : ISkeletonMappingService
+    {
+        public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken) =>
+            Task.FromResult(new SkeletonMappingResult("xpmsse-vanilla", "xpmsse-vanilla", [], unsupportedBones));
     }
 
     private sealed class TestMorphGenerator : IMorphGenerationService

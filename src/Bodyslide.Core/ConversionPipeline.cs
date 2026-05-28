@@ -1204,6 +1204,10 @@ public sealed class ConversionOrchestrator(
 
             var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
+            if (skeletonMapping.UnsupportedBones.Count > 0)
+            {
+                steps.Add($"skeleton-warnings:unsupported-bones={string.Join('+', skeletonMapping.UnsupportedBones)}");
+            }
 
             var morphs = await morphGenerator.GenerateAsync(weighted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph}");
