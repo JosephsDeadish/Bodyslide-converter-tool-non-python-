@@ -1618,6 +1618,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double BoneSignatureWeight = 0.10;
     private const double VertexCountWeight = 0.15;
     private const double BoundingRatioWeight = 0.05;
+    private const double BodyReferenceTokenWeight = 0.08;
 
     // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
@@ -1636,6 +1637,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+        var bodyReferenceNames = armor.BodyReferenceFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var geometrySignature = NifGeometrySignatureReader.TryReadBest(
             armor.MeshFiles.Concat(armor.BodyReferenceFiles.Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))));
 
@@ -1643,7 +1645,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, physicsContents, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1680,6 +1682,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<string> meshNames,
         IReadOnlyList<string> textureNames,
         IReadOnlyList<string> physicsNames,
+        IReadOnlyList<string> bodyReferenceNames,
         string physicsContents,
         MeshGeometrySignature? geometrySignature)
     {
@@ -1701,6 +1704,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         if (template.PhysicsTokens.Count > 0 && physicsHitRatio > 0)
         {
             evidence.Add($"physics:{physicsHitRatio:P0}");
+        }
+
+        var referenceHitRatio = MatchRatio(bodyReferenceNames, template.TextureTokens);
+        if (referenceHitRatio > 0)
+        {
+            evidence.Add($"reference:{referenceHitRatio:P0}");
         }
 
         // Bone signature: check if specific physics bone names appear in XML content.
@@ -1739,6 +1748,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (meshHitRatio * MeshTokenWeight) +
             (textureHitRatio * TextureTokenWeight) +
             (physicsHitRatio * PhysicsTokenWeight) +
+            (referenceHitRatio * BodyReferenceTokenWeight) +
             (boneSignatureScore * BoneSignatureWeight) +
             (vertexSignatureScore * VertexCountWeight) +
             (boundingRatioScore * BoundingRatioWeight) +

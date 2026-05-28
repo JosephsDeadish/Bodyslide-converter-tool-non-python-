@@ -1892,6 +1892,33 @@ public sealed class BodySignatureVertexCountTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_UsesBodyReferenceComparisonEvidence()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "cbbe_mystery_armor.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "femalebody_1.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("CBBE", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
 
 public sealed class PreviewMetadataTests
