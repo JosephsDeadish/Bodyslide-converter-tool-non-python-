@@ -430,7 +430,8 @@ public sealed class MainForm : Form
                 DeformationProfile: profile,
                 SourceBodyOverride: sourceOverride);
 
-            var results = await Task.Run(async () => await _batchRunner.ConvertAsync(request, _activeConversion.Token));
+            var cancellationToken = _activeConversion.Token;
+            var results = await Task.Run(() => _batchRunner.ConvertAsync(request, cancellationToken));
             _lastOutputDirectory = GetBestOutputDirectory(results);
             _openOutputButton.Enabled = !string.IsNullOrWhiteSpace(_lastOutputDirectory) && Directory.Exists(_lastOutputDirectory);
 
