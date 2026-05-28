@@ -5644,14 +5644,14 @@ internal sealed class LocalExportService : IExportService
               sig := Signature(e);
               { ── ARMA (ArmorAddon) — world and first-person models ── }
               if sig = 'ARMA' then begin
-                TryRewriteModelPath(e, 'Female World Model\MOD2');
-                TryRewriteModelPath(e, 'Female World Model\MOD2 - Model Filename');
                 TryRewriteModelPath(e, 'Male World Model\MOD2');
                 TryRewriteModelPath(e, 'Male World Model\MOD2 - Model Filename');
-                TryRewriteModelPath(e, 'Female 1st Person\MOD4');
-                TryRewriteModelPath(e, 'Female 1st Person\MOD4 - Model Filename');
+                TryRewriteModelPath(e, 'Female World Model\MOD3');
+                TryRewriteModelPath(e, 'Female World Model\MOD3 - Model Filename');
                 TryRewriteModelPath(e, 'Male 1st Person\MOD4');
                 TryRewriteModelPath(e, 'Male 1st Person\MOD4 - Model Filename');
+                TryRewriteModelPath(e, 'Female 1st Person\MOD5');
+                TryRewriteModelPath(e, 'Female 1st Person\MOD5 - Model Filename');
               end;
               { ── ARMO (Armor) — inventory/world model ── }
               if sig = 'ARMO' then begin

@@ -2627,6 +2627,10 @@ public sealed class PoseSimulationAndPreviewTests
                 Assert.Contains("Finalize",     content, StringComparison.Ordinal);
                 Assert.Contains("SetEditValue", content, StringComparison.Ordinal);
                 Assert.Contains("1st Person",   content, StringComparison.Ordinal);
+                Assert.Contains(@"Male World Model\MOD2", content, StringComparison.Ordinal);
+                Assert.Contains(@"Female World Model\MOD3", content, StringComparison.Ordinal);
+                Assert.Contains(@"Male 1st Person\MOD4", content, StringComparison.Ordinal);
+                Assert.Contains(@"Female 1st Person\MOD5", content, StringComparison.Ordinal);
             }
         }
         finally
