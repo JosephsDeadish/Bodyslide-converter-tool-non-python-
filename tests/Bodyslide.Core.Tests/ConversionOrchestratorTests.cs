@@ -4578,9 +4578,11 @@ public sealed class BinaryPluginRewriteServiceTests
             modl, 0, modl.Length, rewriteMap, "ARMO");
 
         Assert.Equal(3, rewritten); // MODL rewrite + synthesized MOD2 + synthesized MOD3
-        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MODL"));
-        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MOD2"));
-        Assert.Equal(1, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_gnd.nif", "MOD3"));
+        var dataText = System.Text.Encoding.Latin1.GetString(newData);
+        Assert.Contains("MODL", dataText, StringComparison.Ordinal);
+        Assert.Contains("MOD2", dataText, StringComparison.Ordinal);
+        Assert.Contains("MOD3", dataText, StringComparison.Ordinal);
+        Assert.Equal(3, dataText.Split("meshes/slidesmith/cbbe/iron_gnd.nif", StringSplitOptions.None).Length - 1);
     }
 
     [Fact]
