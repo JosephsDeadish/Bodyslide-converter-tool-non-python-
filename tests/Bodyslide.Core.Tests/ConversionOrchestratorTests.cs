@@ -3035,6 +3035,30 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
+    public void RewriteArmaSubrecords_LongReplacementPath_WritesExtendedSizeSubrecord()
+    {
+        const string original = "meshes/armor/iron/iron_0.nif\0";
+        var longPath = "meshes/slidesmith/" + new string('a', 70000) + ".nif";
+        byte[] data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(original));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = longPath
+        };
+
+        var (newData, rewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            data, 0, data.Length, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+        Assert.Equal("XXXX", System.Text.Encoding.ASCII.GetString(newData, 0, 4));
+        Assert.Equal(4, (ushort)(newData[4] | (newData[5] << 8)));
+        var extendedSize = newData[6] | (newData[7] << 8) | (newData[8] << 16) | (newData[9] << 24);
+        Assert.Equal(longPath.Length + 1, extendedSize);
+        Assert.Equal("MOD2", System.Text.Encoding.ASCII.GetString(newData, 10, 4));
+        Assert.Equal(0, (ushort)(newData[14] | (newData[15] << 8)));
+    }
+
+    [Fact]
     public void RewriteArmaSubrecords_CompressedFlagSkipped_ReturnsUnchanged()
     {
         // The RewritePlugin call skips compressed ARMA; this tests the raw subrecord
@@ -3915,6 +3939,28 @@ public sealed class PatchPluginWriterTests
 
         Assert.Equal(1, rewritten);
         Assert.Equal("MOD2", System.Text.Encoding.ASCII.GetString(newData, 0, 4));
+    }
+
+    [Fact]
+    public void RewriteArmaData_LongReplacementPath_WritesExtendedSizeSubrecord()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_0.nif\0"));
+        var longPath = "meshes/slidesmith/" + new string('b', 70000) + ".nif";
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/iron/iron_0.nif"] = longPath
+        };
+
+        var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(mod2, rewriteMap);
+
+        Assert.Equal(1, rewritten);
+        Assert.Equal("XXXX", System.Text.Encoding.ASCII.GetString(newData, 0, 4));
+        Assert.Equal(4, (ushort)(newData[4] | (newData[5] << 8)));
+        var extendedSize = newData[6] | (newData[7] << 8) | (newData[8] << 16) | (newData[9] << 24);
+        Assert.Equal(longPath.Length + 1, extendedSize);
+        Assert.Equal("MOD2", System.Text.Encoding.ASCII.GetString(newData, 10, 4));
+        Assert.Equal(0, (ushort)(newData[14] | (newData[15] << 8)));
     }
 
     // ── BuildPatchPlugin ──────────────────────────────────────────────────────

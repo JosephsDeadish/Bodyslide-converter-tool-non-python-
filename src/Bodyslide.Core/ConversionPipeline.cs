@@ -3162,9 +3162,7 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 {
                     // Write subrecord with the new (case-preserved) path.
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
-                    WriteTag(ms, subType);
-                    WriteUInt16Le(ms, (ushort)newBytes.Length);
-                    ms.Write(newBytes, 0, newBytes.Length);
+                    WriteSubrecordWithExtendedSize(ms, subType, newBytes);
                     rewritten++;
                 }
                 else
@@ -3276,6 +3274,24 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
     {
         var encoded = System.Text.Encoding.ASCII.GetBytes(tag);
         ms.Write(encoded, 0, Math.Min(4, encoded.Length));
+    }
+
+    private static void WriteSubrecordWithExtendedSize(MemoryStream ms, string subType, byte[] payload)
+    {
+        if (payload.Length <= ushort.MaxValue)
+        {
+            WriteTag(ms, subType);
+            WriteUInt16Le(ms, (ushort)payload.Length);
+            ms.Write(payload, 0, payload.Length);
+            return;
+        }
+
+        WriteTag(ms, ExtendedSizeTag);
+        WriteUInt16Le(ms, 4);
+        WriteUInt32Le(ms, (uint)payload.Length);
+        WriteTag(ms, subType);
+        WriteUInt16Le(ms, 0);
+        ms.Write(payload, 0, payload.Length);
     }
 
     private static int IndexOfNull(byte[] bytes, int start, int length)
@@ -3945,9 +3961,7 @@ internal static class PatchPluginWriter
                     rewriteMap.TryGetValue(meshPath, out var newPath))
                 {
                     var newBytes = System.Text.Encoding.ASCII.GetBytes(newPath + '\0');
-                    WriteTag(ms, subTag);
-                    WriteUInt16Le(ms, (ushort)newBytes.Length);
-                    ms.Write(newBytes, 0, newBytes.Length);
+                    WriteSubrecordWithExtendedSize(ms, subTag, newBytes);
                     rewritten++;
                 }
                 else
@@ -4009,6 +4023,24 @@ internal static class PatchPluginWriter
     {
         ms.WriteByte((byte)(value));
         ms.WriteByte((byte)(value >> 8));
+    }
+
+    private static void WriteSubrecordWithExtendedSize(MemoryStream ms, string subTag, byte[] payload)
+    {
+        if (payload.Length <= ushort.MaxValue)
+        {
+            WriteTag(ms, subTag);
+            WriteUInt16Le(ms, (ushort)payload.Length);
+            ms.Write(payload, 0, payload.Length);
+            return;
+        }
+
+        WriteTag(ms, ExtendedSizeTag);
+        WriteUInt16Le(ms, 4);
+        WriteUInt32Le(ms, (uint)payload.Length);
+        WriteTag(ms, subTag);
+        WriteUInt16Le(ms, 0);
+        ms.Write(payload, 0, payload.Length);
     }
 
     private static void WriteFloat32Le(MemoryStream ms, float value)
