@@ -2723,6 +2723,11 @@ internal sealed class LocalExportService : IExportService
         var writtenNifs = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
+        // Carry source support assets (textures, physics configs, plugins, body refs)
+        // into the output package so converted outputs stay mod-ready.
+        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
+        outputFiles.AddRange(copiedSupportAssets);
+
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
         var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
         await File.WriteAllTextAsync(
@@ -2947,6 +2952,95 @@ internal sealed class LocalExportService : IExportService
         }
 
         return written;
+    }
+
+    private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
+        ImportedArmor armor,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        var supportFiles = new List<string>();
+        supportFiles.AddRange(armor.TextureFiles);
+        supportFiles.AddRange(armor.PhysicsFiles);
+        supportFiles.AddRange(armor.BodyReferenceFiles.Where(path =>
+            Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase)));
+        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath));
+
+        var copied = new List<string>();
+        var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sourceFile in supportFiles)
+        {
+            var fullSource = Path.GetFullPath(sourceFile);
+            if (!seenSources.Add(fullSource) || !File.Exists(fullSource))
+            {
+                continue;
+            }
+
+            var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
+            var destinationPath = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
+            if (!destinationPath.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
+            {
+                destinationPath = Path.Combine(outputDirectory, Path.GetFileName(fullSource));
+            }
+
+            if (!seenDestinations.Add(destinationPath) || File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            var directory = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await using var sourceStream = File.OpenRead(fullSource);
+            await using var destinationStream = File.Create(destinationPath);
+            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+            copied.Add(destinationPath);
+        }
+
+        return copied;
+    }
+
+    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath)
+    {
+        static bool IsPlugin(string path) =>
+            Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
+
+        if (File.Exists(sourcePath))
+        {
+            return IsPlugin(sourcePath) ? [Path.GetFullPath(sourcePath)] : [];
+        }
+
+        if (!Directory.Exists(sourcePath))
+        {
+            return [];
+        }
+
+        return Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
+            .Where(IsPlugin)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string GetSafeRelativeAssetPath(string sourceRoot, string fullSourcePath)
+    {
+        if (Directory.Exists(sourceRoot))
+        {
+            var relative = Path.GetRelativePath(sourceRoot, fullSourcePath);
+            if (!string.IsNullOrWhiteSpace(relative) &&
+                !relative.StartsWith("..", StringComparison.Ordinal) &&
+                !Path.IsPathRooted(relative))
+            {
+                return relative;
+            }
+        }
+
+        return Path.GetFileName(fullSourcePath);
     }
 
     private static async Task CopyNifAsync(string sourcePath, string destPath, ConvertedMesh mesh, CancellationToken cancellationToken)
