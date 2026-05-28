@@ -103,7 +103,7 @@ Each successful conversion produces the following files in the output directory:
 |---|---|
 | `<ArmorName>.nif` | Converted mesh with heuristic in-place vertex transform when a readable NIF vertex block is detected (falls back to safe copy when not detectable) |
 | `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair when both are detected in input |
-| `textures/...`, `*.xml`/`*.hkx`, `*.esp`/`*.esm`/`*.esl`, body refs (`*.tri`/`*.osp`) | Source support assets are copied into output with preserved relative paths so converted packages stay runnable |
+| `textures/...`, `materials/...` (`*.bgsm`/`*.bgem`), `*.xml`/`*.hkx`, `*.esp`/`*.esm`/`*.esl`, body refs (`*.tri`/`*.osp`) | Source support assets are copied into output with preserved relative paths so converted packages stay runnable |
 | `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
 | `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
@@ -145,7 +145,7 @@ Implemented from issue scope:
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
 - **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
-- **support asset carry-forward** — export now copies scanned textures, physics files, plugin files, and body-reference files into the output tree using source-relative paths so converted packs include required sidecar assets
+- **support asset carry-forward** — export now copies scanned textures, material files (`.bgsm`/`.bgem`), physics files, plugin files, and body-reference files into the output tree using source-relative paths so converted packs include required sidecar assets
 
 - **animation-driven geometry solver** — `AnimationDrivenGeometrySolver` applies linear-blend skinning (LBS) across 8 canonical poses using anatomically-derived per-region bone rotations (sagittal Z-Y plane), computing per-region body-envelope penetration depth; `AnimationDrivenPoseSimulationService` reads source mesh vertices from NIF files, runs the solver, and feeds push-out corrections back into the vertex transform pass; heuristic fallback used when no mesh data is available — all vertex transformations are now pose-informed rather than purely morph-threshold based
 

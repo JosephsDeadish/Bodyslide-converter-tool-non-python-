@@ -228,10 +228,12 @@ public sealed class ConversionOrchestratorTests
         var outputDirectory = Path.Combine(workingDirectory, "output");
         var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "iron");
         var textureDirectory = Path.Combine(inputDirectory, "textures", "armor", "iron");
+        var materialDirectory = Path.Combine(inputDirectory, "materials", "armor", "iron");
         var bodyRefDirectory = Path.Combine(inputDirectory, "meshes", "actors", "character", "character assets");
 
         Directory.CreateDirectory(meshDirectory);
         Directory.CreateDirectory(textureDirectory);
+        Directory.CreateDirectory(materialDirectory);
         Directory.CreateDirectory(bodyRefDirectory);
         Directory.CreateDirectory(outputDirectory);
 
@@ -240,12 +242,14 @@ public sealed class ConversionOrchestratorTests
         var physicsPath = Path.Combine(meshDirectory, "ironarmor.xml");
         var pluginPath = Path.Combine(inputDirectory, "MyArmor.esp");
         var bodyRefPath = Path.Combine(bodyRefDirectory, "body_reference.tri");
+        var materialPath = Path.Combine(materialDirectory, "ironarmor.bgsm");
 
         await File.WriteAllTextAsync(meshPath, "mesh");
         await File.WriteAllBytesAsync(texturePath, [0x44, 0x44, 0x53, 0x20]);
         await File.WriteAllTextAsync(physicsPath, "<physics/>");
         await File.WriteAllTextAsync(pluginPath, "meshes\\armor\\iron\\ironarmor_0.nif");
         await File.WriteAllTextAsync(bodyRefPath, "reference");
+        await File.WriteAllTextAsync(materialPath, "material");
 
         try
         {
@@ -257,6 +261,56 @@ public sealed class ConversionOrchestratorTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "MyArmor.esp")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "actors", "character", "character assets", "body_reference.tri")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "materials", "armor", "iron", "ironarmor.bgsm")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSingleNifInput_ScansSiblingSupportAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "iron");
+        var textureDirectory = Path.Combine(inputDirectory, "textures", "armor", "iron");
+        var materialDirectory = Path.Combine(inputDirectory, "materials", "armor", "iron");
+        var bodyRefDirectory = Path.Combine(inputDirectory, "meshes", "actors", "character", "character assets");
+
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(textureDirectory);
+        Directory.CreateDirectory(materialDirectory);
+        Directory.CreateDirectory(bodyRefDirectory);
+        Directory.CreateDirectory(outputDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "ironarmor_0.nif");
+        var texturePath = Path.Combine(textureDirectory, "ironarmor.dds");
+        var physicsPath = Path.Combine(meshDirectory, "ironarmor.xml");
+        var pluginPath = Path.Combine(inputDirectory, "MyArmor.esp");
+        var bodyRefPath = Path.Combine(bodyRefDirectory, "body_reference.tri");
+        var materialPath = Path.Combine(materialDirectory, "ironarmor.bgem");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllBytesAsync(texturePath, [0x44, 0x44, 0x53, 0x20]);
+        await File.WriteAllTextAsync(physicsPath, "<physics/>");
+        await File.WriteAllTextAsync(pluginPath, "meshes\\armor\\iron\\ironarmor_0.nif");
+        await File.WriteAllTextAsync(bodyRefPath, "reference");
+        await File.WriteAllTextAsync(materialPath, "material");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(meshPath, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "textures", "armor", "iron", "ironarmor.dds")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "MyArmor.esp")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "actors", "character", "character assets", "body_reference.tri")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "materials", "armor", "iron", "ironarmor.bgem")));
         }
         finally
         {

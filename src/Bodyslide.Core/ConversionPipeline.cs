@@ -1433,9 +1433,10 @@ internal sealed class LocalArmorImportService : IArmorImportService
             throw new InvalidDataException("No .nif mesh files were found in the input.");
         }
 
-        var textureFiles = EnumerateFiles(sourcePath, [".dds", ".png", ".tga"]);
-        var physicsFiles = EnumerateFiles(sourcePath, [".xml", ".hkx"]);
-        var bodyReferenceFiles = EnumerateFiles(sourcePath, [".tri", ".osp", ".nif"])
+        var supportScanRoot = ResolveSupportScanRoot(sourcePath);
+        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"]);
+        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"]);
+        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"])
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -1494,6 +1495,25 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .Where(file => extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
             .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static string ResolveSupportScanRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return sourcePath;
+        }
+
+        if (File.Exists(sourcePath))
+        {
+            var directory = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                return directory;
+            }
+        }
+
+        return sourcePath;
     }
 }
 
@@ -4304,7 +4324,7 @@ internal sealed class LocalExportService : IExportService
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
 
-        // Carry source support assets (textures, physics configs, plugins, body refs)
+        // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
         var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
@@ -4617,6 +4637,7 @@ internal sealed class LocalExportService : IExportService
         supportFiles.AddRange(armor.BodyReferenceFiles.Where(path =>
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase)));
+        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath));
         supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath));
 
         var copied = new List<string>();
@@ -4665,6 +4686,15 @@ internal sealed class LocalExportService : IExportService
 
         if (File.Exists(sourcePath))
         {
+            var sourceDirectory = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
+            {
+                return Directory.GetFiles(sourceDirectory, "*.*", SearchOption.AllDirectories)
+                    .Where(IsPlugin)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
             return IsPlugin(sourcePath) ? [Path.GetFullPath(sourcePath)] : [];
         }
 
@@ -4675,6 +4705,36 @@ internal sealed class LocalExportService : IExportService
 
         return Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
             .Where(IsPlugin)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath)
+    {
+        static bool IsMaterial(string path) =>
+            Path.GetExtension(path) is ".bgsm" or ".bgem";
+
+        if (File.Exists(sourcePath))
+        {
+            var sourceDirectory = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
+            {
+                return Directory.GetFiles(sourceDirectory, "*.*", SearchOption.AllDirectories)
+                    .Where(IsMaterial)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            return IsMaterial(sourcePath) ? [Path.GetFullPath(sourcePath)] : [];
+        }
+
+        if (!Directory.Exists(sourcePath))
+        {
+            return [];
+        }
+
+        return Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
+            .Where(IsMaterial)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
