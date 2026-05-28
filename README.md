@@ -138,9 +138,10 @@ Implemented from issue scope:
 - **live preview HTML** (`preview.html`) — self-contained browser-openable file with an inline SVG body silhouette where each region is colour-coded by morph factor (blue→green→yellow→orange→red scale), plus regional morphing table, BodySlide slider list, physics-node list, pose-clipping risk summary, and interactive controls to swap body profile, rotate view, and adjust sliders; replaces the old metadata-only `preview-renders.json`
 - **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that iterates ARMA records, matches detected mesh paths, and emits placement instructions — drop it into the Edit Scripts folder and run via Tools → Apply Script
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
+- **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
 
 Remaining gap versus full issue vision:
-- deformation/physics logic and vertex transformation are still heuristic/rule-based (no full NIF block graph parser or animation-driven geometry solver yet)
+- deformation/physics and vertex transformation remain heuristic/rule-based; a full NIF block graph parser and true animation-driven geometry solver are still not implemented
 
 ## Current built-in presets (27 total)
 

@@ -1325,6 +1325,22 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
 
 internal sealed class StrategyMeshConversionService : IMeshConversionService
 {
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RegionalAdjacency =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = ["breasts", "shoulders", "arms", "waist"],
+            ["breasts"] = ["chest", "shoulders", "waist"],
+            ["waist"] = ["chest", "belly", "pelvis", "arms"],
+            ["belly"] = ["waist", "pelvis", "butt"],
+            ["pelvis"] = ["waist", "belly", "butt", "legs", "thighs"],
+            ["butt"] = ["pelvis", "thighs", "legs"],
+            ["legs"] = ["pelvis", "thighs", "calves"],
+            ["thighs"] = ["pelvis", "butt", "legs", "calves"],
+            ["calves"] = ["legs", "thighs"],
+            ["shoulders"] = ["chest", "arms", "breasts"],
+            ["arms"] = ["shoulders", "chest", "waist"]
+        };
+
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
         var strategy = analysis.MeshType switch
@@ -1361,7 +1377,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             _ => profileField
         };
 
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, regionalMorphing));
+        var solverRefinedMorphing = ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing));
     }
 
     /// <summary>
@@ -1383,6 +1400,75 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 1.15), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, double> ApplyRegionAwareSolver(IReadOnlyDictionary<string, double> field, string meshType)
+    {
+        if (field.Count == 0)
+        {
+            return field;
+        }
+
+        var (minClamp, maxClamp) = meshType switch
+        {
+            "plate" => (0.85d, 1.20d),
+            "cloth" => (0.72d, 1.35d),
+            "physics-enabled" => (0.70d, 1.40d),
+            "skin-tight" => (0.80d, 1.30d),
+            _ => (0.75d, 1.32d)
+        };
+
+        var blendStrength = meshType switch
+        {
+            "plate" => 0.15d,
+            "leather" => 0.28d,
+            "skin-tight" => 0.35d,
+            "cloth" => 0.45d,
+            "physics-enabled" => 0.50d,
+            _ => 0.30d
+        };
+
+        var iterations = meshType switch
+        {
+            "plate" => 1,
+            "leather" => 2,
+            "cloth" => 4,
+            "physics-enabled" => 4,
+            _ => 3
+        };
+
+        var current = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < iterations; i++)
+        {
+            var next = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (region, value) in current)
+            {
+                if (!RegionalAdjacency.TryGetValue(region, out var neighbors))
+                {
+                    next[region] = Math.Clamp(value, minClamp, maxClamp);
+                    continue;
+                }
+
+                var localNeighbors = neighbors
+                    .Where(current.ContainsKey)
+                    .Select(key => current[key])
+                    .ToList();
+
+                if (localNeighbors.Count == 0)
+                {
+                    next[region] = Math.Clamp(value, minClamp, maxClamp);
+                    continue;
+                }
+
+                var neighborAverage = localNeighbors.Average();
+                var blended = (value * (1d - blendStrength)) + (neighborAverage * blendStrength);
+                next[region] = Math.Clamp(blended, minClamp, maxClamp);
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
 }
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
@@ -1445,31 +1531,63 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         "HIMBO", "SAM", "SOS"
     };
 
+    private readonly record struct PhysicsSolverTuning(
+        double StiffnessMultiplier,
+        double OffsetMultiplier,
+        double DampingMultiplier,
+        double GravityMultiplier,
+        double MassMultiplier,
+        double RestitutionMultiplier);
+
     public Task<PhysicsConfig> BuildAsync(WeightedMesh mesh, string targetBody, string physicsProfile, CancellationToken cancellationToken)
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
         var isMale  = MaleBodies.Contains(targetBody);
 
-        // Derive mesh-type-aware stiffness and offset multipliers.
-        // Cloth and physics-enabled meshes allow more movement; rigid plate restricts it.
-        var (stiffnessMult, offsetMult) = mesh.MeshType switch
-        {
-            "cloth"           => (0.85, 1.25),
-            "physics-enabled" => (1.00, 1.00),
-            "skin-tight"      => (0.95, 0.90),
-            "leather"         => (1.05, 0.85),
-            "plate"           => (1.12, 0.70),
-            _                 => (1.00, 1.00)
-        };
+        var tuning = BuildSolverTuning(mesh);
 
-        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, stiffnessMult, offsetMult) : null;
-        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, stiffnessMult, offsetMult) : null;
+        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning) : null;
+        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
 
-    private static string BuildCbpcXml(bool isMale, double stiffnessMult, double offsetMult)
+    private static PhysicsSolverTuning BuildSolverTuning(WeightedMesh mesh)
+    {
+        var tuning = mesh.MeshType switch
+        {
+            "cloth" => new PhysicsSolverTuning(0.85, 1.25, 0.90, 1.08, 0.95, 1.15),
+            "physics-enabled" => new PhysicsSolverTuning(1.00, 1.12, 0.82, 1.15, 1.10, 1.20),
+            "skin-tight" => new PhysicsSolverTuning(0.95, 0.90, 1.05, 0.95, 1.00, 0.90),
+            "leather" => new PhysicsSolverTuning(1.05, 0.85, 1.08, 0.92, 1.02, 0.88),
+            "plate" => new PhysicsSolverTuning(1.12, 0.70, 1.15, 0.85, 1.10, 0.75),
+            _ => new PhysicsSolverTuning(1.00, 1.00, 1.00, 1.00, 1.00, 1.00)
+        };
+
+        if (!mesh.PhysicsWeightsTransferred)
+        {
+            tuning = tuning with
+            {
+                StiffnessMultiplier = tuning.StiffnessMultiplier * 1.05,
+                OffsetMultiplier = tuning.OffsetMultiplier * 0.85,
+                DampingMultiplier = tuning.DampingMultiplier * 1.08,
+                RestitutionMultiplier = tuning.RestitutionMultiplier * 0.90
+            };
+        }
+        else if (mesh.MeshType.Equals("physics-enabled", StringComparison.OrdinalIgnoreCase))
+        {
+            tuning = tuning with
+            {
+                OffsetMultiplier = tuning.OffsetMultiplier * 1.08,
+                DampingMultiplier = tuning.DampingMultiplier * 0.92
+            };
+        }
+
+        return tuning;
+    }
+
+    private static string BuildCbpcXml(bool isMale, PhysicsSolverTuning tuning)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
@@ -1478,37 +1596,37 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         if (isMale)
         {
             sb.AppendLine("  <PecPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.88 * stiffnessMult)}</Stiffness>");
-            sb.AppendLine("    <Damping>0.62</Damping>");
-            sb.AppendLine("    <Gravity>0.04</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.06 * offsetMult)}</MaxOffset>");
+            sb.AppendLine($"    <Stiffness>{F(0.88 * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.62 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.04 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(0.06 * tuning.OffsetMultiplier)}</MaxOffset>");
             sb.AppendLine("  </PecPhysics>");
             sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.92 * stiffnessMult)}</Stiffness>");
-            sb.AppendLine("    <Damping>0.65</Damping>");
-            sb.AppendLine("    <Gravity>0.03</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.04 * offsetMult)}</MaxOffset>");
+            sb.AppendLine($"    <Stiffness>{F(0.92 * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.03 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(0.04 * tuning.OffsetMultiplier)}</MaxOffset>");
             sb.AppendLine("  </BellyPhysics>");
         }
         else
         {
             sb.AppendLine("  <BreastPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.90 * stiffnessMult)}</Stiffness>");
-            sb.AppendLine("    <Damping>0.60</Damping>");
-            sb.AppendLine("    <Gravity>0.05</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.08 * offsetMult)}</MaxOffset>");
+            sb.AppendLine($"    <Stiffness>{F(0.90 * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.05 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(0.08 * tuning.OffsetMultiplier)}</MaxOffset>");
             sb.AppendLine("  </BreastPhysics>");
             sb.AppendLine("  <ButtPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.85 * stiffnessMult)}</Stiffness>");
-            sb.AppendLine("    <Damping>0.55</Damping>");
-            sb.AppendLine("    <Gravity>0.06</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.06 * offsetMult)}</MaxOffset>");
+            sb.AppendLine($"    <Stiffness>{F(0.85 * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.06 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(0.06 * tuning.OffsetMultiplier)}</MaxOffset>");
             sb.AppendLine("  </ButtPhysics>");
             sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.92 * stiffnessMult)}</Stiffness>");
-            sb.AppendLine("    <Damping>0.65</Damping>");
-            sb.AppendLine("    <Gravity>0.03</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.04 * offsetMult)}</MaxOffset>");
+            sb.AppendLine($"    <Stiffness>{F(0.92 * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.03 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(0.04 * tuning.OffsetMultiplier)}</MaxOffset>");
             sb.AppendLine("  </BellyPhysics>");
         }
 
@@ -1516,7 +1634,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return sb.ToString();
     }
 
-    private static string BuildSmpXml(string targetBody, bool isMale, double stiffnessMult, double offsetMult)
+    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
@@ -1524,32 +1642,32 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
         if (isMale)
         {
-            sb.AppendLine($"  <bone name=\"NPC L Pec\" mass=\"2.5\" stiffness=\"{F(0.85 * stiffnessMult)}\" damping=\"0.60\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.15\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Pec\" mass=\"2.5\" stiffness=\"{F(0.85 * stiffnessMult)}\" damping=\"0.60\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.15\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"{F(0.90 * stiffnessMult)}\" damping=\"0.65\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-8 * offsetMult)}\" max=\"{F(8 * offsetMult)}\" restitution=\"0.10\" />");
+            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-8 * tuning.OffsetMultiplier)}\" max=\"{F(8 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
         }
         else
         {
-            sb.AppendLine($"  <bone name=\"NPC L Breast01\" mass=\"2.0\" stiffness=\"{F(0.80 * stiffnessMult)}\" damping=\"0.50\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * offsetMult)}\" max=\"{F(20 * offsetMult)}\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Breast01\" mass=\"2.0\" stiffness=\"{F(0.80 * stiffnessMult)}\" damping=\"0.50\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * offsetMult)}\" max=\"{F(20 * offsetMult)}\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"1.5\" stiffness=\"{F(0.90 * stiffnessMult)}\" damping=\"0.60\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-10 * offsetMult)}\" max=\"{F(10 * offsetMult)}\" restitution=\"0.10\" />");
+            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-10 * tuning.OffsetMultiplier)}\" max=\"{F(10 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC L Butt\" mass=\"1.8\" stiffness=\"{F(0.75 * stiffnessMult)}\" damping=\"0.55\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC L Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Butt\" mass=\"1.8\" stiffness=\"{F(0.75 * stiffnessMult)}\" damping=\"0.55\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * offsetMult)}\" max=\"{F(15 * offsetMult)}\" restitution=\"0.20\" />");
+            sb.AppendLine($"  <bone name=\"NPC R Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
         }
 

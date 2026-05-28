@@ -1752,6 +1752,58 @@ public sealed class PhysicsMeshTypeTuningTests
     }
 
     [Fact]
+    public async Task BuildAsync_ClothMesh_HasLowerCbpcDampingThanPlate()
+    {
+        var service = new BasicPhysicsSupportService();
+        var clothMesh = new WeightedMesh("cloth", "default", true);
+        var plateMesh = new WeightedMesh("plate", "default", true);
+
+        var clothConfig = await service.BuildAsync(clothMesh, "CBBE", "cbpc", CancellationToken.None);
+        var plateConfig = await service.BuildAsync(plateMesh, "CBBE", "cbpc", CancellationToken.None);
+
+        Assert.NotNull(clothConfig.CbpcConfigXml);
+        Assert.NotNull(plateConfig.CbpcConfigXml);
+
+        var dampingPattern = new System.Text.RegularExpressions.Regex(
+            @"<BreastPhysics>\s*<Stiffness>[0-9.]+</Stiffness>\s*<Damping>([0-9.]+)</Damping>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        var clothDamping = double.Parse(dampingPattern.Match(clothConfig.CbpcConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+        var plateDamping = double.Parse(dampingPattern.Match(plateConfig.CbpcConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.True(clothDamping < plateDamping,
+            $"Cloth damping ({clothDamping}) should be lower than plate damping ({plateDamping}).");
+    }
+
+    [Fact]
+    public async Task BuildAsync_PhysicsWeightsMissing_TightensCbpcMaxOffset()
+    {
+        var service = new BasicPhysicsSupportService();
+        var weightedMesh = new WeightedMesh("physics-enabled", "default", true);
+        var unweightedMesh = new WeightedMesh("physics-enabled", "default", false);
+
+        var weightedConfig = await service.BuildAsync(weightedMesh, "CBBE", "cbpc", CancellationToken.None);
+        var unweightedConfig = await service.BuildAsync(unweightedMesh, "CBBE", "cbpc", CancellationToken.None);
+
+        Assert.NotNull(weightedConfig.CbpcConfigXml);
+        Assert.NotNull(unweightedConfig.CbpcConfigXml);
+
+        var offsetPattern = new System.Text.RegularExpressions.Regex(
+            @"<BreastPhysics>.*?<MaxOffset>([0-9.]+)</MaxOffset>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        var weightedOffset = double.Parse(offsetPattern.Match(weightedConfig.CbpcConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+        var unweightedOffset = double.Parse(offsetPattern.Match(unweightedConfig.CbpcConfigXml).Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.True(unweightedOffset < weightedOffset,
+            $"Missing physics weights should reduce max offset ({unweightedOffset} < {weightedOffset}).");
+    }
+
+    [Fact]
     public async Task BuildAsync_MalePhysicsWithMeshTuning_StillContainsPecNodes()
     {
         var service = new BasicPhysicsSupportService();
