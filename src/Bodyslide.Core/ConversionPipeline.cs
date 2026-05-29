@@ -7810,6 +7810,31 @@ internal sealed class LocalExportService(
                 .OrderBy(s => s)
                 .ToList();
 
+            // When no source plugin is present, there are no ARMA BOD2 slots to reuse.
+            // Fall back to the same mesh-analysis partition logic used by the main pipeline
+            // so standalone scratch ESPs keep correct slot masks (especially for headgear).
+            if (bipedSlots.Count == 0)
+            {
+                var fallbackPartitions = await new BasicPartitionRebuildingService().RebuildAsync(
+                    new WeightedMesh(analysis.MeshType, "scratch-default", false),
+                    analysis,
+                    request.TargetBody,
+                    cancellationToken);
+
+                bipedSlots = fallbackPartitions.Partitions
+                    .Select(static label =>
+                    {
+                        var colon = label.IndexOf(':');
+                        if (colon <= 0) return (int?)null;
+                        return int.TryParse(label[..colon], out var slot) ? slot : null;
+                    })
+                    .Where(static slot => slot is >= 30 and <= 61)
+                    .Select(static slot => slot!.Value)
+                    .Distinct()
+                    .OrderBy(s => s)
+                    .ToList();
+            }
+
             var safeBodyToken  = BuildSafeBodyToken(request.TargetBody);
             var pluginNifPaths = writtenNifs
                 .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")

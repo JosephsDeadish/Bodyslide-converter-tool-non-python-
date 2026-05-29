@@ -8487,6 +8487,72 @@ public sealed class LocalExportServiceGroundMeshTests
     }
 
     [Fact]
+    public async Task ExportAsync_WithScratchPluginGen_UsesHeadgearSlotsWhenPluginSlotsAreMissing()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "steelcirclet_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var service = new LocalExportService(
+                scratchPluginGen: new BasicScratchPluginGeneratorService());
+
+            var request  = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor    = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("headgear", false, 1, HeadgearSubTypes.Circlet);
+            var mesh     = new ConvertedMesh("headgear", "rigid-no-deform", 1, new Dictionary<string, double>());
+            var morphs   = new MorphSet("low", "high", true);
+            var physics  = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty); // no source plugin slots available
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "XPMSSE", "CBBE",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, ["step1"],
+                detectedBody, skeletonMapping, voxelResult,
+                CancellationToken.None);
+
+            var espPath = files.First(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase));
+            var espBytes = await File.ReadAllBytesAsync(espPath);
+
+            // Circlet slot = 42 -> bit (42-30)=12 => 0x1000.
+            // Both ARMO and ARMA BOD2 subrecords should carry this mask.
+            var foundBod2 = false;
+            for (int i = 0; i + 14 < espBytes.Length; i++)
+            {
+                if (espBytes[i] == 'B' && espBytes[i + 1] == 'O' && espBytes[i + 2] == 'D' && espBytes[i + 3] == '2')
+                {
+                    var mask = (uint)(espBytes[i + 6] | (espBytes[i + 7] << 8) | (espBytes[i + 8] << 16) | (espBytes[i + 9] << 24));
+                    Assert.Equal(0x1000u, mask);
+                    foundBod2 = true;
+                }
+            }
+
+            Assert.True(foundBod2, "Expected at least one BOD2 subrecord in generated scratch ESP.");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_WithScratchPluginGen_StagesScratchPluginMeshPath()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
