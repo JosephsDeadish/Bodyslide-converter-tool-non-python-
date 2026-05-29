@@ -4519,6 +4519,13 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         "NPC L Breast02", "NPC R Breast02"
     };
 
+    private static readonly IReadOnlySet<string> CbpcPhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "NPC L Breast01", "NPC R Breast01",
+        "NPC L Butt", "NPC R Butt",
+        "NPC Belly"
+    };
+
     // Physics bones specific to HIMBO/SAM male bodies.
     private static readonly IReadOnlySet<string> MalePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -4531,13 +4538,28 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         {
             ["3BA"]   = FeaturePhysicsBones,
             ["BHUNP"] = FeaturePhysicsBones,
-            ["TBD"]   = FeaturePhysicsBones,
+            ["TBD"]   = CbpcPhysicsBones,
             ["HIMBO"] = MalePhysicsBones,
             ["SAM"]   = MalePhysicsBones,
             ["CBBE"]  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            ["UNP"]   = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            ["UNP"]   = CbpcPhysicsBones,
             ["UBE"]   = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             ["SOS"]   = MalePhysicsBones
+        };
+
+    // Fallback remaps for source physics bones that are missing on the target skeleton.
+    // Ordered by preference: the first candidate present on the target is selected.
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneFallbacks =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["NPC L Breast03"] = ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
+            ["NPC R Breast03"] = ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"],
+            ["NPC L Breast02"] = ["NPC L Breast01", "NPC L Breast"],
+            ["NPC R Breast02"] = ["NPC R Breast01", "NPC R Breast"],
+            ["NPC L Breast"]   = ["NPC L Breast01"],
+            ["NPC R Breast"]   = ["NPC R Breast01"],
+            ["NPC L Lat"]      = ["NPC L Pec"],
+            ["NPC R Lat"]      = ["NPC R Pec"],
         };
 
     public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
@@ -4602,7 +4624,15 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
             else
             {
-                unsupportedBones.Add(bone);
+                var fallback = ResolveFallbackBone(bone, allTargetBones);
+                if (fallback is not null)
+                {
+                    mappings.Add(new SkeletonBoneMapping(bone, fallback, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+                }
+                else
+                {
+                    unsupportedBones.Add(bone);
+                }
             }
         }
 
@@ -4610,6 +4640,20 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         var targetSkeleton = targetPhysicsBones.Count > 0 ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
 
         return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
+    }
+
+    private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
+    {
+        if (!PhysicsBoneFallbacks.TryGetValue(sourceBone, out var fallbackCandidates))
+            return null;
+
+        foreach (var candidate in fallbackCandidates)
+        {
+            if (targetBones.Contains(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 }
 

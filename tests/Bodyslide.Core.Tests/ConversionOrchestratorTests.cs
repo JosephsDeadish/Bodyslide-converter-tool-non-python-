@@ -9600,6 +9600,55 @@ public sealed class CustomBodyProfileSupportTests
     // ── SkeletonNifBoneParser tests ──────────────────────────────────────────────
 
     [Fact]
+    public async Task BasicSkeletonMappingService_UnpTarget_RemapsHigherOrderBreastBones()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC L Breast02\" /></system>");
+            var armor = new ImportedArmor(tempDir, [physicsPath], [], [], []);
+
+            var result = await service.MapAsync(armor, "UNP", CancellationToken.None);
+
+            var remap = result.BoneMappings.FirstOrDefault(m => m.SourceBone.Equals("NPC L Breast02", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(remap);
+            Assert.Equal("NPC L Breast01", remap.TargetBone);
+            Assert.DoesNotContain("NPC L Breast02", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_UnpTarget_UsesCbpcSupportSet()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC Belly\" /></system>");
+            var armor = new ImportedArmor(tempDir, [physicsPath], [], [], []);
+
+            var result = await service.MapAsync(armor, "UNP", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("NPC Belly", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("NPC Belly", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("NPC Belly", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
     {
         var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);
