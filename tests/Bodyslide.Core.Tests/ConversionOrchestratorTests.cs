@@ -4938,6 +4938,60 @@ public sealed class PoseSimulationAndPreviewTests
         }
     }
 
+    [Fact]
+    public async Task Convert_WithDefaultModules_WritesWorldPhysicsReport()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+            Assert.True(File.Exists(reportPath), "world-physics.json was not written.");
+
+            var json = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"Mode\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"CollisionShape\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"Recommendations\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"static\"", json, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithPhysicsEnabledMesh_WorldPhysicsReportUsesRigidProxyMode()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "dress_smp.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "dress_smp.nif"), "CBBE", outputDirectory));
+
+            var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+            var json = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"rigid-proxy\"", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"convex-hull\"", json, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     // ── patch-armor.pas (xEdit script) ────────────────────────────────────────
 
     [Fact]

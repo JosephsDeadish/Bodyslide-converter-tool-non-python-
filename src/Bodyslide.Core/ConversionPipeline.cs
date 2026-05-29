@@ -287,6 +287,19 @@ public sealed record PoseSimulationResult(
     int TotalPosesAtRisk);
 
 /// <summary>
+/// World-object (dropped item) physics guidance for the converted armor output.
+/// Skyrim applies rigid/static world physics to dropped meshes, so this report
+/// captures the recommended world behavior for generated assets.
+/// </summary>
+public sealed record WorldObjectPhysicsReport(
+    string Mode,
+    string CollisionShape,
+    bool SourcePhysicsDetected,
+    bool RuntimePhysicsProfileGenerated,
+    bool GroundMeshAvailable,
+    IReadOnlyList<string> Recommendations);
+
+/// <summary>
 /// Per-bone rotation delta for a single animation pose (Skyrim Z-up coordinate space).
 /// <c>RotX</c> is the forward/back tilt angle in radians (positive = forward tilt).
 /// <c>TransZ</c> is a vertical offset in normalised mesh-space units (applied before rotation).
@@ -7868,6 +7881,14 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(poseReportPath);
 
+        // Write dropped-item/world-object physics guidance.
+        var worldPhysicsPath = Path.Combine(outputDirectory, "world-physics.json");
+        var worldPhysics = BuildWorldObjectPhysicsReport(analysis, mesh, physics, armor, groundMeshRelativePath);
+        await File.WriteAllTextAsync(worldPhysicsPath,
+            JsonSerializer.Serialize(worldPhysics, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(worldPhysicsPath);
+
         // Write a standalone SVG render so mod pages/tooling can embed a static preview
         // without opening the interactive HTML report.
         var previewSvgPath = Path.Combine(outputDirectory, "preview.svg");
@@ -9576,6 +9597,54 @@ internal sealed class LocalExportService(
         < 1.20 => "#e67e22",  // expanded / orange
         _      => "#e74c3c"   // high expansion / red
     };
+
+    /// <summary>
+    /// Builds dropped-item/world-object physics guidance for the current conversion output.
+    /// </summary>
+    private static WorldObjectPhysicsReport BuildWorldObjectPhysicsReport(
+        MeshAnalysis analysis,
+        ConvertedMesh mesh,
+        PhysicsConfig physics,
+        ImportedArmor armor,
+        string? groundMeshRelativePath)
+    {
+        var sourcePhysicsDetected = analysis.PhysicsEnabled || armor.PhysicsFiles.Count > 0;
+        var runtimePhysicsProfileGenerated = !string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase);
+        var physicsDrivenMesh = sourcePhysicsDetected || runtimePhysicsProfileGenerated || string.Equals(analysis.MeshType, "physics-enabled", StringComparison.OrdinalIgnoreCase);
+        var groundMeshAvailable = !string.IsNullOrWhiteSpace(groundMeshRelativePath);
+
+        if (physicsDrivenMesh)
+        {
+            return new WorldObjectPhysicsReport(
+                Mode: "rigid-proxy",
+                CollisionShape: "convex-hull",
+                SourcePhysicsDetected: sourcePhysicsDetected,
+                RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
+                GroundMeshAvailable: groundMeshAvailable,
+                Recommendations:
+                [
+                    "Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects.",
+                    "Prefer a simplified proxy collision shape for stability.",
+                    groundMeshAvailable
+                        ? "Use the generated *_ground.nif as the dropped-item world model."
+                        : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback."
+                ]);
+        }
+
+        return new WorldObjectPhysicsReport(
+            Mode: "static",
+            CollisionShape: "none",
+            SourcePhysicsDetected: sourcePhysicsDetected,
+            RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
+            GroundMeshAvailable: groundMeshAvailable,
+            Recommendations:
+            [
+                "Use a static dropped-item model for maximum compatibility.",
+                groundMeshAvailable
+                    ? "Use the generated *_ground.nif for world/inventory model paths."
+                    : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback."
+            ]);
+    }
 
     /// <summary>
     /// Generates a self-contained HTML file with an inline SVG body silhouette colour-coded by

@@ -23,6 +23,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - live preview HTML output (`preview.html`) with region heatmap and conversion context
+- dropped-item/world-object physics guidance export (`world-physics.json`) describing static vs rigid-proxy behavior for generated meshes
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 
 ## Projects
@@ -216,6 +217,7 @@ output/
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
 | `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
 | `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping regions, correction method, voxel penetration count, skeleton names, mapped + unsupported bone counts, and ISO-8601 generation timestamp |
+| `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
 | `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
 | `<PluginName>_patched.<ext>` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord updated in-place; supports both Skyrim LE and SE record header formats |
