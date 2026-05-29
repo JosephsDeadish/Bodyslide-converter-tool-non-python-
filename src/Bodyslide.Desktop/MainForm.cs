@@ -28,6 +28,7 @@ public sealed class MainForm : Form
     private readonly Button _openPreviewButton;
     private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
+    private readonly Button _openReportButton;
     private readonly Button _openArtifactButton;
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
@@ -47,6 +48,8 @@ public sealed class MainForm : Form
     private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _reportsTabPage;
+    private readonly ListView _reportsListView;
     private readonly TabPage _catalogTabPage;
     private readonly ListView _catalogListView;
     private readonly TabPage _artifactsTabPage;
@@ -60,6 +63,17 @@ public sealed class MainForm : Form
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
+    private static readonly string[] ReportFileNames =
+    [
+        "batch-report.json",
+        "conversion-quality.json",
+        "dependency-map.json",
+        "skeleton-compatibility.json",
+        "texture-summary.json",
+        "pose-simulation-report.json",
+        "world-physics.json",
+        "plugin-patches.json",
+    ];
 
     public MainForm()
     {
@@ -412,6 +426,15 @@ public sealed class MainForm : Form
             Enabled = false,
         };
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
+        _openReportButton = new Button
+        {
+            Text = "Open report",
+            Width = 110,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _openReportButton.Click += (_, _) => OpenSelectedReport();
         _openArtifactButton = new Button
         {
             Text = "Open file",
@@ -453,6 +476,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_openPreviewButton);
         actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
+        actionRow.Controls.Add(_openReportButton);
         actionRow.Controls.Add(_openArtifactButton);
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
@@ -535,6 +559,22 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _reportsTabPage = new TabPage("Reports");
+        _reportsListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _reportsListView.Columns.Add("Report", 260);
+        _reportsListView.Columns.Add("Property", 180);
+        _reportsListView.Columns.Add("Value", -2);
+        _reportsListView.SelectedIndexChanged += (_, _) => _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
+        _reportsListView.DoubleClick += (_, _) => OpenSelectedReport();
+        _reportsTabPage.Controls.Add(_reportsListView);
+        _resultsTabControl.TabPages.Add(_reportsTabPage);
         _catalogTabPage = new TabPage("Catalog");
         _catalogListView = new ListView
         {
@@ -573,6 +613,7 @@ public sealed class MainForm : Form
         PopulateCatalogTab();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
+        PopulateReportsTab([], null);
         ShowPreviewStatus("Run a conversion to render preview.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert.");
     }
@@ -826,6 +867,7 @@ public sealed class MainForm : Form
             UpdatePathActionStates();
             _ = await LoadPreviewInAppAsync(_lastPreviewPath);
             PopulateSummaryTab(results);
+            PopulateReportsTab(results);
             PopulateArtifactsTab(results);
 
             AppendLog($"Converted {results.Count} armor item(s).");
@@ -950,6 +992,7 @@ public sealed class MainForm : Form
         _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
+        _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
         UseWaitCursor = isBusy;
         _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
@@ -1058,6 +1101,7 @@ public sealed class MainForm : Form
 
         UpdatePathActionStates();
         _ = await LoadPreviewInAppAsync(previewPath);
+        PopulateReportsTab(selectedFolder);
         PopulateArtifactsTab(selectedFolder);
         _resultsTabControl.SelectedTab = _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
@@ -1339,6 +1383,27 @@ public sealed class MainForm : Form
         });
     }
 
+    private void OpenSelectedReport()
+    {
+        if (_reportsListView.SelectedItems.Count == 0)
+        {
+            return;
+        }
+
+        if (_reportsListView.SelectedItems[0].Tag is not string filePath || !File.Exists(filePath))
+        {
+            MessageBox.Show(this, "Selected report file was not found.", "Open report", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            PopulateReportsTab(GetPreferredOutputDirectoryForOpen());
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = filePath,
+            UseShellExecute = true,
+        });
+    }
+
     private void OpenSelectedArtifact()
     {
         if (_artifactsListView.SelectedItems.Count == 0)
@@ -1498,6 +1563,7 @@ public sealed class MainForm : Form
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
+        _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
     }
 
@@ -1677,5 +1743,282 @@ public sealed class MainForm : Form
         }
 
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
+    }
+
+    private void PopulateReportsTab(IReadOnlyList<ConversionResult> results)
+    {
+        var outputDirectories = results
+            .Select(result => result.OutputDirectory)
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var files = outputDirectories
+            .SelectMany(EnumerateKnownReportFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        PopulateReportsTab(files, FindCommonDirectory(outputDirectories));
+    }
+
+    private void PopulateReportsTab(string? outputDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            PopulateReportsTab([], null);
+            return;
+        }
+
+        PopulateReportsTab(
+            EnumerateKnownReportFiles(outputDirectory)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            outputDirectory);
+    }
+
+    private void PopulateReportsTab(IReadOnlyList<string> files, string? baseDirectory)
+    {
+        _reportsListView.BeginUpdate();
+        try
+        {
+            _reportsListView.Items.Clear();
+
+            if (files.Count == 0)
+            {
+                _reportsListView.Items.Add(new ListViewItem(["Status", "Reports", "Run or load a conversion to inspect JSON diagnostics in-app."]));
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                var reportName = !string.IsNullOrWhiteSpace(baseDirectory)
+                    ? Path.GetRelativePath(baseDirectory, file)
+                    : Path.GetFileName(file);
+                AppendReportSummary(reportName, file);
+            }
+        }
+        finally
+        {
+            _reportsListView.EndUpdate();
+        }
+
+        _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
+    }
+
+    private void AppendReportSummary(string reportName, string filePath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(filePath));
+            var root = document.RootElement;
+            var fileName = Path.GetFileName(filePath);
+
+            switch (fileName)
+            {
+                case "batch-report.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Conversion label", TryReadString(root, "ConversionLabel"), filePath);
+                    AddReportMetric(reportName, "Total items", TryReadInt(root, "TotalCount"), filePath);
+                    AddReportMetric(reportName, "Succeeded", TryReadInt(root, "SuccessCount"), filePath);
+                    AddReportMetric(reportName, "Failed", TryReadInt(root, "FailedCount"), filePath);
+                    break;
+                case "conversion-quality.json":
+                    AddReportMetric(reportName, "Source body", TryReadString(root, "DetectedSourceBody"), filePath);
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
+                    AddReportMetric(reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
+                    AddReportMetric(reportName, "Clipping detected", TryReadBool(root, "ClippingDetected"), filePath);
+                    AddReportMetric(reportName, "Correction applied", TryReadBool(root, "CorrectionApplied"), filePath);
+                    AddReportMetric(reportName, "Topology risk", TryReadBool(root, "TopologyMismatchRisk"), filePath);
+                    AddReportMetric(reportName, "Quality warnings", TryReadArray(root, "QualityWarnings"), filePath);
+                    break;
+                case "dependency-map.json":
+                    AddReportMetric(reportName, "Entries", CountElements(root), filePath);
+                    AddReportMetric(reportName, "Detected bodies", DistinctArrayValues(root, "DetectedSourceBody"), filePath);
+                    AddReportMetric(reportName, "Source skeletons", DistinctArrayValues(root, "SourceSkeleton"), filePath);
+                    AddReportMetric(reportName, "Linked ARMA IDs", SumNestedArrayCounts(root, "LinkedArmaFormIds"), filePath);
+                    break;
+                case "skeleton-compatibility.json":
+                    AddReportMetric(reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
+                    AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
+                    AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
+                    AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    break;
+                case "texture-summary.json":
+                    AddReportMetric(reportName, "Textures", TryReadInt(root, "TotalCount"), filePath);
+                    AddReportMetric(reportName, "Diffuse", CountNestedArray(root, "DiffuseFiles"), filePath);
+                    AddReportMetric(reportName, "Normal", CountNestedArray(root, "NormalFiles"), filePath);
+                    AddReportMetric(reportName, "Missing normals", CountNestedArray(root, "MissingNormals"), filePath);
+                    AddReportMetric(reportName, "Glow", CountNestedArray(root, "GlowFiles"), filePath);
+                    break;
+                case "pose-simulation-report.json":
+                    AddReportMetric(reportName, "Tested poses", CountNestedArray(root, "TestedPoses"), filePath);
+                    AddReportMetric(reportName, "At-risk poses", TryReadInt(root, "TotalPosesAtRisk"), filePath);
+                    AddReportMetric(reportName, "High-risk regions", TryReadArray(root, "HighRiskRegions"), filePath);
+                    break;
+                case "world-physics.json":
+                    AddReportMetric(reportName, "Mode", TryReadString(root, "Mode"), filePath);
+                    AddReportMetric(reportName, "Collision shape", TryReadString(root, "CollisionShape"), filePath);
+                    AddReportMetric(reportName, "Source physics", TryReadBool(root, "SourcePhysicsDetected"), filePath);
+                    AddReportMetric(reportName, "Ground mesh", TryReadBool(root, "GroundMeshAvailable"), filePath);
+                    AddReportMetric(reportName, "Recommendations", TryReadArray(root, "Recommendations"), filePath);
+                    break;
+                case "plugin-patches.json":
+                    AddReportMetric(reportName, "Plugins", CountNestedArray(root, "ScannedPlugins"), filePath);
+                    AddReportMetric(reportName, "Armor add-ons", CountNestedArray(root, "ArmorAddons"), filePath);
+                    AddReportMetric(reportName, "Rewrite mappings", CountNestedArray(root, "RewriteMappings"), filePath);
+                    AddReportMetric(reportName, "Patch steps", CountNestedArray(root, "ProposedPatchSteps"), filePath);
+                    break;
+                default:
+                    AddReportMetric(reportName, "Status", "Open this report for full details.", filePath);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddReportMetric(reportName, "Status", $"Failed to read report: {ex.Message}", filePath);
+        }
+    }
+
+    private void AddReportMetric(string reportName, string property, string? value, string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        _reportsListView.Items.Add(new ListViewItem([reportName, property, value]) { Tag = filePath });
+    }
+
+    private static IEnumerable<string> EnumerateKnownReportFiles(string outputDirectory) =>
+        Directory
+            .EnumerateFiles(outputDirectory, "*.json", SearchOption.AllDirectories)
+            .Where(path => ReportFileNames.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase));
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.ToString(),
+            JsonValueKind.True => "Yes",
+            JsonValueKind.False => "No",
+            _ => null,
+        };
+    }
+
+    private static string? TryReadInt(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.ToString()
+            : null;
+
+    private static string? TryReadBool(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
+            ? (value.GetBoolean() ? "Yes" : "No")
+            : null;
+
+    private static string? TryReadArray(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(FormatJsonValue)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .ToArray();
+        if (items.Length == 0)
+        {
+            return "None";
+        }
+
+        const int previewCount = 4;
+        return items.Length <= previewCount
+            ? string.Join(", ", items)
+            : $"{string.Join(", ", items.Take(previewCount))} (+{items.Length - previewCount} more)";
+    }
+
+    private static string CountNestedArray(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.GetArrayLength().ToString()
+            : "0";
+
+    private static string CountElements(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Array => element.GetArrayLength().ToString(),
+        JsonValueKind.Object => element.EnumerateObject().Count().ToString(),
+        _ => "0",
+    };
+
+    private static string DistinctArrayValues(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return "None";
+        }
+
+        var values = element
+            .EnumerateArray()
+            .Select(item => TryReadString(item, propertyName))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return values.Length == 0 ? "None" : string.Join(", ", values);
+    }
+
+    private static string SumNestedArrayCounts(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return "0";
+        }
+
+        var total = 0;
+        foreach (var item in element.EnumerateArray())
+        {
+            if (TryGetProperty(item, propertyName, out var value) && value.ValueKind == JsonValueKind.Array)
+            {
+                total += value.GetArrayLength();
+            }
+        }
+
+        return total.ToString();
+    }
+
+    private static string FormatJsonValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString() ?? string.Empty,
+        JsonValueKind.Number => value.ToString(),
+        JsonValueKind.True => "Yes",
+        JsonValueKind.False => "No",
+        JsonValueKind.Object => $"{value.EnumerateObject().Count()} field(s)",
+        JsonValueKind.Array => $"{value.GetArrayLength()} item(s)",
+        _ => string.Empty,
+    };
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
     }
 }
