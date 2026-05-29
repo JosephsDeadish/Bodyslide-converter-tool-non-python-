@@ -2,7 +2,7 @@
 
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
-- import scan (single `.nif`, armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
+- import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
@@ -42,8 +42,9 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
 
-# GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
+# GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder), open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
+# **"Convert to All Bodies" button** — one click sets the target batch to every supported body type,
 # optional profile/source/physics override, optional BodySlide export toggle, optional output zip,
 # optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,

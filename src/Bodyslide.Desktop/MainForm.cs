@@ -99,7 +99,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Text = "Drag and drop a .nif file, archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
+            Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
         layout.Controls.Add(dropPanel, 0, 0);
@@ -222,13 +222,28 @@ public sealed class MainForm : Form
             PlaceholderText = "Example: CBBE, 3BA, HIMBO",
         };
         leftOptions.Controls.Add(_targetBatchTextBox, 1, 3);
-        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        leftOptions.Controls.Add(new Label(), 0, 4);
+        var allBodiesButton = new Button
+        {
+            Text = "Convert to All Bodies",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 2, 0, 4),
+        };
+        allBodiesButton.Click += (_, _) =>
+        {
+            _useCustomTargetRadio.Checked = true;
+            _targetBatchTextBox.Text = "all";
+            AppendLog("Target set to all supported body types.");
+        };
+        leftOptions.Controls.Add(allBodiesButton, 1, 4);
+        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 5);
         _presetDetailsLabel = new Label
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
         };
-        leftOptions.Controls.Add(_presetDetailsLabel, 1, 4);
+        leftOptions.Controls.Add(_presetDetailsLabel, 1, 5);
         conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
 
         var rightOptions = new TableLayoutPanel
@@ -534,7 +549,7 @@ public sealed class MainForm : Form
     {
         using var fileDialog = new OpenFileDialog
         {
-            Filter = "NIF/Archive Files (*.nif;*.zip;*.7z;*.tar;*.tar.gz;*.tgz)|*.nif;*.zip;*.7z;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
+            Filter = "Armor Files (*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.tar;*.tar.gz;*.tgz)|*.nif;*.esp;*.esm;*.esl;*.zip;*.7z;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };
@@ -1008,6 +1023,8 @@ public sealed class MainForm : Form
             {
                 if (step.StartsWith("detected-body:", StringComparison.Ordinal))
                     Add("Detected body", step["detected-body:".Length..]);
+                else if (step.StartsWith("source-body-override:", StringComparison.Ordinal))
+                    Add("Source body (override)", step["source-body-override:".Length..]);
                 else if (step.StartsWith("mesh-type:", StringComparison.Ordinal))
                     Add("Mesh type", step["mesh-type:".Length..]);
                 else if (step.StartsWith("cage:", StringComparison.Ordinal))
@@ -1016,22 +1033,62 @@ public sealed class MainForm : Form
                     Add("Conversion strategy", step["mesh-converted:".Length..]);
                 else if (step.StartsWith("physics:", StringComparison.Ordinal))
                     Add("Physics profile", step["physics:".Length..]);
+                else if (step.StartsWith("physics-override:", StringComparison.Ordinal))
+                    Add("Physics (override)", step["physics-override:".Length..]);
                 else if (step.StartsWith("skeleton:", StringComparison.Ordinal))
                     Add("Skeleton mapping", step["skeleton:".Length..]);
+                else if (step.StartsWith("skeleton-warnings:", StringComparison.Ordinal))
+                    Add("Skeleton warnings", step["skeleton-warnings:".Length..]);
                 else if (step.StartsWith("morphs:", StringComparison.Ordinal))
                     Add("Morphs", step["morphs:".Length..]);
                 else if (step.StartsWith("clipping:", StringComparison.Ordinal))
                     Add("Clipping", step["clipping:".Length..]);
                 else if (step.StartsWith("correction:", StringComparison.Ordinal))
                     Add("Auto-correction", step["correction:".Length..]);
-                else if (step.StartsWith("voxel-", StringComparison.Ordinal))
-                    Add("Voxel check", step);
+                else if (step.StartsWith("correction-applied:", StringComparison.Ordinal))
+                    Add("Correction regions", step["correction-applied:".Length..]);
+                else if (step.StartsWith("voxel-collision:", StringComparison.Ordinal))
+                    Add("Voxel collision", step["voxel-collision:".Length..]);
+                else if (step.StartsWith("voxel-push-applied:", StringComparison.Ordinal))
+                    Add("Voxel push-out", step["voxel-push-applied:".Length..]);
                 else if (step.StartsWith("weights:", StringComparison.Ordinal))
                     Add("Weight profile", step["weights:".Length..]);
+                else if (step.StartsWith("weight-solver:", StringComparison.Ordinal))
+                    Add("Weight solver", step["weight-solver:".Length..]);
+                else if (step.StartsWith("physics-injection:", StringComparison.Ordinal))
+                    Add("Physics bone injection", step["physics-injection:".Length..]);
                 else if (step.StartsWith("bodyslide:", StringComparison.Ordinal))
                     Add("BodySlide project", step["bodyslide:".Length..]);
                 else if (step.StartsWith("regions:", StringComparison.Ordinal))
                     Add("Armor regions", step["regions:".Length..]);
+                else if (step.StartsWith("rigid-islands:", StringComparison.Ordinal))
+                    Add("Rigid islands", step["rigid-islands:".Length..]);
+                else if (step.StartsWith("normals:", StringComparison.Ordinal))
+                    Add("Normal recalc", step["normals:".Length..]);
+                else if (step.StartsWith("partitions:", StringComparison.Ordinal))
+                    Add("Partitions", step["partitions:".Length..]);
+                else if (step.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal))
+                    Add("Biped slots (plugin)", step["biped-slots-passthrough:".Length..]);
+                else if (step.StartsWith("pose-simulation:", StringComparison.Ordinal))
+                    Add("Pose simulation", step["pose-simulation:".Length..]);
+                else if (step.StartsWith("plugins:", StringComparison.Ordinal))
+                    Add("Plugins", step["plugins:".Length..]);
+                else if (step.StartsWith("vanilla-armor:", StringComparison.Ordinal))
+                    Add("Vanilla armor", step["vanilla-armor:".Length..]);
+                else if (step.StartsWith("vanilla-profile:", StringComparison.Ordinal))
+                    Add("Vanilla profile", step["vanilla-profile:".Length..]);
+                else if (step.StartsWith("weight-variants:", StringComparison.Ordinal))
+                    Add("Weight variants (_0/_1)", step["weight-variants:".Length..]);
+                else if (step.StartsWith("smp-bones:", StringComparison.Ordinal))
+                    Add("SMP bones", step["smp-bones:".Length..]);
+                else if (step.StartsWith("race-compat:", StringComparison.Ordinal))
+                    Add("Race compatibility", step["race-compat:".Length..]);
+                else if (step.StartsWith("learning-cache:", StringComparison.Ordinal))
+                    Add("Learning cache", step["learning-cache:".Length..]);
+                else if (step.StartsWith("conversion-delta:", StringComparison.Ordinal))
+                    Add("Conversion delta", step["conversion-delta:".Length..]);
+                else if (step.StartsWith("textures:", StringComparison.Ordinal))
+                    Add("Texture warnings", step["textures:".Length..]);
                 else if (step.StartsWith("imported:", StringComparison.Ordinal))
                     Add("Imported assets", step["imported:".Length..]);
                 else if (step.StartsWith("exported:", StringComparison.Ordinal))

@@ -3444,6 +3444,14 @@ internal static class ConversionLearningCache
 
 internal sealed class LocalArmorImportService : IArmorImportService
 {
+    private static readonly IReadOnlyList<string> PluginFileExtensions = [".esp", ".esm", ".esl"];
+
+    /// <summary>
+    /// Returns true when <paramref name="path"/> is a Bethesda plugin file (.esp/.esm/.esl).
+    /// </summary>
+    private static bool IsPluginFile(string path) =>
+        PluginFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+
     public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken)
     {
         var fullInputPath = Path.GetFullPath(inputPath);
@@ -3454,6 +3462,13 @@ internal sealed class LocalArmorImportService : IArmorImportService
         {
             temporaryWorkspace = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(fullInputPath, "bodyslide-extract");
             sourcePath = temporaryWorkspace;
+        }
+        else if (File.Exists(fullInputPath) && IsPluginFile(fullInputPath))
+        {
+            // Plugin file dropped directly: resolve the containing folder (or the nearest mod-root
+            // containing a meshes/ sub-directory) as the scan root so that the NIF files referenced
+            // by the plugin's ARMA records are located automatically.
+            sourcePath = ResolveSupportScanRoot(fullInputPath);
         }
 
         var meshFiles = EnumerateFiles(sourcePath, [".nif"]);
