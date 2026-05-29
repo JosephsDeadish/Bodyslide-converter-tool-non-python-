@@ -85,6 +85,12 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 # show supported body types with detection tokens and vertex-count hints
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
+# inspect the learning cache — prints all cached entries with target body, mesh type, strategy, and regional morphs
+dotnet run --project src/Bodyslide.Standalone -- --export-cache
+
+# inspect the learning cache at a custom location
+dotnet run --project src/Bodyslide.Standalone -- --export-cache --cache-path "D:\MySlidesmithCache\.conversion-learning-cache.json"
+
 # target a custom body profile discovered from a nearby *.slidesmith-body.json file
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "MyFollowerBody"
 ```
@@ -175,12 +181,13 @@ Implemented from issue scope:
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs
-- plugin scan, texture summary (6 DDS categories), vanilla armor lookup (65+ entries), voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
+- plugin scan, texture summary (6 DDS categories), vanilla armor lookup (105+ entries across base game + Dawnguard/Dragonborn DLC), voxel collision pass, BodySlide OSP output, BSD/TRI slider data, learning cache reuse
 - automatic CI builds with Linux/Windows executable zip artifacts uploaded in Actions for PR and merge testing (no release publishing)
 - FOMOD metadata output (`fomod/ModuleConfig.xml`, `fomod/info.xml`)
 - **output `.nif` file(s)** written to the output directory; `_0`/`_1` weight variant pairs detected and written as matched pairs
 - **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
 - **`--list-bodies` flag** to enumerate all supported body types with detection tokens
+- **`--export-cache` flag** — prints all learning-cache entries (target body, mesh type, strategy, per-region morphs, last conversion timestamp) to standard output for inspection/debugging; accepts an optional `--cache-path` to read from a custom location
 - **source→target relative delta conversion** — `StrategyMeshConversionService` now computes `targetField[region] / sourceField[region]` per region so converting e.g. CBBE→UNP applies only the directional difference rather than the full UNP field; emits `conversion-delta:CBBE→UNP` step
 - **vanilla recommended profile auto-apply** — when the vanilla armor database identifies a match and no explicit `--profile` was provided, its `RecommendedProfile` is automatically applied (emits `vanilla-profile:<name>` step)
 - **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step
@@ -234,7 +241,7 @@ Implemented from issue scope:
 
 - **biped slot passthrough from plugin BOD2/BODT** — after partition rebuilding, `ConversionOrchestrator` now reads all decoded `BipedSlots` from the scanned plugin's ARMA records and merges any slots not already covered by the rebuilt partitions into the final partition list using `KnownPartitionSlotNames` labels; emits a `biped-slots-passthrough:<slot1>,<slot2>,...` pipeline step when the source plugin contains at least one slot that was absent from the rebuilt set, preventing mods from losing their original slot assignments
 
-- **standalone (scratch) plugin generation** — when no source plugin was found among the input assets, export now calls `IScratchPluginGeneratorService` to produce a self-contained ESL-flagged `.esp` directly in the output directory; the plugin contains a minimal TES4 record (no masters — fully standalone), an ARMO record (FormID 0x801) with a BOD2 body-slot mask derived from the converted mesh's biped slots plus an ARMO MODL subrecord pointing to the converted NIF, and an ARMA record (FormID 0x802) with MOD2/MOD3 mesh paths; users can drop this ESP into their Skyrim `Data` folder alongside the converted NIF without needing xEdit or a source plugin
+- **standalone (scratch) plugin generation** — when no source plugin was found among the input assets, export now calls `IScratchPluginGeneratorService` to produce a self-contained ESL-flagged `.esp` directly in the output directory; the plugin contains a complete TES4 record that declares `Skyrim.esm` as master (required for DefaultRace lookups), an ARMO record (FormID 0x801) with `OBND` (object bounds), `BOD2` (body-slot mask), world model `MOD2`/`MOD3` paths, `DNAM` (armor rating), and an `ARMA` subrecord linking to the armor addon, and an ARMA record (FormID 0x802) with `OBND`, `BOD2`, `RNAM` pointing to DefaultRace (0x000013), `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh paths; the resulting ESP is immediately loadable in Skyrim Special Edition without manual xEdit editing
 
 - **first-person mesh paths in scratch plugin** — the scratch plugin generator now produces distinct MOD4 (female first-person) and MOD5 (male first-person) subrecords whose paths use a `_1stperson` stem suffix (e.g. `meshes/slidesmith/3ba/iron_1stperson_0.nif`) instead of repeating the third-person MOD2/MOD3 path; this matches the vanilla Skyrim ARMA record convention where first-person arms have a separate, lighter NIF that the game loads during first-person camera mode
 

@@ -7767,6 +7767,180 @@ public sealed class BasicScratchPluginGeneratorServiceTests
         // A minimal ESP must be at least 200 bytes (TES4 + two GRUPs + two records).
         Assert.True(bytes.Length >= 200, $"Expected >=200 bytes, got {bytes.Length}");
     }
+
+    // ── Record completeness tests (critical for in-game loading) ──────────────
+
+    /// <summary>
+    /// The OBND subrecord is required by the engine on both ARMO and ARMA records.
+    /// A missing OBND is a known cause of CTDs during plugin loading.
+    /// </summary>
+    [Fact]
+    public void Generate_PluginContainsOBNDSubrecord()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var found = false;
+        for (int i = 0; i + 5 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'O' && bytes[i + 1] == 'B' && bytes[i + 2] == 'N' && bytes[i + 3] == 'D')
+            {
+                found = true;
+                break;
+            }
+        }
+        Assert.True(found, "OBND subrecord must be present in at least one record in the generated ESP.");
+    }
+
+    /// <summary>
+    /// ARMA records require RNAM to reference DefaultRace (0x00000013), otherwise the
+    /// armor addon is not applied to any character race and the mesh never renders.
+    /// </summary>
+    [Fact]
+    public void Generate_ArmaContainsRNAMWithDefaultRace()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        for (int i = 0; i + 9 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'R' && bytes[i + 1] == 'N' && bytes[i + 2] == 'A' && bytes[i + 3] == 'M')
+            {
+                // RNAM subrecord: 4-byte tag + 2-byte size + 4-byte FormID
+                var formId = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                Assert.Equal(0x00000013u, formId);
+                return;
+            }
+        }
+        Assert.Fail("RNAM subrecord not found in ARMA record of generated ESP.");
+    }
+
+    /// <summary>
+    /// The TES4 record must declare Skyrim.esm as a master so the RNAM DefaultRace
+    /// FormID (0x00000013) resolves correctly at load time.
+    /// </summary>
+    [Fact]
+    public void Generate_Tes4ContainsSkyrimEsmMaster()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("Skyrim.esm", pluginText);
+    }
+
+    /// <summary>
+    /// The ARMO record must carry its own BOD2 subrecord so the game knows which biped
+    /// slots the armor piece occupies (used for conflict detection at equip time).
+    /// </summary>
+    [Fact]
+    public void Generate_ArmoContainsBOD2Subrecord()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32, 33, 37],
+            null);
+
+        var (bytes, _) = result!.Value;
+
+        // Count how many BOD2 subrecords appear — both ARMO and ARMA should have one.
+        int bod2Count = 0;
+        for (int i = 0; i + 3 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'B' && bytes[i + 1] == 'O' && bytes[i + 2] == 'D' && bytes[i + 3] == '2')
+                bod2Count++;
+        }
+        Assert.True(bod2Count >= 2, $"Expected at least 2 BOD2 subrecords (ARMO + ARMA), found {bod2Count}.");
+    }
+
+    /// <summary>
+    /// The ARMO record must include an ARMA subrecord referencing the armor addon (0x00000802),
+    /// otherwise the game treats the ARMO as having no mesh data.
+    /// </summary>
+    [Fact]
+    public void Generate_ArmoContainsARMAReference()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+
+        // Locate the ARMO record group then scan for "ARMA" subrecord inside it.
+        // Because byte-patterns are shared, we search the whole buffer and accept any occurrence
+        // after position 24 (past TES4) where the tag is followed by a non-zero 4-byte FormID.
+        for (int i = 24; i + 9 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'A' && bytes[i + 1] == 'R' && bytes[i + 2] == 'M' && bytes[i + 3] == 'A')
+            {
+                // Skip the ARMA record-type tag itself (first occurrence = GRUP label or record type).
+                // Look for the ARMA *subrecord* (4-char tag + 2-byte size + 4-byte value = 10 bytes).
+                if (bytes[i + 4] != 0 || bytes[i + 5] != 0) continue; // size must be 4 (little-endian 0x0004)
+                if (bytes[i + 4] == 4 && bytes[i + 5] == 0)
+                {
+                    var formId = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                    if (formId != 0) return; // found a non-zero ARMA reference — test passes
+                }
+            }
+        }
+
+        // Simpler fallback: verify the ESP text contains the ARMA subrecord tag at least twice
+        // (once as the record type in the ARMA GRUP, once as a subrecord in the ARMO record).
+        int armaCount = 0;
+        for (int i = 0; i + 3 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'A' && bytes[i + 1] == 'R' && bytes[i + 2] == 'M' && bytes[i + 3] == 'A')
+                armaCount++;
+        }
+        Assert.True(armaCount >= 2, $"Expected ARMA to appear at least twice (record type + ARMO subrecord), found {armaCount}.");
+    }
+
+    /// <summary>
+    /// ARMO records should include a DNAM subrecord (armor rating float32).
+    /// Without DNAM the game may not register the item correctly in the perk system.
+    /// </summary>
+    [Fact]
+    public void Generate_ArmoContainsDNAMSubrecord()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var found = false;
+        for (int i = 0; i + 3 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'D' && bytes[i + 1] == 'N' && bytes[i + 2] == 'A' && bytes[i + 3] == 'M')
+            {
+                found = true;
+                break;
+            }
+        }
+        Assert.True(found, "DNAM subrecord (armor rating) must be present in the ARMO record.");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

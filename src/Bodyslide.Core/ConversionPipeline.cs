@@ -2728,6 +2728,11 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
     // ESL flag — prevents the plugin consuming a load-order slot.
     private const uint EslFlag = 0x00000200u;
 
+    // DefaultRace FormID in Skyrim.esm (master index 0).
+    // ARMA records require an RNAM subrecord pointing to a valid race.
+    // DefaultRace (0x000013) is always present in Skyrim.esm and matches all playable races.
+    private const uint DefaultRaceFormId = 0x00000013u;
+
     public (byte[] PluginBytes, string FileName)? Generate(
         string armorName,
         string targetBody,
@@ -2754,11 +2759,22 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         var edidArma = SanitizeEdid($"SlideSmith_{armorName}_ARMA");
         WriteSubrecord(armaDataMs, "EDID", System.Text.Encoding.ASCII.GetBytes(edidArma + '\0'));
 
+        // OBND (object bounds) — required by the engine; 6 int16 values (minX/Y/Z, maxX/Y/Z).
+        WriteSubrecord(armaDataMs, "OBND", new byte[12]);
+
         using (var bod2Ms = new MemoryStream(8))
         {
             WriteUInt32Le(bod2Ms, slotMask);
             WriteUInt32Le(bod2Ms, 0u); // armor type: 0 = light armor
             WriteSubrecord(armaDataMs, "BOD2", bod2Ms.ToArray());
+        }
+
+        // RNAM — default race reference (DefaultRace in Skyrim.esm).
+        // Without RNAM the armor addon is not applied to any race and the mesh never shows.
+        using (var rnamMs = new MemoryStream(4))
+        {
+            WriteUInt32Le(rnamMs, DefaultRaceFormId);
+            WriteSubrecord(armaDataMs, "RNAM", rnamMs.ToArray());
         }
 
         // Equipped mesh paths (MOD2 = male, MOD3 = female).
@@ -2769,8 +2785,8 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         // Skyrim loads a separate NIF for the first-person camera; we derive its path by
         // inserting the "_1stperson" suffix before the file extension. The export step stages
         // a fallback copy at that path so the generated plugin is immediately usable.
-        var fpExt          = Path.GetExtension(primaryPath);                     // ".nif"
-        var fpStem         = primaryPath[..^fpExt.Length];                       // "meshes/slidesmith/..."
+        var fpExt           = Path.GetExtension(primaryPath);                    // ".nif"
+        var fpStem          = primaryPath[..^fpExt.Length];                      // "meshes/slidesmith/..."
         var firstPersonPath = $"{fpStem}_1stperson{fpExt}";                     // "..._1stperson.nif"
         WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
         WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
@@ -2781,7 +2797,21 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         using var armoDataMs = new MemoryStream();
         var edidArmo = SanitizeEdid($"SlideSmith_{armorName}");
         WriteSubrecord(armoDataMs, "EDID", System.Text.Encoding.ASCII.GetBytes(edidArmo + '\0'));
+
+        // OBND — required by the engine; a missing OBND can cause CTDs on record access.
+        WriteSubrecord(armoDataMs, "OBND", new byte[12]);
+
         WriteSubrecord(armoDataMs, "FULL", System.Text.Encoding.ASCII.GetBytes(armorName + '\0'));
+
+        // BOD2 on the ARMO record defines which body slots the armor occupies.
+        // This is separate from the ARMA's BOD2 and is used by the game to prevent
+        // equipping conflicting items in the same slot.
+        using (var bod2Ms = new MemoryStream(8))
+        {
+            WriteUInt32Le(bod2Ms, slotMask);
+            WriteUInt32Le(bod2Ms, 0u); // armor type: 0 = light
+            WriteSubrecord(armoDataMs, "BOD2", bod2Ms.ToArray());
+        }
 
         if (!string.IsNullOrWhiteSpace(groundMeshRelativePath))
         {
@@ -2799,6 +2829,21 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
             WriteFloat32Le(dataMs, 1.0f);
             WriteUInt32Le(dataMs, 0u);
             WriteSubrecord(armoDataMs, "DATA", dataMs.ToArray());
+        }
+
+        // DNAM: armor rating (float32 = 0.0 for cosmetic/clothing items).
+        using (var dnamMs = new MemoryStream(4))
+        {
+            WriteFloat32Le(dnamMs, 0.0f);
+            WriteSubrecord(armoDataMs, "DNAM", dnamMs.ToArray());
+        }
+
+        // ARMA reference — links this ARMO to the ARMA addon record that holds the mesh paths.
+        // Without this, the armor has no renderable geometry in-game.
+        using (var armaRefMs = new MemoryStream(4))
+        {
+            WriteUInt32Le(armaRefMs, ArmaFormId);
+            WriteSubrecord(armoDataMs, "ARMA", armaRefMs.ToArray());
         }
 
         var armoRecord = BuildRecord("ARMO", armoDataMs.ToArray(), ArmoFormId);
@@ -2826,7 +2871,12 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         }
 
         WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
-        // No MAST/DATA — standalone plugin with no masters.
+
+        // Declare Skyrim.esm as master so RNAM can reference DefaultRace (0x00000013).
+        // The DATA subrecord after MAST is an 8-byte file-size field; writing 0 is valid.
+        WriteSubrecord(ms, "MAST", System.Text.Encoding.ASCII.GetBytes("Skyrim.esm\0"));
+        WriteSubrecord(ms, "DATA", new byte[8]);
+
         return ms.ToArray();
     }
 
@@ -9485,6 +9535,48 @@ internal static class VanillaArmorDatabase
         new("Skaal Armor",                  ["skaalarmor", "skaal"],                        "Vanilla", ["32:Body"],                             "athletic"),
         new("Bound Armor",                  ["boundarmor"],                                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
         new("Thieves Guild Master Armor",   ["tgmasterarmor", "tgmaster"],                 "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+
+        // ── Dawnguard DLC ────────────────────────────────────────────────────
+        new("Auriel's Shield",              ["aurielshield"],                               "Vanilla", ["39:Shield"],                          "athletic"),
+        new("Knight Paladin Armor",         ["knightpaladin", "dawnguardpaladin"],          "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Falkon Armor",                 ["falkonarmor"],                                "Vanilla", ["32:Body"],                             "slim"),
+        new("Vampire Armor",                ["vampirearmor", "vampiressarmor"],             "Vanilla", ["32:Body"],                             "slim"),
+        new("Vampire Gauntlets",            ["vampiregauntlets"],                           "Vanilla", ["33:Hands"],                            "slim"),
+        new("Vampire Boots",                ["vampireboots"],                               "Vanilla", ["37:Feet"],                             "slim"),
+        new("Dawnguard War Axe",            ["dawnguardwaraxe"],                            "Vanilla", ["41:RightHand"],                        "athletic"),
+        new("Moth Priest Robes",            ["mothpriest"],                                 "Vanilla", ["32:Body"],                             "slim"),
+        new("Vampire Lord Armor",           ["vampirelord"],                                "Vanilla", ["32:Body"],                             "muscular"),
+        new("Ancient Falmer Boots",         ["ancientfalmerlightboots", "ancientfalmerboots"], "Vanilla", ["37:Feet"],                         "slim"),
+        new("Ancient Falmer Gauntlets",     ["ancientfalmerlightgauntlets", "ancientfalmergauntlets"], "Vanilla", ["33:Hands"],               "slim"),
+        new("Ancient Falmer Helmet",        ["ancientfalmerhelmet"],                        "Vanilla", ["42:Circlet"],                          "slim"),
+
+        // ── Dragonborn DLC ───────────────────────────────────────────────────
+        new("Miraak's Robes",               ["miraakrobes", "miraak"],                      "Vanilla", ["32:Body"],                             "slim"),
+        new("Miraak's Boots",               ["miraakboots"],                                "Vanilla", ["37:Feet"],                             "slim"),
+        new("Miraak's Gloves",              ["miraakgloves"],                               "Vanilla", ["33:Hands"],                            "slim"),
+        new("Miraak's Mask",                ["mipraakmask", "miraakhelmet"],                "Vanilla", ["42:Circlet"],                          "slim"),
+        new("Morag Tong Armor",             ["moragtong"],                                  "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Telvanni Robes",               ["telvanirobes", "telvanniarmor"],              "Vanilla", ["32:Body"],                             "slim"),
+        new("Redoran Guard Armor",          ["redoranguard"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Deathbrand Armor",             ["deathbrandarmor", "deathbrand"],              "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "athletic"),
+        new("Deathbrand Helmet",            ["deathbrandhelmet"],                           "Vanilla", ["42:Circlet"],                          "athletic"),
+        new("Nordic Carved Shield",         ["nordicshield"],                               "Vanilla", ["39:Shield"],                          "athletic"),
+
+        // ── Base Game Additional ─────────────────────────────────────────────
+        new("Thalmor Robes",                ["thalmorrobes", "thalmorrobe"],                "Vanilla", ["32:Body"],                             "slim"),
+        new("Thalmor Armor",                ["thalmorarmor"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Linwe's Armor",                ["linwesarmor", "linwes"],                      "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Worn Shrouded Armor",          ["wornshrouded"],                               "Vanilla", ["32:Body", "33:Hands", "37:Feet"], "slim"),
+        new("Cicero's Outfit",              ["cicerooutfit", "cicero"],                     "Vanilla", ["32:Body"],                             "slim"),
+        new("Jarl's Longcoat",              ["jarlslongcoat", "jarlcoat"],                  "Vanilla", ["32:Body"],                             "slim"),
+        new("College Robes (Fine)",         ["finerobes", "collegefinerobes"],              "Vanilla", ["32:Body"],                             "slim"),
+        new("Woodland Man Armor",           ["woodlandmanarmor", "woodlandman"],            "Vanilla", ["32:Body"],                             "lean"),
+        new("Hunting Boots",                ["huntingboots"],                               "Vanilla", ["37:Feet"],                             "slim"),
+        new("Fine Clothes",                 ["fineclothes", "fancyclothes"],                "Vanilla", ["32:Body"],                             "slim"),
+        new("Wedding Dress",                ["weddingdress"],                               "Vanilla", ["32:Body"],                             "curvy"),
+        new("Barkeeper Outfit",             ["barkeeper", "barmaidoutfit"],                 "Vanilla", ["32:Body"],                             "curvy"),
+        new("Tavern Clothes",               ["tavernclothes", "commonclothes"],             "Vanilla", ["32:Body"],                             "slim"),
+        new("Mythic Dawn Robes",            ["mythicdawnrobes", "mythicdawn"],              "Vanilla", ["32:Body"],                             "slim"),
     ];
 }
 

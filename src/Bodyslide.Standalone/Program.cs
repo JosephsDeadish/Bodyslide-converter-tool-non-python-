@@ -3,6 +3,56 @@ using System.Reflection;
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
+if (args.Contains("--export-cache", StringComparer.OrdinalIgnoreCase))
+{
+    var parsed = ParseNamedArguments(args);
+    parsed.TryGetValue("export-cache", out var exportCachePath);
+    parsed.TryGetValue("cache-path", out var exportCacheOverridePath);
+
+    // Allow --export-cache <path> OR --cache-path <path> to specify the cache file location.
+    var resolvedPath = (!string.IsNullOrWhiteSpace(exportCachePath) && exportCachePath != "true")
+        ? exportCachePath
+        : exportCacheOverridePath;
+
+    if (!string.IsNullOrWhiteSpace(resolvedPath))
+    {
+        ConversionLearningCache.SetGlobalCachePath(resolvedPath);
+    }
+
+    var entries = await ConversionLearningCache.LoadMergedEntriesAsync(string.Empty, CancellationToken.None);
+    if (entries.Count == 0)
+    {
+        Console.WriteLine("Learning cache is empty. Run at least one successful conversion to populate it.");
+    }
+    else
+    {
+        Console.WriteLine($"Learning cache — {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}:");
+        foreach (var entry in entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"  [{entry.Key}]");
+            Console.WriteLine($"    Target body  : {entry.TargetBody}");
+            Console.WriteLine($"    Mesh type    : {entry.MeshType}");
+            Console.WriteLine($"    Strategy     : {entry.Strategy}");
+            Console.WriteLine($"    Had clipping : {entry.HadClipping}");
+            Console.WriteLine($"    Correction   : {entry.CorrectionMethod}");
+            Console.WriteLine($"    Cached at    : {entry.LastSuccessfulConversion:u}");
+            if (entry.RegionalMorphing.Count > 0)
+            {
+                Console.WriteLine("    Regional morphs:");
+                foreach (var (region, factor) in entry.RegionalMorphing
+                    .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"      {region,-14}: {factor:F4}");
+                }
+            }
+
+            Console.WriteLine();
+        }
+    }
+
+    return;
+}
+
 if (args.Contains("--list-presets", StringComparer.OrdinalIgnoreCase))
 {
     Console.WriteLine("Available presets:");
@@ -55,6 +105,7 @@ if (!TryParseRequest(args, out var request, out var error, out var cachePath))
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
+    Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
     Console.WriteLine();
     Console.WriteLine("Drag a .nif file, supported archive (.zip/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
 
