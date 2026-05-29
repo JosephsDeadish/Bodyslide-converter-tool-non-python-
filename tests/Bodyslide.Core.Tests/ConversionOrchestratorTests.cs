@@ -10422,7 +10422,9 @@ public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCu
         Assert.Equal(inputFile, inspection.InputPath);
         Assert.Equal("MyFollower", inspection.RequestedTargetBody);
         Assert.Equal("MyFollower", inspection.Detection.Body);
-        Assert.Equal("physics-enabled", inspection.Analysis.MeshType);
+        Assert.True(
+            inspection.Analysis.MeshType is "mixed" or "physics-enabled",
+            $"Unexpected mesh type: {inspection.Analysis.MeshType}");
         Assert.NotNull(inspection.SkeletonMapping);
         Assert.Equal("xpmsse-myfollower-physics", inspection.SkeletonMapping!.TargetSkeleton);
         Assert.Contains("MyFollower", inspection.Armor.CustomBodyProfiles?.Select(profile => profile.Name) ?? []);

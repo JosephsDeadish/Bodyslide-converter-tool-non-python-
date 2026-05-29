@@ -2390,52 +2390,7 @@ public sealed class ConversionOrchestrator(
         }
     }
 
-    public sealed class ConversionInspector(
-        IArmorImportService importer,
-        IBodyDetectionService bodyDetector,
-        IMeshAnalysisService meshAnalyzer,
-        ISkeletonMappingService skeletonMapper)
-    {
-        public async Task<ConversionInspectionResult> InspectAsync(
-            string inputPath,
-            string? targetBody = null,
-            IReadOnlyList<string>? customProfilePaths = null,
-            CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrWhiteSpace(inputPath))
-            {
-                throw new ArgumentException("Input path is required.", nameof(inputPath));
-            }
-
-            if (!File.Exists(inputPath) && !Directory.Exists(inputPath))
-            {
-                throw new FileNotFoundException("Input path was not found.", inputPath);
-            }
-
-            var armor = await importer.ImportAsync(inputPath, cancellationToken);
-            armor = CustomBodyProfileSupport.MergeProfiles(armor, customProfilePaths);
-
-            var detection = await bodyDetector.DetectAsync(armor, cancellationToken);
-            var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
-
-            var normalizedTargetBody = string.IsNullOrWhiteSpace(targetBody) ? null : targetBody.Trim();
-            SkeletonMappingResult? skeletonMapping = null;
-            if (!string.IsNullOrWhiteSpace(normalizedTargetBody))
-            {
-                skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
-            }
-
-            return new ConversionInspectionResult(
-                inputPath,
-                normalizedTargetBody,
-                armor,
-                detection,
-                analysis,
-                skeletonMapping);
-        }
-    }
-
-    // Biped partition slot names — mirrors BasicPartitionRebuildingService.PartitionSlots so
+        // Biped partition slot names — mirrors BasicPartitionRebuildingService.PartitionSlots so
     // the passthrough logic can produce labelled slot strings without coupling to that class.
     private static readonly IReadOnlyDictionary<int, string> KnownPartitionSlotNames =
         new Dictionary<int, string>
@@ -2468,6 +2423,51 @@ public sealed class ConversionOrchestrator(
         }
 
         return PhysicsProfileCatalog.GetDefaultForTargetBody(request.TargetBody);
+    }
+}
+
+public sealed class ConversionInspector(
+    IArmorImportService importer,
+    IBodyDetectionService bodyDetector,
+    IMeshAnalysisService meshAnalyzer,
+    ISkeletonMappingService skeletonMapper)
+{
+    public async Task<ConversionInspectionResult> InspectAsync(
+        string inputPath,
+        string? targetBody = null,
+        IReadOnlyList<string>? customProfilePaths = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(inputPath))
+        {
+            throw new ArgumentException("Input path is required.", nameof(inputPath));
+        }
+
+        if (!File.Exists(inputPath) && !Directory.Exists(inputPath))
+        {
+            throw new FileNotFoundException("Input path was not found.", inputPath);
+        }
+
+        var armor = await importer.ImportAsync(inputPath, cancellationToken);
+        armor = CustomBodyProfileSupport.MergeProfiles(armor, customProfilePaths);
+
+        var detection = await bodyDetector.DetectAsync(armor, cancellationToken);
+        var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
+
+        var normalizedTargetBody = string.IsNullOrWhiteSpace(targetBody) ? null : targetBody.Trim();
+        SkeletonMappingResult? skeletonMapping = null;
+        if (!string.IsNullOrWhiteSpace(normalizedTargetBody))
+        {
+            skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
+        }
+
+        return new ConversionInspectionResult(
+            inputPath,
+            normalizedTargetBody,
+            armor,
+            detection,
+            analysis,
+            skeletonMapping);
     }
 }
 
