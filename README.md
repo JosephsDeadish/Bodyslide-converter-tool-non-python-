@@ -45,6 +45,7 @@ dotnet run --project src/Bodyslide.Desktop
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # optional profile/source/physics override, optional BodySlide export toggle, optional output zip,
+# optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
 # any previous output folder's preview, quick-open batch reports when available,

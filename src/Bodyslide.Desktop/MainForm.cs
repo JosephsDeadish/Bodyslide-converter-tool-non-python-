@@ -10,6 +10,7 @@ public sealed class MainForm : Form
 {
     private readonly TextBox _inputTextBox;
     private readonly TextBox _outputTextBox;
+    private readonly TextBox _cachePathTextBox;
     private readonly ComboBox _presetComboBox;
     private readonly ComboBox _targetComboBox;
     private readonly TextBox _presetBatchTextBox;
@@ -28,6 +29,7 @@ public sealed class MainForm : Form
     private readonly Button _openBatchReportButton;
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
+    private readonly Button _inspectCacheButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
@@ -68,9 +70,10 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 8,
             Padding = new Padding(12),
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -283,6 +286,13 @@ public sealed class MainForm : Form
         outputRow.Controls.Add(browseOutputButton, 2, 0);
         layout.Controls.Add(outputRow, 0, 4);
 
+        var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
+        _cachePathTextBox.PlaceholderText = "Custom path for .conversion-learning-cache.json";
+        var browseCacheButton = new Button { Text = "Browse...", AutoSize = true };
+        browseCacheButton.Click += (_, _) => BrowseCachePath();
+        cacheRow.Controls.Add(browseCacheButton, 2, 0);
+        layout.Controls.Add(cacheRow, 0, 5);
+
         var actionRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -379,6 +389,13 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 0, 8, 0),
         };
         _saveProfileButton.Click += (_, _) => SaveCurrentProfile();
+        _inspectCacheButton = new Button
+        {
+            Text = "Inspect cache",
+            Width = 110,
+            Height = 34,
+        };
+        _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
@@ -390,7 +407,8 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_openBatchReportButton);
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
-        layout.Controls.Add(actionRow, 0, 5);
+        actionRow.Controls.Add(_inspectCacheButton);
+        layout.Controls.Add(actionRow, 0, 6);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -458,7 +476,7 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        layout.Controls.Add(bottomPanel, 0, 6);
+        layout.Controls.Add(bottomPanel, 0, 7);
 
         RefreshModeState();
         UpdatePresetDetails();
@@ -525,6 +543,25 @@ public sealed class MainForm : Form
         }
     }
 
+    private void BrowseCachePath()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Select learning cache file path",
+            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+            FileName = ".conversion-learning-cache.json",
+            DefaultExt = "json",
+            AddExtension = true,
+            CheckPathExists = true,
+            OverwritePrompt = false,
+        };
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _cachePathTextBox.Text = dialog.FileName;
+        }
+    }
+
     private void OnDragEnter(object? sender, DragEventArgs e)
     {
         if (e.Data?.GetDataPresent(DataFormats.FileDrop) == true)
@@ -576,6 +613,7 @@ public sealed class MainForm : Form
         var selectedTargets = CombineSelections(target, ParseDelimitedValues(_targetBatchTextBox.Text));
         var profile = ReadOptionalComboValue(_profileComboBox);
         var physicsOverride = ReadOptionalComboValue(_physicsComboBox);
+        var cachePathOverride = ReadOptionalPathValue(_cachePathTextBox.Text);
         var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
             : _sourceComboBox.Text.Trim();
@@ -626,6 +664,12 @@ public sealed class MainForm : Form
                 PhysicsProfileOverride: physicsOverride,
                 GenerateBodySlideFiles: _buildSlidersCheckBox.Checked,
                 CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null);
+
+            ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
+            if (!string.IsNullOrWhiteSpace(cachePathOverride))
+            {
+                AppendLog($"Learning cache override: {cachePathOverride}");
+            }
 
             var cancellationToken = _activeConversion.Token;
 
@@ -710,6 +754,7 @@ public sealed class MainForm : Form
         _cancelButton.Enabled = isBusy;
         _clearLogButton.Enabled = !isBusy;
         _loadResultButton.Enabled = !isBusy;
+        _inspectCacheButton.Enabled = !isBusy;
         _openInputButton.Enabled = !isBusy && InputPathExists();
         _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
@@ -977,6 +1022,9 @@ public sealed class MainForm : Form
         return selected;
     }
 
+    private static string? ReadOptionalPathValue(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+
     private static string? GetBestOutputDirectory(IReadOnlyList<ConversionResult> results)
     {
         if (results.Count == 0)
@@ -1104,6 +1152,35 @@ public sealed class MainForm : Form
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+
+    private async Task InspectLearningCacheAsync()
+    {
+        try
+        {
+            var cachePathOverride = ReadOptionalPathValue(_cachePathTextBox.Text);
+            ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
+
+            var entries = await ConversionLearningCache.LoadMergedEntriesAsync(string.Empty, CancellationToken.None);
+            if (entries.Count == 0)
+            {
+                AppendLog("Learning cache is empty.");
+                MessageBox.Show(this, "Learning cache is empty.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            AppendLog($"Learning cache: {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}.");
+            foreach (var entry in entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                AppendLog($"[{entry.Key}] target={entry.TargetBody}, mesh={entry.MeshType}, strategy={entry.Strategy}, cached={entry.LastSuccessfulConversion:u}");
+            }
+
+            MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Failed to inspect learning cache:\n{ex.Message}", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
 
     private void LoadCustomProfileFile()
     {
