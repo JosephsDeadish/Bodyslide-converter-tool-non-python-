@@ -86,6 +86,13 @@ public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, b
 public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetSkeleton, IReadOnlyList<SkeletonBoneMapping> BoneMappings, IReadOnlyList<string> UnsupportedBones);
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
+public sealed record ConversionInspectionResult(
+    string InputPath,
+    string? RequestedTargetBody,
+    ImportedArmor Armor,
+    BodyDetectionReport Detection,
+    MeshAnalysis Analysis,
+    SkeletonMappingResult? SkeletonMapping);
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -1598,6 +1605,31 @@ internal static class CustomBodyProfileSupport
             .ToArray();
     }
 
+    public static ImportedArmor MergeProfiles(ImportedArmor armor, IReadOnlyList<string>? filePaths)
+    {
+        if (filePaths is not { Count: > 0 })
+        {
+            return armor;
+        }
+
+        var extraProfiles = LoadProfiles(filePaths);
+        if (extraProfiles.Count == 0)
+        {
+            return armor;
+        }
+
+        var merged = new List<CustomBodyProfile>(armor.CustomBodyProfiles ?? []);
+        foreach (var extraProfile in extraProfiles)
+        {
+            if (!merged.Any(profile => string.Equals(profile.Name, extraProfile.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                merged.Add(extraProfile);
+            }
+        }
+
+        return armor with { CustomBodyProfiles = merged };
+    }
+
     public static bool TryGetProfile(ImportedArmor? armor, string bodyName, out CustomBodyProfile profile)
     {
         profile = default!;
@@ -2039,20 +2071,7 @@ public sealed class ConversionOrchestrator(
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
-            if (normalized.Request.CustomProfilePaths is { Count: > 0 } extraPaths)
-            {
-                var extraProfiles = CustomBodyProfileSupport.LoadProfiles(extraPaths);
-                if (extraProfiles.Count > 0)
-                {
-                    var merged = new List<CustomBodyProfile>(armor.CustomBodyProfiles ?? []);
-                    foreach (var ep in extraProfiles)
-                    {
-                        if (!merged.Any(p => string.Equals(p.Name, ep.Name, StringComparison.OrdinalIgnoreCase)))
-                            merged.Add(ep);
-                    }
-                    armor = armor with { CustomBodyProfiles = merged };
-                }
-            }
+            armor = CustomBodyProfileSupport.MergeProfiles(armor, normalized.Request.CustomProfilePaths);
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
             if (armor.CustomBodyProfiles is { Count: > 0 } customBodies)
             {
@@ -2371,6 +2390,51 @@ public sealed class ConversionOrchestrator(
         }
     }
 
+    public sealed class ConversionInspector(
+        IArmorImportService importer,
+        IBodyDetectionService bodyDetector,
+        IMeshAnalysisService meshAnalyzer,
+        ISkeletonMappingService skeletonMapper)
+    {
+        public async Task<ConversionInspectionResult> InspectAsync(
+            string inputPath,
+            string? targetBody = null,
+            IReadOnlyList<string>? customProfilePaths = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(inputPath))
+            {
+                throw new ArgumentException("Input path is required.", nameof(inputPath));
+            }
+
+            if (!File.Exists(inputPath) && !Directory.Exists(inputPath))
+            {
+                throw new FileNotFoundException("Input path was not found.", inputPath);
+            }
+
+            var armor = await importer.ImportAsync(inputPath, cancellationToken);
+            armor = CustomBodyProfileSupport.MergeProfiles(armor, customProfilePaths);
+
+            var detection = await bodyDetector.DetectAsync(armor, cancellationToken);
+            var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
+
+            var normalizedTargetBody = string.IsNullOrWhiteSpace(targetBody) ? null : targetBody.Trim();
+            SkeletonMappingResult? skeletonMapping = null;
+            if (!string.IsNullOrWhiteSpace(normalizedTargetBody))
+            {
+                skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
+            }
+
+            return new ConversionInspectionResult(
+                inputPath,
+                normalizedTargetBody,
+                armor,
+                detection,
+                analysis,
+                skeletonMapping);
+        }
+    }
+
     // Biped partition slot names — mirrors BasicPartitionRebuildingService.PartitionSlots so
     // the passthrough logic can produce labelled slot strings without coupling to that class.
     private static readonly IReadOnlyDictionary<int, string> KnownPartitionSlotNames =
@@ -2663,6 +2727,13 @@ public static class StandaloneConversionModules
             normalRecalcService: new BasicNormalRecalculationService(),
             weightSolverService: new BasicWeightSolverService(),
             rigidIslandService: new BasicRigidIslandDetectionService());
+
+    public static ConversionInspector CreateInspector() =>
+        new(
+            new LocalArmorImportService(),
+            new SignatureBodyDetectionService(),
+            new BasicMeshAnalysisService(),
+            new BasicSkeletonMappingService());
 }
 
 /// <summary>

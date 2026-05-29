@@ -10395,4 +10395,41 @@ public sealed class CustomBodyProfileSupportTests
     }
 }
 
+[Fact]
+public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCustomProfileSummary()
+{
+    var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tmpDir);
+    var inputFile = Path.Combine(tmpDir, "myfollower_armor_0.nif");
+    var profilePath = Path.Combine(tmpDir, "myfollower.slidesmith-body.json");
+    await File.WriteAllBytesAsync(inputFile, new byte[64]);
+    await File.WriteAllTextAsync(
+        profilePath,
+        """
+        {
+          "name": "MyFollower",
+          "detectionTokens": ["myfollower"],
+          "physicsProfile": "smp",
+          "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"]
+        }
+        """);
+
+    try
+    {
+        var inspector = StandaloneConversionModules.CreateInspector();
+        var inspection = await inspector.InspectAsync(inputFile, "MyFollower");
+
+        Assert.Equal(inputFile, inspection.InputPath);
+        Assert.Equal("MyFollower", inspection.RequestedTargetBody);
+        Assert.Equal("MyFollower", inspection.Detection.Body);
+        Assert.Equal("physics-enabled", inspection.Analysis.MeshType);
+        Assert.NotNull(inspection.SkeletonMapping);
+        Assert.Equal("xpmsse-myfollower-physics", inspection.SkeletonMapping!.TargetSkeleton);
+        Assert.Contains("MyFollower", inspection.Armor.CustomBodyProfiles?.Select(profile => profile.Name) ?? []);
+    }
+    finally
+    {
+        Directory.Delete(tmpDir, recursive: true);
+    }
+}
 }

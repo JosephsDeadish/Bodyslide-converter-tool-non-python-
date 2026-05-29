@@ -42,7 +42,7 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
 
-# GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder), open selected input path, preset details panel, choose preset or custom target,
+# GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder), inspect selected input before conversion (detected body, mesh type, skeleton compatibility, custom-body count), open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # **"Convert to All Bodies" button** — one click sets the target batch to every supported body type,
 # optional profile/source/physics override, optional BodySlide export toggle, optional output zip,

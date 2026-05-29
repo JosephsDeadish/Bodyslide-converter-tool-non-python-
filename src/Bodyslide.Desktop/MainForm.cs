@@ -22,6 +22,7 @@ public sealed class MainForm : Form
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
     private readonly Button _clearLogButton;
+    private readonly Button _inspectInputButton;
     private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
     private readonly Button _openPreviewButton;
@@ -42,11 +43,14 @@ public sealed class MainForm : Form
     private readonly TabPage _previewTabPage;
     private readonly Panel _previewPanel;
     private readonly Label _previewStatusLabel;
+    private readonly TabPage _inspectTabPage;
+    private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
     private readonly TabPage _artifactsTabPage;
     private readonly ListView _artifactsListView;
     private readonly BatchConversionRunner _batchRunner;
+    private readonly ConversionInspector _inspector;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
@@ -68,6 +72,7 @@ public sealed class MainForm : Form
         MinimumSize = new Size(860, 680);
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
+        _inspector = StandaloneConversionModules.CreateInspector();
 
         var layout = new TableLayoutPanel
         {
@@ -108,9 +113,21 @@ public sealed class MainForm : Form
         _inputTextBox.AllowDrop = true;
         _inputTextBox.DragEnter += OnDragEnter;
         _inputTextBox.DragDrop += OnDragDrop;
-        _inputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
+        _inputTextBox.TextChanged += (_, _) =>
+        {
+            UpdatePathActionStates();
+            ClearInspectionTab("Input changed. Click Inspect Input to refresh detection and compatibility details.");
+        };
         var browseInputButton = new Button { Text = "Browse...", AutoSize = true };
         browseInputButton.Click += (_, _) => BrowseInput();
+        _inspectInputButton = new Button
+        {
+            Text = "Inspect Input",
+            AutoSize = true,
+            Enabled = false,
+            Margin = new Padding(6, 0, 0, 0),
+        };
+        _inspectInputButton.Click += async (_, _) => await InspectInputAsync();
         _openInputButton = new Button
         {
             Text = "Open",
@@ -129,6 +146,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
         };
         inputActions.Controls.Add(browseInputButton);
+        inputActions.Controls.Add(_inspectInputButton);
         inputActions.Controls.Add(_openInputButton);
         inputRow.Controls.Add(inputActions, 2, 0);
         layout.Controls.Add(inputRow, 0, 1);
@@ -489,6 +507,19 @@ public sealed class MainForm : Form
         _previewTabPage.Controls.Add(_previewPanel);
         _resultsTabControl.TabPages.Add(logTabPage);
         _resultsTabControl.TabPages.Add(_previewTabPage);
+        _inspectTabPage = new TabPage("Inspect");
+        _inspectListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _inspectListView.Columns.Add("Property", 200);
+        _inspectListView.Columns.Add("Value", -2);
+        _inspectTabPage.Controls.Add(_inspectListView);
+        _resultsTabControl.TabPages.Add(_inspectTabPage);
         _summaryTabPage = new TabPage("Summary");
         _summaryListView = new ListView
         {
@@ -524,6 +555,7 @@ public sealed class MainForm : Form
         RefreshModeState();
         UpdatePresetDetails();
         UpdatePathActionStates();
+        ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         ShowPreviewStatus("Run a conversion to render preview.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert.");
     }
@@ -779,6 +811,61 @@ public sealed class MainForm : Form
         }
     }
 
+    private async Task InspectInputAsync()
+    {
+        var input = _inputTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            MessageBox.Show(this, "Please select an input file/folder first.", "Missing input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!File.Exists(input) && !Directory.Exists(input))
+        {
+            MessageBox.Show(this, "Input path was not found.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        try
+        {
+            SetBusyState(isBusy: true);
+            _statusLabel.Text = "Inspecting input...";
+            ClearInspectionTab("Inspecting input...");
+
+            var inspection = await _inspector.InspectAsync(
+                input,
+                ResolveInspectionTargetBody(),
+                _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null);
+
+            PopulateInspectionTab(inspection);
+            _resultsTabControl.SelectedTab = _inspectTabPage;
+            _statusLabel.Text = "Inspection complete.";
+            AppendLog($"Inspection complete: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}.");
+        }
+        catch (Exception ex)
+        {
+            ClearInspectionTab($"Inspection failed: {ex.Message}");
+            _statusLabel.Text = "Inspection failed.";
+            MessageBox.Show(this, $"Failed to inspect input:\n{ex.Message}", "Inspect input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusyState(isBusy: false);
+        }
+    }
+
+    private string? ResolveInspectionTargetBody()
+    {
+        if (_usePresetRadio.Checked && TryGetSelectedPreset(out var preset))
+        {
+            return preset.TargetBody;
+        }
+
+        return string.IsNullOrWhiteSpace(_targetComboBox.Text)
+            ? _targetComboBox.SelectedItem?.ToString()
+            : _targetComboBox.Text.Trim();
+    }
+
     private void CancelConversion()
     {
         if (_activeConversion is null)
@@ -797,6 +884,7 @@ public sealed class MainForm : Form
         _convertButton.Enabled = !isBusy;
         _cancelButton.Enabled = isBusy;
         _clearLogButton.Enabled = !isBusy;
+        _inspectInputButton.Enabled = !isBusy && InputPathExists();
         _loadResultButton.Enabled = !isBusy;
         _inspectCacheButton.Enabled = !isBusy;
         _openInputButton.Enabled = !isBusy && InputPathExists();
@@ -1099,6 +1187,83 @@ public sealed class MainForm : Form
         }
     }
 
+    private void PopulateInspectionTab(ConversionInspectionResult inspection)
+    {
+        _inspectListView.BeginUpdate();
+        try
+        {
+            _inspectListView.Items.Clear();
+
+            void Add(string property, string value) =>
+                _inspectListView.Items.Add(new ListViewItem([property, value]));
+
+            Add("Input", inspection.InputPath);
+            if (!string.IsNullOrWhiteSpace(inspection.RequestedTargetBody))
+            {
+                Add("Target body", inspection.RequestedTargetBody);
+            }
+
+            Add("Detected body", $"{inspection.Detection.Body} ({inspection.Detection.Confidence:P1})");
+            Add("Detection evidence", inspection.Detection.Evidence.Count == 0
+                ? "None"
+                : string.Join(", ", inspection.Detection.Evidence));
+            Add("Mesh type", inspection.Analysis.MeshType);
+            Add("Physics enabled", inspection.Analysis.PhysicsEnabled ? "Yes" : "No");
+            if (!string.IsNullOrWhiteSpace(inspection.Analysis.HeadgearSubType))
+            {
+                Add("Headgear subtype", inspection.Analysis.HeadgearSubType);
+            }
+
+            Add("Mesh files", inspection.Armor.MeshFiles.Count.ToString());
+            Add("Texture files", inspection.Armor.TextureFiles.Count.ToString());
+            Add("Physics files", inspection.Armor.PhysicsFiles.Count.ToString());
+            Add("Body references", inspection.Armor.BodyReferenceFiles.Count.ToString());
+            Add("Weight variants", inspection.Armor.WeightVariantPairs?.Count.ToString() ?? "0");
+            Add("Custom body profiles", inspection.Armor.CustomBodyProfiles?.Count.ToString() ?? "0");
+            if (inspection.Armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
+            {
+                Add("Custom body names", string.Join(", ", customProfiles.Select(profile => profile.Name)));
+            }
+
+            if (inspection.SkeletonMapping is not null)
+            {
+                Add("Source skeleton", inspection.SkeletonMapping.SourceSkeleton);
+                Add("Target skeleton", inspection.SkeletonMapping.TargetSkeleton);
+                Add("Mapped bones", inspection.SkeletonMapping.BoneMappings.Count.ToString());
+                Add("Unsupported bones", inspection.SkeletonMapping.UnsupportedBones.Count == 0
+                    ? "None"
+                    : string.Join(", ", inspection.SkeletonMapping.UnsupportedBones));
+            }
+            else
+            {
+                Add("Skeleton mapping", "Select a target or preset to inspect compatibility.");
+            }
+        }
+        finally
+        {
+            _inspectListView.EndUpdate();
+        }
+    }
+
+    private void ClearInspectionTab(string message)
+    {
+        if (_inspectListView is null)
+        {
+            return;
+        }
+
+        _inspectListView.BeginUpdate();
+        try
+        {
+            _inspectListView.Items.Clear();
+            _inspectListView.Items.Add(new ListViewItem(["Status", message]));
+        }
+        finally
+        {
+            _inspectListView.EndUpdate();
+        }
+    }
+
     private void OpenBatchReport()
     {
         if (!File.Exists(_lastBatchReportPath))
@@ -1269,6 +1434,7 @@ public sealed class MainForm : Form
             return;
         }
 
+        _inspectInputButton.Enabled = InputPathExists();
         _openInputButton.Enabled = InputPathExists();
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
@@ -1337,6 +1503,7 @@ public sealed class MainForm : Form
         if (added > 0)
         {
             AppendLog($"Loaded {added} custom profile file(s): {string.Join(", ", dialog.FileNames.Select(Path.GetFileName))}");
+            ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
     }
 
@@ -1380,6 +1547,8 @@ public sealed class MainForm : Form
             {
                 _customProfilePaths.Add(dialog.FileName);
             }
+
+            ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
         catch (IOException ex)
         {
