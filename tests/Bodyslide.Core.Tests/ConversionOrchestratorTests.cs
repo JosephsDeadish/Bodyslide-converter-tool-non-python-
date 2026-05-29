@@ -9609,7 +9609,7 @@ public sealed class CustomBodyProfileSupportTests
         {
             var physicsPath = Path.Combine(tempDir, "armor.xml");
             await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC L Breast02\" /></system>");
-            var armor = new ImportedArmor(tempDir, [physicsPath], [], [], []);
+            var armor = new ImportedArmor(tempDir, [], [], [physicsPath], []);
 
             var result = await service.MapAsync(armor, "UNP", CancellationToken.None);
 
@@ -9634,7 +9634,7 @@ public sealed class CustomBodyProfileSupportTests
         {
             var physicsPath = Path.Combine(tempDir, "armor.xml");
             await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC Belly\" /></system>");
-            var armor = new ImportedArmor(tempDir, [physicsPath], [], [], []);
+            var armor = new ImportedArmor(tempDir, [], [], [physicsPath], []);
 
             var result = await service.MapAsync(armor, "UNP", CancellationToken.None);
 
