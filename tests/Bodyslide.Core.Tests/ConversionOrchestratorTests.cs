@@ -8633,6 +8633,9 @@ public sealed class OutputCompletenessTests
             Assert.Contains("true", json.ToLowerInvariant()); // clipping / correction
             Assert.Contains("WeirdBone", json);          // unsupported bones
             Assert.Contains("XPMSSE", json);             // source skeleton
+            Assert.Contains("TopologyMismatchRisk", json);
+            Assert.Contains("VertexCountDeltaRatio", json);
+            Assert.Contains("QualityWarnings", json);
         }
         finally
         {

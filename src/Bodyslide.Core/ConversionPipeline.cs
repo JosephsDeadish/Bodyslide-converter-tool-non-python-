@@ -104,7 +104,12 @@ public sealed record ConversionQualityReport(
     string TargetSkeleton,
     int MappedBoneCount,
     IReadOnlyList<string> UnsupportedBones,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt,
+    bool TopologyMismatchRisk = false,
+    double VertexCountDeltaRatio = 0,
+    double? UvCoverageDeltaRatio = null,
+    double? UvAspectRatioDelta = null,
+    IReadOnlyList<string>? QualityWarnings = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -7433,6 +7438,8 @@ internal sealed class LocalExportService(
 
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
+        var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
+            AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
         var qualityReport = new ConversionQualityReport(
             DetectedSourceBody:        detectedBody.Body,
             BodyDetectionConfidence:   detectedBody.Confidence,
@@ -7451,7 +7458,12 @@ internal sealed class LocalExportService(
             TargetSkeleton:            skeletonMapping.TargetSkeleton,
             MappedBoneCount:           skeletonMapping.BoneMappings.Count,
             UnsupportedBones:          skeletonMapping.UnsupportedBones,
-            GeneratedAt:               DateTimeOffset.UtcNow);
+            GeneratedAt:               DateTimeOffset.UtcNow,
+            TopologyMismatchRisk:      topologyMismatchRisk,
+            VertexCountDeltaRatio:     vertexCountDeltaRatio,
+            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
+            UvAspectRatioDelta:        uvAspectRatioDelta,
+            QualityWarnings:           qualityWarnings);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -8656,6 +8668,59 @@ internal sealed class LocalExportService(
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    private static (bool TopologyMismatchRisk, double VertexCountDeltaRatio, double? UvCoverageDeltaRatio, double? UvAspectRatioDelta, IReadOnlyList<string> QualityWarnings)
+        AssessTopologyAndUvMismatch(
+            IReadOnlyList<string> sourceMeshFiles,
+            IReadOnlyList<string> convertedMeshFiles)
+    {
+        var warnings = new List<string>();
+        var sourceSignature = NifGeometrySignatureReader.TryReadBest(sourceMeshFiles);
+        var convertedSignature = NifGeometrySignatureReader.TryReadBest(convertedMeshFiles);
+        if (sourceSignature is null || convertedSignature is null)
+        {
+            return (false, 0d, null, null, warnings);
+        }
+
+        var topologyRisk = false;
+        var vertexDeltaRatio = sourceSignature.VertexCount <= 0
+            ? 0d
+            : Math.Abs(convertedSignature.VertexCount - sourceSignature.VertexCount) / (double)sourceSignature.VertexCount;
+
+        if (vertexDeltaRatio >= 0.35d)
+        {
+            topologyRisk = true;
+            warnings.Add($"vertex-count-drift:{vertexDeltaRatio:P0}");
+        }
+
+        double? uvCoverageDeltaRatio = null;
+        double? uvAspectRatioDelta = null;
+        if (sourceSignature.UvSignature is not null && convertedSignature.UvSignature is not null)
+        {
+            var sourceUv = sourceSignature.UvSignature;
+            var convertedUv = convertedSignature.UvSignature;
+            var sourceCoverage = Math.Max(sourceUv.Coverage, 0.0001f);
+            uvCoverageDeltaRatio = Math.Abs(convertedUv.Coverage - sourceUv.Coverage) / sourceCoverage;
+
+            var sourceAspect = sourceUv.Width / Math.Max(sourceUv.Height, 0.0001f);
+            var convertedAspect = convertedUv.Width / Math.Max(convertedUv.Height, 0.0001f);
+            uvAspectRatioDelta = Math.Abs(convertedAspect - sourceAspect) / Math.Max(Math.Abs(sourceAspect), 0.0001f);
+
+            if (uvCoverageDeltaRatio.Value >= 0.40d)
+            {
+                topologyRisk = true;
+                warnings.Add($"uv-coverage-drift:{uvCoverageDeltaRatio.Value:P0}");
+            }
+
+            if (uvAspectRatioDelta.Value >= 0.35d)
+            {
+                topologyRisk = true;
+                warnings.Add($"uv-aspect-drift:{uvAspectRatioDelta.Value:P0}");
+            }
+        }
+
+        return (topologyRisk, vertexDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, warnings);
     }
 
     // ── Preview helpers ──────────────────────────────────────────────────────
