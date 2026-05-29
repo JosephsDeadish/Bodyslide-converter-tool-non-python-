@@ -82,6 +82,30 @@ public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetS
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 
+/// <summary>
+/// Machine-readable quality summary for a single conversion, written to
+/// <c>conversion-quality.json</c> in the output directory.
+/// </summary>
+public sealed record ConversionQualityReport(
+    string DetectedSourceBody,
+    double BodyDetectionConfidence,
+    IReadOnlyList<string> BodyDetectionEvidence,
+    string TargetBody,
+    string MeshType,
+    string Strategy,
+    IReadOnlyDictionary<string, double> RegionalMorphing,
+    bool ClippingDetected,
+    IReadOnlyList<string> ClippingRegions,
+    bool CorrectionApplied,
+    string CorrectionMethod,
+    bool VoxelPenetrationsFound,
+    IReadOnlyList<string> VoxelAffectedRegions,
+    string SourceSkeleton,
+    string TargetSkeleton,
+    int MappedBoneCount,
+    IReadOnlyList<string> UnsupportedBones,
+    DateTimeOffset GeneratedAt);
+
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
 
@@ -238,7 +262,10 @@ public sealed record MeshDependencyMapEntry(
     IReadOnlyList<string> Textures,
     IReadOnlyList<string> PhysicsFiles,
     IReadOnlyList<string> BodyReferences,
-    IReadOnlyList<string> PluginMeshReferences);
+    IReadOnlyList<string> PluginMeshReferences,
+    string? DetectedSourceBody = null,
+    IReadOnlyList<string>? LinkedArmaFormIds = null,
+    string? SourceSkeleton = null);
 
 /// <summary>
 /// Records per-pose clipping risk for each tested animation pose.
@@ -1550,6 +1577,9 @@ public interface IExportService
         TextureSummary textureSummary,
         PoseSimulationResult poseSimulation,
         IReadOnlyList<string> steps,
+        BodyDetectionReport detectedBody,
+        SkeletonMappingResult skeletonMapping,
+        VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken);
 }
 
@@ -2069,7 +2099,7 @@ public sealed class ConversionOrchestrator(
             var bodySlideProject = await bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
 
-            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, cancellationToken);
+            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
             return new ConversionResult(true, export.OutputDirectory, steps, export.OutputFiles);
@@ -6878,6 +6908,9 @@ internal sealed class LocalExportService(
         TextureSummary textureSummary,
         PoseSimulationResult poseSimulation,
         IReadOnlyList<string> steps,
+        BodyDetectionReport detectedBody,
+        SkeletonMappingResult skeletonMapping,
+        VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken)
     {
         var defaultOutput = Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
@@ -6995,12 +7028,53 @@ internal sealed class LocalExportService(
         outputFiles.AddRange(generatedRoughness);
 
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
-        var dependencyMap = BuildDependencyMap(armor, pluginAnalysis);
+        var dependencyMap = BuildDependencyMap(
+            armor,
+            pluginAnalysis,
+            detectedSourceBody: detectedBody.Body,
+            sourceSkeleton: skeletonMapping.SourceSkeleton);
         await File.WriteAllTextAsync(
             dependencyMapPath,
             JsonSerializer.Serialize(dependencyMap, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(dependencyMapPath);
+
+        // Write skeleton-compatibility.json — full bone mapping report so users know
+        // exactly which bones mapped, which were unsupported, and which skeletons were detected.
+        var skeletonCompatPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+        await File.WriteAllTextAsync(
+            skeletonCompatPath,
+            JsonSerializer.Serialize(skeletonMapping, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(skeletonCompatPath);
+
+        // Write conversion-quality.json — machine-readable quality metrics that tooling,
+        // mod managers, and the learning cache can consume without parsing the conversion log.
+        var qualityReport = new ConversionQualityReport(
+            DetectedSourceBody:        detectedBody.Body,
+            BodyDetectionConfidence:   detectedBody.Confidence,
+            BodyDetectionEvidence:     detectedBody.Evidence,
+            TargetBody:                request.TargetBody,
+            MeshType:                  analysis.MeshType,
+            Strategy:                  mesh.Strategy,
+            RegionalMorphing:          mesh.RegionalMorphing,
+            ClippingDetected:          clipping.HasClipping,
+            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
+            CorrectionApplied:         correction.Applied,
+            CorrectionMethod:          correction.Method,
+            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
+            VoxelAffectedRegions:      voxelResult.AffectedRegions,
+            SourceSkeleton:            skeletonMapping.SourceSkeleton,
+            TargetSkeleton:            skeletonMapping.TargetSkeleton,
+            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
+            UnsupportedBones:          skeletonMapping.UnsupportedBones,
+            GeneratedAt:               DateTimeOffset.UtcNow);
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        await File.WriteAllTextAsync(
+            qualityPath,
+            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(qualityPath);
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
         await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(morphs, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
@@ -8046,8 +8120,26 @@ internal sealed class LocalExportService(
         return count > 0 ? total / count : 1d;
     }
 
-    private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(ImportedArmor armor, PluginAnalysisResult pluginAnalysis)
+    private static IReadOnlyList<MeshDependencyMapEntry> BuildDependencyMap(
+        ImportedArmor armor,
+        PluginAnalysisResult pluginAnalysis,
+        string? detectedSourceBody = null,
+        string? sourceSkeleton = null)
     {
+        // Build a lookup: mesh filename → list of ARMA FormIDs that reference it.
+        var formIdsByMesh = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            foreach (var meshPath in addon.DetectedMeshPaths)
+            {
+                var meshFile = Path.GetFileName(meshPath) ?? meshPath;
+                if (!formIdsByMesh.TryGetValue(meshFile, out var list))
+                    formIdsByMesh[meshFile] = list = [];
+                if (addon.FormId != 0)
+                    list.Add($"0x{addon.FormId:X8}");
+            }
+        }
+
         var pluginMeshReferences = pluginAnalysis.ArmorAddons
             .SelectMany(addon => addon.DetectedMeshPaths)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -8068,12 +8160,19 @@ internal sealed class LocalExportService(
                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
+                var linkedFormIds = formIdsByMesh.TryGetValue(meshFileName, out var ids)
+                    ? (IReadOnlyList<string>)ids.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList()
+                    : [];
+
                 return new MeshDependencyMapEntry(
                     meshFileName,
                     textures,
                     physicsFiles,
                     bodyReferences,
-                    matchedPluginPaths);
+                    matchedPluginPaths,
+                    DetectedSourceBody: detectedSourceBody,
+                    LinkedArmaFormIds: linkedFormIds,
+                    SourceSkeleton: sourceSkeleton);
             })
             .ToList();
     }

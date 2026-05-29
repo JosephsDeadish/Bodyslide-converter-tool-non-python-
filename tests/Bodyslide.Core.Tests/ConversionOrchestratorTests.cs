@@ -1199,6 +1199,9 @@ public sealed class ConversionOrchestratorTests
             TextureSummary textureSummary,
             PoseSimulationResult poseSimulation,
             IReadOnlyList<string> steps,
+            BodyDetectionReport detectedBody,
+            SkeletonMappingResult skeletonMapping,
+            VoxelCollisionResult voxelResult,
             CancellationToken cancellationToken)
         {
             ExportPath = request.OutputDirectory ?? throw new InvalidOperationException("Output should be provided for this test.");
@@ -8180,11 +8183,190 @@ public sealed class LocalExportServiceGroundMeshTests
         var textureSummary = new TextureSummary(0, [], [], []);
         var poseSimulation = new PoseSimulationResult(
             [], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+        var detectedBody = new BodyDetectionReport(targetBody, 1.0, ["test"]);
+        var skeletonMapping = new SkeletonMappingResult(
+            "XPMSSE", targetBody,
+            [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+            []);
+        var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
 
         return await service.ExportAsync(
             request, armor, analysis, mesh, morphs, physics,
             clipping, correction, bodySlideProject, pluginAnalysis,
-            textureSummary, poseSimulation, ["step1"], CancellationToken.None);
+            textureSummary, poseSimulation, ["step1"],
+            detectedBody, skeletonMapping, voxelResult,
+            CancellationToken.None);
+    }
+}
+
+// ── Output completeness: skeleton-compat, quality JSON, enriched dep-map ──────
+
+public sealed class OutputCompletenessTests
+{
+    [Fact]
+    public async Task ExportAsync_WritesSkeletonCompatibilityJson()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request      = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor        = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis     = new MeshAnalysis("plate", false, 1);
+            var mesh         = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs       = new MorphSet("low", "high", true);
+            var physics      = new PhysicsConfig("none");
+            var clipping     = new ClippingReport(false, [], []);
+            var correction   = new CorrectionResult(false, "not-required");
+            var bsProject    = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures     = new TextureSummary(0, [], [], []);
+            var pose         = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected     = new BodyDetectionReport("UUNP", 0.87, ["vertex-density:high", "reference:85%"]);
+            var skel         = new SkeletonMappingResult(
+                "XPMSSE", "CBBE",
+                [new SkeletonBoneMapping("NPC Spine [Spn0]", "NPC Spine [Spn0]", false),
+                 new SkeletonBoneMapping("NPC L Thigh [LThg]", "NPC L Thigh [LThg]", false)],
+                ["HDT_SMP_Pelvis"]);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var skelPath = files.FirstOrDefault(f => f.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(skelPath);
+            Assert.True(File.Exists(skelPath));
+
+            var json = await File.ReadAllTextAsync(skelPath!);
+            Assert.Contains("XPMSSE", json);
+            Assert.Contains("HDT_SMP_Pelvis", json);
+            Assert.Contains("CBBE", json);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WritesConversionQualityJson()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request      = new ConversionRequest(nifPath, "3BA", OutputDirectory: outputDir);
+            var armor        = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis     = new MeshAnalysis("plate", false, 1);
+            var mesh         = new ConvertedMesh("plate", "cage+shrinkwrap", 1, new Dictionary<string, double> { ["chest"] = 0.72, ["belly"] = 0.61 });
+            var morphs       = new MorphSet("low", "high", true);
+            var physics      = new PhysicsConfig("smp");
+            var clipping     = new ClippingReport(true, ["chest", "belly"], ["region-score"]);
+            var correction   = new CorrectionResult(true, "push-out");
+            var bsProject    = new BodySlideProject("TestProject", "3BA", ["Breast"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures     = new TextureSummary(0, [], [], []);
+            var pose         = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected     = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel         = new SkeletonMappingResult("XPMSSE", "3BA", [], ["WeirdBone"]);
+            var voxel        = new VoxelCollisionResult(true, ["chest"], new Dictionary<string, double> { ["chest"] = 0.05 }, 32);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var qualityPath = files.FirstOrDefault(f => f.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(qualityPath);
+            Assert.True(File.Exists(qualityPath));
+
+            var json = await File.ReadAllTextAsync(qualityPath!);
+            Assert.Contains("CBBE", json);               // detected source body
+            Assert.Contains("0.94", json);               // confidence
+            // Strategy contains '+' which is Unicode-escaped by JavaScriptEncoder.Default
+            Assert.True(json.Contains("cage") && json.Contains("shrinkwrap"), "Strategy should contain 'cage' and 'shrinkwrap'");
+            Assert.Contains("true", json.ToLowerInvariant()); // clipping / correction
+            Assert.Contains("WeirdBone", json);          // unsupported bones
+            Assert.Contains("XPMSSE", json);             // source skeleton
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_DependencyMap_IncludesDetectedBodyAndFormIds()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request    = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor      = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis   = new MeshAnalysis("plate", false, 1);
+            var mesh       = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs     = new MorphSet("low", "high", true);
+            var physics    = new PhysicsConfig("none");
+            var clipping   = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject  = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            // Provide an ARMA addon with a real FormId so the enriched map records it.
+            var addon      = new PluginArmorAddon("ARMA", [$"meshes/{Path.GetFileName(nifPath)}"], FormId: 0x00001234, EditorId: "IronCuirass");
+            var pluginResult = new PluginAnalysisResult(["TestMod.esp"], [addon], "patch-guidance");
+            var textures   = new TextureSummary(0, [], [], []);
+            var pose       = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected   = new BodyDetectionReport("UUNP", 0.91, ["reference:91%"]);
+            var skel       = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel      = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var depMapPath = files.FirstOrDefault(f => f.EndsWith("dependency-map.json", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(depMapPath);
+            Assert.True(File.Exists(depMapPath));
+
+            var json = await File.ReadAllTextAsync(depMapPath!);
+            Assert.Contains("UUNP", json);               // detected source body
+            Assert.Contains("XPMSSE", json);             // source skeleton
+            Assert.Contains("0x00001234", json);         // ARMA FormID
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 }
 
@@ -8545,6 +8727,9 @@ public sealed class ConversionOrchestratorRigidIslandTests
             TextureSummary textureSummary,
             PoseSimulationResult poseSimulation,
             IReadOnlyList<string> steps,
+            BodyDetectionReport detectedBody,
+            SkeletonMappingResult skeletonMapping,
+            VoxelCollisionResult voxelResult,
             CancellationToken ct) =>
             Task.FromResult<(string, IReadOnlyList<string>)>((request.OutputDirectory ?? Path.GetTempPath(), []));
     }

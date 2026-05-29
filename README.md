@@ -146,7 +146,9 @@ Each successful conversion produces the following files in the output directory:
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
 | `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
-| `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, and plugin mesh references |
+| `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
+| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
+| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping regions, correction method, voxel penetration count, skeleton names, mapped + unsupported bone counts, and ISO-8601 generation timestamp |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
 | `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
 | `<PluginName>_patched.<ext>` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord that matched a converted NIF updated in-place; preserves the original plugin extension (`.esp`, `.esm`, or `.esl`), supports both Skyrim LE (20-byte record headers) and Skyrim SE / SSE (24-byte headers), and is only produced when at least one path was rewritten |
