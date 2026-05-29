@@ -54,8 +54,9 @@ dotnet run --project src/Bodyslide.Desktop
 # all built-in presets, supported body signatures, deformation profiles, physics profiles, and
 # `all/any/*` target aliases in one place,
 # "Load Custom Profile..." button (multi-select *.json) to inject extra body profile definitions into
-# the conversion without placing them next to the input files, and "Save Profile..." button to export
-# the current target/physics settings as a reusable *.json profile that can be reloaded later
+# the conversion without placing them next to the input files, a loaded-profile list with open/remove/clear
+# actions so active custom bodies are visible in the GUI, and "Save Profile..." to export the current
+# target body as a reusable *.json profile with transformation field / sliders / gender / output-path data
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
@@ -331,6 +332,7 @@ Implemented from issue scope:
 - **preview GUI fallback + safer saved target profiles** — when embedded WebView2 preview is unavailable (or fails), the desktop app now automatically opens `preview.html` in the system default browser so preview access is never blocked by missing runtime dependencies; “Save profile...” also now preserves typed target text (fallback `CUSTOM`) instead of relying only on selected dropdown items
 - **desktop conversion catalog tab** — GUI now includes a **Catalog** tab that exposes all built-in presets (target/deformation/physics), supported body detection tokens + vertex ranges, deformation profiles, physics profiles, and `all/any/*` target aliases so CLI discovery flags have an in-app equivalent
 - **desktop reports tab** — GUI now includes a native **Reports** tab plus **Open report** action that surfaces key fields from `batch-report.json`, `conversion-quality.json`, `dependency-map.json`, `skeleton-compatibility.json`, `texture-summary.json`, `pose-simulation-report.json`, `world-physics.json`, and `plugin-patches.json` for both fresh conversions and reloaded output folders, so users do not have to dig through raw JSON to inspect converter diagnostics
+- **custom profile management GUI** — the desktop app now shows every loaded custom body profile in a dedicated list with open/remove/clear actions, and “Save profile...” writes a reusable full custom-body payload (transformation field, slider names, gender, output path, detection tokens, physics profile) instead of a minimal stub
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, headgear sub-type/partition handling, ground mesh NIF output, biped slot passthrough, scratch plugin generation for plugin-free inputs, first-person mesh paths, rigid island detection, target physics bone injection, and armor-type/keyword injection in scratch plugins).
 

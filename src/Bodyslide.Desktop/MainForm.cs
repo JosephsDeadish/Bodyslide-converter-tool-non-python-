@@ -34,6 +34,9 @@ public sealed class MainForm : Form
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
     private readonly Button _inspectCacheButton;
+    private readonly Button _openCustomProfileButton;
+    private readonly Button _removeCustomProfileButton;
+    private readonly Button _clearCustomProfilesButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
@@ -55,6 +58,7 @@ public sealed class MainForm : Form
     private readonly ListView _catalogListView;
     private readonly TabPage _artifactsTabPage;
     private readonly ListView _artifactsListView;
+    private readonly ListView _customProfilesListView;
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
 
@@ -95,9 +99,10 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 8,
+            RowCount = 9,
             Padding = new Padding(12),
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -347,6 +352,60 @@ public sealed class MainForm : Form
         cacheRow.Controls.Add(browseCacheButton, 2, 0);
         layout.Controls.Add(cacheRow, 0, 5);
 
+        var customProfilesPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        customProfilesPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        customProfilesPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        customProfilesPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        customProfilesPanel.Controls.Add(new Label
+        {
+            Text = "Loaded custom profiles",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 0, 0, 4),
+        }, 0, 0);
+
+        _customProfilesListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            Height = 92,
+            View = View.Details,
+            FullRowSelect = true,
+            HideSelection = false,
+            MultiSelect = true,
+        };
+        _customProfilesListView.Columns.Add("Name", 160);
+        _customProfilesListView.Columns.Add("Physics", 90);
+        _customProfilesListView.Columns.Add("Gender", 80);
+        _customProfilesListView.Columns.Add("File", 300);
+        _customProfilesListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
+        _customProfilesListView.DoubleClick += (_, _) => OpenSelectedCustomProfile();
+        customProfilesPanel.Controls.Add(_customProfilesListView, 0, 1);
+
+        var customProfileActions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Margin = new Padding(8, 0, 0, 0),
+        };
+        _openCustomProfileButton = new Button { Text = "Open profile", AutoSize = true, Enabled = false };
+        _openCustomProfileButton.Click += (_, _) => OpenSelectedCustomProfile();
+        _removeCustomProfileButton = new Button { Text = "Remove", AutoSize = true, Enabled = false };
+        _removeCustomProfileButton.Click += (_, _) => RemoveSelectedCustomProfiles();
+        _clearCustomProfilesButton = new Button { Text = "Clear all", AutoSize = true, Enabled = false };
+        _clearCustomProfilesButton.Click += (_, _) => ClearCustomProfiles();
+        customProfileActions.Controls.Add(_openCustomProfileButton);
+        customProfileActions.Controls.Add(_removeCustomProfileButton);
+        customProfileActions.Controls.Add(_clearCustomProfilesButton);
+        customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
+        layout.Controls.Add(customProfilesPanel, 0, 6);
+
         var actionRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -447,8 +506,8 @@ public sealed class MainForm : Form
         _openArtifactButton.Click += (_, _) => OpenSelectedArtifact();
         _loadCustomProfileButton = new Button
         {
-            Text = "Load profile...",
-            Width = 110,
+            Text = "Load custom profile...",
+            Width = 140,
             Height = 34,
             Margin = new Padding(0, 0, 8, 0),
         };
@@ -482,7 +541,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
         actionRow.Controls.Add(_inspectCacheButton);
-        layout.Controls.Add(actionRow, 0, 6);
+        layout.Controls.Add(actionRow, 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -607,11 +666,12 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        layout.Controls.Add(bottomPanel, 0, 7);
+        layout.Controls.Add(bottomPanel, 0, 8);
 
         RefreshModeState();
         UpdatePresetDetails();
         PopulateCatalogTab();
+        RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab([], null);
@@ -1566,6 +1626,9 @@ public sealed class MainForm : Form
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
+        _openCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count == 1;
+        _removeCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count > 0;
+        _clearCustomProfilesButton.Enabled = _customProfilePaths.Count > 0;
     }
 
     private static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
@@ -1605,6 +1668,119 @@ public sealed class MainForm : Form
         }
     }
 
+    private void RefreshCustomProfilesList(string? selectedPath = null)
+    {
+        _customProfilesListView.BeginUpdate();
+        try
+        {
+            _customProfilesListView.Items.Clear();
+            foreach (var path in _customProfilePaths.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
+            {
+                var summary = ReadCustomProfileSummary(path);
+                var item = new ListViewItem(summary.Name);
+                item.SubItems.Add(summary.PhysicsProfile);
+                item.SubItems.Add(summary.Gender);
+                item.SubItems.Add(Path.GetFileName(path));
+                item.Tag = path;
+                item.ToolTipText = path;
+                _customProfilesListView.Items.Add(item);
+
+                if (!string.IsNullOrWhiteSpace(selectedPath) &&
+                    string.Equals(path, selectedPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Selected = true;
+                }
+            }
+        }
+        finally
+        {
+            _customProfilesListView.EndUpdate();
+        }
+
+        UpdatePathActionStates();
+    }
+
+    private static (string Name, string PhysicsProfile, string Gender) ReadCustomProfileSummary(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var document = JsonDocument.Parse(stream);
+            var root = document.RootElement;
+            var name = root.TryGetProperty("Name", out var nameProperty) && nameProperty.ValueKind == JsonValueKind.String
+                ? nameProperty.GetString()
+                : null;
+            var physics = root.TryGetProperty("PhysicsProfile", out var physicsProperty) && physicsProperty.ValueKind == JsonValueKind.String
+                ? physicsProperty.GetString()
+                : null;
+            var gender = root.TryGetProperty("Gender", out var genderProperty) && genderProperty.ValueKind == JsonValueKind.String
+                ? genderProperty.GetString()
+                : null;
+            return (
+                string.IsNullOrWhiteSpace(name) ? Path.GetFileNameWithoutExtension(path) ?? "Custom" : name.Trim(),
+                string.IsNullOrWhiteSpace(physics) ? "none" : physics.Trim(),
+                string.IsNullOrWhiteSpace(gender) ? "female" : gender.Trim());
+        }
+        catch
+        {
+            return (Path.GetFileNameWithoutExtension(path) ?? "Custom", "?", "?");
+        }
+    }
+
+    private string? GetSelectedCustomProfilePath() =>
+        _customProfilesListView.SelectedItems.Count == 1
+            ? _customProfilesListView.SelectedItems[0].Tag as string
+            : null;
+
+    private void OpenSelectedCustomProfile()
+    {
+        var path = GetSelectedCustomProfilePath();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            MessageBox.Show(this, "Selected custom profile file was not found.", "Open profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true,
+        });
+    }
+
+    private void RemoveSelectedCustomProfiles()
+    {
+        var selectedPaths = _customProfilesListView.SelectedItems
+            .Cast<ListViewItem>()
+            .Select(static item => item.Tag as string)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (selectedPaths.Length == 0)
+        {
+            return;
+        }
+
+        _customProfilePaths.RemoveAll(path => selectedPaths.Contains(path, StringComparer.OrdinalIgnoreCase));
+        RefreshCustomProfilesList();
+        AppendLog($"Removed {selectedPaths.Length} custom profile file(s).");
+        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+    }
+
+    private void ClearCustomProfiles()
+    {
+        if (_customProfilePaths.Count == 0)
+        {
+            return;
+        }
+
+        _customProfilePaths.Clear();
+        RefreshCustomProfilesList();
+        AppendLog("Cleared all loaded custom profile files.");
+        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+    }
+
     private void LoadCustomProfileFile()
     {
         using var dialog = new OpenFileDialog
@@ -1629,6 +1805,7 @@ public sealed class MainForm : Form
         if (added > 0)
         {
             AppendLog($"Loaded {added} custom profile file(s): {string.Join(", ", dialog.FileNames.Select(Path.GetFileName))}");
+            RefreshCustomProfilesList(dialog.FileNames[0]);
             ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
     }
@@ -1645,42 +1822,171 @@ public sealed class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var targetText = string.IsNullOrWhiteSpace(_targetComboBox.Text)
-            ? _targetComboBox.SelectedItem?.ToString()
-            : _targetComboBox.Text.Trim();
-        var target     = string.IsNullOrWhiteSpace(targetText) ? "CUSTOM" : targetText;
-        var profile    = ReadOptionalComboValue(_profileComboBox) ?? "standard";
-        var physics    = ReadOptionalComboValue(_physicsComboBox) ?? "none";
-
-        // Build a minimal JSON profile that CustomBodyProfileSupport can load.
-        var sb = new StringBuilder();
-        sb.AppendLine("{");
-        sb.AppendLine($"  \"Name\": \"{target}\",");
-        sb.AppendLine($"  \"PhysicsProfile\": \"{physics}\"");
-        if (!string.IsNullOrWhiteSpace(profile) && !profile.Equals("standard", StringComparison.OrdinalIgnoreCase))
+        var effectiveTarget = ResolveProfileTargetName();
+        if (string.IsNullOrWhiteSpace(effectiveTarget))
         {
-            sb.Insert(sb.Length - 2, $",{Environment.NewLine}  \"DeformationProfile\": \"{profile}\"");
+            MessageBox.Show(this, "Select or type a target body before saving a profile.", "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
         }
-        sb.AppendLine("}");
+
+        var effectivePhysics = ResolveEffectivePhysicsProfile(effectiveTarget);
+        var effectiveProfile = ResolveEffectiveDeformationProfile();
+        var baseField = CreateBaseTransformationField(effectiveTarget);
+        var transformedField = ApplyDeformationProfile(baseField, effectiveProfile);
+        var bodyInfo = BodyTypeCatalog.All.FirstOrDefault(body => string.Equals(body.Name, effectiveTarget, StringComparison.OrdinalIgnoreCase));
+        var gender = IsMaleBody(effectiveTarget) ? "male" : "female";
+        var payload = new
+        {
+            Name = effectiveTarget,
+            DetectionTokens = bodyInfo?.DetectionTokens ?? [effectiveTarget],
+            VertexCountMin = bodyInfo?.VertexCountMin ?? 0,
+            VertexCountMax = bodyInfo?.VertexCountMax ?? 0,
+            TransformationField = transformedField,
+            SliderNames = ResolveSliderNames(effectiveTarget),
+            PhysicsProfile = effectivePhysics,
+            BodyOutputPath = ResolveBodyOutputPath(effectiveTarget),
+            Gender = gender,
+        };
 
         try
         {
-            File.WriteAllText(dialog.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+            var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(dialog.FileName, json, Encoding.UTF8);
             AppendLog($"Saved profile to: {dialog.FileName}");
 
-            // Auto-add to the loaded profiles list so it takes effect on the next conversion.
             if (!_customProfilePaths.Contains(dialog.FileName, StringComparer.OrdinalIgnoreCase))
             {
                 _customProfilePaths.Add(dialog.FileName);
             }
 
+            RefreshCustomProfilesList(dialog.FileName);
             ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             MessageBox.Show(this, $"Failed to save profile:\n{ex.Message}", "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    private string ResolveProfileTargetName()
+    {
+        if (_usePresetRadio.Checked && TryGetSelectedPreset(out var preset))
+        {
+            return preset.TargetBody;
+        }
+
+        var targetText = string.IsNullOrWhiteSpace(_targetComboBox.Text)
+            ? _targetComboBox.SelectedItem?.ToString()
+            : _targetComboBox.Text.Trim();
+        return string.IsNullOrWhiteSpace(targetText) ? "CUSTOM" : targetText;
+    }
+
+    private string? ResolveEffectiveDeformationProfile()
+    {
+        var overrideProfile = ReadOptionalComboValue(_profileComboBox);
+        if (!string.IsNullOrWhiteSpace(overrideProfile))
+        {
+            return overrideProfile;
+        }
+
+        return _usePresetRadio.Checked && TryGetSelectedPreset(out var preset)
+            ? preset.DeformationProfile
+            : null;
+    }
+
+    private string ResolveEffectivePhysicsProfile(string targetBody)
+    {
+        var overridePhysics = ReadOptionalComboValue(_physicsComboBox);
+        if (PhysicsProfileCatalog.TryNormalize(overridePhysics, out var normalizedOverride))
+        {
+            return normalizedOverride;
+        }
+
+        if (_usePresetRadio.Checked &&
+            TryGetSelectedPreset(out var preset) &&
+            PhysicsProfileCatalog.TryNormalize(preset.PhysicsProfile, out var normalizedPreset))
+        {
+            return normalizedPreset;
+        }
+
+        return PhysicsProfileCatalog.GetDefaultForTargetBody(targetBody);
+    }
+
+    private static Dictionary<string, double> CreateBaseTransformationField(string targetBody)
+    {
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.02,
+            ["waist"] = 0.99,
+            ["pelvis"] = 1.02,
+            ["legs"] = 1.01,
+            ["shoulders"] = 1.00,
+            ["breasts"] = 1.02,
+            ["butt"] = 1.01,
+            ["belly"] = 1.01,
+            ["arms"] = 1.00,
+            ["thighs"] = 1.01,
+            ["calves"] = 1.01,
+        };
+
+        foreach (var (region, value) in targetBody.Trim().ToUpperInvariant() switch
+        {
+            "CBBE" => new (string, double)[] { ("chest", 1.08), ("waist", 0.96), ("pelvis", 1.05), ("legs", 1.03), ("shoulders", 1.01), ("breasts", 1.09), ("butt", 1.06), ("belly", 1.02), ("arms", 1.01), ("thighs", 1.04), ("calves", 1.02) },
+            "3BA" => new (string, double)[] { ("chest", 1.12), ("waist", 0.95), ("pelvis", 1.06), ("legs", 1.04), ("shoulders", 1.01), ("breasts", 1.13), ("butt", 1.08), ("belly", 1.03), ("arms", 1.02), ("thighs", 1.05), ("calves", 1.03) },
+            "BHUNP" => new (string, double)[] { ("chest", 1.10), ("waist", 0.94), ("pelvis", 1.07), ("legs", 1.04), ("shoulders", 1.01), ("breasts", 1.11), ("butt", 1.07), ("belly", 1.03), ("arms", 1.01), ("thighs", 1.05), ("calves", 1.03) },
+            "UNP" => new (string, double)[] { ("chest", 1.04), ("waist", 0.97), ("pelvis", 1.02), ("legs", 1.01), ("shoulders", 1.00), ("breasts", 1.04), ("butt", 1.02), ("belly", 1.01), ("arms", 1.00), ("thighs", 1.02), ("calves", 1.01) },
+            "TBD" => new (string, double)[] { ("chest", 1.06), ("waist", 0.96), ("pelvis", 1.04), ("legs", 1.02), ("shoulders", 1.00), ("breasts", 1.07), ("butt", 1.04), ("belly", 1.02), ("arms", 1.00), ("thighs", 1.03), ("calves", 1.02) },
+            "UBE" => new (string, double)[] { ("chest", 1.06), ("waist", 0.97), ("pelvis", 1.03), ("legs", 1.02), ("shoulders", 1.01), ("breasts", 1.06), ("butt", 1.03), ("belly", 1.02), ("arms", 1.01), ("thighs", 1.03), ("calves", 1.02) },
+            "HIMBO" => new (string, double)[] { ("chest", 1.10), ("waist", 1.02), ("pelvis", 1.04), ("legs", 1.06), ("shoulders", 1.12), ("breasts", 1.08), ("butt", 1.05), ("belly", 1.03), ("arms", 1.10), ("thighs", 1.07), ("calves", 1.05) },
+            "SAM" => new (string, double)[] { ("chest", 1.08), ("waist", 1.01), ("pelvis", 1.03), ("legs", 1.05), ("shoulders", 1.10), ("breasts", 1.05), ("butt", 1.04), ("belly", 1.02), ("arms", 1.08), ("thighs", 1.06), ("calves", 1.04) },
+            "SOS" => new (string, double)[] { ("chest", 1.05), ("waist", 1.00), ("pelvis", 1.02), ("legs", 1.04), ("shoulders", 1.06), ("breasts", 1.03), ("butt", 1.03), ("belly", 1.01), ("arms", 1.05), ("thighs", 1.04), ("calves", 1.03) },
+            "VANILLA" => new (string, double)[] { ("chest", 1.00), ("waist", 1.00), ("pelvis", 1.00), ("legs", 1.00), ("shoulders", 1.00), ("breasts", 1.00), ("butt", 1.00), ("belly", 1.00), ("arms", 1.00), ("thighs", 1.00), ("calves", 1.00) },
+            _ => []
+        })
+        {
+            field[region] = value;
+        }
+
+        return field;
+    }
+
+    private static IReadOnlyDictionary<string, double> ApplyDeformationProfile(
+        IReadOnlyDictionary<string, double> field,
+        string? profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile))
+        {
+            return field.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return DeformationProfileModifier.Apply(field, profile)
+            .ToDictionary(static pair => pair.Key, static pair => Math.Round(pair.Value, 4), StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string[] ResolveSliderNames(string targetBody) => targetBody.Trim().ToUpperInvariant() switch
+    {
+        "CBBE" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
+        "3BA" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
+        "BHUNP" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
+        "UNP" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
+        "HIMBO" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
+        "SAM" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+        "SOS" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
+        "TBD" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
+        "UBE" => ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs"],
+        "VANILLA" => ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
+        _ => ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"]
+    };
+
+    private static string ResolveBodyOutputPath(string targetBody) =>
+        IsMaleBody(targetBody)
+            ? @"meshes\actors\character\character assets male\"
+            : @"meshes\actors\character\character assets\";
+
+    private static bool IsMaleBody(string targetBody) =>
+        targetBody.Equals("HIMBO", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Equals("SAM", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Equals("SOS", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
     {
