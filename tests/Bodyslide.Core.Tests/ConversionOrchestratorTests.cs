@@ -1,6 +1,8 @@
 using Bodyslide.Core;
 using System.Formats.Tar;
 using System.IO.Compression;
+using SharpCompress.Common;
+using SharpCompress.Writers.SevenZip;
 
 namespace Bodyslide.Core.Tests;
 
@@ -241,6 +243,44 @@ public sealed class ConversionOrchestratorTests
 
             var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
             var results = await runner.ConvertAsync(new ConversionRequest(tarGzPath, "CBBE", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_ConvertsAllNifsInSevenZipArchive()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var sourceDirectory = Path.Combine(workingDirectory, "source");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var sevenZipPath = Path.Combine(workingDirectory, "mod-pack.7z");
+        Directory.CreateDirectory(sourceDirectory);
+
+        try
+        {
+            var armorOnePath = Path.Combine(sourceDirectory, "armor_one.nif");
+            var armorTwoPath = Path.Combine(sourceDirectory, "armor_two.nif");
+            await File.WriteAllTextAsync(armorOnePath, "mesh");
+            await File.WriteAllTextAsync(armorTwoPath, "mesh");
+
+            await using (var archiveStream = File.Create(sevenZipPath))
+            using (var writer = SevenZipWriter.OpenWriter(archiveStream, CompressionType.LZMA2))
+            {
+                await using var armorOneStream = File.OpenRead(armorOnePath);
+                writer.Write("armor_one.nif", armorOneStream, File.GetLastWriteTimeUtc(armorOnePath));
+
+                await using var armorTwoStream = File.OpenRead(armorTwoPath);
+                writer.Write("armor_two.nif", armorTwoStream, File.GetLastWriteTimeUtc(armorTwoPath));
+            }
+
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var results = await runner.ConvertAsync(new ConversionRequest(sevenZipPath, "CBBE", outputDirectory));
 
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));

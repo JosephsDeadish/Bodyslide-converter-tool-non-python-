@@ -86,7 +86,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            Text = "Drag and drop a .nif file, archive (.zip/.tar/.tar.gz/.tgz), or armor folder here",
+            Text = "Drag and drop a .nif file, archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
         layout.Controls.Add(dropPanel, 0, 0);
@@ -428,7 +428,7 @@ public sealed class MainForm : Form
     {
         using var fileDialog = new OpenFileDialog
         {
-            Filter = "NIF/Archive Files (*.nif;*.zip;*.tar;*.tar.gz;*.tgz)|*.nif;*.zip;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
+            Filter = "NIF/Archive Files (*.nif;*.zip;*.7z;*.tar;*.tar.gz;*.tgz)|*.nif;*.zip;*.7z;*.tar;*.tar.gz;*.tgz|All Files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };

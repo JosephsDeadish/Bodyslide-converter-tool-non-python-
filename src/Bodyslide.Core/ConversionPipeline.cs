@@ -4,6 +4,8 @@ using System.IO.Compression;
 using System.Numerics;
 using System.Security;
 using System.Text.Json;
+using SharpCompress.Archives.SevenZip;
+using SharpCompress.Readers;
 
 namespace Bodyslide.Core;
 
@@ -3429,7 +3431,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal static class ArchiveExtractionHelper
 {
-    private static readonly string[] SupportedArchiveSuffixes = [".zip", ".tar", ".tgz", ".tar.gz"];
+    private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
 
     public static bool IsSupportedArchive(string path)
     {
@@ -3458,6 +3460,12 @@ internal static class ArchiveExtractionHelper
             return;
         }
 
+        if (archivePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractSevenZipArchive(archivePath, destinationDirectory);
+            return;
+        }
+
         if (archivePath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
         {
             TarFile.ExtractToDirectory(archivePath, destinationDirectory, overwriteFiles: true);
@@ -3474,6 +3482,48 @@ internal static class ArchiveExtractionHelper
         }
 
         throw new NotSupportedException($"Unsupported archive format: {archivePath}");
+    }
+
+    private static void ExtractSevenZipArchive(string archivePath, string destinationDirectory)
+    {
+        var destinationRoot = Path.GetFullPath(destinationDirectory);
+        if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
+        {
+            destinationRoot += Path.DirectorySeparatorChar;
+        }
+
+        using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
+        foreach (var entry in archive.Entries)
+        {
+            if (entry.IsDirectory || string.IsNullOrWhiteSpace(entry.Key))
+            {
+                continue;
+            }
+
+            var normalizedKey = entry.Key.Replace('\\', Path.DirectorySeparatorChar);
+            normalizedKey = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, normalizedKey));
+            if (!destinationPath.StartsWith(destinationRoot, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Archive entry escapes extraction root: {entry.Key}");
+            }
+
+            var destinationParent = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationParent))
+            {
+                Directory.CreateDirectory(destinationParent);
+            }
+
+            using var entryStream = entry.OpenEntryStream();
+            using var outputStream = File.Create(destinationPath);
+            entryStream.CopyTo(outputStream);
+
+            if (entry.LastModifiedTime is { } lastModified)
+            {
+                File.SetLastWriteTimeUtc(destinationPath, lastModified.ToUniversalTime());
+            }
+        }
     }
 }
 
