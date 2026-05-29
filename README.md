@@ -139,16 +139,52 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 
 ## Output files
 
-Each successful conversion produces the following files in the output directory:
+Each successful conversion produces a **Data-relative package** in the output directory. The folder structure maps directly to Skyrim's `Data\` folder so mod managers and manual installs both work without any re-pathing:
+
+```
+output/
+  meshes/
+    slidesmith/<body>/
+      <ArmorName>_0.nif          ← converted mesh (low-weight)
+      <ArmorName>_1.nif          ← converted mesh (high-weight)
+      <ArmorName>_ground.nif     ← ground/loot mesh
+      <ArmorName>_1stperson.nif  ← first-person fallback (scratch-plugin)
+  CalienteTools/
+    BodySlide/
+      SliderSets/
+        <ArmorName>.osp          ← BodySlide slider-set project
+      ShapeData/<ArmorName>/
+        <ArmorName>.nif          ← BodySlide source-shape reference mesh
+        <Slider>.bsd             ← low-weight slider morph (one per slider)
+        <Slider>_1.bsd           ← high-weight slider morph (one per slider)
+        <ArmorName>.tri          ← low-weight TRI morph for RaceMenu
+        <ArmorName>_1.tri        ← high-weight TRI morph
+  textures/...                   ← source textures (preserved relative paths)
+  <PluginName>_patched.esp       ← full-copy patched plugin (if source ESP found)
+  <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
+  fomod/
+    info.xml
+    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
+  cbpc-config.xml                ← CBPC physics XML
+  smp-config.xml                 ← SMP physics XML
+  conversion-manifest.json       ← full pipeline log
+  README.txt                     ← user-facing installation guide
+  preview.html                   ← interactive body heatmap + morph preview
+  ...                            ← additional metadata/diagnostic files (see table below)
+```
 
 | File | Description |
 |---|---|
-| `<ArmorName>.nif` | Converted mesh with heuristic in-place vertex transform when a readable NIF vertex block is detected (falls back to safe copy when not detectable) |
-| `<ArmorName>_0.nif` + `<ArmorName>_1.nif` | Low/high-weight variant pair; both halves written when detected, **missing half is auto-synthesised** (morph-delta scaled) when only one is present |
-| `meshes/slidesmith/<body>/<ArmorName>.nif` + `meshes/slidesmith/<body>/<ArmorName>_1stperson.nif` | Scratch-plugin-ready staged mesh copies; when no source plugin exists, the generated standalone ESP points here and first-person paths get a fallback `_1stperson` mesh immediately |
-| `<stem>_n.dds` (stub) | Auto-generated flat tangent-space normal map for any diffuse that lacks a `_n.dds` companion; 4×4 uncompressed BGRA8 DDS, neutral outward-facing vector |
-| `textures/...`, `materials/...` (`*.bgsm`/`*.bgem`), `*.xml`/`*.hkx`, `*.esp`/`*.esm`/`*.esl`, body refs (`*.tri`/`*.osp`/`skeleton*.nif`) | Source support assets are copied into output with preserved relative paths so converted packages stay runnable |
-| `<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
+| `<ArmorName>.nif` (root) | Original-filename copy of the converted mesh (workspace artifact) |
+| `<ArmorName>_0.nif` + `<ArmorName>_1.nif` (root) | Low/high-weight variant pair at output root; **missing half is auto-synthesised** when only one is present |
+| `meshes/slidesmith/<body>/<ArmorName>.nif` | Data-relative staged mesh; pointed to by the generated plugin |
+| `meshes/slidesmith/<body>/<stem>_ground.nif` | Ground/loot mesh companion for every converted NIF variant |
+| `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation |
+| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
+| `fomod/info.xml` | FOMOD package metadata (name, version, author) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
 | `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
@@ -157,16 +193,12 @@ Each successful conversion produces the following files in the output directory:
 | `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping regions, correction method, voxel penetration count, skeleton names, mapped + unsupported bone counts, and ISO-8601 generation timestamp |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
 | `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
-| `<PluginName>_patched.<ext>` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord that matched a converted NIF updated in-place; preserves the original plugin extension (`.esp`, `.esm`, or `.esl`), supports both Skyrim LE (20-byte record headers) and Skyrim SE / SSE (24-byte headers), and is only produced when at least one path was rewritten |
-| `<PluginName>_SlidesmithPatch.esp` | **Minimal override patch ESP** — contains ONLY the patched ARMA records and lists the original plugin as its master; proper Bethesda override plugin safe to load after the original; only produced when at least one ARMA path matched the rewrite map |
-| `README.txt` | Human-readable installation guide: lists all generated files, where to put them, how to apply the patch ESP, how to build BodySlide morphs, and any manual finishing steps required |
-| `texture-summary.json` | Texture audit: DDS count per type (diffuse/normal/specular/glow/parallax/roughness/subsurface), missing normal maps |
-| `preview.svg` | Standalone static body silhouette render with region heatmap colours for sharing/embed use outside the interactive report |
-| `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls (swap body profile, rotate view, adjust sliders) |
-| `pose-simulation-report.json` | Per-pose clipping-risk report used by preview HTML (T-pose, walk, run, idle, crouch, combat-idle, jump, sneak) |
-| `batch-report.json` | Root batch summary when input is a folder or archive (`.zip`, `.tar`, `.tar.gz`, `.tgz`) (total/success/fail counts and per-armor results) |
+| `<PluginName>_patched.<ext>` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord updated in-place; supports both Skyrim LE and SE record header formats |
+| `<PluginName>_SlidesmithPatch.esp` | **Minimal override patch ESP** — contains ONLY the patched ARMA records and lists the original plugin as its master; safe to load after the original |
+| `README.txt` | Human-readable installation guide with FOMOD and manual install instructions |
+| `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls |
+| `batch-report.json` | Root batch summary when input is a folder or archive (total/success/fail counts and per-armor results) |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
-| `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
 When a matching cache entry exists for the same armor mesh + target body, the converter reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps. The cache is written to both the local output folder (`.conversion-learning-cache.json`) **and** a shared global location (`%APPDATA%\SlideSmith\` on Windows, `~/.config/slidesmith/` on Linux/macOS) so the tool learns from all prior conversions across different armor packs. Use `--cache-path` to specify a custom global cache location.
 

@@ -886,7 +886,7 @@ public sealed class ConversionOrchestratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories).FirstOrDefault();
             Assert.NotNull(ospFile);
             var ospContent = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("<SliderSetInfo", ospContent, StringComparison.Ordinal);
@@ -923,6 +923,140 @@ public sealed class ConversionOrchestratorTests
             var infoXml = await File.ReadAllTextAsync(infoPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_FomodModuleConfigHasFileEntries()
+    {
+        // The FOMOD <files> block must not be empty — mod managers (MO2, Vortex) use it
+        // to determine what files to install.  An empty <files /> means nothing gets installed.
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var moduleConfigPath = Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml");
+            var moduleConfig = await File.ReadAllTextAsync(moduleConfigPath);
+
+            // Must have real file/folder entries — not an empty <files /> self-closer.
+            Assert.DoesNotContain("<files />", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<files>", moduleConfig, StringComparison.Ordinal);
+            // meshes/ and CalienteTools/ folders should both appear.
+            Assert.Contains("meshes", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("CalienteTools", moduleConfig, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesBodySlideOspToSliderSetsFolder()
+    {
+        // OSP must be at CalienteTools\BodySlide\SliderSets\ — the canonical path that BodySlide
+        // and mod managers expect when scanning for projects.
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "boots.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var sliderSetsDir = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDir), "SliderSets folder should exist under CalienteTools/BodySlide/");
+
+            var ospFiles = Directory.GetFiles(sliderSetsDir, "*.osp");
+            Assert.NotEmpty(ospFiles);
+
+            var ospContent = await File.ReadAllTextAsync(ospFiles[0]);
+            Assert.Contains("<SliderSetInfo", ospContent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_WritesBsdFilesToShapeDataFolder()
+    {
+        // BSD files must live at CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide
+        // can locate the slider data when the user opens the slider editor.
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "gauntlets.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var shapeDataBase = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            Assert.True(Directory.Exists(shapeDataBase), "ShapeData folder should exist under CalienteTools/BodySlide/");
+
+            var bsdFiles = Directory.GetFiles(shapeDataBase, "*.bsd", SearchOption.AllDirectories);
+            Assert.NotEmpty(bsdFiles);
+
+            // All BSD files must be inside the ShapeData tree.
+            foreach (var bsdFile in bsdFiles)
+                Assert.StartsWith(shapeDataBase, bsdFile, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDefaultModules_StagesSourceNifInShapeDataFolder()
+    {
+        // BodySlide needs a source NIF at CalienteTools\BodySlide\ShapeData\<project>\<project>.nif
+        // to display the base reference mesh when the user opens the slider editor.
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "helmet.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var shapeDataBase = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            var sourceNifFiles = Directory.GetFiles(shapeDataBase, "*.nif", SearchOption.AllDirectories);
+            Assert.NotEmpty(sourceNifFiles);
+
+            // The source NIF filename should match the project name.
+            Assert.True(sourceNifFiles.Any(f =>
+                Path.GetFileName(f).Equals($"{Path.GetFileNameWithoutExtension(inputFile)}.nif", StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileNameWithoutExtension(f).Length > 0),
+                "ShapeData should contain a source NIF for BodySlide.");
         }
         finally
         {
@@ -980,7 +1114,7 @@ public sealed class ConversionOrchestratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories).FirstOrDefault();
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
@@ -1007,7 +1141,7 @@ public sealed class ConversionOrchestratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "HIMBO", outputDirectory));
 
             Assert.True(result.Success);
-            var ospFile = Directory.GetFiles(outputDirectory, "*.osp").FirstOrDefault();
+            var ospFile = Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories).FirstOrDefault();
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
@@ -3310,12 +3444,12 @@ public sealed class BsdSliderDataTests
 
             Assert.True(result.Success);
 
-            // BSD files land in SliderData/<ProjectName>/
-            var sliderDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
-                .FirstOrDefault(d => d.Contains("SliderData", StringComparison.OrdinalIgnoreCase));
-            Assert.NotNull(sliderDataDir);
+            // BSD files land in CalienteTools/BodySlide/ShapeData/<ProjectName>/
+            var shapeDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(d => d.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(shapeDataDir);
 
-            var bsdFiles = Directory.GetFiles(sliderDataDir!, "*.bsd", SearchOption.AllDirectories);
+            var bsdFiles = Directory.GetFiles(shapeDataDir!, "*.bsd", SearchOption.AllDirectories);
             Assert.NotEmpty(bsdFiles);
 
             // Verify BSD magic header in each file.
@@ -3350,11 +3484,11 @@ public sealed class BsdSliderDataTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var sliderDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
-                .FirstOrDefault(d => d.Contains("SliderData", StringComparison.OrdinalIgnoreCase));
-            Assert.NotNull(sliderDataDir);
+            var shapeDataDir = Directory.GetDirectories(outputDirectory, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(d => d.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(shapeDataDir);
 
-            var bsdFiles = Directory.GetFiles(sliderDataDir!, "*.bsd", SearchOption.AllDirectories).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var bsdFiles = Directory.GetFiles(shapeDataDir!, "*.bsd", SearchOption.AllDirectories).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             // Expect both low-weight (e.g. "Belly.bsd") and high-weight (e.g. "Belly_1.bsd") files.
             Assert.True(bsdFiles.Any(f => !f!.EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase)), "Expected low-weight .bsd files.");
@@ -3420,7 +3554,7 @@ public sealed class TriMorphFileTests
             Assert.True(result.Success);
 
             // Expect both the low-weight and high-weight TRI files.
-            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly);
+            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories);
             Assert.True(triFiles.Length >= 2, "Expected at least 2 TRI files (low and high weight).");
 
             // The standard low-weight TRI should NOT end with _1.tri
@@ -3450,7 +3584,7 @@ public sealed class TriMorphFileTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly);
+            var triFiles = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories);
             Assert.NotEmpty(triFiles);
 
             foreach (var triFile in triFiles)
@@ -3482,7 +3616,7 @@ public sealed class TriMorphFileTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var triFile = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.TopDirectoryOnly).First();
+            var triFile = Directory.GetFiles(outputDirectory, "*.tri", SearchOption.AllDirectories).First();
             var bytes = await File.ReadAllBytesAsync(triFile);
 
             var offset = 8;
@@ -6713,8 +6847,8 @@ public sealed class ConversionReadmeGeneratorTests
         if (espPath is not null) files.Add(espPath);
         if (includeBsd)
         {
-            files.Add("/out/SliderData/Belly.bsd");
-            files.Add("/out/IronArmor.osp");
+            files.Add("/out/CalienteTools/BodySlide/ShapeData/IronArmor/Belly.bsd");
+            files.Add("/out/CalienteTools/BodySlide/SliderSets/IronArmor.osp");
         }
 
         var rewriteMap = new Dictionary<string, string>
@@ -9388,7 +9522,7 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(result.Steps, step => step.StartsWith("detected-body:MyFollower@", StringComparison.Ordinal));
             Assert.Contains(result.Steps, step => step.Contains("sliders=3", StringComparison.Ordinal));
 
-            var ospFile = Assert.Single(Directory.GetFiles(outputDir, "*.osp"));
+            var ospFile = Assert.Single(Directory.GetFiles(outputDir, "*.osp", SearchOption.AllDirectories));
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);

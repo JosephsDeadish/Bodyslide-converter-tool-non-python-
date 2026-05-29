@@ -6843,20 +6843,24 @@ internal static class ConversionReadmeGenerator
         // ── How to install ─────────────────────────────────────────────────
         sb.AppendLine("HOW TO INSTALL");
         sb.AppendLine("--------------");
-        sb.AppendLine("  OPTION A — FOMOD (recommended):");
-        sb.AppendLine("    Copy the entire output folder into your Skyrim Data folder");
-        sb.AppendLine("    and enable via your mod manager using the included FOMOD installer.");
+        sb.AppendLine("  OPTION A — Mod Manager FOMOD (recommended):");
+        sb.AppendLine("    Open your mod manager (Mod Organizer 2, Vortex, etc.) and install");
+        sb.AppendLine("    this output folder as a mod.  The included FOMOD installer will");
+        sb.AppendLine("    automatically place all files in the correct Data sub-folders.");
         sb.AppendLine();
-        sb.AppendLine("  OPTION B — Manual:");
-        sb.AppendLine($"    1. Copy converted .nif files to:  Data\\meshes\\slidesmith\\{request.TargetBody.ToLowerInvariant()}\\");
-        sb.AppendLine("    2. Copy physics configs (.xml) to: Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
-        sb.AppendLine("                                       Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
+        sb.AppendLine("  OPTION B — Manual (drop-in):");
+        sb.AppendLine("    The output folder is already structured as a Skyrim Data package.");
+        sb.AppendLine("    Copy the following sub-folders directly into your Skyrim Data\\ folder:");
+        sb.AppendLine($"      Data\\meshes\\slidesmith\\{request.TargetBody.ToLowerInvariant()}\\  ← converted NIF meshes");
         if (bsdFiles.Count > 0)
         {
-            sb.AppendLine($"    3. Copy BodySlide files (.osp, .bsd) to:");
-            sb.AppendLine($"         Data\\CalienteTools\\BodySlide\\SliderSets\\{bodySlideProject.ProjectName}.osp");
-            sb.AppendLine($"         Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\*.bsd");
+            sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderSets\\    ← BodySlide .osp project");
+            sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\  ← .bsd sliders + source NIF");
         }
+        sb.AppendLine("    Also copy any .esp plugin files to Data\\ root.");
+        sb.AppendLine("    Physics configs (.xml) go to:");
+        sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
+        sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
 
         sb.AppendLine();
 
@@ -7150,30 +7154,46 @@ internal sealed class LocalExportService(
             outputFiles.Add(smpPath);
         }
 
-        // Write the BodySlide project .osp file for use with the BodySlide application.
-        var ospPath = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}.osp");
+        // Write the BodySlide project .osp file to the canonical SliderSets folder so BodySlide
+        // and mod managers pick it up automatically from Data\CalienteTools\BodySlide\SliderSets\.
+        var ospDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        Directory.CreateDirectory(ospDirectory);
+        var ospPath = Path.Combine(ospDirectory, $"{bodySlideProject.ProjectName}.osp");
         await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
         outputFiles.Add(ospPath);
 
+        // BSD slider data, TRI morph files, and the BodySlide source-shape NIF all belong under
+        // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
+        // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
+        // acts as the base reference shape displayed inside BodySlide.
+        var morphVertexCount = EstimateMorphVertexCount(writtenNifs, request.TargetBody);
+        var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        // Stage source-shape NIF into ShapeData so BodySlide can display the base mesh.
+        var shapeDataNifPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.nif");
+        if (writtenNifs.Count > 0)
+        {
+            await CopyFileAsync(writtenNifs[0], shapeDataNifPath, cancellationToken);
+            outputFiles.Add(shapeDataNifPath);
+        }
+
         // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
         // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
-        var morphVertexCount = EstimateMorphVertexCount(writtenNifs, request.TargetBody);
-        var bsdDirectory = Path.Combine(outputDirectory, "SliderData", bodySlideProject.ProjectName);
-        Directory.CreateDirectory(bsdDirectory);
         foreach (var slider in bodySlideProject.Sliders)
         {
-            var lowBsdPath  = Path.Combine(bsdDirectory, $"{slider}.bsd");
-            var highBsdPath = Path.Combine(bsdDirectory, $"{slider}_1.bsd");
+            var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
+            var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
             await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
             await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
             outputFiles.Add(lowBsdPath);
             outputFiles.Add(highBsdPath);
         }
 
-        // Write TRI morph files (.tri) — one for low-weight and one for high-weight.
+        // Write TRI morph files (.tri) alongside the BSD files in ShapeData.
         // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
-        var triLowPath  = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}.tri");
-        var triHighPath = Path.Combine(outputDirectory, $"{bodySlideProject.ProjectName}_1.tri");
+        var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
+        var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
         await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
         await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
         outputFiles.Add(triLowPath);
@@ -7349,9 +7369,24 @@ internal sealed class LocalExportService(
         var fomodModuleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
         var fomodInfoPath = Path.Combine(fomodDirectory, "info.xml");
         var packageName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmith Package";
+
+        // Collect Data-relative folder names that exist in the output at FOMOD generation time.
+        // Mod managers use these to install each folder to the corresponding location under Data\.
+        var knownDataFolders = new[] { "meshes", "CalienteTools", "textures", "SKSE", "scripts" };
+        var fomodDataFolders = knownDataFolders
+            .Where(f => Directory.Exists(Path.Combine(outputDirectory, f)))
+            .ToList();
+        // ESP files at the output root are plugins and must be installed directly to Data\.
+        var fomodRootFiles = outputFiles
+            .Where(f => string.Equals(
+                            Path.GetDirectoryName(f), outputDirectory, StringComparison.OrdinalIgnoreCase)
+                        && Path.GetExtension(f).Equals(".esp", StringComparison.OrdinalIgnoreCase))
+            .Select(f => Path.GetFileName(f)!)
+            .ToList();
         await File.WriteAllTextAsync(
             fomodModuleConfigPath,
-            BuildFomodModuleConfigXml(packageName, request.TargetBody, bodySlideProject.ProjectName),
+            BuildFomodModuleConfigXml(packageName, request.TargetBody, bodySlideProject.ProjectName,
+                fomodDataFolders, fomodRootFiles),
             cancellationToken);
         await File.WriteAllTextAsync(
             fomodInfoPath,
@@ -8563,11 +8598,33 @@ internal sealed class LocalExportService(
         return steps;
     }
 
-    private static string BuildFomodModuleConfigXml(string packageName, string targetBody, string bodySlideProjectName)
+    private static string BuildFomodModuleConfigXml(
+        string packageName,
+        string targetBody,
+        string bodySlideProjectName,
+        IReadOnlyList<string> dataFolderNames,
+        IReadOnlyList<string> rootFileNames)
     {
         var safePackage = XmlEscape(packageName);
         var safeTargetBody = XmlEscape(targetBody);
         var safeProjectName = XmlEscape(bodySlideProjectName);
+
+        // Build <files> content: one <folder> per Data subfolder + one <file> per root ESP/plugin.
+        var filesContent = new System.Text.StringBuilder();
+        foreach (var folder in dataFolderNames)
+        {
+            var safeFolder = XmlEscape(folder);
+            filesContent.AppendLine($"            <folder source=\"{safeFolder}\" destination=\"{safeFolder}\" priority=\"0\" />");
+        }
+        foreach (var file in rootFileNames)
+        {
+            var safeFile = XmlEscape(file);
+            filesContent.AppendLine($"            <file source=\"{safeFile}\" destination=\"{safeFile}\" priority=\"0\" />");
+        }
+
+        var filesBlock = filesContent.Length > 0
+            ? $"          <files>\n{filesContent.ToString().TrimEnd()}\n          </files>"
+            : "          <files />";
 
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -8580,7 +8637,7 @@ internal sealed class LocalExportService(
                       <plugins order="Explicit">
                         <plugin name="{{safeTargetBody}}">
                           <description>Generated conversion output for {{safeTargetBody}} with BodySlide project {{safeProjectName}}.</description>
-                          <files />
+            {{filesBlock}}
                           <conditionFlags />
                           <typeDescriptor>
                             <type name="Required" />
