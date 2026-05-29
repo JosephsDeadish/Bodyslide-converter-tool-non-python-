@@ -8362,6 +8362,131 @@ public sealed class BasicScratchPluginGeneratorServiceTests
         }
         Assert.True(found, "DNAM subrecord (armor rating) must be present in the ARMO record.");
     }
+
+    /// <summary>
+    /// When meshType is "cloth" the ARMO KWDA subrecord must contain the
+    /// ArmorClothing keyword FormID (0x0006BBE8 from Skyrim.esm).
+    /// </summary>
+    [Fact]
+    public void Generate_ClothMeshType_HasArmorClothingKeyword()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "LinenRobe", "CBBE",
+            ["meshes/slidesmith/cbbe/linen_robe_0.nif"],
+            [32],
+            null,
+            meshType: "cloth");
+
+        var (bytes, _) = result!.Value;
+        // Search for KWDA subrecord followed by the ArmorClothing FormID 0x0006BBE8
+        const uint armorClothing = 0x0006BBE8u;
+        bool found = false;
+        for (int i = 0; i + 9 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'K' && bytes[i + 1] == 'W' && bytes[i + 2] == 'D' && bytes[i + 3] == 'A')
+            {
+                // KWDA: tag(4) + size(2) + formId(4)
+                var formId = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                if (formId == armorClothing) { found = true; break; }
+            }
+        }
+        Assert.True(found, $"KWDA subrecord with ArmorClothing FormID (0x{armorClothing:X8}) not found for cloth meshType.");
+    }
+
+    /// <summary>
+    /// When meshType is "plate" the ARMO KWDA subrecord must contain the
+    /// ArmorHeavy keyword FormID (0x0007E8C4 from Skyrim.esm).
+    /// </summary>
+    [Fact]
+    public void Generate_PlateMeshType_HasArmorHeavyKeyword()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "Dragonplate", "3BA",
+            ["meshes/slidesmith/3ba/dragonplate_0.nif"],
+            [32],
+            null,
+            meshType: "plate");
+
+        var (bytes, _) = result!.Value;
+        const uint armorHeavy = 0x0007E8C4u;
+        bool found = false;
+        for (int i = 0; i + 9 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'K' && bytes[i + 1] == 'W' && bytes[i + 2] == 'D' && bytes[i + 3] == 'A')
+            {
+                var formId = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                if (formId == armorHeavy) { found = true; break; }
+            }
+        }
+        Assert.True(found, $"KWDA subrecord with ArmorHeavy FormID (0x{armorHeavy:X8}) not found for plate meshType.");
+    }
+
+    /// <summary>
+    /// When meshType is "leather" the ARMO KWDA subrecord must contain the
+    /// ArmorLight keyword FormID (0x000A8669 from Skyrim.esm).
+    /// </summary>
+    [Fact]
+    public void Generate_LeatherMeshType_HasArmorLightKeyword()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "Leather Armor", "BHUNP",
+            ["meshes/slidesmith/bhunp/leather_0.nif"],
+            [32],
+            null,
+            meshType: "leather");
+
+        var (bytes, _) = result!.Value;
+        const uint armorLight = 0x000A8669u;
+        bool found = false;
+        for (int i = 0; i + 9 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'K' && bytes[i + 1] == 'W' && bytes[i + 2] == 'D' && bytes[i + 3] == 'A')
+            {
+                var formId = (uint)(bytes[i + 6] | (bytes[i + 7] << 8) | (bytes[i + 8] << 16) | (bytes[i + 9] << 24));
+                if (formId == armorLight) { found = true; break; }
+            }
+        }
+        Assert.True(found, $"KWDA subrecord with ArmorLight FormID (0x{armorLight:X8}) not found for leather meshType.");
+    }
+
+    /// <summary>
+    /// BOD2 armor-type field must match the detected meshType:
+    ///   cloth  → 2 (clothing), plate → 1 (heavy), leather → 0 (light).
+    /// Both ARMA and ARMO BOD2 subrecords must carry the same armor-type code.
+    /// </summary>
+    [Theory]
+    [InlineData("cloth",   2u)]
+    [InlineData("plate",   1u)]
+    [InlineData("leather", 0u)]
+    [InlineData(null,      0u)]  // null falls back to light armor default
+    public void Generate_MeshType_SetsBod2ArmorTypeCorrectly(string? meshType, uint expectedArmorType)
+    {
+        var service = new BasicScratchPluginGeneratorService();
+        var result = service.Generate(
+            "TestArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/test_0.nif"],
+            [32],
+            null,
+            meshType: meshType);
+
+        var (bytes, _) = result!.Value;
+        // Each BOD2 subrecord is: tag(4) + size(2) + slotMask(4) + armorType(4) = 14 bytes total.
+        // Scan for all BOD2 tags and verify the armor-type field (bytes +10..+13 from the tag start).
+        int bod2Found = 0;
+        for (int i = 0; i + 13 < bytes.Length; i++)
+        {
+            if (bytes[i] == 'B' && bytes[i + 1] == 'O' && bytes[i + 2] == 'D' && bytes[i + 3] == '2')
+            {
+                var armorType = (uint)(bytes[i + 10] | (bytes[i + 11] << 8) | (bytes[i + 12] << 16) | (bytes[i + 13] << 24));
+                Assert.Equal(expectedArmorType, armorType);
+                bod2Found++;
+            }
+        }
+        Assert.True(bod2Found >= 2, $"Expected at least 2 BOD2 subrecords (ARMA + ARMO), found {bod2Found}.");
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

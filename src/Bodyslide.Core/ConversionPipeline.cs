@@ -1964,12 +1964,19 @@ public interface IScratchPluginGeneratorService
     /// Builds a minimal standalone ESP containing one ARMO and one ARMA record.
     /// Returns <c>null</c> when generation is not applicable (e.g. no converted NIF paths provided).
     /// </summary>
+    /// <param name="meshType">
+    /// Optional detected armor mesh type (e.g. "cloth", "leather", "plate", "rigid", "soft").
+    /// Used to set the BOD2 armor-type field and inject appropriate Skyrim.esm KWDA keywords
+    /// so the record loads correctly in the Creation Kit and in-game filters.
+    /// When <c>null</c> or unrecognised the generator defaults to light-armor behaviour.
+    /// </param>
     (byte[] PluginBytes, string FileName)? Generate(
         string armorName,
         string targetBody,
         IReadOnlyList<string> convertedNifRelativePaths,
         IReadOnlyList<int> bipedSlots,
-        string? groundMeshRelativePath);
+        string? groundMeshRelativePath,
+        string? meshType = null);
 }
 
 public sealed class ConversionOrchestrator(
@@ -3004,17 +3011,47 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
     // DefaultRace (0x000013) is always present in Skyrim.esm and matches all playable races.
     private const uint DefaultRaceFormId = 0x00000013u;
 
+    // Skyrim.esm keyword FormIDs (master index 0 — declared in TES4 MAST).
+    // These are used in KWDA subrecords on the ARMO record so the armor appears in
+    // the correct category filters in the Creation Kit, SkyUI, and vendor lists.
+    private const uint KwdArmorClothing = 0x0006BBE8u; // ArmorClothing  — clothing/robes
+    private const uint KwdArmorLight    = 0x000A8669u; // ArmorLight     — light armor
+    private const uint KwdArmorHeavy    = 0x0007E8C4u; // ArmorHeavy     — heavy/plate armor
+
+    /// <summary>
+    /// Maps a detected mesh-type string to a BOD2 armor-type code (0 = light, 1 = heavy, 2 = clothing)
+    /// and the matching Skyrim.esm KWDA keyword FormID that should be written on the ARMO record.
+    /// </summary>
+    private static (uint ArmorType, uint KeywordFormId) GetArmorTypeInfo(string? meshType) =>
+        meshType?.ToLowerInvariant() switch
+        {
+            "cloth"      => (2u, KwdArmorClothing),
+            "clothing"   => (2u, KwdArmorClothing),
+            "robe"       => (2u, KwdArmorClothing),
+            "plate"      => (1u, KwdArmorHeavy),
+            "rigid"      => (1u, KwdArmorHeavy),
+            "heavy"      => (1u, KwdArmorHeavy),
+            "leather"    => (0u, KwdArmorLight),
+            "soft"       => (0u, KwdArmorLight),
+            "skin-tight" => (0u, KwdArmorLight),
+            "skintight"  => (0u, KwdArmorLight),
+            _            => (0u, KwdArmorLight),  // default: light armor
+        };
+
     public (byte[] PluginBytes, string FileName)? Generate(
         string armorName,
         string targetBody,
         IReadOnlyList<string> convertedNifRelativePaths,
         IReadOnlyList<int> bipedSlots,
-        string? groundMeshRelativePath)
+        string? groundMeshRelativePath,
+        string? meshType = null)
     {
         if (convertedNifRelativePaths.Count == 0) return null;
 
         var primaryPath = convertedNifRelativePaths[0];
         if (string.IsNullOrWhiteSpace(primaryPath)) return null;
+
+        var (armorTypeCode, keywordFormId) = GetArmorTypeInfo(meshType);
 
         // Compute BOD2 slot bitmask (bit N = slot 30+N).
         uint slotMask = 0;
@@ -3036,7 +3073,7 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         using (var bod2Ms = new MemoryStream(8))
         {
             WriteUInt32Le(bod2Ms, slotMask);
-            WriteUInt32Le(bod2Ms, 0u); // armor type: 0 = light armor
+            WriteUInt32Le(bod2Ms, armorTypeCode); // armor type from detected mesh type
             WriteSubrecord(armaDataMs, "BOD2", bod2Ms.ToArray());
         }
 
@@ -3080,8 +3117,19 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         using (var bod2Ms = new MemoryStream(8))
         {
             WriteUInt32Le(bod2Ms, slotMask);
-            WriteUInt32Le(bod2Ms, 0u); // armor type: 0 = light
+            WriteUInt32Le(bod2Ms, armorTypeCode); // armor type from detected mesh type
             WriteSubrecord(armoDataMs, "BOD2", bod2Ms.ToArray());
+        }
+
+        // KWDA — keyword array sourced from Skyrim.esm.
+        // This is the correct way for the Creation Kit, SkyUI and in-game vendor/crafting
+        // filters to categorise the armor (clothing vs. light vs. heavy).
+        // Each keyword is a 4-byte FormID; Skyrim.esm is always the first master (index 0)
+        // so no master-index remapping is required.
+        using (var kwdaMs = new MemoryStream(4))
+        {
+            WriteUInt32Le(kwdaMs, keywordFormId);
+            WriteSubrecord(armoDataMs, "KWDA", kwdaMs.ToArray());
         }
 
         var armoGroundModelPath = string.IsNullOrWhiteSpace(groundMeshRelativePath)
@@ -7929,7 +7977,8 @@ internal sealed class LocalExportService(
                 .ToList();
 
             var scratchResult = scratchPluginGen.Generate(
-                armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath);
+                armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath,
+                meshType: analysis.MeshType);
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
