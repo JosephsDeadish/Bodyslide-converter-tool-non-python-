@@ -90,28 +90,35 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--help", StringComparer.OrdinalIgnoreCase)
+    || args.Contains("-h", StringComparer.OrdinalIgnoreCase))
+{
+    WriteUsage();
+    return;
+}
+
 if (!TryParseRequest(args, out var request, out var error, out var cachePath))
 {
+    var missingRequiredArgs = !string.IsNullOrEmpty(error) &&
+        (error.StartsWith("Missing required", StringComparison.OrdinalIgnoreCase)
+         || error.StartsWith("Provide --target", StringComparison.OrdinalIgnoreCase));
+
     if (!string.IsNullOrEmpty(error))
     {
-        Console.WriteLine(error);
+        Console.WriteLine($"No conversion executed: {error}");
+        Console.WriteLine();
     }
 
-    Console.WriteLine($"SlideSmith v{Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0"} — Bodyslide Armor Converter");
-    Console.WriteLine();
-    Console.WriteLine("Usage:");
-    Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip] [--cache-path <path>]");
-    Console.WriteLine("  SlideSmith --list-presets");
-    Console.WriteLine("  SlideSmith --list-profiles");
-    Console.WriteLine("  SlideSmith --list-bodies");
-    Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
-    Console.WriteLine();
-    Console.WriteLine("Drag a .nif file, supported archive (.zip/.7z/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
+    WriteUsage();
 
     if (shouldPauseOnExit)
     {
         PauseBeforeExit();
+    }
+
+    if (missingRequiredArgs)
+    {
+        Environment.ExitCode = 2;
     }
 
     return;
@@ -266,4 +273,20 @@ static void PauseBeforeExit()
     Console.WriteLine();
     Console.WriteLine("Press any key to exit...");
     Console.ReadKey(intercept: true);
+}
+
+static void WriteUsage()
+{
+    Console.WriteLine($"SlideSmith v{Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0"} — Bodyslide Armor Converter");
+    Console.WriteLine();
+    Console.WriteLine("Usage:");
+    Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --list-presets");
+    Console.WriteLine("  SlideSmith --list-profiles");
+    Console.WriteLine("  SlideSmith --list-bodies");
+    Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --help");
+    Console.WriteLine();
+    Console.WriteLine("Drag a .nif file, supported archive (.zip/.7z/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
 }

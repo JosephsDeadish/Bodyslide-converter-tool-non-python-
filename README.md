@@ -103,8 +103,11 @@ What it does:
 - **Every push/PR:** restore, build, test, build a Linux executable package, zip it, and upload it as an Actions artifact.
 - **Push to `main`/`master` (post-merge):** build Windows desktop executable package, zip it, and upload as an Actions artifact.
 - **Pull requests:** build Windows desktop executable package, zip it, and upload as an Actions artifact for testing.
+- Each artifact now includes `README-FIRST.txt` with exact run steps and a short explanation of required runtime support files.
 
 These are CI build artifacts only (download from the Actions run page). No GitHub Release publishing is performed by this workflow.
+
+If the app seems to "do nothing", run it from a terminal with `--help` first. The standalone Linux binary expects CLI arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
 
 ## Deformation profiles
 
