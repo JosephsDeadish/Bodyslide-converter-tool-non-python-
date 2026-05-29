@@ -718,7 +718,7 @@ public sealed class MainForm : Form
             _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
-            await LoadPreviewInAppAsync(_lastPreviewPath);
+            _ = await LoadPreviewInAppAsync(_lastPreviewPath);
             PopulateSummaryTab(results);
             PopulateArtifactsTab(results);
 
@@ -854,7 +854,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        await LoadPreviewInAppAsync(_lastPreviewPath);
+        _ = await LoadPreviewInAppAsync(_lastPreviewPath);
         _resultsTabControl.SelectedTab = _previewTabPage;
     }
 
@@ -895,24 +895,25 @@ public sealed class MainForm : Form
         }
 
         UpdatePathActionStates();
-        await LoadPreviewInAppAsync(previewPath);
+        _ = await LoadPreviewInAppAsync(previewPath);
         PopulateArtifactsTab(selectedFolder);
         _resultsTabControl.SelectedTab = _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
     }
 
-    private async Task LoadPreviewInAppAsync(string? previewPath)
+    private async Task<bool> LoadPreviewInAppAsync(string? previewPath)
     {
         if (string.IsNullOrWhiteSpace(previewPath) || !File.Exists(previewPath))
         {
             ShowPreviewStatus("No preview report is currently available.");
-            return;
+            return false;
         }
 
         if (!await EnsurePreviewWebViewReadyAsync())
         {
-            ShowPreviewStatus("Embedded preview is unavailable (WebView2 runtime missing).");
-            return;
+            ShowPreviewStatus("Embedded preview is unavailable (WebView2 runtime missing). Opening preview in your default browser.");
+            OpenPreviewExternally(previewPath);
+            return false;
         }
 
         try
@@ -920,10 +921,13 @@ public sealed class MainForm : Form
             _previewWebView!.Visible = true;
             _previewStatusLabel.Visible = false;
             _previewWebView.Source = new Uri(previewPath, UriKind.Absolute);
+            return true;
         }
         catch (Exception ex)
         {
             ShowPreviewStatus($"Failed to load in-app preview: {ex.Message}");
+            OpenPreviewExternally(previewPath);
+            return false;
         }
     }
 
@@ -963,6 +967,23 @@ public sealed class MainForm : Form
 
         _previewStatusLabel.Text = message;
         _previewStatusLabel.Visible = true;
+    }
+
+    private void OpenPreviewExternally(string previewPath)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = previewPath,
+                UseShellExecute = true,
+            });
+            AppendLog($"Opened preview in external browser: {previewPath}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to open preview externally: {ex.Message}");
+        }
     }
 
     private void PopulateSummaryTab(IReadOnlyList<ConversionResult> results)
@@ -1274,10 +1295,12 @@ public sealed class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var target     = ReadOptionalComboValue(_targetComboBox) ?? string.Empty;
+        var targetText = string.IsNullOrWhiteSpace(_targetComboBox.Text)
+            ? _targetComboBox.SelectedItem?.ToString()
+            : _targetComboBox.Text.Trim();
+        var target     = string.IsNullOrWhiteSpace(targetText) ? "CUSTOM" : targetText;
         var profile    = ReadOptionalComboValue(_profileComboBox) ?? "standard";
         var physics    = ReadOptionalComboValue(_physicsComboBox) ?? "none";
-        var source     = ReadOptionalComboValue(_sourceComboBox) ?? string.Empty;
 
         // Build a minimal JSON profile that CustomBodyProfileSupport can load.
         var sb = new StringBuilder();
