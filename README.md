@@ -49,8 +49,10 @@ dotnet run --project src/Bodyslide.Desktop
 # optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
-# any previous output folder's preview, quick-open batch reports when available, and an in-app files tab
-# that lists generated outputs with double-click/open-button launch,
+# any previous output folder's preview, quick-open batch reports when available, an in-app files tab
+# that lists generated outputs with double-click/open-button launch, and a catalog tab that lists
+# all built-in presets, supported body signatures, deformation profiles, physics profiles, and
+# `all/any/*` target aliases in one place,
 # "Load Custom Profile..." button (multi-select *.json) to inject extra body profile definitions into
 # the conversion without placing them next to the input files, and "Save Profile..." button to export
 # the current target/physics settings as a reusable *.json profile that can be reloaded later
@@ -327,6 +329,7 @@ Implemented from issue scope:
 - **topology + UV mismatch diagnostics** — export now compares source vs converted mesh signatures and writes `TopologyMismatchRisk`, `VertexCountDeltaRatio`, `UvCoverageDeltaRatio`, `UvAspectRatioDelta`, and `QualityWarnings` into `conversion-quality.json`; large drift thresholds flag likely topology/UV mismatch risks early (addressing a major “common failure point” from issue #2)
 - **physics-bone fallback remapping for skeleton compatibility** — skeleton mapping now aligns UNP/TBD targets with their CBPC support set (`NPC L/R Breast01`, `NPC L/R Butt`, `NPC Belly`) and auto-remaps unsupported higher-order source physics bones (e.g. `NPC L/R Breast02/03`) to the best available target equivalent before marking them unsupported, reducing conversion drop-off when source and target skeleton physics depth differ
 - **preview GUI fallback + safer saved target profiles** — when embedded WebView2 preview is unavailable (or fails), the desktop app now automatically opens `preview.html` in the system default browser so preview access is never blocked by missing runtime dependencies; “Save profile...” also now preserves typed target text (fallback `CUSTOM`) instead of relying only on selected dropdown items
+- **desktop conversion catalog tab** — GUI now includes a **Catalog** tab that exposes all built-in presets (target/deformation/physics), supported body detection tokens + vertex ranges, deformation profiles, physics profiles, and `all/any/*` target aliases so CLI discovery flags have an in-app equivalent
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, headgear sub-type/partition handling, ground mesh NIF output, biped slot passthrough, scratch plugin generation for plugin-free inputs, first-person mesh paths, rigid island detection, target physics bone injection, and armor-type/keyword injection in scratch plugins).
 

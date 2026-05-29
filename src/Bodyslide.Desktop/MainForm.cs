@@ -47,6 +47,8 @@ public sealed class MainForm : Form
     private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _catalogTabPage;
+    private readonly ListView _catalogListView;
     private readonly TabPage _artifactsTabPage;
     private readonly ListView _artifactsListView;
     private readonly BatchConversionRunner _batchRunner;
@@ -533,6 +535,20 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _catalogTabPage = new TabPage("Catalog");
+        _catalogListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _catalogListView.Columns.Add("Category", 170);
+        _catalogListView.Columns.Add("Name", 180);
+        _catalogListView.Columns.Add("Details", -2);
+        _catalogTabPage.Controls.Add(_catalogListView);
+        _resultsTabControl.TabPages.Add(_catalogTabPage);
         _artifactsTabPage = new TabPage("Files");
         _artifactsListView = new ListView
         {
@@ -554,10 +570,53 @@ public sealed class MainForm : Form
 
         RefreshModeState();
         UpdatePresetDetails();
+        PopulateCatalogTab();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         ShowPreviewStatus("Run a conversion to render preview.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert.");
+    }
+
+    private void PopulateCatalogTab()
+    {
+        _catalogListView.BeginUpdate();
+        _catalogListView.Items.Clear();
+
+        foreach (var preset in PresetCatalog.All.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _catalogListView.Items.Add(new ListViewItem(
+            [
+                "Preset",
+                preset.Name,
+                $"Target={preset.TargetBody}; Deformation={preset.DeformationProfile}; Physics={preset.PhysicsProfile}",
+            ]));
+        }
+
+        foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var vertexRange = body.VertexCountMin > 0
+                ? $"{body.VertexCountMin}-{body.VertexCountMax}"
+                : "n/a";
+            _catalogListView.Items.Add(new ListViewItem(
+            [
+                "Body",
+                body.Name,
+                $"Tokens=[{string.Join(", ", body.DetectionTokens)}]; Vertices={vertexRange}",
+            ]));
+        }
+
+        foreach (var profile in DeformationProfileModifier.All.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            _catalogListView.Items.Add(new ListViewItem(["Deformation profile", profile, ""]));
+        }
+
+        foreach (var physics in PhysicsProfileCatalog.All.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            _catalogListView.Items.Add(new ListViewItem(["Physics profile", physics, ""]));
+        }
+
+        _catalogListView.Items.Add(new ListViewItem(["Target alias", "all / any / *", "Expands to every supported body type."]));
+        _catalogListView.EndUpdate();
     }
 
     private static TableLayoutPanel CreateThreeColumnRow(string labelText, out TextBox textBox)
