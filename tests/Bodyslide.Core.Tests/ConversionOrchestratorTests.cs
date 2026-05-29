@@ -2461,7 +2461,7 @@ public sealed class ConversionOrchestratorTests
             .GetMethod("BuildSpecularMapDds",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
-        return (byte[])method!.Invoke(null, null)!;
+        return (byte[])method!.Invoke(null, [4, 4])!;
     }
 
     private static byte[] BuildParallaxMapDdsViaReflection()
@@ -2470,7 +2470,7 @@ public sealed class ConversionOrchestratorTests
             .GetMethod("BuildParallaxMapDds",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
-        return (byte[])method!.Invoke(null, null)!;
+        return (byte[])method!.Invoke(null, [4, 4])!;
     }
 
     private static byte[] BuildGlowMapDdsViaReflection()
@@ -2479,7 +2479,7 @@ public sealed class ConversionOrchestratorTests
             .GetMethod("BuildGlowMapDds",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
-        return (byte[])method!.Invoke(null, null)!;
+        return (byte[])method!.Invoke(null, [4, 4])!;
     }
 
     private static byte[] BuildRoughnessMapDdsViaReflection()
@@ -2488,7 +2488,7 @@ public sealed class ConversionOrchestratorTests
             .GetMethod("BuildRoughnessMapDds",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.NotNull(method);
-        return (byte[])method!.Invoke(null, null)!;
+        return (byte[])method!.Invoke(null, [4, 4])!;
     }
 
     private static byte[] BuildMeshSubrecordData(params (string Tag, string Path)[] subrecords)
@@ -9552,6 +9552,250 @@ public sealed class CustomBodyProfileSupportTests
         {
             Directory.Delete(tmpDir, recursive: true);
         }
+    }
+
+    // ── SkeletonNifBoneParser tests ──────────────────────────────────────────────
+
+    [Fact]
+    public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
+    {
+        var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);
+        var ok = SkeletonNifBoneParser.TryParseStringTable(nifBytes, out var strings);
+        Assert.True(ok);
+        Assert.Contains("NPC Root [Root]",  strings);
+        Assert.Contains("NPC Spine [Spn0]", strings);
+        Assert.Contains("Sword_Back",       strings);
+        Assert.Contains("notabone",         strings);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_ExtractBoneNames_FiltersToBonePatterns()
+    {
+        var nifBytes = BuildMinimalNifWithStrings(
+            ["NPC Spine [Spn0]", "Weapon_Back", "CME Spine", "randomstring", "HDTBone", "Tail1"]);
+        var bones = SkeletonNifBoneParser.ExtractBoneNames(nifBytes);
+        Assert.Contains("NPC Spine [Spn0]", bones);
+        Assert.Contains("Weapon_Back",      bones);
+        Assert.Contains("CME Spine",        bones);
+        Assert.Contains("HDTBone",          bones);
+        Assert.Contains("Tail1",            bones);
+        Assert.DoesNotContain("randomstring", bones);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_PhysicsBonesYieldPhysicsLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(
+            ["NPC L Breast", "NPC Butt", "NPC Belly"]);
+        Assert.Equal("xpmsse-physics", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_Bip01YieldsFo4Label()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Bip01 Spine", "Bip01 L Arm"]);
+        Assert.Equal("fo4-biped", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_EmptyYieldsVanilla()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel([]);
+        Assert.Equal("xpmsse-vanilla", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_TryParseStringTable_ReturnsFalseForEmptyInput()
+    {
+        Assert.False(SkeletonNifBoneParser.TryParseStringTable([], out _));
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_TryParseStringTable_ReturnsFalseForGarbage()
+    {
+        Assert.False(SkeletonNifBoneParser.TryParseStringTable(new byte[128], out _));
+    }
+
+    // ── DdsTextureDerivation tests ───────────────────────────────────────────────
+
+    [Fact]
+    public void DdsTextureDerivation_TryReadDimensions_ReadsWidthHeight()
+    {
+        var dds = LocalExportService.BuildFlatNormalMapDds(32, 16);
+        var ok = DdsTextureDerivation.TryReadDimensions(dds, out var w, out var h);
+        Assert.True(ok);
+        Assert.Equal(32, w);
+        Assert.Equal(16, h);
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryReadDimensions_ReturnsFalseForTooShort()
+    {
+        Assert.False(DdsTextureDerivation.TryReadDimensions(new byte[64], out _, out _));
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryReadDimensions_ReturnsFalseForWrongMagic()
+    {
+        var bytes = new byte[128];
+        bytes[0] = 0xFF;
+        Assert.False(DdsTextureDerivation.TryReadDimensions(bytes, out _, out _));
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveRoughnessFromSpecular_InvertsLuminance()
+    {
+        // Build a 4×4 uncompressed DDS where every pixel is a known colour.
+        // Pure grey (B=128, G=128, R=128, A=255) → luma≈128 → roughness≈127.
+        const int w = 4; const int h = 4;
+        var spec = LocalExportService.BuildSpecularMapDds(w, h);
+        // Paint all pixels pure-white (B=255,G=255,R=255) so luma=255 → roughness=0.
+        for (var i = 0; i < w * h; i++)
+        {
+            var off = 128 + i * 4;
+            spec[off] = 0xFF; spec[off + 1] = 0xFF; spec[off + 2] = 0xFF; spec[off + 3] = 0xFF;
+        }
+        var ok = DdsTextureDerivation.TryDeriveRoughnessFromSpecular(spec, out var roughness);
+        Assert.True(ok);
+        Assert.Equal(spec.Length, roughness.Length);
+        // Every pixel roughness should be 0 (255 − 255 = 0).
+        for (var i = 0; i < w * h; i++)
+        {
+            var off = 128 + i * 4;
+            Assert.Equal(0, roughness[off]);
+        }
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveRoughnessFromSpecular_ReturnsFalseForCompressed()
+    {
+        // Build a well-formed DDS but with FourCC set to DXT1 (compressed).
+        var dds = LocalExportService.BuildFlatNormalMapDds(4, 4);
+        // Write "DXT1" at offset 84.
+        dds[84] = 0x44; dds[85] = 0x58; dds[86] = 0x54; dds[87] = 0x31;
+        Assert.False(DdsTextureDerivation.TryDeriveRoughnessFromSpecular(dds, out _));
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveHeightFromNormal_ProducesCorrectDimensions()
+    {
+        var normal = LocalExportService.BuildFlatNormalMapDds(8, 8);
+        var ok = DdsTextureDerivation.TryDeriveHeightFromNormal(normal, out var height);
+        Assert.True(ok);
+        // Output should have same header size + same pixel count.
+        Assert.Equal(normal.Length, height.Length);
+        var okH = DdsTextureDerivation.TryReadDimensions(height, out var hw, out var hh);
+        Assert.True(okH);
+        Assert.Equal(8, hw);
+        Assert.Equal(8, hh);
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveHeightFromNormal_ReturnsFalseForCompressed()
+    {
+        var dds = LocalExportService.BuildFlatNormalMapDds(4, 4);
+        dds[84] = 0x44; dds[85] = 0x58; dds[86] = 0x54; dds[87] = 0x35; // DXT5
+        Assert.False(DdsTextureDerivation.TryDeriveHeightFromNormal(dds, out _));
+    }
+
+    // ── BuildFlatNormalMapDds / BuildSolidColorDds dimension tests ────────────────
+
+    [Fact]
+    public void BuildFlatNormalMapDds_WithCustomDimensions_HasCorrectByteLength()
+    {
+        // 8×8 = 64 pixels × 4 bytes + 128 header = 384 bytes.
+        var dds = LocalExportService.BuildFlatNormalMapDds(8, 8);
+        Assert.Equal(128 + 8 * 8 * 4, dds.Length);
+    }
+
+    [Fact]
+    public void BuildFlatNormalMapDds_DefaultDimensions_PreservesExistingSize()
+    {
+        // Regression: 4×4 = 192 bytes must still hold.
+        var dds = LocalExportService.BuildFlatNormalMapDds();
+        Assert.Equal(192, dds.Length);
+    }
+
+    [Fact]
+    public void BuildFlatNormalMapDds_CustomDimensions_HeaderReflectsSize()
+    {
+        var dds = LocalExportService.BuildFlatNormalMapDds(16, 8);
+        var ok = DdsTextureDerivation.TryReadDimensions(dds, out var w, out var h);
+        Assert.True(ok);
+        Assert.Equal(16, w);
+        Assert.Equal(8, h);
+    }
+
+    [Fact]
+    public void BuildSpecularMapDds_WithCustomDimensions_HasCorrectByteLength()
+    {
+        var dds = LocalExportService.BuildSpecularMapDds(8, 4);
+        Assert.Equal(128 + 8 * 4 * 4, dds.Length);
+        var ok = DdsTextureDerivation.TryReadDimensions(dds, out var w, out var h);
+        Assert.True(ok);
+        Assert.Equal(8, w);
+        Assert.Equal(4, h);
+    }
+
+    [Fact]
+    public void BuildParallaxMapDds_WithCustomDimensions_HasCorrectByteLength()
+    {
+        var dds = LocalExportService.BuildParallaxMapDds(16, 16);
+        Assert.Equal(128 + 16 * 16 * 4, dds.Length);
+    }
+
+    [Fact]
+    public void BuildGlowMapDds_WithCustomDimensions_HasCorrectByteLength()
+    {
+        var dds = LocalExportService.BuildGlowMapDds(32, 32);
+        Assert.Equal(128 + 32 * 32 * 4, dds.Length);
+    }
+
+    [Fact]
+    public void BuildRoughnessMapDds_WithCustomDimensions_HasCorrectByteLength()
+    {
+        var dds = LocalExportService.BuildRoughnessMapDds(64, 64);
+        Assert.Equal(128 + 64 * 64 * 4, dds.Length);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a minimal Skyrim SE NIF byte array whose string table contains exactly
+    /// the supplied strings.  Uses the same header layout as BuildMinimalNifStub
+    /// (v20.2.0.7, userVersion=12, userVersion2=130).
+    /// </summary>
+    private static byte[] BuildMinimalNifWithStrings(IReadOnlyList<string> strings)
+    {
+        using var ms = new MemoryStream();
+        using var w  = new BinaryWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+
+        var headerLine = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n");
+        ms.Write(headerLine);
+
+        w.Write(0x14020007u);
+        w.Write((byte)1);
+        w.Write(12u);
+        w.Write(0u);
+        w.Write(130u);
+
+        for (var i = 0; i < 3; i++) w.Write((byte)0);
+
+        w.Write((ushort)0);
+
+        w.Write((uint)strings.Count);
+        var maxLen = strings.Count > 0 ? strings.Max(s => s.Length) : 0;
+        w.Write((uint)maxLen);
+        foreach (var s in strings)
+        {
+            var bytes = System.Text.Encoding.ASCII.GetBytes(s);
+            w.Write((uint)bytes.Length);
+            w.Write(bytes);
+        }
+
+        w.Write(0u);
+
+        return ms.ToArray();
     }
 }
 

@@ -694,6 +694,164 @@ internal static class NifBlockGraphParser
         char.IsLetterOrDigit(value) || value == '_' || value == '-';
 }
 
+/// <summary>
+/// Parses the NIF string table (v20.2.0.7 Skyrim/SSE) to extract skeleton bone names stored
+/// inside the file.  Used to discover custom-skeleton bones beyond the built-in XPMSSE lists,
+/// enabling proper bone-mapping for follower mods, creature rigs, and custom physics skeletons.
+/// </summary>
+internal static class SkeletonNifBoneParser
+{
+    private static readonly byte[] NifHeaderToken =
+        System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
+
+    // ── Public API ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads all strings from the NIF string table and returns those that are plausible
+    /// Skyrim skeleton bone names ("NPC *", "Bip01*", "CME *", "Weapon*", etc.).
+    /// </summary>
+    public static IReadOnlyList<string> ExtractBoneNames(byte[] nifBytes)
+    {
+        if (!TryParseStringTable(nifBytes, out var strings))
+            return [];
+
+        return [.. strings
+            .Where(IsBoneName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static s => s, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Infers a skeleton label from the set of parsed bone names so that
+    /// <see cref="BasicSkeletonMappingService"/> can report a meaningful source skeleton.
+    /// </summary>
+    public static string DetectSkeletonLabel(IReadOnlyList<string> boneNames)
+    {
+        if (boneNames.Count == 0)
+            return "xpmsse-vanilla";
+
+        var hasFemaleSmpBones = boneNames.Any(b =>
+            b.Contains("Breast", StringComparison.OrdinalIgnoreCase) ||
+            b.Contains("Butt",   StringComparison.OrdinalIgnoreCase) ||
+            b.Contains("Belly",  StringComparison.OrdinalIgnoreCase));
+
+        var hasMaleSmpBones = boneNames.Any(b =>
+            b.Contains("Pec", StringComparison.OrdinalIgnoreCase) ||
+            b.Contains("Lat", StringComparison.OrdinalIgnoreCase));
+
+        var hasBip01 = boneNames.Any(b =>
+            b.StartsWith("Bip01", StringComparison.OrdinalIgnoreCase));
+
+        if (hasBip01)
+            return "fo4-biped";
+        if (hasFemaleSmpBones || hasMaleSmpBones)
+            return "xpmsse-physics";
+        return "xpmsse-vanilla";
+    }
+
+    // ── Internal helpers ────────────────────────────────────────────────────────
+
+    private static bool IsBoneName(string s) =>
+        s.Length >= 3 && s.Length <= 64 &&
+        (s.StartsWith("NPC ",     StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("Bip01",    StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("CME ",     StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("Weapon",   StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("Equip",    StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("Camera",   StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("HDT",      StringComparison.OrdinalIgnoreCase) ||
+         s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Locates and reads the NIF header string table.
+    /// Layout (v20.2.0.7, SSE):
+    /// ASCII header line → version(4) → endian(1) → userVer(4) → numBlocks(4) →
+    /// userVer2(4) → exportInfo(3 ShortStrings) → numBlockTypes(uint16) →
+    /// blockTypeNames(ShortString×N) → blockTypeIndices(uint16×numBlocks) →
+    /// blockSizes(uint32×numBlocks) → numStrings(uint32) → maxStringLen(uint32) →
+    /// strings(SizedString×numStrings).
+    /// ShortString = uint8_length + chars; SizedString = uint32_length + chars.
+    /// </summary>
+    internal static bool TryParseStringTable(byte[] bytes, out IReadOnlyList<string> strings)
+    {
+        strings = [];
+        if (bytes.Length < 64) return false;
+
+        var span = bytes.AsSpan();
+        var headerIdx = span.IndexOf(NifHeaderToken);
+        if (headerIdx < 0) return false;
+
+        // Skip past the ASCII header line (ends with '\n').
+        var lineEnd = Array.IndexOf(bytes, (byte)'\n', headerIdx);
+        if (lineEnd < 0) return false;
+        var pos = lineEnd + 1;
+
+        // version(4) + endian(1) + userVersion(4) + numBlocks(4) + userVersion2(4) = 17 bytes
+        if (pos + 17 > bytes.Length) return false;
+        pos += 4; // version bytes
+        pos += 1; // endian
+        pos += 4; // user version
+        var numBlocks = BitConverter.ToUInt32(bytes, pos); pos += 4;
+        pos += 4; // user version 2
+
+        // Skip 3 export-info ShortStrings (uint8 length + chars).
+        for (var i = 0; i < 3; i++)
+        {
+            if (pos >= bytes.Length) return false;
+            pos += 1 + bytes[pos]; // 1 byte for length + that many chars
+        }
+
+        // numBlockTypes (uint16)
+        if (pos + 2 > bytes.Length) return false;
+        var numBlockTypes = BitConverter.ToUInt16(bytes, pos); pos += 2;
+
+        // Skip numBlockTypes ShortStrings.
+        for (var i = 0; i < numBlockTypes; i++)
+        {
+            if (pos >= bytes.Length) return false;
+            pos += 1 + bytes[pos];
+        }
+
+        // Skip per-block type indices (numBlocks × uint16).
+        var skipBytes = (long)numBlocks * 2;
+        if (pos + skipBytes > bytes.Length) return false;
+        pos += (int)skipBytes;
+
+        // Skip per-block sizes (numBlocks × uint32).
+        skipBytes = (long)numBlocks * 4;
+        if (pos + skipBytes > bytes.Length) return false;
+        pos += (int)skipBytes;
+
+        // numStrings + maxStringLen
+        if (pos + 8 > bytes.Length) return false;
+        var numStrings = BitConverter.ToUInt32(bytes, pos); pos += 4;
+        pos += 4; // max string length (skip)
+
+        if (numStrings == 0 || numStrings > 500_000) return false;
+
+        var result = new List<string>((int)Math.Min(numStrings, 4096));
+        for (uint i = 0; i < numStrings; i++)
+        {
+            if (pos + 4 > bytes.Length) break;
+            var strLen = BitConverter.ToUInt32(bytes, pos); pos += 4;
+
+            if (strLen == 0)
+            {
+                result.Add(string.Empty);
+                continue;
+            }
+
+            if (strLen > 4096 || pos + (int)strLen > bytes.Length) break;
+
+            result.Add(System.Text.Encoding.ASCII.GetString(bytes, pos, (int)strLen));
+            pos += (int)strLen;
+        }
+
+        strings = result;
+        return result.Count > 0;
+    }
+}
+
 internal static class VanillaBodySignatureDatabase
 {
     // Typical vertex counts per body type are well-known in the modding community.
@@ -4327,7 +4485,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             ["SOS"]   = MalePhysicsBones
         };
 
-    public Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
         IReadOnlySet<string> targetPhysicsBones;
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
@@ -4349,7 +4507,34 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             ? FeaturePhysicsBones.Concat(MalePhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var allSourceBones = CommonBones.Concat(sourcePhysicsBones).ToList();
+        // Supplement hardcoded bone lists with any custom bones discovered by parsing
+        // skeleton.nif files bundled with the mod.  This handles follower skeletons,
+        // creature rigs, and custom SMP skeletons that add non-standard bones.
+        var parsedSkeletonLabel = armor.PhysicsFiles.Count > 0 ? "xpmsse-physics" : "xpmsse-vanilla";
+        var parsedBones         = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var refFile in armor.BodyReferenceFiles)
+        {
+            if (!refFile.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!Path.GetFileName(refFile).StartsWith("skeleton", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!File.Exists(refFile)) continue;
+            try
+            {
+                var skeletonBytes = await File.ReadAllBytesAsync(refFile, cancellationToken);
+                var bones         = SkeletonNifBoneParser.ExtractBoneNames(skeletonBytes);
+                if (bones.Count > 0)
+                {
+                    parsedBones.UnionWith(bones);
+                    parsedSkeletonLabel = SkeletonNifBoneParser.DetectSkeletonLabel(bones);
+                }
+            }
+            catch (IOException) { /* Skip unreadable skeleton files */ }
+        }
+
+        // Custom bones from the skeleton NIF widen what the target can accept.
+        if (parsedBones.Count > 0)
+            allTargetBones.UnionWith(parsedBones);
+
+        var allSourceBones = CommonBones.Concat(sourcePhysicsBones).Concat(parsedBones).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var mappings = new List<SkeletonBoneMapping>(allSourceBones.Count);
         var unsupportedBones = new List<string>();
@@ -4366,10 +4551,10 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
         }
 
-        var sourceSkeleton = armor.PhysicsFiles.Count > 0 ? "xpmsse-physics" : "xpmsse-vanilla";
+        var sourceSkeleton = parsedSkeletonLabel;
         var targetSkeleton = targetPhysicsBones.Count > 0 ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
 
-        return Task.FromResult(new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones));
+        return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
     }
 }
 
@@ -6944,6 +7129,150 @@ internal static class ConversionReadmeGenerator
     }
 }
 
+/// <summary>
+/// Utilities for reading DDS texture dimensions and deriving physically meaningful
+/// texture maps from existing source textures.
+/// <list type="bullet">
+///   <item>Reads width/height from any DDS (uncompressed or block-compressed).</item>
+///   <item>Derives a roughness map from an existing specular map (luminance inversion).</item>
+///   <item>Derives a parallax/height map from an existing normal map (gradient integration).</item>
+/// </list>
+/// All methods operate on raw DDS byte arrays and handle only BGRA8 uncompressed sources.
+/// Compressed (BC1/BC5/DXT) sources fall back to correctly-sized neutral-colour stubs.
+/// </summary>
+internal static class DdsTextureDerivation
+{
+    private const int DdsHeaderSize   = 128; // 4 magic + 124 DDS_HEADER
+    private const int DwHeightOffset  = 12;  // inside DDS_HEADER, relative to magic start
+    private const int DwWidthOffset   = 16;
+    private const int DwFourCcOffset  = 84;  // dwFourCC inside DDS_PIXELFORMAT
+
+    // FourCC values for compressed formats (stored as little-endian uint32).
+    private const uint FourCcDxt1 = 0x31545844u; // "DXT1"
+    private const uint FourCcDxt5 = 0x35545844u; // "DXT5"
+    private const uint FourCcAti2 = 0x32495441u; // "ATI2" / BC5
+    private const uint FourCcBc7  = 0x20374342u; // "BC7 "
+
+    // ── Public API ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the pixel dimensions from the DDS_HEADER (offsets 12 and 16 from magic).
+    /// Returns <c>false</c> when the byte array is too short or the magic is wrong.
+    /// </summary>
+    public static bool TryReadDimensions(byte[] ddsBytes, out int width, out int height)
+    {
+        width = height = 0;
+        if (ddsBytes.Length < DdsHeaderSize) return false;
+        if (ddsBytes[0] != 0x44 || ddsBytes[1] != 0x44 ||
+            ddsBytes[2] != 0x53 || ddsBytes[3] != 0x20) return false;
+
+        height = (int)BitConverter.ToUInt32(ddsBytes, DwHeightOffset);
+        width  = (int)BitConverter.ToUInt32(ddsBytes, DwWidthOffset);
+        return width > 0 && height > 0 && width <= 16384 && height <= 16384;
+    }
+
+    /// <summary>
+    /// Derives a roughness map from a specular map by inverting the per-pixel luminance.
+    /// Works on BGRA8 uncompressed DDS only; compressed sources return <c>false</c>.
+    /// The operation is: roughness = 1 − luma(specular) where luma = 0.114·B + 0.587·G + 0.299·R.
+    /// </summary>
+    public static bool TryDeriveRoughnessFromSpecular(byte[] specularDds, out byte[] roughnessDds)
+    {
+        roughnessDds = [];
+        if (!TryReadDimensions(specularDds, out var w, out var h)) return false;
+        if (!IsUncompressed(specularDds)) return false;
+
+        int pixelCount = w * h;
+        if (specularDds.Length < DdsHeaderSize + pixelCount * 4) return false;
+
+        // Clone header, then derive pixel data.
+        roughnessDds = new byte[DdsHeaderSize + pixelCount * 4];
+        Buffer.BlockCopy(specularDds, 0, roughnessDds, 0, DdsHeaderSize);
+
+        for (var i = 0; i < pixelCount; i++)
+        {
+            var src = DdsHeaderSize + i * 4;
+            byte b = specularDds[src];
+            byte g = specularDds[src + 1];
+            byte r = specularDds[src + 2];
+            byte a = specularDds[src + 3];
+
+            // Perceived luminance (BT.601 weights).
+            var luma = (byte)Math.Round(0.114 * b + 0.587 * g + 0.299 * r);
+            // Roughness = inverted luminance; alpha preserved.
+            var dst = DdsHeaderSize + i * 4;
+            roughnessDds[dst]     = luma == 0 ? (byte)0xFF : (byte)(255 - luma);
+            roughnessDds[dst + 1] = roughnessDds[dst]; // uniform grey
+            roughnessDds[dst + 2] = roughnessDds[dst];
+            roughnessDds[dst + 3] = a;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Derives a greyscale parallax/height map from a tangent-space normal map
+    /// by integrating the XY gradient (Frankot–Chellappa single-pass approximation):
+    /// height[x,y] ≈ cumulative sum of X-slope across scanlines, normalised to [0,255].
+    /// Works on BGRA8 uncompressed DDS only; compressed sources return <c>false</c>.
+    /// </summary>
+    public static bool TryDeriveHeightFromNormal(byte[] normalDds, out byte[] heightDds)
+    {
+        heightDds = [];
+        if (!TryReadDimensions(normalDds, out var w, out var h)) return false;
+        if (!IsUncompressed(normalDds)) return false;
+
+        int pixelCount = w * h;
+        if (normalDds.Length < DdsHeaderSize + pixelCount * 4) return false;
+
+        // Accumulate the X (red channel after BGRA swap: offset +2) gradient per row.
+        var height = new float[pixelCount];
+        for (var y = 0; y < h; y++)
+        {
+            var rowBase = DdsHeaderSize + y * w * 4;
+            var running = 0f;
+            for (var x = 0; x < w; x++)
+            {
+                // In BGRA8 tangent-space NIF normals: R=X-displacement.
+                // Remap [0,255] → [−1, 1]; slope = (value − 128) / 128.
+                var rByte = normalDds[rowBase + x * 4 + 2];
+                running += (rByte - 128) / 128f;
+                height[y * w + x] = running;
+            }
+        }
+
+        // Normalise to [0,255].
+        var min = height.Min();
+        var max = height.Max();
+        var range = max - min;
+
+        heightDds = new byte[DdsHeaderSize + pixelCount * 4];
+        Buffer.BlockCopy(normalDds, 0, heightDds, 0, DdsHeaderSize);
+
+        for (var i = 0; i < pixelCount; i++)
+        {
+            var val = range > 0f ? (byte)Math.Round((height[i] - min) / range * 255f) : (byte)0x80;
+            var dst = DdsHeaderSize + i * 4;
+            heightDds[dst]     = val;
+            heightDds[dst + 1] = val;
+            heightDds[dst + 2] = val;
+            heightDds[dst + 3] = 0xFF;
+        }
+
+        return true;
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────────
+
+    private static bool IsUncompressed(byte[] ddsBytes)
+    {
+        if (ddsBytes.Length < DdsHeaderSize) return false;
+        var fourCc = BitConverter.ToUInt32(ddsBytes, DwFourCcOffset);
+        // FourCC == 0 means uncompressed (BGRA/RGBA); any known compression code ≠ 0.
+        return fourCc == 0;
+    }
+}
+
 internal sealed class LocalExportService(
     IGroundMeshGeneratorService? groundMeshGen = null,
     IScratchPluginGeneratorService? scratchPluginGen = null) : IExportService
@@ -7570,7 +7899,6 @@ internal sealed class LocalExportService(
 
         var generated = new List<string>();
         var missingSet = new HashSet<string>(textureSummary.MissingNormals, StringComparer.OrdinalIgnoreCase);
-        var stubBytes  = BuildFlatNormalMapDds();
 
         foreach (var texturePath in armor.TextureFiles)
         {
@@ -7593,6 +7921,21 @@ internal sealed class LocalExportService(
 
             if (File.Exists(normalStubPath)) continue;
 
+            // Match the stub dimensions to the source diffuse so normal-map resolution
+            // aligns with the diffuse sheet rather than defaulting to 4×4.
+            byte[] stubBytes;
+            try
+            {
+                var sourceBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
+                stubBytes = DdsTextureDerivation.TryReadDimensions(sourceBytes, out var sw, out var sh)
+                    ? BuildFlatNormalMapDds(sw, sh)
+                    : BuildFlatNormalMapDds();
+            }
+            catch (IOException)
+            {
+                stubBytes = BuildFlatNormalMapDds();
+            }
+
             var dir = Path.GetDirectoryName(normalStubPath);
             if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
 
@@ -7604,14 +7947,15 @@ internal sealed class LocalExportService(
     }
 
     /// <summary>
-    /// Builds a minimal 4×4 uncompressed BGRA8 DDS representing a flat tangent-space
-    /// normal map.  Every pixel stores the vector (0.5, 0.5, 1.0) remapped to bytes
+    /// Builds an uncompressed BGRA8 DDS representing a flat tangent-space normal map.
+    /// Every pixel stores the vector (0.5, 0.5, 1.0) remapped to bytes
     /// (R=0x80, G=0x80, B=0xFF) which points straight outward from the surface.
+    /// When no dimensions are supplied the output is 4×4 (minimal valid stub).
     /// </summary>
-    internal static byte[] BuildFlatNormalMapDds()
+    internal static byte[] BuildFlatNormalMapDds(int width = 4, int height = 4)
     {
-        const int width         = 4;
-        const int height        = 4;
+        width  = Math.Max(1, width);
+        height = Math.Max(1, height);
         const int bytesPerPixel = 4; // BGRA8888
         const int headerBytes   = 128; // 4-byte magic + 124-byte DDS_HEADER
 
@@ -7665,13 +8009,13 @@ internal sealed class LocalExportService(
     }
 
     /// <summary>
-    /// Builds a shared DDS helper: 4×4 uncompressed BGRA8, every pixel the same solid colour.
-    /// Used by the aux-texture stub builders.
+    /// Builds a shared DDS helper: uncompressed BGRA8, every pixel the same solid colour.
+    /// Used by the aux-texture stub builders.  Defaults to 4×4 when no dimensions are given.
     /// </summary>
-    private static byte[] BuildSolidColorDds(byte b, byte g, byte r, byte a)
+    private static byte[] BuildSolidColorDds(byte b, byte g, byte r, byte a, int width = 4, int height = 4)
     {
-        const int width         = 4;
-        const int height        = 4;
+        width  = Math.Max(1, width);
+        height = Math.Max(1, height);
         const int bytesPerPixel = 4;
         const int headerBytes   = 128;
 
@@ -7715,26 +8059,26 @@ internal sealed class LocalExportService(
     /// Neutral specular/roughness mask: mid-grey (0x80) in all channels.
     /// Skyrim interprets R=specular intensity, G=gloss, B=unused. Mid-grey is a safe neutral.
     /// </summary>
-    internal static byte[] BuildSpecularMapDds()
-        => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF);
+    internal static byte[] BuildSpecularMapDds(int width = 4, int height = 4)
+        => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF, width, height);
 
     /// <summary>
     /// Flat parallax/height map: all-black means zero height offset (no displacement).
     /// </summary>
-    internal static byte[] BuildParallaxMapDds()
-        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00);
+    internal static byte[] BuildParallaxMapDds(int width = 4, int height = 4)
+        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00, width, height);
 
     /// <summary>
     /// Empty glow/emissive map: all-black means no self-illumination.
     /// </summary>
-    internal static byte[] BuildGlowMapDds()
-        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00);
+    internal static byte[] BuildGlowMapDds(int width = 4, int height = 4)
+        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0x00, width, height);
 
     /// <summary>
     /// Neutral roughness map: mid-grey roughness value.
     /// </summary>
-    internal static byte[] BuildRoughnessMapDds()
-        => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF);
+    internal static byte[] BuildRoughnessMapDds(int width = 4, int height = 4)
+        => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF, width, height);
 
     /// <summary>
     /// Generates stub DDS files for specular (_s), parallax (_p), glow (_g), and roughness (_r) textures
@@ -7748,9 +8092,9 @@ internal sealed class LocalExportService(
             string outputDirectory,
             CancellationToken cancellationToken)
     {
-        var specGenerated  = new List<string>();
-        var parallaxGenerated = new List<string>();
-        var glowGenerated  = new List<string>();
+        var specGenerated      = new List<string>();
+        var parallaxGenerated  = new List<string>();
+        var glowGenerated      = new List<string>();
         var roughnessGenerated = new List<string>();
 
         var missingSpecularSet  = new HashSet<string>(textureSummary.MissingSpecular  ?? [], StringComparer.OrdinalIgnoreCase);
@@ -7760,11 +8104,6 @@ internal sealed class LocalExportService(
 
         if (missingSpecularSet.Count == 0 && missingParallaxSet.Count == 0 && missingGlowSet.Count == 0 && missingRoughnessSet.Count == 0)
             return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated);
-
-        var specBytes     = BuildSpecularMapDds();
-        var parallaxBytes = BuildParallaxMapDds();
-        var glowBytes     = BuildGlowMapDds();
-        var roughnessBytes = BuildRoughnessMapDds();
 
         foreach (var texturePath in armor.TextureFiles)
         {
@@ -7779,13 +8118,25 @@ internal sealed class LocalExportService(
             var destDir  = Path.GetDirectoryName(destDiffuse) ?? outputDirectory;
             var stemName = Path.GetFileNameWithoutExtension(destDiffuse);
 
+            // Read source dimensions once per diffuse texture so all stubs match it.
+            var w = 4; var h = 4;
+            if (File.Exists(texturePath))
+            {
+                try
+                {
+                    var srcBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
+                    DdsTextureDerivation.TryReadDimensions(srcBytes, out w, out h);
+                }
+                catch (IOException) { w = 4; h = 4; }
+            }
+
             if (missingSpecularSet.Contains(fileName))
             {
                 var stubPath = Path.Combine(destDir, stemName + "_s.dds");
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, specBytes, cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, BuildSpecularMapDds(w, h), cancellationToken);
                     specGenerated.Add(stubPath);
                 }
             }
@@ -7796,7 +8147,21 @@ internal sealed class LocalExportService(
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, parallaxBytes, cancellationToken);
+                    // Attempt to derive height from the normal map if present.
+                    byte[]? derivedParallax = null;
+                    var normalPath = Path.Combine(
+                        Path.GetDirectoryName(texturePath) ?? string.Empty,
+                        Path.GetFileNameWithoutExtension(texturePath) + "_n.dds");
+                    if (File.Exists(normalPath))
+                    {
+                        try
+                        {
+                            var normalBytes = await File.ReadAllBytesAsync(normalPath, cancellationToken);
+                            DdsTextureDerivation.TryDeriveHeightFromNormal(normalBytes, out derivedParallax);
+                        }
+                        catch (IOException) { derivedParallax = null; }
+                    }
+                    await File.WriteAllBytesAsync(stubPath, derivedParallax ?? BuildParallaxMapDds(w, h), cancellationToken);
                     parallaxGenerated.Add(stubPath);
                 }
             }
@@ -7807,7 +8172,7 @@ internal sealed class LocalExportService(
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, glowBytes, cancellationToken);
+                    await File.WriteAllBytesAsync(stubPath, BuildGlowMapDds(w, h), cancellationToken);
                     glowGenerated.Add(stubPath);
                 }
             }
@@ -7818,7 +8183,21 @@ internal sealed class LocalExportService(
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, roughnessBytes, cancellationToken);
+                    // Attempt to derive roughness from specular map if present.
+                    byte[]? derivedRoughness = null;
+                    var specularPath = Path.Combine(
+                        Path.GetDirectoryName(texturePath) ?? string.Empty,
+                        Path.GetFileNameWithoutExtension(texturePath) + "_s.dds");
+                    if (File.Exists(specularPath))
+                    {
+                        try
+                        {
+                            var specBytes = await File.ReadAllBytesAsync(specularPath, cancellationToken);
+                            DdsTextureDerivation.TryDeriveRoughnessFromSpecular(specBytes, out derivedRoughness);
+                        }
+                        catch (IOException) { derivedRoughness = null; }
+                    }
+                    await File.WriteAllBytesAsync(stubPath, derivedRoughness ?? BuildRoughnessMapDds(w, h), cancellationToken);
                     roughnessGenerated.Add(stubPath);
                 }
             }
