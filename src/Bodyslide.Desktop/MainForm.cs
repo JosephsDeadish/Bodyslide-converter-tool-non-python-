@@ -22,6 +22,7 @@ public sealed class MainForm : Form
     private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
     private readonly Button _openPreviewButton;
+    private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
@@ -43,7 +44,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "SlideSmith v0.1";
+        Text = "SlideSmith v1.0";
         Width = 960;
         Height = 760;
         StartPosition = FormStartPosition.CenterScreen;
@@ -313,6 +314,14 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 0, 8, 0),
         };
         _openPreviewButton.Click += async (_, _) => await ShowPreviewReportAsync();
+        _loadResultButton = new Button
+        {
+            Text = "Load result...",
+            Width = 110,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _loadResultButton.Click += async (_, _) => await LoadPreviousResultAsync();
         _openBatchReportButton = new Button
         {
             Text = "Batch report",
@@ -327,6 +336,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_clearLogButton);
         actionRow.Controls.Add(_openOutputButton);
         actionRow.Controls.Add(_openPreviewButton);
+        actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
         layout.Controls.Add(actionRow, 0, 5);
 
@@ -629,6 +639,7 @@ public sealed class MainForm : Form
         _convertButton.Enabled = !isBusy;
         _cancelButton.Enabled = isBusy;
         _clearLogButton.Enabled = !isBusy;
+        _loadResultButton.Enabled = !isBusy;
         _openInputButton.Enabled = !isBusy && InputPathExists();
         _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
@@ -700,6 +711,48 @@ public sealed class MainForm : Form
 
         await LoadPreviewInAppAsync(_lastPreviewPath);
         _resultsTabControl.SelectedTab = _previewTabPage;
+    }
+
+    private async Task LoadPreviousResultAsync()
+    {
+        using var folderDialog = new FolderBrowserDialog
+        {
+            Description = "Select a previous SlideSmith output folder containing preview.html",
+            UseDescriptionForTitle = true,
+        };
+
+        if (folderDialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var selectedFolder = folderDialog.SelectedPath;
+        var previewPath = Path.Combine(selectedFolder, "preview.html");
+
+        if (!File.Exists(previewPath))
+        {
+            MessageBox.Show(
+                this,
+                $"No preview.html was found in the selected folder.{Environment.NewLine}{selectedFolder}",
+                "Load result",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        _lastPreviewPath = previewPath;
+        _lastOutputDirectory = selectedFolder;
+
+        var batchReportCandidate = Path.Combine(selectedFolder, "batch-report.json");
+        if (File.Exists(batchReportCandidate))
+        {
+            _lastBatchReportPath = batchReportCandidate;
+        }
+
+        UpdatePathActionStates();
+        await LoadPreviewInAppAsync(previewPath);
+        _resultsTabControl.SelectedTab = _previewTabPage;
+        AppendLog($"Loaded previous result from: {selectedFolder}");
     }
 
     private async Task LoadPreviewInAppAsync(string? previewPath)

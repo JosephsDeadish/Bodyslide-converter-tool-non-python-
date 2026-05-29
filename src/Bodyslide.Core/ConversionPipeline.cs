@@ -1792,7 +1792,7 @@ public sealed class ConversionOrchestrator(
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
             var outputDirectory = Path.GetFullPath(normalized.Request.OutputDirectory ?? defaultOutput);
             var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
-            var cacheEntries = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
+            var cacheEntries = await ConversionLearningCache.LoadMergedEntriesAsync(cachePath, cancellationToken);
             var cacheKey = ConversionLearningCache.BuildCacheKey(
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown",
                 normalized.Request.TargetBody);
@@ -2885,6 +2885,125 @@ internal sealed record ConversionCacheEntry(
 
 internal static class ConversionLearningCache
 {
+    // Optional override for the global cache path. Null means use the platform default.
+    private static string? _globalCachePathOverride;
+
+    /// <summary>
+    /// Returns the shared global cache path for the current user.
+    /// On Windows: %APPDATA%\SlideSmith\.conversion-learning-cache.json
+    /// On Linux/macOS: ~/.config/slidesmith/.conversion-learning-cache.json
+    /// Returns <see langword="null"/> when no suitable path can be determined.
+    /// </summary>
+    public static string? GetGlobalCachePath()
+    {
+        if (_globalCachePathOverride is not null)
+        {
+            return _globalCachePathOverride;
+        }
+
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var baseDir = string.IsNullOrWhiteSpace(appData)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".config")
+                : appData;
+            return Path.Combine(baseDir, "SlideSmith", ".conversion-learning-cache.json");
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Overrides the global cache path for the lifetime of this process.
+    /// Pass <see langword="null"/> to revert to the platform default.
+    /// </summary>
+    public static void SetGlobalCachePath(string? path) =>
+        _globalCachePathOverride = path;
+
+    /// <summary>
+    /// Loads and merges entries from both the global shared cache and the local
+    /// per-output-directory cache.  When the same key appears in both, the entry
+    /// with the more recent <see cref="ConversionCacheEntry.LastSuccessfulConversion"/>
+    /// timestamp is kept, so the tool learns from all prior conversions across armor packs.
+    /// </summary>
+    public static async Task<List<ConversionCacheEntry>> LoadMergedEntriesAsync(
+        string localCachePath,
+        CancellationToken cancellationToken)
+    {
+        var local = await LoadEntriesAsync(localCachePath, cancellationToken);
+
+        var globalPath = GetGlobalCachePath();
+        if (globalPath is null ||
+            string.Equals(globalPath, localCachePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return local;
+        }
+
+        List<ConversionCacheEntry> global;
+        try
+        {
+            global = await LoadEntriesAsync(globalPath, cancellationToken);
+        }
+        catch (IOException)
+        {
+            return local;
+        }
+
+        // Merge: for the same key keep the most recent entry.
+        var merged = new Dictionary<string, ConversionCacheEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in global.Concat(local))
+        {
+            if (!merged.TryGetValue(entry.Key, out var existing) ||
+                entry.LastSuccessfulConversion > existing.LastSuccessfulConversion)
+            {
+                merged[entry.Key] = entry;
+            }
+        }
+
+        return [.. merged.Values.OrderByDescending(static e => e.LastSuccessfulConversion)];
+    }
+
+    /// <summary>
+    /// Saves <paramref name="entries"/> to both the local per-output-directory cache
+    /// and the global shared cache so future conversions of any armor pack can benefit.
+    /// Global cache write failures are swallowed; local write failures are propagated.
+    /// </summary>
+    public static async Task SaveToGlobalAndLocalAsync(
+        List<ConversionCacheEntry> entries,
+        string localCachePath,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true });
+
+        await File.WriteAllTextAsync(localCachePath, json, cancellationToken);
+
+        var globalPath = GetGlobalCachePath();
+        if (globalPath is null ||
+            string.Equals(globalPath, localCachePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var globalDir = Path.GetDirectoryName(globalPath);
+            if (!string.IsNullOrWhiteSpace(globalDir))
+            {
+                Directory.CreateDirectory(globalDir);
+            }
+
+            await File.WriteAllTextAsync(globalPath, json, cancellationToken);
+        }
+        catch (IOException)
+        {
+            // Global cache write failure is non-fatal.
+        }
+    }
+
     public static async Task<List<ConversionCacheEntry>> LoadEntriesAsync(string cachePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(cachePath))
@@ -2898,7 +3017,14 @@ internal static class ConversionLearningCache
             return [];
         }
 
-        return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     public static string BuildCacheKey(string meshFileNameWithoutExtension, string targetBody)
@@ -7123,7 +7249,7 @@ internal sealed class LocalExportService(
         outputFiles.Add(readmePath);
 
         var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
-        var cache = await ConversionLearningCache.LoadEntriesAsync(cachePath, cancellationToken);
+        var cache = await ConversionLearningCache.LoadMergedEntriesAsync(cachePath, cancellationToken);
         var cacheKey = ConversionLearningCache.BuildCacheKey(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown", request.TargetBody);
         cache.RemoveAll(entry => string.Equals(entry.Key, cacheKey, StringComparison.OrdinalIgnoreCase));
         cache.Add(new ConversionCacheEntry(
@@ -7135,7 +7261,7 @@ internal sealed class LocalExportService(
             mesh.RegionalMorphing,
             clipping.HasClipping,
             correction.Method));
-        await File.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        await ConversionLearningCache.SaveToGlobalAndLocalAsync(cache, cachePath, cancellationToken);
         outputFiles.Add(cachePath);
 
         if (request.OutputZip)

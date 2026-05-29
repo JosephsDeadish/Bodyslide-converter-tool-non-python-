@@ -39,18 +39,18 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
-if (!TryParseRequest(args, out var request, out var error))
+if (!TryParseRequest(args, out var request, out var error, out var cachePath))
 {
     if (!string.IsNullOrEmpty(error))
     {
         Console.WriteLine(error);
     }
 
-    Console.WriteLine("SlideSmith v0.1 — Bodyslide Armor Converter");
+    Console.WriteLine("SlideSmith v1.0 — Bodyslide Armor Converter");
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
@@ -63,6 +63,12 @@ if (!TryParseRequest(args, out var request, out var error))
     }
 
     return;
+}
+
+// Apply global cache path override before running any conversion.
+if (!string.IsNullOrWhiteSpace(cachePath))
+{
+    ConversionLearningCache.SetGlobalCachePath(cachePath);
 }
 
 try
@@ -93,10 +99,11 @@ catch (Exception ex)
     Environment.ExitCode = 1;
 }
 
-static bool TryParseRequest(string[] args, out ConversionRequest request, out string error)
+static bool TryParseRequest(string[] args, out ConversionRequest request, out string error, out string? cachePath)
 {
     request = default!;
     error = string.Empty;
+    cachePath = null;
 
     if (args.Length >= 2 && !args[0].StartsWith("--", StringComparison.Ordinal))
     {
@@ -113,6 +120,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("profile", out var profile);
     parsed.TryGetValue("source", out var source);
     parsed.TryGetValue("targets", out var targetsValue);
+    parsed.TryGetValue("cache-path", out cachePath);
     var outputZip = parsed.ContainsKey("output-zip");
     var selectedTargets = CombineSelections(target, ParseDelimitedValues(targetsValue));
     var selectedPresets = CombineSelections(preset, ParseDelimitedValues(presetsValue));

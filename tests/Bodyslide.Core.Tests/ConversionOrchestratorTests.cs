@@ -368,6 +368,162 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ConversionLearningCache_GetGlobalCachePath_ReturnsSlideSmithSubfolder()
+    {
+        // Reset any process-level override so we test the real platform default.
+        ConversionLearningCache.SetGlobalCachePath(null);
+
+        var globalPath = ConversionLearningCache.GetGlobalCachePath();
+
+        // On all CI platforms (Windows, Linux, macOS) a path should be returned.
+        Assert.NotNull(globalPath);
+        Assert.EndsWith(".conversion-learning-cache.json", globalPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SlideSmith", globalPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConversionLearningCache_LoadMergedEntries_MergesGlobalAndLocal()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var globalPath = Path.Combine(tmpDir, "global-cache.json");
+        var localPath = Path.Combine(tmpDir, "local-cache.json");
+
+        var now = DateTimeOffset.UtcNow;
+        var globalEntry = new ConversionCacheEntry(
+            Key: "cuirass:3ba",
+            LastSuccessfulConversion: now.AddHours(-2),
+            TargetBody: "3BA",
+            MeshType: "Cuirass",
+            Strategy: "cage",
+            RegionalMorphing: new Dictionary<string, double> { ["Bust"] = 0.5 },
+            HadClipping: false,
+            CorrectionMethod: "none");
+        var localEntry = new ConversionCacheEntry(
+            Key: "boots:3ba",
+            LastSuccessfulConversion: now.AddHours(-1),
+            TargetBody: "3BA",
+            MeshType: "Boots",
+            Strategy: "cage",
+            RegionalMorphing: new Dictionary<string, double> { ["Legs"] = 0.3 },
+            HadClipping: false,
+            CorrectionMethod: "none");
+
+        await File.WriteAllTextAsync(
+            globalPath,
+            System.Text.Json.JsonSerializer.Serialize(new[] { globalEntry }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(
+            localPath,
+            System.Text.Json.JsonSerializer.Serialize(new[] { localEntry }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        ConversionLearningCache.SetGlobalCachePath(globalPath);
+        try
+        {
+            var merged = await ConversionLearningCache.LoadMergedEntriesAsync(localPath, CancellationToken.None);
+
+            Assert.Equal(2, merged.Count);
+            Assert.Contains(merged, e => e.Key.Equals("cuirass:3ba", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(merged, e => e.Key.Equals("boots:3ba", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            ConversionLearningCache.SetGlobalCachePath(null);
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConversionLearningCache_LoadMergedEntries_PrefersMoreRecentEntry()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var globalPath = Path.Combine(tmpDir, "global-cache.json");
+        var localPath = Path.Combine(tmpDir, "local-cache.json");
+
+        var now = DateTimeOffset.UtcNow;
+        var olderEntry = new ConversionCacheEntry(
+            Key: "cuirass:3ba",
+            LastSuccessfulConversion: now.AddHours(-5),
+            TargetBody: "3BA",
+            MeshType: "Cuirass",
+            Strategy: "cage",
+            RegionalMorphing: new Dictionary<string, double> { ["Bust"] = 0.2 },
+            HadClipping: false,
+            CorrectionMethod: "none");
+        var newerEntry = new ConversionCacheEntry(
+            Key: "cuirass:3ba",
+            LastSuccessfulConversion: now.AddHours(-1),
+            TargetBody: "3BA",
+            MeshType: "Cuirass",
+            Strategy: "cage",
+            RegionalMorphing: new Dictionary<string, double> { ["Bust"] = 0.9 },
+            HadClipping: false,
+            CorrectionMethod: "none");
+
+        await File.WriteAllTextAsync(
+            globalPath,
+            System.Text.Json.JsonSerializer.Serialize(new[] { olderEntry }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(
+            localPath,
+            System.Text.Json.JsonSerializer.Serialize(new[] { newerEntry }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        ConversionLearningCache.SetGlobalCachePath(globalPath);
+        try
+        {
+            var merged = await ConversionLearningCache.LoadMergedEntriesAsync(localPath, CancellationToken.None);
+
+            Assert.Single(merged);
+            // The newer local entry (Bust=0.9) wins over the older global entry (Bust=0.2).
+            Assert.Equal(0.9, merged[0].RegionalMorphing["Bust"], precision: 5);
+        }
+        finally
+        {
+            ConversionLearningCache.SetGlobalCachePath(null);
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithGlobalCachePreloaded_HitsGlobalCache()
+    {
+        var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDir = Path.Combine(workDir, "input");
+        var outputDir1 = Path.Combine(workDir, "output1");
+        var outputDir2 = Path.Combine(workDir, "output2");
+        var globalCacheDir = Path.Combine(workDir, "globalcache");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir1);
+        Directory.CreateDirectory(outputDir2);
+        Directory.CreateDirectory(globalCacheDir);
+
+        var globalCachePath = Path.Combine(globalCacheDir, ".conversion-learning-cache.json");
+        ConversionLearningCache.SetGlobalCachePath(globalCachePath);
+        var inputFile = Path.Combine(inputDir, "cuirass_3ba.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+
+            // First conversion populates the global cache.
+            var firstResult = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDir1));
+            Assert.True(firstResult.Success);
+            Assert.True(File.Exists(globalCachePath), "Global cache file should be written after first conversion.");
+
+            // Second conversion uses a fresh local output dir — global cache hit should still occur.
+            var secondResult = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDir2));
+            Assert.True(secondResult.Success);
+            Assert.Contains(secondResult.Steps, s => s.StartsWith("learning-cache:hit=", StringComparison.Ordinal));
+            Assert.Contains(secondResult.Steps, s => s.Equals("learning-cache:reused", StringComparison.Ordinal));
+        }
+        finally
+        {
+            ConversionLearningCache.SetGlobalCachePath(null);
+            Directory.Delete(workDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesDependencyMap()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6948,9 +7104,9 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Single(records);
         Assert.NotNull(records[0].KeywordFormIds);
         Assert.Equal(3, records[0].KeywordFormIds!.Count);
-        Assert.Equal(0xAABBCCDDu, records[0].KeywordFormIds[0]);
-        Assert.Equal(0x11223344u, records[0].KeywordFormIds[1]);
-        Assert.Equal(0xDEADBEEFu, records[0].KeywordFormIds[2]);
+        Assert.Equal(0xAABBCCDDu, records[0].KeywordFormIds![0]);
+        Assert.Equal(0x11223344u, records[0].KeywordFormIds![1]);
+        Assert.Equal(0xDEADBEEFu, records[0].KeywordFormIds![2]);
     }
 
     [Fact]
