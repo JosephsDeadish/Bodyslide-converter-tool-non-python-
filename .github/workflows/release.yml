@@ -29,11 +29,39 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
-      - name: Publish Windows exe
-        run: dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --output artifacts/win-x64
+      - name: Publish Windows desktop app (single file)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64
 
-      - name: Create GitHub Release and upload exe
+      - name: Publish Windows standalone CLI (single file)
+        run: >
+          dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-cli
+
+      - name: Rename CLI exe
+        run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
+
+      - name: Create GitHub Release and upload executables
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/win-x64/SlideSmith.exe
           generate_release_notes: true
+          files: |
+            artifacts/win-x64/SlideSmith.exe
+            artifacts/win-x64-cli/SlideSmith-CLI.exe

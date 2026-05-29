@@ -95,19 +95,30 @@ dotnet run --project src/Bodyslide.Standalone -- --export-cache --cache-path "D:
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "MyFollowerBody"
 ```
 
-## GitHub Actions (automatic build)
+## Downloading pre-built executables
+
+**The easiest way to get SlideSmith is from the [GitHub Releases page](../../releases):**
+
+| File | Platform | What it is |
+|---|---|---|
+| `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
+| `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
+| `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
+
+Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
+
+## GitHub Actions (CI)
 
 This repository includes `.github/workflows/build.yml`, which runs automatically on pushes to `main`/`master` and on pull requests.
 
 What it does:
-- **Every push/PR:** restore, build, test, build a Linux executable package, zip it, and upload it as an Actions artifact.
-- **Push to `main`/`master` (post-merge):** build Windows desktop executable package, zip it, and upload as an Actions artifact.
-- **Pull requests:** build Windows desktop executable package, zip it, and upload as an Actions artifact for testing.
-- Each artifact now includes `README-FIRST.txt` with exact run steps and a short explanation of required runtime support files.
+- **Every push/PR:** restore, build, test, publish a single-file Linux CLI binary, and upload it as a temporary Actions artifact.
+- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach `SlideSmith.exe` and `SlideSmith-CLI.exe` directly.
+- **Pull requests:** publish Windows desktop app, zip just the `.exe`, upload as a temporary PR artifact.
 
-These are CI build artifacts only (download from the Actions run page). No GitHub Release publishing is performed by this workflow.
+All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
 
-If the app seems to "do nothing", run it from a terminal with `--help` first. The standalone Linux binary expects CLI arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
+If the app seems to "do nothing", run it from a terminal with `--help` first. The CLI expects arguments (`--input`, `--target`/`--preset`, optional `--output`) and prints usage when required arguments are missing.
 
 ## Deformation profiles
 
