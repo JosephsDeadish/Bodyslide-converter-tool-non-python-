@@ -11,7 +11,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - weight transfer + skeleton bone mapping (source → target, unsupported bone detection)
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
-- clipping detection + auto-correction pass
+- clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
 - physics profile generation (CBPC + SMP XML config file output)
 - physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations

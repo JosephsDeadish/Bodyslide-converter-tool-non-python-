@@ -4799,6 +4799,26 @@ public sealed class PoseSimulationAndPreviewTests
         }
     }
 
+    [Fact]
+    public async Task PoseSimulation_ArmShoulderRisk_AlsoFlagsArmpits()
+    {
+        var service = new AnimationDrivenPoseSimulationService();
+        var mesh = new ConvertedMesh(
+            "mixed",
+            "test",
+            1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["arms"] = 1.25,
+                ["shoulders"] = 1.20
+            });
+
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.Contains(result.HighRiskRegions, region => string.Equals(region, "armpits", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.PoseClippingRisk.Values.SelectMany(static regions => regions), region => string.Equals(region, "armpits", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ── preview.html output ───────────────────────────────────────────────────
 
     [Fact]

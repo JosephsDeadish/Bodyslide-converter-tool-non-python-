@@ -10510,7 +10510,18 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
 
             if (atRiskRegions.Count > 0)
             {
+                if (atRiskRegions.Any(static region =>
+                        string.Equals(region, "arms", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(region, "shoulders", StringComparison.OrdinalIgnoreCase)))
+                {
+                    atRiskRegions.Add("armpits");
+                    highRiskSet.Add("armpits");
+                }
+
                 atRiskRegions.Sort(StringComparer.OrdinalIgnoreCase);
+                atRiskRegions = atRiskRegions
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 poseClippingRisk[pose] = atRiskRegions;
                 atRiskPoseCount++;
             }
@@ -10928,10 +10939,26 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             ((List<string>)existing).Add(region);
         }
 
+        if (highRiskSet.Contains("arms") || highRiskSet.Contains("shoulders"))
+        {
+            highRiskSet.Add("armpits");
+
+            if (!poseClippingRisk.TryGetValue("Combat-Idle", out var existing))
+            {
+                existing = new List<string>();
+                poseClippingRisk["Combat-Idle"] = existing;
+            }
+
+            ((List<string>)existing).Add("armpits");
+        }
+
         // Sort each pose's at-risk list
         foreach (var key in poseClippingRisk.Keys.ToList())
         {
             ((List<string>)poseClippingRisk[key]).Sort(StringComparer.OrdinalIgnoreCase);
+            poseClippingRisk[key] = ((List<string>)poseClippingRisk[key])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         return new PoseSimulationResult(
@@ -10946,7 +10973,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         {
             "thighs" or "calves" or "butt" or "pelvis" => "Crouch",
             "chest" or "breasts"                        => "Combat-Idle",
-            "shoulders"                                 => "Combat-Idle",
+            "shoulders" or "armpits"                    => "Combat-Idle",
             "arms"                                      => "Run",
             "belly" or "waist"                          => "Sneak",
             _                                           => "Run",
@@ -10977,7 +11004,18 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
 
             if (atRiskRegions.Count > 0)
             {
+                if (atRiskRegions.Any(static region =>
+                        string.Equals(region, "arms", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(region, "shoulders", StringComparison.OrdinalIgnoreCase)))
+                {
+                    atRiskRegions.Add("armpits");
+                    highRiskSet.Add("armpits");
+                }
+
                 atRiskRegions.Sort(StringComparer.OrdinalIgnoreCase);
+                atRiskRegions = atRiskRegions
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 poseClippingRisk[pose] = atRiskRegions;
                 atRiskPoseCount++;
             }
