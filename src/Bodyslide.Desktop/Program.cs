@@ -35,10 +35,91 @@ internal static class Program
 
     private static void ShowFatalError(Exception ex)
     {
-        MessageBox.Show(
-            $"SlideSmith encountered a fatal error and could not start:\n\n{ex.Message}\n\n{ex.GetType().FullName}\n\nIf this keeps happening, please report it on GitHub.",
-            "SlideSmith — Fatal Error",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error);
+        var crashDetails = BuildCrashDetails(ex);
+        using var dialog = new Form
+        {
+            Text = "SlideSmith — Fatal Error",
+            Width = 760,
+            Height = 460,
+            StartPosition = FormStartPosition.CenterScreen,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = true
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3,
+            Padding = new Padding(10),
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        dialog.Controls.Add(layout);
+
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "SlideSmith encountered a fatal error and could not start.\nYou can copy the details below for bug reports.",
+        }, 0, 0);
+
+        var detailsTextBox = new TextBox
+        {
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Both,
+            WordWrap = false,
+            Dock = DockStyle.Fill,
+            Font = new Font("Consolas", 9f),
+            Text = crashDetails
+        };
+        layout.Controls.Add(detailsTextBox, 0, 1);
+
+        var actions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+        };
+        var closeButton = new Button
+        {
+            Text = "Close",
+            AutoSize = true,
+            DialogResult = DialogResult.OK,
+        };
+        var copyButton = new Button
+        {
+            Text = "Copy crash details",
+            AutoSize = true,
+        };
+        copyButton.Click += (_, _) =>
+        {
+            try
+            {
+                Clipboard.SetText(crashDetails);
+            }
+            catch
+            {
+            }
+        };
+        actions.Controls.Add(closeButton);
+        actions.Controls.Add(copyButton);
+        layout.Controls.Add(actions, 0, 2);
+
+        dialog.AcceptButton = closeButton;
+        dialog.CancelButton = closeButton;
+        dialog.ShowDialog();
+    }
+
+    private static string BuildCrashDetails(Exception ex)
+    {
+        return
+            $"Message: {ex.Message}{Environment.NewLine}" +
+            $"Type: {ex.GetType().FullName}{Environment.NewLine}" +
+            $"Timestamp (UTC): {DateTime.UtcNow:O}{Environment.NewLine}{Environment.NewLine}" +
+            $"Stack Trace:{Environment.NewLine}{ex}";
     }
 }

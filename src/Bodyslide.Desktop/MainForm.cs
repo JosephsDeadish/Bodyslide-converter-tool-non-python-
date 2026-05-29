@@ -188,10 +188,6 @@ public sealed class MainForm : Form
         }
 
         _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
-        if (_presetComboBox.Items.Count > 0)
-        {
-            _presetComboBox.SelectedIndex = 0;
-        }
         leftOptions.Controls.Add(_presetComboBox, 1, 0);
         leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetBatchTextBox = new TextBox
@@ -244,6 +240,10 @@ public sealed class MainForm : Form
             AutoSize = true,
         };
         leftOptions.Controls.Add(_presetDetailsLabel, 1, 5);
+        if (_presetComboBox.Items.Count > 0)
+        {
+            _presetComboBox.SelectedIndex = 0;
+        }
         conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
 
         var rightOptions = new TableLayoutPanel
