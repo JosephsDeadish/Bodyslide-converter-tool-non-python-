@@ -90,6 +90,18 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
+{
+    Console.WriteLine("Available physics profiles:");
+    foreach (var profile in PhysicsProfileCatalog.All)
+    {
+        Console.WriteLine($" - {profile}");
+    }
+    Console.WriteLine(" - auto  => use preset/custom/default target-body physics");
+
+    return;
+}
+
 if (args.Contains("--help", StringComparer.OrdinalIgnoreCase)
     || args.Contains("-h", StringComparer.OrdinalIgnoreCase))
 {
@@ -180,9 +192,27 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("source", out var source);
     parsed.TryGetValue("targets", out var targetsValue);
     parsed.TryGetValue("cache-path", out cachePath);
+    parsed.TryGetValue("physics", out var physicsOverride);
+    parsed.TryGetValue("build-sliders", out var buildSlidersValue);
     var outputZip = parsed.ContainsKey("output-zip");
     var selectedTargets = CombineSelections(target, ParseDelimitedValues(targetsValue));
     var selectedPresets = CombineSelections(preset, ParseDelimitedValues(presetsValue));
+    var normalizedPhysicsOverride = string.Empty;
+    if (!string.IsNullOrWhiteSpace(physicsOverride) &&
+        !string.Equals(physicsOverride, "auto", StringComparison.OrdinalIgnoreCase) &&
+        !PhysicsProfileCatalog.TryNormalize(physicsOverride, out normalizedPhysicsOverride))
+    {
+        error = $"Unknown --physics value '{physicsOverride}'. Use --list-physics to view available profiles.";
+        return false;
+    }
+
+    var generateBodySlideFiles = true;
+    if (parsed.ContainsKey("build-sliders") &&
+        !TryParseBooleanOption(buildSlidersValue, out generateBodySlideFiles))
+    {
+        error = $"Invalid --build-sliders value '{buildSlidersValue}'. Use true/false, yes/no, on/off, or 1/0.";
+        return false;
+    }
 
     if (string.IsNullOrWhiteSpace(input))
     {
@@ -205,7 +235,9 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         DeformationProfile: profile,
         SourceBodyOverride: source,
         TargetBodies: selectedTargets.Count > 1 ? selectedTargets : null,
-        Presets: selectedPresets.Count > 1 ? selectedPresets : null);
+        Presets: selectedPresets.Count > 1 ? selectedPresets : null,
+        PhysicsProfileOverride: string.IsNullOrWhiteSpace(normalizedPhysicsOverride) ? null : normalizedPhysicsOverride,
+        GenerateBodySlideFiles: generateBodySlideFiles);
 
     return true;
 }
@@ -268,6 +300,33 @@ static IReadOnlyList<string> CombineSelections(string? singleValue, IReadOnlyLis
         .ToArray();
 }
 
+static bool TryParseBooleanOption(string? value, out bool parsed)
+{
+    parsed = true;
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    switch (value.Trim().ToLowerInvariant())
+    {
+        case "true":
+        case "yes":
+        case "on":
+        case "1":
+            parsed = true;
+            return true;
+        case "false":
+        case "no":
+        case "off":
+        case "0":
+            parsed = false;
+            return true;
+        default:
+            return false;
+    }
+}
+
 static void PauseBeforeExit()
 {
     Console.WriteLine();
@@ -281,10 +340,11 @@ static void WriteUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--build-sliders <true|false>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
+    Console.WriteLine("  SlideSmith --list-physics");
     Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --help");
     Console.WriteLine();

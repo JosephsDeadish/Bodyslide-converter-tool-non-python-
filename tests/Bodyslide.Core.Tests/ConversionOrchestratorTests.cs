@@ -1104,6 +1104,35 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_WithBuildSlidersDisabled_SkipsBodySlideOutputFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "travelclothes.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputFile,
+                "3BA",
+                outputDirectory,
+                GenerateBodySlideFiles: false));
+
+            Assert.True(result.Success);
+            Assert.Contains("bodyslide-export:disabled", result.Steps);
+            Assert.False(Directory.Exists(Path.Combine(outputDirectory, "CalienteTools", "BodySlide")));
+            Assert.DoesNotContain(result.OutputFiles, file => file.Contains($"{Path.DirectorySeparatorChar}CalienteTools{Path.DirectorySeparatorChar}BodySlide{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("curvy", 1.15)]
     [InlineData("slim", 0.82)]
@@ -3273,6 +3302,61 @@ public sealed class PhysicsXmlTests
 
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithDirectCbbeTarget_UsesBodyDefaultPhysicsProfile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "simpledress.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains("physics:none", result.Steps);
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithPhysicsOverride_WritesOnlyRequestedPhysicsFiles()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "overridephysics.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputFile,
+                "CBBE",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+
+            Assert.True(result.Success);
+            Assert.Contains("physics-override:smp", result.Steps);
+            Assert.Contains("physics:smp", result.Steps);
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
         }
         finally

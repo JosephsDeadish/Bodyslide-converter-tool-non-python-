@@ -20,7 +20,9 @@ public sealed record ConversionRequest(
     string? DeformationProfile = null,
     string? SourceBodyOverride = null,
     IReadOnlyList<string>? TargetBodies = null,
-    IReadOnlyList<string>? Presets = null);
+    IReadOnlyList<string>? Presets = null,
+    string? PhysicsProfileOverride = null,
+    bool GenerateBodySlideFiles = true);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -356,6 +358,53 @@ public static class PresetCatalog
         Presets.TryGetValue(presetName, out preset!);
 }
 
+public static class PhysicsProfileCatalog
+{
+    private static readonly IReadOnlyDictionary<string, string> BuiltInDefaults =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["3BA"] = "smp+cbpc",
+            ["BHUNP"] = "smp+cbpc",
+            ["UNP"] = "cbpc",
+            ["TBD"] = "cbpc",
+            ["HIMBO"] = "smp",
+            ["SAM"] = "smp",
+            ["SOS"] = "smp",
+            ["CBBE"] = "none",
+            ["UBE"] = "none",
+            ["Vanilla"] = "none",
+        };
+
+    public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc"];
+
+    public static bool TryNormalize(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var candidate = value.Trim().ToLowerInvariant();
+        normalized = candidate switch
+        {
+            "none" => "none",
+            "cbpc" => "cbpc",
+            "smp" => "smp",
+            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp" => "smp+cbpc",
+            _ => string.Empty
+        };
+
+        return normalized.Length > 0;
+    }
+
+    public static string GetDefaultForTargetBody(string? targetBody) =>
+        !string.IsNullOrWhiteSpace(targetBody) &&
+        BuiltInDefaults.TryGetValue(targetBody.Trim(), out var profile)
+            ? profile
+            : "none";
+}
+
 public static class RequestNormalizer
 {
     private static readonly string[] AllTargetAliases = ["all", "any", "*"];
@@ -384,7 +433,7 @@ public static class RequestNormalizer
         {
             var normalized = Normalize(candidate);
             var outputSegment = MakeSafePathSegment(displayName);
-            var key = $"{normalized.Request.TargetBody}|{normalized.Request.Preset}|{normalized.Request.DeformationProfile}|{outputSegment}";
+            var key = $"{normalized.Request.TargetBody}|{normalized.Request.Preset}|{normalized.Request.DeformationProfile}|{normalized.Request.PhysicsProfileOverride}|{normalized.Request.GenerateBodySlideFiles}|{outputSegment}";
             if (!seen.Add(key))
             {
                 return;
@@ -2254,15 +2303,20 @@ public sealed class ConversionOrchestrator(
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
 
-            var physicsProfile = normalized.Preset?.PhysicsProfile
-                ?? (CustomBodyProfileSupport.TryGetProfile(armor, normalized.Request.TargetBody, out var customTargetProfile)
-                    ? customTargetProfile.PhysicsProfile ?? "none"
-                    : "smp+cbpc");
+            var physicsProfile = ResolvePhysicsProfile(normalized.Request, armor, normalized.Preset);
+            if (!string.IsNullOrWhiteSpace(normalized.Request.PhysicsProfileOverride))
+            {
+                steps.Add($"physics-override:{physicsProfile}");
+            }
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
             steps.Add($"physics:{physics.Profile}");
 
             var bodySlideProject = await bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
+            if (!normalized.Request.GenerateBodySlideFiles)
+            {
+                steps.Add("bodyslide-export:disabled");
+            }
 
             var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
@@ -2291,6 +2345,27 @@ public sealed class ConversionOrchestrator(
             [48] = "Dragon Tail", [49] = "Dragon Leg", [50] = "Dragon Claws",
             [54] = "DecapHead",  [55] = "Decap",     [56] = "Genitals"
         };
+
+    private static string ResolvePhysicsProfile(ConversionRequest request, ImportedArmor armor, ConversionPreset? preset)
+    {
+        if (PhysicsProfileCatalog.TryNormalize(request.PhysicsProfileOverride, out var overrideProfile))
+        {
+            return overrideProfile;
+        }
+
+        if (preset is not null && PhysicsProfileCatalog.TryNormalize(preset.PhysicsProfile, out var presetProfile))
+        {
+            return presetProfile;
+        }
+
+        if (CustomBodyProfileSupport.TryGetProfile(armor, request.TargetBody, out var customTargetProfile) &&
+            PhysicsProfileCatalog.TryNormalize(customTargetProfile.PhysicsProfile, out var customProfile))
+        {
+            return customProfile;
+        }
+
+        return PhysicsProfileCatalog.GetDefaultForTargetBody(request.TargetBody);
+    }
 }
 
 public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
@@ -7589,50 +7664,53 @@ internal sealed class LocalExportService(
             outputFiles.Add(smpPath);
         }
 
-        // Write the BodySlide project .osp file to the canonical SliderSets folder so BodySlide
-        // and mod managers pick it up automatically from Data\CalienteTools\BodySlide\SliderSets\.
-        var ospDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
-        Directory.CreateDirectory(ospDirectory);
-        var ospPath = Path.Combine(ospDirectory, $"{bodySlideProject.ProjectName}.osp");
-        await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
-        outputFiles.Add(ospPath);
-
-        // BSD slider data, TRI morph files, and the BodySlide source-shape NIF all belong under
-        // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
-        // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
-        // acts as the base reference shape displayed inside BodySlide.
-        var morphVertexCount = EstimateMorphVertexCount(writtenNifs, request.TargetBody);
-        var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
-        Directory.CreateDirectory(shapeDataDirectory);
-
-        // Stage source-shape NIF into ShapeData so BodySlide can display the base mesh.
-        var shapeDataNifPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.nif");
-        if (writtenNifs.Count > 0)
+        if (request.GenerateBodySlideFiles)
         {
-            await CopyFileAsync(writtenNifs[0], shapeDataNifPath, cancellationToken);
-            outputFiles.Add(shapeDataNifPath);
-        }
+            // Write the BodySlide project .osp file to the canonical SliderSets folder so BodySlide
+            // and mod managers pick it up automatically from Data\CalienteTools\BodySlide\SliderSets\.
+            var ospDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(ospDirectory);
+            var ospPath = Path.Combine(ospDirectory, $"{bodySlideProject.ProjectName}.osp");
+            await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
+            outputFiles.Add(ospPath);
 
-        // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
-        // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
-        foreach (var slider in bodySlideProject.Sliders)
-        {
-            var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
-            var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
-            await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-            await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
-            outputFiles.Add(lowBsdPath);
-            outputFiles.Add(highBsdPath);
-        }
+            // BSD slider data, TRI morph files, and the BodySlide source-shape NIF all belong under
+            // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
+            // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
+            // acts as the base reference shape displayed inside BodySlide.
+            var morphVertexCount = EstimateMorphVertexCount(writtenNifs, request.TargetBody);
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
+            Directory.CreateDirectory(shapeDataDirectory);
 
-        // Write TRI morph files (.tri) alongside the BSD files in ShapeData.
-        // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
-        var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
-        var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
-        await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-        await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
-        outputFiles.Add(triLowPath);
-        outputFiles.Add(triHighPath);
+            // Stage source-shape NIF into ShapeData so BodySlide can display the base mesh.
+            var shapeDataNifPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.nif");
+            if (writtenNifs.Count > 0)
+            {
+                await CopyFileAsync(writtenNifs[0], shapeDataNifPath, cancellationToken);
+                outputFiles.Add(shapeDataNifPath);
+            }
+
+            // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
+            // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
+            foreach (var slider in bodySlideProject.Sliders)
+            {
+                var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
+                var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
+                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
+                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+                outputFiles.Add(lowBsdPath);
+                outputFiles.Add(highBsdPath);
+            }
+
+            // Write TRI morph files (.tri) alongside the BSD files in ShapeData.
+            // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
+            var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
+            var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
+            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
+            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+            outputFiles.Add(triLowPath);
+            outputFiles.Add(triHighPath);
+        }
 
         // Write plugin patch guidance + rewrite instructions when plugins were found.
         bool patchEspGenerated = false;

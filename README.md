@@ -13,10 +13,11 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass
 - physics profile generation (CBPC + SMP XML config file output)
+- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
-- **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor
+- **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
 - export package + manifest/log output
@@ -42,7 +43,8 @@ dotnet run --project src/Bodyslide.Desktop
 
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
-# optional profile/source override, optional output zip, cancel in-progress conversion, open output folder,
+# optional profile/source/physics override, optional BodySlide export toggle, optional output zip,
+# cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
 # any previous output folder's preview, and quick-open batch reports when available
 
@@ -67,6 +69,12 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --preset
 # apply a deformation profile (overrides the preset's built-in profile)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --profile curvy
 
+# override the auto-selected physics profile
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --physics none
+
+# skip BodySlide slider/project export for a lighter output package
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "3BA" --build-sliders false
+
 # override the auto-detected source body type
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --source "UNP" --target "3BA"
 
@@ -84,6 +92,9 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 # show supported body types with detection tokens and vertex-count hints
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
+
+# show available physics profiles
+dotnet run --project src/Bodyslide.Standalone -- --list-physics
 
 # inspect the learning cache — prints all cached entries with target body, mesh type, strategy, and regional morphs
 dotnet run --project src/Bodyslide.Standalone -- --export-cache
@@ -166,21 +177,21 @@ output/
   CalienteTools/
     BodySlide/
       SliderSets/
-        <ArmorName>.osp          ← BodySlide slider-set project
+        <ArmorName>.osp          ← BodySlide slider-set project (when slider export is enabled)
       ShapeData/<ArmorName>/
-        <ArmorName>.nif          ← BodySlide source-shape reference mesh
-        <Slider>.bsd             ← low-weight slider morph (one per slider)
-        <Slider>_1.bsd           ← high-weight slider morph (one per slider)
-        <ArmorName>.tri          ← low-weight TRI morph for RaceMenu
-        <ArmorName>_1.tri        ← high-weight TRI morph
+        <ArmorName>.nif          ← BodySlide source-shape reference mesh (when enabled)
+        <Slider>.bsd             ← low-weight slider morph (one per slider, when enabled)
+        <Slider>_1.bsd           ← high-weight slider morph (one per slider, when enabled)
+        <ArmorName>.tri          ← low-weight TRI morph for RaceMenu (when enabled)
+        <ArmorName>_1.tri        ← high-weight TRI morph (when enabled)
   textures/...                   ← source textures (preserved relative paths)
   <PluginName>_patched.esp       ← full-copy patched plugin (if source ESP found)
   <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
   fomod/
     info.xml
     ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
-  cbpc-config.xml                ← CBPC physics XML
-  smp-config.xml                 ← SMP physics XML
+  cbpc-config.xml                ← CBPC physics XML (when selected physics profile includes CBPC)
+  smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview.html                   ← interactive body heatmap + morph preview
@@ -193,10 +204,10 @@ output/
 | `<ArmorName>_0.nif` + `<ArmorName>_1.nif` (root) | Low/high-weight variant pair at output root; **missing half is auto-synthesised** when only one is present |
 | `meshes/slidesmith/<body>/<ArmorName>.nif` | Data-relative staged mesh; pointed to by the generated plugin |
 | `meshes/slidesmith/<body>/<stem>_ground.nif` | Ground/loot mesh companion for every converted NIF variant |
-| `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) |
-| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh |
-| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) |
-| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation |
+| `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
 | `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
 | `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
@@ -246,6 +257,7 @@ Implemented from issue scope:
 - **NIF block graph parsing for geometry nodes** — conversion now parses `Ni*` block/type spans first (e.g. `NiTriShapeData`) to locate real vertex streams before fallback heuristics, improving transform reliability on non-synthetic NIF layouts
 - **support asset carry-forward** — export now copies scanned textures, material files (`.bgsm`/`.bgem`), physics files, plugin files, and body-reference files (`.tri`/`.osp` plus skeleton `.nif`) into the output tree using source-relative paths so converted packs include required sidecar assets
 - **external custom body profiles** — import now auto-loads nearby `*.slidesmith-body.json` files so conversions can target named custom bodies with custom detection tokens, transformation fields, slider sets, male/female BodySlide metadata, and per-body physics defaults instead of falling back to a generic `CUSTOM` output
+- **profile system controls** — direct target-body runs now resolve sensible built-in default physics per body (`CBBE/UBE/Vanilla` → `none`, `UNP/TBD` → `cbpc`, `3BA/BHUNP` → `smp+cbpc`, `HIMBO/SAM/SOS` → `smp`), while CLI/desktop users can explicitly override physics and disable BodySlide slider export for lighter packages
 
 - **animation-driven geometry solver** — `AnimationDrivenGeometrySolver` applies linear-blend skinning (LBS) across 8 canonical poses using anatomically-derived per-region bone rotations (sagittal Z-Y plane), computing per-region body-envelope penetration depth; `AnimationDrivenPoseSimulationService` reads source mesh vertices from NIF files, runs the solver, and feeds push-out corrections back into the vertex transform pass; heuristic fallback used when no mesh data is available — all vertex transformations are now pose-informed rather than purely morph-threshold based
 

@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly TextBox _targetBatchTextBox;
     private readonly ComboBox _profileComboBox;
     private readonly ComboBox _sourceComboBox;
+    private readonly ComboBox _physicsComboBox;
     private readonly TextBox _logTextBox;
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
@@ -28,6 +29,7 @@ public sealed class MainForm : Form
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
+    private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _statusLabel;
     private readonly Label _presetDetailsLabel;
     private readonly ProgressBar _progressBar;
@@ -252,6 +254,20 @@ public sealed class MainForm : Form
         }
         _sourceComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_sourceComboBox, 1, 1);
+
+        rightOptions.Controls.Add(new Label { Text = "Physics (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        _physicsComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        _physicsComboBox.Items.Add("(auto)");
+        foreach (var profile in PhysicsProfileCatalog.All)
+        {
+            _physicsComboBox.Items.Add(profile);
+        }
+        _physicsComboBox.SelectedIndex = 0;
+        rightOptions.Controls.Add(_physicsComboBox, 1, 2);
         conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
         layout.Controls.Add(conversionOptionsPanel, 0, 3);
 
@@ -274,6 +290,13 @@ public sealed class MainForm : Form
         {
             Text = "Create output zip",
             AutoSize = true,
+            Margin = new Padding(0, 8, 12, 0),
+        };
+        _buildSlidersCheckBox = new CheckBox
+        {
+            Text = "Build BodySlide files",
+            AutoSize = true,
+            Checked = true,
             Margin = new Padding(0, 8, 12, 0),
         };
         _convertButton = new Button
@@ -336,6 +359,7 @@ public sealed class MainForm : Form
         };
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
         actionRow.Controls.Add(_outputZipCheckBox);
+        actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
         actionRow.Controls.Add(_cancelButton);
         actionRow.Controls.Add(_clearLogButton);
@@ -515,6 +539,7 @@ public sealed class MainForm : Form
         var selectedPresets = CombineSelections(preset, ParseDelimitedValues(_presetBatchTextBox.Text));
         var selectedTargets = CombineSelections(target, ParseDelimitedValues(_targetBatchTextBox.Text));
         var profile = ReadOptionalComboValue(_profileComboBox);
+        var physicsOverride = ReadOptionalComboValue(_physicsComboBox);
         var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
             : _sourceComboBox.Text.Trim();
@@ -561,7 +586,9 @@ public sealed class MainForm : Form
                 DeformationProfile: profile,
                 SourceBodyOverride: sourceOverride,
                 TargetBodies: !usingPreset && selectedTargets.Count > 1 ? selectedTargets : null,
-                Presets: usingPreset && selectedPresets.Count > 1 ? selectedPresets : null);
+                Presets: usingPreset && selectedPresets.Count > 1 ? selectedPresets : null,
+                PhysicsProfileOverride: physicsOverride,
+                GenerateBodySlideFiles: _buildSlidersCheckBox.Checked);
 
             var cancellationToken = _activeConversion.Token;
 
