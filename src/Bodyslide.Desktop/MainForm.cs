@@ -2,6 +2,7 @@ using Bodyslide.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Windows.Forms;
 
 namespace Bodyslide.Desktop;
