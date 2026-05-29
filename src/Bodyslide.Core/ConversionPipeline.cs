@@ -22,7 +22,8 @@ public sealed record ConversionRequest(
     IReadOnlyList<string>? TargetBodies = null,
     IReadOnlyList<string>? Presets = null,
     string? PhysicsProfileOverride = null,
-    bool GenerateBodySlideFiles = true);
+    bool GenerateBodySlideFiles = true,
+    IReadOnlyList<string>? CustomProfilePaths = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -2027,6 +2028,23 @@ public sealed class ConversionOrchestrator(
             }
 
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
+
+            // Merge any explicitly-provided custom profile paths from the request with the
+            // auto-scanned profiles that the importer found inside the input directory.
+            if (normalized.Request.CustomProfilePaths is { Count: > 0 } extraPaths)
+            {
+                var extraProfiles = CustomBodyProfileSupport.LoadProfiles(extraPaths);
+                if (extraProfiles.Count > 0)
+                {
+                    var merged = new List<CustomBodyProfile>(armor.CustomBodyProfiles ?? []);
+                    foreach (var ep in extraProfiles)
+                    {
+                        if (!merged.Any(p => string.Equals(p.Name, ep.Name, StringComparison.OrdinalIgnoreCase)))
+                            merged.Add(ep);
+                    }
+                    armor = armor with { CustomBodyProfiles = merged };
+                }
+            }
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
             if (armor.CustomBodyProfiles is { Count: > 0 } customBodies)
             {
@@ -7449,6 +7467,63 @@ internal static class DdsTextureDerivation
         return true;
     }
 
+    /// <summary>
+    /// Derives a greyscale glow (self-illumination) map from a diffuse texture by extracting
+    /// high-luminance pixels as emissive sources.  The algorithm isolates only the brightest
+    /// areas of the armor — gem stones, glowing runes, hot metal — while pushing mid and dark
+    /// tones to black.
+    /// <para>
+    /// Works on BGRA8 uncompressed DDS only; compressed sources return <c>false</c>.
+    /// </para>
+    /// <para>
+    /// Algorithm:
+    /// <list type="number">
+    ///   <item>Compute BT.601 perceived luminance for every pixel.</item>
+    ///   <item>Apply a threshold (≥ <c>GlowThreshold</c>, default 204/255 ≈ 80 %).</item>
+    ///   <item>Above-threshold pixels map their luminance linearly to [0,255].
+    ///         Below-threshold pixels are set to black.</item>
+    /// </list>
+    /// This matches the common Skyrim practice of using a separate <c>_g.dds</c> that is all-black
+    /// except for intentionally emissive details.
+    /// </para>
+    /// </summary>
+    public static bool TryDeriveGlowFromDiffuse(byte[] diffuseDds, out byte[] glowDds, byte glowThreshold = 204)
+    {
+        glowDds = [];
+        if (!TryReadDimensions(diffuseDds, out var w, out var h)) return false;
+        if (!IsUncompressed(diffuseDds)) return false;
+
+        int pixelCount = w * h;
+        if (diffuseDds.Length < DdsHeaderSize + pixelCount * 4) return false;
+
+        glowDds = new byte[DdsHeaderSize + pixelCount * 4];
+        Buffer.BlockCopy(diffuseDds, 0, glowDds, 0, DdsHeaderSize);
+
+        for (var i = 0; i < pixelCount; i++)
+        {
+            var src = DdsHeaderSize + i * 4;
+            byte b = diffuseDds[src];
+            byte g = diffuseDds[src + 1];
+            byte r = diffuseDds[src + 2];
+            // alpha ignored for luminance; glow is opaque.
+
+            // Perceived luminance (BT.601 weights).
+            var luma = (byte)Math.Round(0.114 * b + 0.587 * g + 0.299 * r);
+
+            // Only pixels bright enough to qualify as emissive contribute to the glow map;
+            // everything else becomes pure black (no emission).
+            var glow = luma >= glowThreshold ? luma : (byte)0;
+
+            var dst = DdsHeaderSize + i * 4;
+            glowDds[dst]     = glow;
+            glowDds[dst + 1] = glow;
+            glowDds[dst + 2] = glow;
+            glowDds[dst + 3] = 0xFF;
+        }
+
+        return true;
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     private static bool IsUncompressed(byte[] ddsBytes)
@@ -8240,9 +8315,9 @@ internal sealed class LocalExportService(
 
     /// <summary>
     /// Builds a shared DDS helper: uncompressed BGRA8, every pixel the same solid colour.
-    /// Used by the aux-texture stub builders.  Defaults to 4×4 when no dimensions are given.
+    /// Used by the aux-texture stub builders and tests.  Defaults to 4×4 when no dimensions are given.
     /// </summary>
-    private static byte[] BuildSolidColorDds(byte b, byte g, byte r, byte a, int width = 4, int height = 4)
+    internal static byte[] BuildSolidColorDds(byte b, byte g, byte r, byte a, int width = 4, int height = 4)
     {
         width  = Math.Max(1, width);
         height = Math.Max(1, height);
@@ -8402,7 +8477,20 @@ internal sealed class LocalExportService(
                 if (!File.Exists(stubPath))
                 {
                     Directory.CreateDirectory(destDir);
-                    await File.WriteAllBytesAsync(stubPath, BuildGlowMapDds(w, h), cancellationToken);
+                    // Attempt to derive a glow map from the diffuse texture itself.
+                    // Only uncompressed (BGRA8) diffuse sources support derivation; compressed
+                    // or missing sources fall back to a solid-black neutral stub.
+                    byte[]? derivedGlow = null;
+                    if (File.Exists(texturePath))
+                    {
+                        try
+                        {
+                            var diffuseBytes = await File.ReadAllBytesAsync(texturePath, cancellationToken);
+                            DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuseBytes, out derivedGlow);
+                        }
+                        catch (IOException) { derivedGlow = null; }
+                    }
+                    await File.WriteAllBytesAsync(stubPath, derivedGlow ?? BuildGlowMapDds(w, h), cancellationToken);
                     glowGenerated.Add(stubPath);
                 }
             }

@@ -26,6 +26,8 @@ public sealed class MainForm : Form
     private readonly Button _openPreviewButton;
     private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
+    private readonly Button _loadCustomProfileButton;
+    private readonly Button _saveProfileButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
@@ -44,6 +46,7 @@ public sealed class MainForm : Form
     private string? _lastPreviewPath;
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
+    private readonly List<string> _customProfilePaths = [];
 
     public MainForm()
     {
@@ -358,6 +361,22 @@ public sealed class MainForm : Form
             Enabled = false,
         };
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
+        _loadCustomProfileButton = new Button
+        {
+            Text = "Load profile...",
+            Width = 110,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _loadCustomProfileButton.Click += (_, _) => LoadCustomProfileFile();
+        _saveProfileButton = new Button
+        {
+            Text = "Save profile...",
+            Width = 110,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _saveProfileButton.Click += (_, _) => SaveCurrentProfile();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
@@ -367,6 +386,8 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_openPreviewButton);
         actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
+        actionRow.Controls.Add(_loadCustomProfileButton);
+        actionRow.Controls.Add(_saveProfileButton);
         layout.Controls.Add(actionRow, 0, 5);
 
         var bottomPanel = new TableLayoutPanel
@@ -588,7 +609,8 @@ public sealed class MainForm : Form
                 TargetBodies: !usingPreset && selectedTargets.Count > 1 ? selectedTargets : null,
                 Presets: usingPreset && selectedPresets.Count > 1 ? selectedPresets : null,
                 PhysicsProfileOverride: physicsOverride,
-                GenerateBodySlideFiles: _buildSlidersCheckBox.Checked);
+                GenerateBodySlideFiles: _buildSlidersCheckBox.Checked,
+                CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null);
 
             var cancellationToken = _activeConversion.Token;
 
@@ -1010,6 +1032,78 @@ public sealed class MainForm : Form
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+
+    private void LoadCustomProfileFile()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Load Custom Body Profile",
+            Filter = "JSON profile files (*.json)|*.json|All files (*.*)|*.*",
+            Multiselect = true,
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var added = 0;
+        foreach (var path in dialog.FileNames)
+        {
+            if (!_customProfilePaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                _customProfilePaths.Add(path);
+                added++;
+            }
+        }
+
+        if (added > 0)
+        {
+            AppendLog($"Loaded {added} custom profile file(s): {string.Join(", ", dialog.FileNames.Select(Path.GetFileName))}");
+        }
+    }
+
+    private void SaveCurrentProfile()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Save Current Settings as Profile",
+            Filter = "JSON profile files (*.json)|*.json",
+            FileName = "custom-body-profile.json",
+            DefaultExt = "json",
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        var target     = ReadOptionalComboValue(_targetComboBox) ?? string.Empty;
+        var profile    = ReadOptionalComboValue(_profileComboBox) ?? "standard";
+        var physics    = ReadOptionalComboValue(_physicsComboBox) ?? "none";
+        var source     = ReadOptionalComboValue(_sourceComboBox) ?? string.Empty;
+
+        // Build a minimal JSON profile that CustomBodyProfileSupport can load.
+        var sb = new StringBuilder();
+        sb.AppendLine("{");
+        sb.AppendLine($"  \"Name\": \"{target}\",");
+        sb.AppendLine($"  \"PhysicsProfile\": \"{physics}\"");
+        if (!string.IsNullOrWhiteSpace(profile) && !profile.Equals("standard", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.Insert(sb.Length - 2, $",{Environment.NewLine}  \"DeformationProfile\": \"{profile}\"");
+        }
+        sb.AppendLine("}");
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+            AppendLog($"Saved profile to: {dialog.FileName}");
+
+            // Auto-add to the loaded profiles list so it takes effect on the next conversion.
+            if (!_customProfilePaths.Contains(dialog.FileName, StringComparer.OrdinalIgnoreCase))
+            {
+                _customProfilePaths.Add(dialog.FileName);
+            }
+        }
+        catch (IOException ex)
+        {
+            MessageBox.Show(this, $"Failed to save profile:\n{ex.Message}", "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
     {

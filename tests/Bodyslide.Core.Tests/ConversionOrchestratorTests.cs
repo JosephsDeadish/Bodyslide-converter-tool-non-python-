@@ -10086,6 +10086,89 @@ public sealed class CustomBodyProfileSupportTests
         Assert.False(DdsTextureDerivation.TryDeriveHeightFromNormal(dds, out _));
     }
 
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveGlowFromDiffuse_BlackPixelsBelowThreshold()
+    {
+        // Build a 4×4 uncompressed DDS with a known solid colour (grey: B=100,G=100,R=100,A=255).
+        // Luminance ≈ 100 → below default threshold 204 → all pixels should be black in glow map.
+        const int w = 4; const int h = 4;
+        var diffuse = LocalExportService.BuildSolidColorDds(b: 100, g: 100, r: 100, a: 255, w, h);
+
+        var ok = DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuse, out var glow);
+
+        Assert.True(ok);
+        Assert.Equal(diffuse.Length, glow.Length);
+        // All pixel channels should be 0 (no glow from mid-grey source).
+        for (var i = 0; i < w * h; i++)
+        {
+            var off = 128 + i * 4;
+            Assert.Equal(0, glow[off]);
+            Assert.Equal(0, glow[off + 1]);
+            Assert.Equal(0, glow[off + 2]);
+        }
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveGlowFromDiffuse_BrightPixelsAboveThreshold()
+    {
+        // A pure-white pixel (B=255,G=255,R=255) has luminance 255 ≥ threshold 204
+        // and should produce a non-zero glow value.
+        const int w = 4; const int h = 4;
+        var diffuse = LocalExportService.BuildSolidColorDds(b: 255, g: 255, r: 255, a: 255, w, h);
+
+        var ok = DdsTextureDerivation.TryDeriveGlowFromDiffuse(diffuse, out var glow);
+
+        Assert.True(ok);
+        // All pixels should have non-zero glow (pure white → max luminance).
+        for (var i = 0; i < w * h; i++)
+        {
+            var off = 128 + i * 4;
+            Assert.NotEqual(0, glow[off]);
+        }
+    }
+
+    [Fact]
+    public void DdsTextureDerivation_TryDeriveGlowFromDiffuse_ReturnsFalseForCompressed()
+    {
+        var dds = LocalExportService.BuildFlatNormalMapDds(4, 4);
+        // Write DXT1 FourCC at offset 84 to mark as compressed.
+        dds[84] = 0x44; dds[85] = 0x58; dds[86] = 0x54; dds[87] = 0x31;
+        Assert.False(DdsTextureDerivation.TryDeriveGlowFromDiffuse(dds, out _));
+    }
+
+    [Fact]
+    public async Task Convert_WithCustomProfilePaths_ExtraProfilesMergedIntoArmor()
+    {
+        // Write a minimal custom body profile JSON to a temp file, pass it via
+        // ConversionRequest.CustomProfilePaths, and verify the step log records it.
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "armor.nif"), "mesh");
+
+        var profilePath = Path.Combine(workingDirectory, "my-body.json");
+        await File.WriteAllTextAsync(profilePath,
+            """{"Name":"MyCustomBody","DetectionTokens":["mycustom"],"VertexCountMin":6000,"VertexCountMax":8000}""");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "armor.nif"),
+                "CBBE",
+                outputDirectory,
+                CustomProfilePaths: [profilePath]));
+
+            // The step list should include "custom-bodies:1" because the extra profile
+            // was loaded and merged, giving the armor 1 custom body profile.
+            Assert.Contains(result.Steps, s => s.StartsWith("custom-bodies:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     // ── BuildFlatNormalMapDds / BuildSolidColorDds dimension tests ────────────────
 
     [Fact]
