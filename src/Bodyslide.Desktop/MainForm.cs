@@ -27,6 +27,7 @@ public sealed class MainForm : Form
     private readonly Button _openPreviewButton;
     private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
+    private readonly Button _openArtifactButton;
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
     private readonly Button _inspectCacheButton;
@@ -43,6 +44,8 @@ public sealed class MainForm : Form
     private readonly Label _previewStatusLabel;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _artifactsTabPage;
+    private readonly ListView _artifactsListView;
     private readonly BatchConversionRunner _batchRunner;
 
     private CancellationTokenSource? _activeConversion;
@@ -183,6 +186,7 @@ public sealed class MainForm : Form
         {
             _presetComboBox.Items.Add(preset.Name);
         }
+
         _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
         if (_presetComboBox.Items.Count > 0)
         {
@@ -373,6 +377,15 @@ public sealed class MainForm : Form
             Enabled = false,
         };
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
+        _openArtifactButton = new Button
+        {
+            Text = "Open file",
+            Width = 110,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(8, 0, 8, 0),
+        };
+        _openArtifactButton.Click += (_, _) => OpenSelectedArtifact();
         _loadCustomProfileButton = new Button
         {
             Text = "Load profile...",
@@ -405,6 +418,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_openPreviewButton);
         actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
+        actionRow.Controls.Add(_openArtifactButton);
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
         actionRow.Controls.Add(_inspectCacheButton);
@@ -473,6 +487,20 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _artifactsTabPage = new TabPage("Files");
+        _artifactsListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+        };
+        _artifactsListView.Columns.Add("File", 260);
+        _artifactsListView.Columns.Add("Path", -2);
+        _artifactsListView.SelectedIndexChanged += (_, _) => _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
+        _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
+        _artifactsTabPage.Controls.Add(_artifactsListView);
+        _resultsTabControl.TabPages.Add(_artifactsTabPage);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
@@ -692,6 +720,7 @@ public sealed class MainForm : Form
             UpdatePathActionStates();
             await LoadPreviewInAppAsync(_lastPreviewPath);
             PopulateSummaryTab(results);
+            PopulateArtifactsTab(results);
 
             AppendLog($"Converted {results.Count} armor item(s).");
             if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
@@ -759,6 +788,7 @@ public sealed class MainForm : Form
         _openOutputButton.Enabled = !isBusy && GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
+        _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
         UseWaitCursor = isBusy;
         _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
         _progressBar.Value = 0;
@@ -866,6 +896,7 @@ public sealed class MainForm : Form
 
         UpdatePathActionStates();
         await LoadPreviewInAppAsync(previewPath);
+        PopulateArtifactsTab(selectedFolder);
         _resultsTabControl.SelectedTab = _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
     }
@@ -1002,6 +1033,27 @@ public sealed class MainForm : Form
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = _lastBatchReportPath,
+            UseShellExecute = true,
+        });
+    }
+
+    private void OpenSelectedArtifact()
+    {
+        if (_artifactsListView.SelectedItems.Count == 0)
+        {
+            return;
+        }
+
+        if (_artifactsListView.SelectedItems[0].Tag is not string filePath || !File.Exists(filePath))
+        {
+            MessageBox.Show(this, "Selected output file was not found.", "Open file", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            PopulateArtifactsTab(GetPreferredOutputDirectoryForOpen());
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = filePath,
             UseShellExecute = true,
         });
     }
@@ -1143,6 +1195,7 @@ public sealed class MainForm : Form
         _openOutputButton.Enabled = GetPreferredOutputDirectoryForOpen() is not null;
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
+        _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
     }
 
     private static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
@@ -1267,5 +1320,54 @@ public sealed class MainForm : Form
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private void PopulateArtifactsTab(IReadOnlyList<ConversionResult> results)
+    {
+        var files = results
+            .SelectMany(result => result.OutputFiles)
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        PopulateArtifactsTab(files, FindCommonDirectory(results.Select(result => result.OutputDirectory)));
+    }
+
+    private void PopulateArtifactsTab(string? outputDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            PopulateArtifactsTab([], null);
+            return;
+        }
+
+        var files = Directory
+            .EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        PopulateArtifactsTab(files, outputDirectory);
+    }
+
+    private void PopulateArtifactsTab(IReadOnlyList<string> files, string? baseDirectory)
+    {
+        _artifactsListView.BeginUpdate();
+        try
+        {
+            _artifactsListView.Items.Clear();
+            foreach (var file in files)
+            {
+                var displayPath = !string.IsNullOrWhiteSpace(baseDirectory)
+                    ? Path.GetRelativePath(baseDirectory, file)
+                    : file;
+                var item = new ListViewItem([Path.GetFileName(file), displayPath]) { Tag = file };
+                _artifactsListView.Items.Add(item);
+            }
+        }
+        finally
+        {
+            _artifactsListView.EndUpdate();
+        }
+
+        _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
     }
 }

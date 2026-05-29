@@ -48,7 +48,8 @@ dotnet run --project src/Bodyslide.Desktop
 # optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
-# any previous output folder's preview, quick-open batch reports when available,
+# any previous output folder's preview, quick-open batch reports when available, and an in-app files tab
+# that lists generated outputs with double-click/open-button launch,
 # "Load Custom Profile..." button (multi-select *.json) to inject extra body profile definitions into
 # the conversion without placing them next to the input files, and "Save Profile..." button to export
 # the current target/physics settings as a reusable *.json profile that can be reloaded later
@@ -320,6 +321,7 @@ Implemented from issue scope:
 - **scratch-plugin mesh staging** — when no source plugin exists, export now stages converted meshes into the exact `meshes/slidesmith/<body>/...` paths referenced by the generated standalone ESP and also writes fallback `_1stperson.nif` copies so the MOD2/MOD3/MOD4/MOD5 paths all resolve without any manual file moves or extra mesh authoring
 - **scratch-plugin MODL fallback** — standalone scratch ESP generation now always writes an ARMO `MODL` world/inventory model path; when a dedicated `<stem>_ground.nif` is unavailable, `MODL` automatically falls back to the primary converted mesh path so dropped-item lookups never end up blank
 - **single-armor multi-target batch conversion** — CLI now supports `--targets "<body1,body2,...>"` and `--presets "<preset1,preset2,...>"`, and the desktop app exposes matching batch-entry fields for preset/target mode; one armor (or one folder/archive batch) can now be converted into multiple body outputs in a single run, with each target/preset written into its own output subfolder to avoid collisions
+- **desktop output-files tab** — GUI now includes a dedicated **Files** tab that enumerates generated output artifacts (`.nif`, plugin patches, JSON reports, BodySlide files, etc.) for both fresh and reloaded conversion folders, with single-click selection + **Open file** action (or double-click) so users can launch any artifact directly without manually browsing the output directory
 - **all-body target alias** — `--target all` / `--target any` / `--target *` (and the same tokens inside `--targets`) now expand to every supported body type automatically, so one command can export a full multi-body conversion pack without manually listing each body name
 - **topology + UV mismatch diagnostics** — export now compares source vs converted mesh signatures and writes `TopologyMismatchRisk`, `VertexCountDeltaRatio`, `UvCoverageDeltaRatio`, `UvAspectRatioDelta`, and `QualityWarnings` into `conversion-quality.json`; large drift thresholds flag likely topology/UV mismatch risks early (addressing a major “common failure point” from issue #2)
 - **physics-bone fallback remapping for skeleton compatibility** — skeleton mapping now aligns UNP/TBD targets with their CBPC support set (`NPC L/R Breast01`, `NPC L/R Butt`, `NPC Belly`) and auto-remaps unsupported higher-order source physics bones (e.g. `NPC L/R Breast02/03`) to the best available target equivalent before marking them unsupported, reducing conversion drop-off when source and target skeleton physics depth differ
