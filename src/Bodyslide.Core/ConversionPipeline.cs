@@ -2813,11 +2813,11 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
             WriteSubrecord(armoDataMs, "BOD2", bod2Ms.ToArray());
         }
 
-        if (!string.IsNullOrWhiteSpace(groundMeshRelativePath))
-        {
-            WriteSubrecord(armoDataMs, "MODL",
-                System.Text.Encoding.ASCII.GetBytes(groundMeshRelativePath + '\0'));
-        }
+        var armoGroundModelPath = string.IsNullOrWhiteSpace(groundMeshRelativePath)
+            ? primaryPath
+            : groundMeshRelativePath;
+        WriteSubrecord(armoDataMs, "MODL",
+            System.Text.Encoding.ASCII.GetBytes(armoGroundModelPath + '\0'));
 
         // World model paths (MOD2 = male, MOD3 = female).
         WriteSubrecord(armoDataMs, "MOD2", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));

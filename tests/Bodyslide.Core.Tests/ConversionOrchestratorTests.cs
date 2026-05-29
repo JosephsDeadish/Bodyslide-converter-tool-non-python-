@@ -7869,6 +7869,23 @@ public sealed class BasicScratchPluginGeneratorServiceTests
     }
 
     [Fact]
+    public void Generate_WithoutGroundMeshPath_UsesPrimaryMeshAsMODLFallback()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "IronArmor", "CBBE",
+            ["meshes/slidesmith/cbbe/ironarmor_0.nif"],
+            [32],
+            null);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("MODL", pluginText, StringComparison.Ordinal);
+        Assert.Contains("meshes/slidesmith/cbbe/ironarmor_0.nif", pluginText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Generate_FileNameSanitisesSpecialCharacters()
     {
         var service = new BasicScratchPluginGeneratorService();
