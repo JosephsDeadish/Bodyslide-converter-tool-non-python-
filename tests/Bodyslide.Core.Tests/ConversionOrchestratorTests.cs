@@ -5051,6 +5051,78 @@ public sealed class PoseSimulationAndPreviewTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+    [Fact]
+    public async Task Convert_WithDefaultModules_PreviewHtmlContainsCorrectionPanel()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
+            Assert.Contains("Auto-Correction Pass", html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_PreviewHtmlContainsTexturePanel()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
+            Assert.Contains("Texture Analysis", html, StringComparison.Ordinal);
+            Assert.Contains("Diffuse",          html, StringComparison.Ordinal);
+            Assert.Contains("Normal",           html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithDefaultModules_PreviewHtmlContainsWorldPhysicsPanel()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"), "CBBE", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview.html"));
+            Assert.Contains("World / Dropped-Item Physics", html, StringComparison.Ordinal);
+            Assert.Contains("Drop mode",                    html, StringComparison.Ordinal);
+            Assert.Contains("Collision shape",              html, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

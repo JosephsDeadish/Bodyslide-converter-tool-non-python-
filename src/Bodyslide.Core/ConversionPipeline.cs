@@ -7901,7 +7901,7 @@ internal sealed class LocalExportService(
         // in any browser without an additional 3D engine.
         var previewPath = Path.Combine(outputDirectory, "preview.html");
         await File.WriteAllTextAsync(previewPath,
-            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation),
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary),
             cancellationToken);
         outputFiles.Add(previewPath);
 
@@ -9574,6 +9574,7 @@ internal sealed class LocalExportService(
             ["head"]      = (84,   4,  32, 32, "Head"),
             ["neck"]      = (91,  37,  18, 18, "Neck"),
             ["shoulders"] = (50,  54,  32, 18, "Sho"),
+            ["armpits"]   = (53,  68,  22, 20, "Pit"),
             ["chest"]     = (76,  54,  48, 36, "Chest"),
             ["arms"]      = (42,  72,  30, 72, "Arms"),
             ["waist"]     = (80,  90,  40, 26, "Waist"),
@@ -9695,7 +9696,10 @@ internal sealed class LocalExportService(
         ConvertedMesh mesh,
         BodySlideProject bodySlideProject,
         PhysicsConfig physics,
-        PoseSimulationResult poseSimulation)
+        PoseSimulationResult poseSimulation,
+        WorldObjectPhysicsReport worldPhysics,
+        CorrectionResult correction,
+        TextureSummary textureSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var orderedRegions = mesh.RegionalMorphing
@@ -9833,6 +9837,77 @@ internal sealed class LocalExportService(
             ? $"⚠ {poseSimulation.TotalPosesAtRisk}/{poseSimulation.TestedPoses.Count} poses at risk"
             : $"✓ {poseSimulation.TestedPoses.Count} poses OK";
 
+        // High-risk regions badge.
+        var highRiskBadge = poseSimulation.HighRiskRegions.Count > 0
+            ? $" &nbsp;·&nbsp; <span style=\"color:#ff6b6b\">High-risk: {HtmlEncode(string.Join(", ", poseSimulation.HighRiskRegions.OrderBy(r => r, StringComparer.OrdinalIgnoreCase)))}</span>"
+            : string.Empty;
+
+        // Auto-correction panel.
+        var correctionPanelHtml = new System.Text.StringBuilder();
+        correctionPanelHtml.AppendLine("""      <div class="panel">""");
+        correctionPanelHtml.AppendLine("""        <h3 style="margin-top:0">Auto-Correction Pass</h3>""");
+        if (correction.Applied)
+        {
+            correctionPanelHtml.AppendLine($"""        <p style="color:#6bcb77;font-size:.85rem">✓ Correction applied — method: <strong>{HtmlEncode(correction.Method)}</strong></p>""");
+            if (correction.CorrectedMorphing is { Count: > 0 })
+            {
+                correctionPanelHtml.AppendLine("        <table><tr><th>Region</th><th>Corrected factor</th></tr>");
+                foreach (var (region, factor) in correction.CorrectedMorphing.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    var cssClass = factor > 1.20 ? "val-high" : factor > 1.08 ? "val-med" : "val-low";
+                    correctionPanelHtml.AppendLine($"          <tr><td>{HtmlEncode(region)}</td><td class=\"{cssClass}\">{factor:F4}</td></tr>");
+                }
+                correctionPanelHtml.AppendLine("        </table>");
+            }
+        }
+        else
+        {
+            correctionPanelHtml.AppendLine("""        <p style="color:#888;font-size:.85rem">No correction applied — no clipping detected or correction not required.</p>""");
+        }
+        correctionPanelHtml.AppendLine("      </div>");
+
+        // Texture analysis panel.
+        var texturePanelHtml = new System.Text.StringBuilder();
+        texturePanelHtml.AppendLine("""      <div class="panel">""");
+        texturePanelHtml.AppendLine("""        <h3 style="margin-top:0">Texture Analysis</h3>""");
+        texturePanelHtml.AppendLine("        <table><tr><th>Type</th><th>Count</th></tr>");
+        texturePanelHtml.AppendLine($"          <tr><td>Diffuse</td><td>{textureSummary.DiffuseFiles.Count}</td></tr>");
+        texturePanelHtml.AppendLine($"          <tr><td>Normal</td><td>{textureSummary.NormalFiles.Count}</td></tr>");
+        if ((textureSummary.SpecularFiles?.Count ?? 0) > 0)
+            texturePanelHtml.AppendLine($"          <tr><td>Specular</td><td>{textureSummary.SpecularFiles!.Count}</td></tr>");
+        if ((textureSummary.GlowFiles?.Count ?? 0) > 0)
+            texturePanelHtml.AppendLine($"          <tr><td>Glow/Emissive</td><td>{textureSummary.GlowFiles!.Count}</td></tr>");
+        if ((textureSummary.ParallaxFiles?.Count ?? 0) > 0)
+            texturePanelHtml.AppendLine($"          <tr><td>Parallax</td><td>{textureSummary.ParallaxFiles!.Count}</td></tr>");
+        if ((textureSummary.RoughnessFiles?.Count ?? 0) > 0)
+            texturePanelHtml.AppendLine($"          <tr><td>Roughness</td><td>{textureSummary.RoughnessFiles!.Count}</td></tr>");
+        texturePanelHtml.AppendLine("        </table>");
+        if (textureSummary.MissingNormals.Count > 0)
+        {
+            texturePanelHtml.AppendLine($"""        <p style="color:#ffd93d;font-size:.85rem;margin-top:8px">⚠ {textureSummary.MissingNormals.Count} normal map(s) missing — surface detail may degrade after conversion.</p>""");
+        }
+        texturePanelHtml.AppendLine("      </div>");
+
+        // World / dropped-item physics panel.
+        var worldPhysicsPanelHtml = new System.Text.StringBuilder();
+        worldPhysicsPanelHtml.AppendLine("""      <div class="panel">""");
+        worldPhysicsPanelHtml.AppendLine("""        <h3 style="margin-top:0">World / Dropped-Item Physics</h3>""");
+        worldPhysicsPanelHtml.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Drop mode:</strong> {HtmlEncode(worldPhysics.Mode)}</p>""");
+        worldPhysicsPanelHtml.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Collision shape:</strong> {HtmlEncode(worldPhysics.CollisionShape)}</p>""");
+        var physicsStatusColour = worldPhysics.SourcePhysicsDetected ? "#6bcb77" : "#888";
+        var physicsStatusText   = worldPhysics.SourcePhysicsDetected ? "✓ Source physics detected" : "No source physics";
+        worldPhysicsPanelHtml.AppendLine($"""        <p style="color:{physicsStatusColour};font-size:.85rem;margin:0 0 8px">{physicsStatusText}</p>""");
+        if (worldPhysics.Recommendations.Count > 0)
+        {
+            worldPhysicsPanelHtml.AppendLine("""        <ul style="font-size:.85rem;padding-left:18px;margin:0">""");
+            foreach (var rec in worldPhysics.Recommendations)
+            {
+                worldPhysicsPanelHtml.AppendLine($"          <li>{HtmlEncode(rec)}</li>");
+            }
+            worldPhysicsPanelHtml.AppendLine("        </ul>");
+        }
+        worldPhysicsPanelHtml.AppendLine("      </div>");
+
         return $$"""
             <!DOCTYPE html>
             <html lang="en">
@@ -9867,7 +9942,7 @@ internal sealed class LocalExportService(
             </head>
             <body>
               <h1>SlideSmith Preview</h1>
-              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}} &nbsp;·&nbsp; interactive preview controls enabled</p>
+              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}}{{highRiskBadge}} &nbsp;·&nbsp; interactive preview controls enabled</p>
               <div class="layout">
                 <div class="body-fig">
                   <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
@@ -9921,7 +9996,7 @@ internal sealed class LocalExportService(
                     <h3 style="margin-top:0">Physics Nodes</h3>
                     {{physicsPanel}}
                   </div>
-            {{posePanelHtml}}      </div>
+            {{posePanelHtml}}{{correctionPanelHtml}}{{texturePanelHtml}}{{worldPhysicsPanelHtml}}      </div>
               </div>
               <script>
                 const baseFactors = {{baseFactorsJson}};
