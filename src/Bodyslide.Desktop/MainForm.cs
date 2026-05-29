@@ -39,6 +39,8 @@ public sealed class MainForm : Form
     private readonly TabPage _previewTabPage;
     private readonly Panel _previewPanel;
     private readonly Label _previewStatusLabel;
+    private readonly TabPage _summaryTabPage;
+    private readonly ListView _summaryListView;
     private readonly BatchConversionRunner _batchRunner;
 
     private CancellationTokenSource? _activeConversion;
@@ -440,6 +442,19 @@ public sealed class MainForm : Form
         _previewTabPage.Controls.Add(_previewPanel);
         _resultsTabControl.TabPages.Add(logTabPage);
         _resultsTabControl.TabPages.Add(_previewTabPage);
+        _summaryTabPage = new TabPage("Summary");
+        _summaryListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _summaryListView.Columns.Add("Property", 200);
+        _summaryListView.Columns.Add("Value", -2);
+        _summaryTabPage.Controls.Add(_summaryListView);
+        _resultsTabControl.TabPages.Add(_summaryTabPage);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
@@ -632,6 +647,7 @@ public sealed class MainForm : Form
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             await LoadPreviewInAppAsync(_lastPreviewPath);
+            PopulateSummaryTab(results);
 
             AppendLog($"Converted {results.Count} armor item(s).");
             if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
@@ -871,6 +887,62 @@ public sealed class MainForm : Form
 
         _previewStatusLabel.Text = message;
         _previewStatusLabel.Visible = true;
+    }
+
+    private void PopulateSummaryTab(IReadOnlyList<ConversionResult> results)
+    {
+        _summaryListView.Items.Clear();
+
+        void Add(string property, string value) =>
+            _summaryListView.Items.Add(new ListViewItem([property, value]));
+
+        Add("Items converted", results.Count.ToString());
+
+        // Aggregate key steps across all results.
+        foreach (var result in results)
+        {
+            if (results.Count > 1)
+            {
+                _summaryListView.Items.Add(new ListViewItem([string.Empty, string.Empty]));
+                Add("Output", result.OutputDirectory);
+            }
+
+            foreach (var step in result.Steps)
+            {
+                if (step.StartsWith("detected-body:", StringComparison.Ordinal))
+                    Add("Detected body", step["detected-body:".Length..]);
+                else if (step.StartsWith("mesh-type:", StringComparison.Ordinal))
+                    Add("Mesh type", step["mesh-type:".Length..]);
+                else if (step.StartsWith("cage:", StringComparison.Ordinal))
+                    Add("Cage mode", step["cage:".Length..]);
+                else if (step.StartsWith("mesh-converted:", StringComparison.Ordinal))
+                    Add("Conversion strategy", step["mesh-converted:".Length..]);
+                else if (step.StartsWith("physics:", StringComparison.Ordinal))
+                    Add("Physics profile", step["physics:".Length..]);
+                else if (step.StartsWith("skeleton:", StringComparison.Ordinal))
+                    Add("Skeleton mapping", step["skeleton:".Length..]);
+                else if (step.StartsWith("morphs:", StringComparison.Ordinal))
+                    Add("Morphs", step["morphs:".Length..]);
+                else if (step.StartsWith("clipping:", StringComparison.Ordinal))
+                    Add("Clipping", step["clipping:".Length..]);
+                else if (step.StartsWith("correction:", StringComparison.Ordinal))
+                    Add("Auto-correction", step["correction:".Length..]);
+                else if (step.StartsWith("voxel-", StringComparison.Ordinal))
+                    Add("Voxel check", step);
+                else if (step.StartsWith("weights:", StringComparison.Ordinal))
+                    Add("Weight profile", step["weights:".Length..]);
+                else if (step.StartsWith("bodyslide:", StringComparison.Ordinal))
+                    Add("BodySlide project", step["bodyslide:".Length..]);
+                else if (step.StartsWith("regions:", StringComparison.Ordinal))
+                    Add("Armor regions", step["regions:".Length..]);
+                else if (step.StartsWith("imported:", StringComparison.Ordinal))
+                    Add("Imported assets", step["imported:".Length..]);
+                else if (step.StartsWith("exported:", StringComparison.Ordinal))
+                    Add("Output directory", step["exported:".Length..]);
+            }
+
+            Add("Output files", result.OutputFiles.Count.ToString());
+        }
     }
 
     private void OpenBatchReport()

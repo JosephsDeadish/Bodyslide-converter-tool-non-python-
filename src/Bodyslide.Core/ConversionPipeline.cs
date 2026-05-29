@@ -134,7 +134,8 @@ public sealed record TextureSummary(
     IReadOnlyList<string>? MissingParallax = null,
     IReadOnlyList<string>? MissingGlow = null,
     IReadOnlyList<string>? RoughnessFiles = null,
-    IReadOnlyList<string>? MissingRoughness = null);
+    IReadOnlyList<string>? MissingRoughness = null,
+    IReadOnlyList<string>? MissingSubsurface = null);
 
 /// <summary>Describes race compatibility between the imported armor's plugin RNAM entries and the target body.</summary>
 public sealed record RaceCompatibilityReport(
@@ -5290,6 +5291,7 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
         var parallaxFiles = new List<string>();
         var roughnessFiles = new List<string>();
         var subsurfaceFiles = new List<string>();
+        var missingSubsurface = new List<string>();
 
         foreach (var texturePath in armor.TextureFiles)
         {
@@ -5379,6 +5381,12 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             {
                 missingRoughness.Add(diffuse);
             }
+
+            var expectedSubsurface = baseName + "_sk.dds";
+            if (!subsurfaceFiles.Any(sk => sk.Equals(expectedSubsurface, StringComparison.OrdinalIgnoreCase)))
+            {
+                missingSubsurface.Add(diffuse);
+            }
         }
 
         var materialTexturePaths = await ScanMaterialFilesAsync(armor.SourcePath, cancellationToken);
@@ -5397,7 +5405,8 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
             MissingParallax: missingParallax,
             MissingGlow: missingGlow,
             RoughnessFiles: roughnessFiles,
-            MissingRoughness: missingRoughness);
+            MissingRoughness: missingRoughness,
+            MissingSubsurface: missingSubsurface);
     }
 
     /// <summary>
@@ -7713,12 +7722,13 @@ internal sealed class LocalExportService(
         // Generate auxiliary texture stubs (specular _s, parallax _p, glow _g, roughness _r) for any diffuse
         // textures that are missing those companions.  Neutral stubs avoid black/broken surfaces
         // and can be overridden by the user with real textures later.
-        var (generatedSpecular, generatedParallax, generatedGlow, generatedRoughness) =
+        var (generatedSpecular, generatedParallax, generatedGlow, generatedRoughness, generatedSubsurface) =
             await GenerateMissingAuxTextureStubsAsync(armor, textureSummary, outputDirectory, cancellationToken);
         outputFiles.AddRange(generatedSpecular);
         outputFiles.AddRange(generatedParallax);
         outputFiles.AddRange(generatedGlow);
         outputFiles.AddRange(generatedRoughness);
+        outputFiles.AddRange(generatedSubsurface);
 
         var dependencyMapPath = Path.Combine(outputDirectory, "dependency-map.json");
         var dependencyMap = BuildDependencyMap(
@@ -8039,10 +8049,10 @@ internal sealed class LocalExportService(
         {
             await File.AppendAllTextAsync(logPath, $"normal-stubs:generated={generatedNormals.Count}{Environment.NewLine}", cancellationToken);
         }
-        if (generatedSpecular.Count > 0 || generatedParallax.Count > 0 || generatedGlow.Count > 0 || generatedRoughness.Count > 0)
+        if (generatedSpecular.Count > 0 || generatedParallax.Count > 0 || generatedGlow.Count > 0 || generatedRoughness.Count > 0 || generatedSubsurface.Count > 0)
         {
             await File.AppendAllTextAsync(logPath,
-                $"aux-stubs:specular={generatedSpecular.Count},parallax={generatedParallax.Count},glow={generatedGlow.Count},roughness={generatedRoughness.Count}{Environment.NewLine}",
+                $"aux-stubs:specular={generatedSpecular.Count},parallax={generatedParallax.Count},glow={generatedGlow.Count},roughness={generatedRoughness.Count},subsurface={generatedSubsurface.Count}{Environment.NewLine}",
                 cancellationToken);
         }
         outputFiles.Add(logPath);
@@ -8435,29 +8445,40 @@ internal sealed class LocalExportService(
         => BuildSolidColorDds(b: 0x80, g: 0x80, r: 0x80, a: 0xFF, width, height);
 
     /// <summary>
-    /// Generates stub DDS files for specular (_s), parallax (_p), glow (_g), and roughness (_r) textures
-    /// that are referenced by a diffuse map but do not yet exist in the output directory.
-    /// Returns a tuple of (specularPaths, parallaxPaths, glowPaths, roughnessPaths).
+    /// Neutral subsurface scattering map (_sk.dds): pure black means no SSS contribution.
+    /// Armor and hard-surface meshes do not exhibit sub-surface scattering so an all-black
+    /// stub is the correct neutral value and avoids unintended skin-tone bleed.
     /// </summary>
-    private static async Task<(IReadOnlyList<string> Specular, IReadOnlyList<string> Parallax, IReadOnlyList<string> Glow, IReadOnlyList<string> Roughness)>
+    internal static byte[] BuildSubsurfaceMapDds(int width = 4, int height = 4)
+        => BuildSolidColorDds(b: 0x00, g: 0x00, r: 0x00, a: 0xFF, width, height);
+
+    /// <summary>
+    /// Generates stub DDS files for specular (_s), parallax (_p), glow (_g), roughness (_r), and
+    /// subsurface (_sk) textures that are referenced by a diffuse map but do not yet exist in the
+    /// output directory.
+    /// Returns a tuple of (specularPaths, parallaxPaths, glowPaths, roughnessPaths, subsurfacePaths).
+    /// </summary>
+    private static async Task<(IReadOnlyList<string> Specular, IReadOnlyList<string> Parallax, IReadOnlyList<string> Glow, IReadOnlyList<string> Roughness, IReadOnlyList<string> Subsurface)>
         GenerateMissingAuxTextureStubsAsync(
             ImportedArmor armor,
             TextureSummary textureSummary,
             string outputDirectory,
             CancellationToken cancellationToken)
     {
-        var specGenerated      = new List<string>();
-        var parallaxGenerated  = new List<string>();
-        var glowGenerated      = new List<string>();
-        var roughnessGenerated = new List<string>();
+        var specGenerated        = new List<string>();
+        var parallaxGenerated    = new List<string>();
+        var glowGenerated        = new List<string>();
+        var roughnessGenerated   = new List<string>();
+        var subsurfaceGenerated  = new List<string>();
 
-        var missingSpecularSet  = new HashSet<string>(textureSummary.MissingSpecular  ?? [], StringComparer.OrdinalIgnoreCase);
-        var missingParallaxSet  = new HashSet<string>(textureSummary.MissingParallax  ?? [], StringComparer.OrdinalIgnoreCase);
-        var missingGlowSet      = new HashSet<string>(textureSummary.MissingGlow      ?? [], StringComparer.OrdinalIgnoreCase);
-        var missingRoughnessSet = new HashSet<string>(textureSummary.MissingRoughness ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingSpecularSet    = new HashSet<string>(textureSummary.MissingSpecular    ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingParallaxSet    = new HashSet<string>(textureSummary.MissingParallax    ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingGlowSet        = new HashSet<string>(textureSummary.MissingGlow        ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingRoughnessSet   = new HashSet<string>(textureSummary.MissingRoughness   ?? [], StringComparer.OrdinalIgnoreCase);
+        var missingSubsurfaceSet  = new HashSet<string>(textureSummary.MissingSubsurface  ?? [], StringComparer.OrdinalIgnoreCase);
 
-        if (missingSpecularSet.Count == 0 && missingParallaxSet.Count == 0 && missingGlowSet.Count == 0 && missingRoughnessSet.Count == 0)
-            return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated);
+        if (missingSpecularSet.Count == 0 && missingParallaxSet.Count == 0 && missingGlowSet.Count == 0 && missingRoughnessSet.Count == 0 && missingSubsurfaceSet.Count == 0)
+            return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated, subsurfaceGenerated);
 
         foreach (var texturePath in armor.TextureFiles)
         {
@@ -8568,9 +8589,20 @@ internal sealed class LocalExportService(
                     roughnessGenerated.Add(stubPath);
                 }
             }
+
+            if (missingSubsurfaceSet.Contains(fileName))
+            {
+                var stubPath = Path.Combine(destDir, stemName + "_sk.dds");
+                if (!File.Exists(stubPath))
+                {
+                    Directory.CreateDirectory(destDir);
+                    await File.WriteAllBytesAsync(stubPath, BuildSubsurfaceMapDds(w, h), cancellationToken);
+                    subsurfaceGenerated.Add(stubPath);
+                }
+            }
         }
 
-        return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated);
+        return (specGenerated, parallaxGenerated, glowGenerated, roughnessGenerated, subsurfaceGenerated);
     }
 
 
