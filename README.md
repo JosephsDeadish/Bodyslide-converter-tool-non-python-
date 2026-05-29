@@ -1,6 +1,6 @@
 # SlideSmith (Standalone, C#)
 
-This repository contains the SlideSmith .NET conversion toolset (current version `0.1`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
+This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, armor folder, or archive input: `.zip` / `.tar` / `.tar.gz` / `.tgz`)
 - body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
@@ -43,7 +43,8 @@ dotnet run --project src/Bodyslide.Desktop
 # GUI features: drag/drop input, open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # optional profile/source override, optional output zip, cancel in-progress conversion, open output folder,
-# embedded in-app preview pane for generated preview.html, and quick-open batch reports when available
+# embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
+# any previous output folder's preview, and quick-open batch reports when available
 
 # build CLI executable package (single-file, self-contained)
 dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
@@ -71,6 +72,9 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --source
 
 # produce a mod-manager-ready ZIP instead of a bare output folder
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --output-zip
+
+# override the global learning-cache location (default: %APPDATA%\SlideSmith\ on Windows)
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "3BA" --cache-path "D:\MySlidesmithCache\.conversion-learning-cache.json"
 
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets
@@ -156,7 +160,7 @@ Each successful conversion produces the following files in the output directory:
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
 | `fomod/ModuleConfig.xml` + `fomod/info.xml` | FOMOD metadata generated for mod manager packaging |
 
-When a matching cache entry exists in the selected output folder for the same armor mesh + target body, the converter now reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps.
+When a matching cache entry exists for the same armor mesh + target body, the converter reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps. The cache is written to both the local output folder (`.conversion-learning-cache.json`) **and** a shared global location (`%APPDATA%\SlideSmith\` on Windows, `~/.config/slidesmith/` on Linux/macOS) so the tool learns from all prior conversions across different armor packs. Use `--cache-path` to specify a custom global cache location.
 
 When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each requested body/preset is exported into its own subfolder under the selected output root so multiple conversions never overwrite each other.
 

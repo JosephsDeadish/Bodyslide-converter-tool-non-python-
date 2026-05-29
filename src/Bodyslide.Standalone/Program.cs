@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using System.Reflection;
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
@@ -46,7 +47,7 @@ if (!TryParseRequest(args, out var request, out var error, out var cachePath))
         Console.WriteLine(error);
     }
 
-    Console.WriteLine("SlideSmith v1.0 — Bodyslide Armor Converter");
+    Console.WriteLine($"SlideSmith v{Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0"} — Bodyslide Armor Converter");
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");

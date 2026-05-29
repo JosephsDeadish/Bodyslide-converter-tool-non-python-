@@ -1,5 +1,6 @@
 using Bodyslide.Core;
 using Microsoft.Web.WebView2.WinForms;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
@@ -44,7 +45,11 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "SlideSmith v1.0";
+        var appVersion = Assembly
+            .GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "1.0";
+        Text = $"SlideSmith v{appVersion}";
         Width = 960;
         Height = 760;
         StartPosition = FormStartPosition.CenterScreen;
