@@ -25,7 +25,8 @@ public sealed record ConversionRequest(
     bool GenerateBodySlideFiles = true,
     IReadOnlyList<string>? CustomProfilePaths = null,
     string? WorldDropModeOverride = null,
-    string? SkeletonNifPath = null);
+    string? SkeletonNifPath = null,
+    string? SharedPluginOutputDirectory = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -3212,17 +3213,28 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             throw new InvalidDataException($"No convertible armor .nif files were found in '{request.InputPath}'.");
         }
 
+        // Deduplicate _0/_1 weight-variant pairs: keep one representative per pair so that
+        // LocalArmorImportService can locate the sibling and both halves land in the same
+        // per-armor output folder instead of being split across separate sub-directories.
+        var processableMeshFiles = meshFiles
+            .GroupBy(
+                f => StripWeightSuffix(Path.GetFileNameWithoutExtension(f) ?? string.Empty),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).First())
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (variants.Count <= 1)
         {
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
                 Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
-            var resultsWithPaths = await ConvertMeshSetAsync(meshFiles, variant.Request, rootOutput, meshFiles.Count, progress, cancellationToken);
+            var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             return resultsWithPaths.Select(x => x.Result).ToList();
         }
 
-        var total = meshFiles.Count * variants.Count;
+        var total = processableMeshFiles.Count * variants.Count;
         var completed = 0;
         var allResults = new List<ConversionResult>(total);
 
@@ -3230,7 +3242,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
             var resultsWithPaths = await ConvertMeshSetAsync(
-                meshFiles,
+                processableMeshFiles,
                 variant.Request,
                 variantRootOutput,
                 total,
@@ -3269,8 +3281,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             },
             async (meshFile, ct) =>
             {
-                var perArmorOutput = Path.Combine(rootOutput, Path.GetFileNameWithoutExtension(meshFile));
-                var perArmorRequest = request with { InputPath = meshFile, OutputDirectory = perArmorOutput };
+                var baseStem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
+                var perArmorOutput = Path.Combine(rootOutput, baseStem);
+                var perArmorRequest = request with
+                {
+                    InputPath = meshFile,
+                    OutputDirectory = perArmorOutput,
+                    SharedPluginOutputDirectory = rootOutput
+                };
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
                 resultBag.Add((meshFile, result));
 
@@ -3299,6 +3317,21 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return batchMode
             ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
             : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
+    }
+
+    /// <summary>
+    /// Strips a <c>_0</c> or <c>_1</c> weight-variant suffix from a NIF stem so that both
+    /// halves of a pair are placed in the same output folder rather than separate sub-directories.
+    /// </summary>
+    private static string StripWeightSuffix(string stem)
+    {
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            return stem[..^2];
+        }
+
+        return stem;
     }
 
     private static bool IsConvertibleBatchMesh(string path)
@@ -4345,6 +4378,18 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         var meshFiles = EnumerateFiles(sourcePath, [".nif"]);
+
+        // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
+        // sibling half so the full pair is processed together and weight interpolation works.
+        if (File.Exists(fullInputPath) && meshFiles.Count == 1)
+        {
+            var sibling = FindWeightSibling(fullInputPath);
+            if (sibling is not null)
+            {
+                meshFiles = [fullInputPath, sibling];
+            }
+        }
+
         if (meshFiles.Count == 0)
         {
             throw new InvalidDataException("No .nif mesh files were found in the input.");
@@ -4409,6 +4454,26 @@ internal sealed class LocalArmorImportService : IArmorImportService
                 low.TryGetValue(baseName, out var l) ? l : null,
                 high.TryGetValue(baseName, out var h) ? h : null))
             .ToList();
+    }
+
+    /// <summary>
+    /// Returns the full path of the opposing weight-variant NIF (<c>_0</c>↔<c>_1</c>) that
+    /// sits alongside <paramref name="meshFilePath"/>, or <see langword="null"/> when the
+    /// file does not have a weight suffix or the sibling does not exist on disk.
+    /// </summary>
+    private static string? FindWeightSibling(string meshFilePath)
+    {
+        var dir = Path.GetDirectoryName(meshFilePath);
+        if (string.IsNullOrEmpty(dir)) return null;
+        var stem = Path.GetFileNameWithoutExtension(meshFilePath);
+        var ext  = Path.GetExtension(meshFilePath);
+        string? siblingName =
+            stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ? stem[..^2] + "_1" + ext :
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase) ? stem[..^2] + "_0" + ext :
+            null;
+        if (siblingName is null) return null;
+        var siblingPath = Path.Combine(dir, siblingName);
+        return File.Exists(siblingPath) ? Path.GetFullPath(siblingPath) : null;
     }
 
     private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions)
@@ -8951,7 +9016,8 @@ internal sealed class LocalExportService(
         // half using weight-scaled morphs so the game can interpolate between body weights.
         // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
         // detected; otherwise the source bytes are copied through unchanged.
-        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
+        var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
         var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
@@ -8975,7 +9041,6 @@ internal sealed class LocalExportService(
         string? groundMeshRelativePath = null;
         if (groundMeshGen is not null && writtenNifs.Count > 0)
         {
-            var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
             foreach (var writtenNifPath in writtenNifs)
             {
                 var sourceNifBytes = await File.ReadAllBytesAsync(writtenNifPath, cancellationToken);
@@ -8996,7 +9061,7 @@ internal sealed class LocalExportService(
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
-        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
+        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, request.SharedPluginOutputDirectory, cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
 
         // Generate flat-normal DDS stubs for any diffuse textures that have no matching _n.dds.
@@ -9221,9 +9286,15 @@ internal sealed class LocalExportService(
                     // ── Existing: full-copy patched plugin (_patched.esp) ──────────────
                     // Kept for compatibility; users who want a single self-contained plugin
                     // can still use this file.
+                    var espDestDirectory = request.SharedPluginOutputDirectory ?? outputDirectory;
+                    if (!string.IsNullOrWhiteSpace(espDestDirectory))
+                    {
+                        Directory.CreateDirectory(espDestDirectory);
+                    }
+
                     var rewriter = new BinaryPluginRewriteService();
                     var rewriteResult = await rewriter.RewriteAsync(
-                        safeSourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
+                        safeSourcePluginPaths, pluginRewriteMap, espDestDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
@@ -9248,7 +9319,7 @@ internal sealed class LocalExportService(
                             if (included > 0)
                             {
                                 var baseName       = Path.GetFileNameWithoutExtension(pluginPath);
-                                var patchPath      = Path.Combine(outputDirectory, $"{baseName}_SlidesmithPatch.esp");
+                                var patchPath      = Path.Combine(espDestDirectory, $"{baseName}_SlidesmithPatch.esp");
                                 await File.WriteAllBytesAsync(patchPath, patchBytes, cancellationToken);
                                 outputFiles.Add(patchPath);
                                 patchEspGenerated = true;
@@ -9301,7 +9372,6 @@ internal sealed class LocalExportService(
                     .ToList();
             }
 
-            var safeBodyToken  = BuildSafeBodyToken(request.TargetBody);
             var pluginNifPaths = writtenNifs
                 .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")
                 .ToList();
@@ -9312,7 +9382,13 @@ internal sealed class LocalExportService(
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
-                var espPath = Path.Combine(outputDirectory, pluginFileName);
+                var scratchEspDir = request.SharedPluginOutputDirectory ?? outputDirectory;
+                if (!string.IsNullOrWhiteSpace(scratchEspDir))
+                {
+                    Directory.CreateDirectory(scratchEspDir);
+                }
+
+                var espPath = Path.Combine(scratchEspDir, pluginFileName);
                 await File.WriteAllBytesAsync(espPath, pluginBytes, cancellationToken);
                 outputFiles.Add(espPath);
             }
@@ -9481,10 +9557,16 @@ internal sealed class LocalExportService(
         ImportedArmor armor,
         ConvertedMesh mesh,
         string outputDirectory,
+        string safeBodyToken,
         CancellationToken cancellationToken)
     {
         var written = new List<string>();
         var synthesizedCount = 0;
+
+        // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
+        // loader can find them and the installed structure matches the expected Data\ layout.
+        var nifDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", safeBodyToken);
+        Directory.CreateDirectory(nifDirectory);
 
         // Build a set of mesh files that are part of a detected _0/_1 pair so we can
         // treat unpaired singletons differently.
@@ -9499,8 +9581,8 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(pair.LowWeightMesh);
                     pairedFiles.Add(pair.HighWeightMesh);
 
-                    var lowDest  = Path.Combine(outputDirectory, Path.GetFileName(pair.LowWeightMesh)!);
-                    var highDest = Path.Combine(outputDirectory, Path.GetFileName(pair.HighWeightMesh)!);
+                    var lowDest  = Path.Combine(nifDirectory, Path.GetFileName(pair.LowWeightMesh)!);
+                    var highDest = Path.Combine(nifDirectory, Path.GetFileName(pair.HighWeightMesh)!);
 
                     await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken);
                     await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
@@ -9515,9 +9597,9 @@ internal sealed class LocalExportService(
                     var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
                     var ext         = Path.GetExtension(sourceMesh);
 
-                    var destSource = Path.Combine(outputDirectory, Path.GetFileName(sourceMesh)!);
+                    var destSource = Path.Combine(nifDirectory, Path.GetFileName(sourceMesh)!);
                     var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
-                    var destSynth  = Path.Combine(outputDirectory, synthName);
+                    var destSynth  = Path.Combine(nifDirectory, synthName);
 
                     // Write the existing half with regular morphs.
                     await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken);
@@ -9543,7 +9625,7 @@ internal sealed class LocalExportService(
         {
             if (pairedFiles.Contains(meshFile)) continue;
 
-            var dest = Path.Combine(outputDirectory, Path.GetFileName(meshFile)!);
+            var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
         }
@@ -9940,6 +10022,7 @@ internal sealed class LocalExportService(
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,
         string outputDirectory,
+        string? sharedPluginOutputDirectory,
         CancellationToken cancellationToken)
     {
         var supportFiles = new List<string>();
@@ -9966,11 +10049,28 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
-            var destinationPath = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
-            if (!destinationPath.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
+            // Plugin files are shared across all per-armor outputs; route them to the shared
+            // plugin directory so only one copy exists rather than one per armor sub-folder.
+            var ext = Path.GetExtension(fullSource);
+            var isPlugin = ext is ".esp" or ".esm" or ".esl";
+            var destRoot = isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory)
+                ? sharedPluginOutputDirectory
+                : outputDirectory;
+
+            string destinationPath;
+            if (isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory))
             {
-                destinationPath = Path.Combine(outputDirectory, Path.GetFileName(fullSource));
+                // Place the plugin directly at the root of the shared directory (no sub-folders).
+                destinationPath = Path.GetFullPath(Path.Combine(destRoot, Path.GetFileName(fullSource)));
+            }
+            else
+            {
+                var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
+                destinationPath = Path.GetFullPath(Path.Combine(destRoot, relativePath));
+                if (!destinationPath.StartsWith(Path.GetFullPath(destRoot), StringComparison.OrdinalIgnoreCase))
+                {
+                    destinationPath = Path.Combine(destRoot, Path.GetFileName(fullSource));
+                }
             }
 
             if (!seenDestinations.Add(destinationPath) || File.Exists(destinationPath))

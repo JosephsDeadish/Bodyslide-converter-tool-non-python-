@@ -740,7 +740,7 @@ public sealed class ConversionOrchestratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            Assert.True(File.Exists(Path.Combine(outputDirectory, "ironarmor_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif")));
         }
         finally
         {
@@ -2998,7 +2998,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif");
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories);
             Assert.NotEmpty(nifFiles);
             // The output NIF must reproduce the source content.
             var written = await File.ReadAllTextAsync(nifFiles[0]);
@@ -3062,7 +3062,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "synthetic_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "synthetic_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
@@ -3104,7 +3104,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "block_graph_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "block_graph_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
@@ -3154,7 +3154,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "Vanilla", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "shrinkwrap_projection.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "vanilla", "shrinkwrap_projection.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
@@ -3237,7 +3237,7 @@ public sealed class NifOutputAndSourceOverrideTests
                 detectedBody, skeletonMapping, voxelResult,
                 CancellationToken.None);
 
-            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "arm_bias.nif")));
+            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "arm_bias.nif")));
             var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
 
             var chestExpansion = MathF.Abs(transformedRead[5].X) - MathF.Abs(sourceRead[5].X);
@@ -3271,7 +3271,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "sse_bstriShape_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bstriShape_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
