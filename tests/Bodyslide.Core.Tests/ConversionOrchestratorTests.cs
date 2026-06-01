@@ -10564,39 +10564,6 @@ public sealed class CustomBodyProfileSupportTests
                 "pelvis": 1.08
               }
             }
-
-            [Fact]
-            public async Task ImportAsync_IgnoresPreviouslyGeneratedOutputTrees()
-            {
-              var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-              var generatedDir = Path.Combine(tmpDir, "Converted");
-              Directory.CreateDirectory(tmpDir);
-              Directory.CreateDirectory(generatedDir);
-
-              var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
-              var sourceTexture = Path.Combine(tmpDir, "DX_MAC_Gwelda.dds");
-              await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
-              await File.WriteAllBytesAsync(sourceTexture, new byte[128]);
-
-              await File.WriteAllTextAsync(Path.Combine(generatedDir, "conversion-manifest.json"), "{}");
-              var generatedShapeData = Path.Combine(generatedDir, "CalienteTools", "BodySlide", "ShapeData", "LoopProject");
-              Directory.CreateDirectory(generatedShapeData);
-              await File.WriteAllBytesAsync(Path.Combine(generatedShapeData, "armor_0.nif"), new byte[64]);
-              await File.WriteAllBytesAsync(Path.Combine(generatedDir, "DX_MAC_Gwelda_n.dds"), new byte[128]);
-
-              try
-              {
-                  var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
-
-                  Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
-                  Assert.DoesNotContain(armor.MeshFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
-                  Assert.DoesNotContain(armor.TextureFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
-              }
-              finally
-              {
-                  Directory.Delete(tmpDir, recursive: true);
-              }
-            }
             """);
 
         try
@@ -10610,6 +10577,39 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains("NPC L Pec", profile.PhysicsBones ?? []);
             Assert.Equal(3, profile.SliderNames?.Count);
             Assert.Equal(1.14, profile.TransformationField["chest"]);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImportAsync_IgnoresPreviouslyGeneratedOutputTrees()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var generatedDir = Path.Combine(tmpDir, "Converted");
+        Directory.CreateDirectory(tmpDir);
+        Directory.CreateDirectory(generatedDir);
+
+        var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
+        var sourceTexture = Path.Combine(tmpDir, "DX_MAC_Gwelda.dds");
+        await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
+        await File.WriteAllBytesAsync(sourceTexture, new byte[128]);
+
+        await File.WriteAllTextAsync(Path.Combine(generatedDir, "conversion-manifest.json"), "{}");
+        var generatedShapeData = Path.Combine(generatedDir, "CalienteTools", "BodySlide", "ShapeData", "LoopProject");
+        Directory.CreateDirectory(generatedShapeData);
+        await File.WriteAllBytesAsync(Path.Combine(generatedShapeData, "armor_0.nif"), new byte[64]);
+        await File.WriteAllBytesAsync(Path.Combine(generatedDir, "DX_MAC_Gwelda_n.dds"), new byte[128]);
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(armor.MeshFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(armor.TextureFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

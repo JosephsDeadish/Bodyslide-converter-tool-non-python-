@@ -3335,24 +3335,24 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             return Path.Combine(originalRequest.OutputDirectory, variant.OutputSegment);
         }
 
-        private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
-        {
-            var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
-            {
-                exclusions.Add(Path.GetFullPath(request.OutputDirectory));
-            }
-
-            var defaultOutputRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output"));
-            exclusions.Add(defaultOutputRoot);
-
-            return exclusions.ToList();
-        }
-
         return batchMode
             ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
             : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
+    }
+
+    private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
+    {
+        var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.OutputDirectory));
+        }
+
+        var defaultOutputRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output"));
+        exclusions.Add(defaultOutputRoot);
+
+        return exclusions.ToList();
     }
 
     internal static class SourceScanEnumerator
@@ -4645,7 +4645,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
     }
 
     private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions, IReadOnlyList<string>? excludedDirectories) =>
-        SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories);
+        BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories);
 
     private static string ResolveSupportScanRoot(string sourcePath)
     {
