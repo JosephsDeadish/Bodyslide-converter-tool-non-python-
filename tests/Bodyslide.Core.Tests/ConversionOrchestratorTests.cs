@@ -1480,6 +1480,22 @@ public sealed class ConversionOrchestratorTests
         var cage = await service.BuildAsync(analysis, "CBBE", CancellationToken.None);
 
         Assert.Equal("rigid-no-deform-cage", cage.Mode);
+        Assert.Empty(cage.Regions!);
+    }
+
+    [Fact]
+    public async Task BasicCageGenerationService_PlateArmorBuildsRegionalControlCage()
+    {
+        var analysis = new MeshAnalysis("plate", false, 1);
+        var service = new BasicCageGenerationService();
+
+        var cage = await service.BuildAsync(analysis, "3BA", CancellationToken.None);
+
+        Assert.Equal("rigid-regional-cage", cage.Mode);
+        Assert.NotNull(cage.Regions);
+        Assert.Contains("chest", cage.Regions!.Keys);
+        Assert.Contains("arms", cage.Regions.Keys);
+        Assert.True(cage.Regions["arms"].Rigidity > 0.5f);
     }
 
     [Fact]
@@ -1498,6 +1514,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal("headgear", result.MeshType);
             Assert.Equal("rigid-no-deform", result.Strategy);
             Assert.Empty(result.RegionalMorphing);
+            Assert.Same(cage, result.DeformationCage);
         }
         finally
         {
@@ -3104,6 +3121,86 @@ public sealed class NifOutputAndSourceOverrideTests
             Assert.True(
                 transformedRadial >= sourceRadial + 0.005f,
                 $"Expected shrinkwrap projection to push the near-surface vertex outward (source={sourceRadial:F4}, transformed={transformedRadial:F4}).");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WithCustomCage_ProjectsOuterArmVerticesMoreThanChestVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "arm_bias.nif");
+        var sourceVertices = new List<(float X, float Y, float Z)>
+        {
+            (-1.00f,  0.00f, 0.00f),
+            ( 1.00f,  0.00f, 0.00f),
+            ( 0.00f, -1.00f, 0.00f),
+            ( 0.00f,  1.00f, 0.00f),
+            ( 0.00f,  0.00f, 1.00f),
+            ( 0.08f,  0.00f, 0.92f), // chest-adjacent vertex
+            ( 0.78f,  0.00f, 0.92f)  // outer arm / shoulder-shell vertex
+        };
+        await SyntheticNifTestData.WriteAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "3BA", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh(
+                "cloth",
+                "cage+surface-project",
+                1,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = 1.00,
+                    ["arms"] = 1.40
+                },
+                new DeformationCage(
+                    "test-cage",
+                    new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = new(0.92f, 0.12f, 0.15f, 0.35f, 0.50f, 1.00f, 0.70f, 0.15f, 0.05f, 0.00f),
+                        ["arms"] = new(0.92f, 0.12f, 0.95f, 0.18f, 0.50f, 1.00f, 1.00f, 0.05f, 0.02f, 0.00f)
+                    }));
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "3BA", ["Arms"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "XPMSSE",
+                "3BA",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, ["step1"],
+                detectedBody, skeletonMapping, voxelResult,
+                CancellationToken.None);
+
+            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "arm_bias.nif")));
+            var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
+
+            var chestExpansion = MathF.Abs(transformedRead[5].X) - MathF.Abs(sourceRead[5].X);
+            var armExpansion = MathF.Abs(transformedRead[6].X) - MathF.Abs(sourceRead[6].X);
+
+            Assert.True(
+                armExpansion > chestExpansion + 0.05f,
+                $"Expected cage weighting to expand the outer arm shell more than the chest (arm={armExpansion:F4}, chest={chestExpansion:F4}).");
         }
         finally
         {

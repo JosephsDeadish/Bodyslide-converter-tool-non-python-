@@ -60,8 +60,24 @@ public static class HeadgearSubTypes
 }
 
 public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount, string? HeadgearSubType = null);
-public sealed record DeformationCage(string Mode);
-public sealed record ConvertedMesh(string MeshType, string Strategy, int MeshCount, IReadOnlyDictionary<string, double> RegionalMorphing);
+public sealed record CageRegion(
+    float HeightCenter,
+    float HeightFalloff,
+    float LateralCenter = 0.5f,
+    float LateralFalloff = 1.0f,
+    float DepthCenter = 0.5f,
+    float DepthFalloff = 1.0f,
+    float WidthInfluence = 1.0f,
+    float DepthInfluence = 1.0f,
+    float HeightInfluence = 0.35f,
+    float Rigidity = 0.0f);
+public sealed record DeformationCage(string Mode, IReadOnlyDictionary<string, CageRegion>? Regions = null);
+public sealed record ConvertedMesh(
+    string MeshType,
+    string Strategy,
+    int MeshCount,
+    IReadOnlyDictionary<string, double> RegionalMorphing,
+    DeformationCage? DeformationCage = null);
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
 /// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
 /// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
@@ -4463,8 +4479,12 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 internal sealed class BasicCageGenerationService : ICageGenerationService
 {
     public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
+        => Task.FromResult(CreatePresetCage(analysis.MeshType, analysis.HeadgearSubType));
+
+    internal static DeformationCage CreatePresetCage(string meshType, string? headgearSubType = null)
     {
-        var mode = analysis.MeshType switch
+        var effectiveType = headgearSubType ?? meshType;
+        var mode = effectiveType switch
         {
             "headgear"
             or HeadgearSubTypes.FullHelmet
@@ -4478,7 +4498,63 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
             _ => "hybrid-cage"
         };
 
-        return Task.FromResult(new DeformationCage(mode));
+        if (effectiveType is "headgear"
+            or HeadgearSubTypes.FullHelmet
+            or HeadgearSubTypes.Hood
+            or HeadgearSubTypes.FaceMask
+            or HeadgearSubTypes.Circlet)
+        {
+            return new DeformationCage(mode, new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        var profile = meshType switch
+        {
+            "plate" => (Width: 0.52f, Depth: 0.46f, Height: 0.18f, Rigidity: 0.58f),
+            "leather" => (Width: 0.70f, Depth: 0.62f, Height: 0.26f, Rigidity: 0.34f),
+            "cloth" => (Width: 1.00f, Depth: 0.96f, Height: 0.40f, Rigidity: 0.08f),
+            "physics-enabled" => (Width: 0.94f, Depth: 0.90f, Height: 0.34f, Rigidity: 0.16f),
+            "skin-tight" => (Width: 1.08f, Depth: 1.02f, Height: 0.46f, Rigidity: 0.04f),
+            _ => (Width: 0.82f, Depth: 0.74f, Height: 0.30f, Rigidity: 0.22f)
+        };
+
+        CageRegion Region(
+            float heightCenter,
+            float heightFalloff,
+            float lateralCenter,
+            float lateralFalloff,
+            float depthCenter,
+            float depthFalloff,
+            float widthInfluence,
+            float depthInfluence,
+            float heightInfluence)
+            => new(
+                HeightCenter: heightCenter,
+                HeightFalloff: heightFalloff,
+                LateralCenter: lateralCenter,
+                LateralFalloff: lateralFalloff,
+                DepthCenter: depthCenter,
+                DepthFalloff: depthFalloff,
+                WidthInfluence: widthInfluence * profile.Width,
+                DepthInfluence: depthInfluence * profile.Depth,
+                HeightInfluence: heightInfluence * profile.Height,
+                Rigidity: profile.Rigidity);
+
+        var regions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"] = Region(0.03f, 0.05f, 0.28f, 0.48f, 0.35f, 0.55f, 0.30f, 0.24f, 0.18f),
+            ["calves"] = Region(0.18f, 0.10f, 0.34f, 0.26f, 0.42f, 0.45f, 0.50f, 0.30f, 0.24f),
+            ["thighs"] = Region(0.40f, 0.16f, 0.48f, 0.32f, 0.52f, 0.42f, 0.82f, 0.50f, 0.30f),
+            ["butt"] = Region(0.54f, 0.10f, 0.28f, 0.48f, 0.90f, 0.20f, 0.56f, 1.00f, 0.16f),
+            ["pelvis"] = Region(0.58f, 0.11f, 0.24f, 0.46f, 0.50f, 0.58f, 0.62f, 0.68f, 0.20f),
+            ["belly"] = Region(0.66f, 0.10f, 0.20f, 0.46f, 0.78f, 0.28f, 0.46f, 1.00f, 0.24f),
+            ["waist"] = Region(0.73f, 0.09f, 0.24f, 0.42f, 0.42f, 0.42f, 0.64f, 0.62f, 0.18f),
+            ["chest"] = Region(0.82f, 0.09f, 0.30f, 0.48f, 0.48f, 0.54f, 0.66f, 0.46f, 0.20f),
+            ["breasts"] = Region(0.80f, 0.09f, 0.18f, 0.30f, 0.76f, 0.28f, 1.00f, 1.00f, 0.16f),
+            ["shoulders"] = Region(0.90f, 0.07f, 0.68f, 0.28f, 0.42f, 0.52f, 0.76f, 0.42f, 0.10f),
+            ["arms"] = Region(0.94f, 0.09f, 0.95f, 0.16f, 0.50f, 0.64f, 1.00f, 0.28f, 0.08f)
+        };
+
+        return new DeformationCage(mode, regions);
     }
 }
 
@@ -4527,7 +4603,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 analysis.MeshType,
                 strategy,
                 analysis.MeshCount,
-                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)));
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+                cage));
         }
 
         // Compute a relative source→target delta when sourceBody is provided.
@@ -4557,7 +4634,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var solverRefinedMorphing = !string.IsNullOrWhiteSpace(sourceBody)
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing));
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing, cage));
     }
 
     /// <summary>
@@ -9262,7 +9339,7 @@ internal sealed class LocalExportService(
         }
 
         var sourceBytes = await File.ReadAllBytesAsync(sourcePath, cancellationToken);
-        var outputBytes = TryApplyNifVertexTransform(sourceBytes, mesh.RegionalMorphing);
+        var outputBytes = TryApplyNifVertexTransform(sourceBytes, mesh.RegionalMorphing, mesh.DeformationCage);
         await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
     }
 
@@ -9282,12 +9359,15 @@ internal sealed class LocalExportService(
             ["arms"] = 0.055f,
         };
 
-    private static byte[] TryApplyNifVertexTransform(byte[] sourceBytes, IReadOnlyDictionary<string, double> regionalMorphing)
+    private static byte[] TryApplyNifVertexTransform(
+        byte[] sourceBytes,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage? deformationCage)
     {
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
             // SSE NIFs use BSTriShape with half-precision (16-bit) float vertices — try that path.
-            return TryApplyNifHalfFloatVertexTransform(sourceBytes, regionalMorphing);
+            return TryApplyNifHalfFloatVertexTransform(sourceBytes, regionalMorphing, deformationCage);
         }
 
         if (vertexCount <= 0)
@@ -9330,11 +9410,9 @@ internal sealed class LocalExportService(
         var zRange = Math.Max(0.0001f, maxZ - minZ);
         var centerX = (minX + maxX) / 2f;
         var centerY = (minY + maxY) / 2f;
-        var upperFactor = AverageMorph(regionalMorphing, "chest", "breasts", "shoulders", "arms");
-        var midFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis");
-        var lowerFactor = AverageMorph(regionalMorphing, "legs", "thighs", "calves", "butt", "pelvis");
-        var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
-        var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
+        var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
+        var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         // Run animation-driven solver to get per-region push-out corrections
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
@@ -9349,11 +9427,14 @@ internal sealed class LocalExportService(
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
             var normalizedHeight = (z - minZ) / zRange;
-            var lowerWeight = 1.0f - normalizedHeight;
-            var upperWeight = normalizedHeight;
-            var midWeight = Math.Max(0f, 1f - Math.Abs((normalizedHeight - 0.5f) * 2f));
-            var widthScale = (upperFactor * upperWeight) + (lowerFactor * lowerWeight) + (midFactor * midWeight * 0.5);
-            var depthScale = (depthFactor * 0.65) + (midFactor * 0.35);
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
+                normalizedHeight,
+                lateralPosition,
+                depthPosition,
+                regionalMorphing,
+                effectiveCage);
 
             var transformedX = centerX + ((x - centerX) * (float)widthScale);
             var transformedY = centerY + ((y - centerY) * (float)depthScale);
@@ -9412,7 +9493,8 @@ internal sealed class LocalExportService(
     /// </summary>
     private static byte[] TryApplyNifHalfFloatVertexTransform(
         byte[] sourceBytes,
-        IReadOnlyDictionary<string, double> regionalMorphing)
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage? deformationCage)
     {
         if (!NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(
                 sourceBytes,
@@ -9455,11 +9537,9 @@ internal sealed class LocalExportService(
         var zRange = Math.Max(0.0001f, maxZ - minZ);
         var centerX = (minX + maxX) / 2f;
         var centerY = (minY + maxY) / 2f;
-        var upperFactor = AverageMorph(regionalMorphing, "chest", "breasts", "shoulders", "arms");
-        var midFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis");
-        var lowerFactor = AverageMorph(regionalMorphing, "legs", "thighs", "calves", "butt", "pelvis");
-        var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
-        var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
+        var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
+        var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -9475,11 +9555,14 @@ internal sealed class LocalExportService(
             var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
 
             var normalizedHeight = (z - minZ) / zRange;
-            var lowerWeight = 1.0f - normalizedHeight;
-            var upperWeight = normalizedHeight;
-            var midWeight = Math.Max(0f, 1f - Math.Abs((normalizedHeight - 0.5f) * 2f));
-            var widthScale = (upperFactor * upperWeight) + (lowerFactor * lowerWeight) + (midFactor * midWeight * 0.5);
-            var depthScale = (depthFactor * 0.65) + (midFactor * 0.35);
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
+                normalizedHeight,
+                lateralPosition,
+                depthPosition,
+                regionalMorphing,
+                effectiveCage);
 
             var transformedX = centerX + ((x - centerX) * (float)widthScale);
             var transformedY = centerY + ((y - centerY) * (float)depthScale);
@@ -9526,6 +9609,89 @@ internal sealed class LocalExportService(
         }
 
         return transformed;
+    }
+
+    private static (double WidthScale, double DepthScale, double HeightScale) ComputeCageProjectionScales(
+        float normalizedHeight,
+        float lateralPosition,
+        float depthPosition,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage deformationCage)
+    {
+        var regions = deformationCage.Regions;
+        if (regions is null || regions.Count == 0)
+        {
+            return ComputeLegacyTransformScales(regionalMorphing, normalizedHeight);
+        }
+
+        double widthTotal = 0;
+        double depthTotal = 0;
+        double heightTotal = 0;
+        double totalWeight = 0;
+
+        foreach (var (region, control) in regions)
+        {
+            var verticalWeight = ComputeCageAxisWeight(normalizedHeight, control.HeightCenter, control.HeightFalloff);
+            if (verticalWeight <= 0f)
+            {
+                continue;
+            }
+
+            var lateralWeight = ComputeCageAxisWeight(lateralPosition, control.LateralCenter, control.LateralFalloff);
+            var depthWeight = ComputeCageAxisWeight(depthPosition, control.DepthCenter, control.DepthFalloff);
+            var weight = verticalWeight * Math.Max(0.10f, lateralWeight) * Math.Max(0.10f, depthWeight);
+            if (weight <= 0f)
+            {
+                continue;
+            }
+
+            var morph = regionalMorphing.TryGetValue(region, out var factor) && double.IsFinite(factor) && factor > 0.01d
+                ? factor
+                : 1.0d;
+            var deformStrength = 1d - Math.Clamp(control.Rigidity, 0f, 0.95f);
+            widthTotal += (1d + ((morph - 1d) * control.WidthInfluence * deformStrength)) * weight;
+            depthTotal += (1d + ((morph - 1d) * control.DepthInfluence * deformStrength)) * weight;
+            heightTotal += (1d + ((morph - 1d) * control.HeightInfluence * deformStrength)) * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0.0001d)
+        {
+            return ComputeLegacyTransformScales(regionalMorphing, normalizedHeight);
+        }
+
+        return (
+            widthTotal / totalWeight,
+            depthTotal / totalWeight,
+            heightTotal / totalWeight);
+    }
+
+    private static float ComputeCageAxisWeight(float value, float center, float falloff)
+    {
+        if (falloff <= 0.0001f)
+        {
+            return MathF.Abs(value - center) <= 0.0001f ? 1f : 0f;
+        }
+
+        var normalizedDistance = MathF.Abs(value - center) / falloff;
+        return MathF.Max(0f, 1f - normalizedDistance);
+    }
+
+    private static (double WidthScale, double DepthScale, double HeightScale) ComputeLegacyTransformScales(
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        float normalizedHeight)
+    {
+        var lowerWeight = 1.0f - normalizedHeight;
+        var upperWeight = normalizedHeight;
+        var midWeight = Math.Max(0f, 1f - Math.Abs((normalizedHeight - 0.5f) * 2f));
+        var upperFactor = AverageMorph(regionalMorphing, "chest", "breasts", "shoulders", "arms");
+        var midFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis");
+        var lowerFactor = AverageMorph(regionalMorphing, "legs", "thighs", "calves", "butt", "pelvis");
+        var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
+        var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
+        var widthScale = (upperFactor * upperWeight) + (lowerFactor * lowerWeight) + (midFactor * midWeight * 0.5);
+        var depthScale = (depthFactor * 0.65) + (midFactor * 0.35);
+        return (widthScale, depthScale, heightFactor);
     }
 
 
