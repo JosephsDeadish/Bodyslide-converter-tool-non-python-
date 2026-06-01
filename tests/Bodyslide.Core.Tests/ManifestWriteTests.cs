@@ -15,7 +15,7 @@ public sealed class ManifestWriteTests
 
         try
         {
-            await using var lockHandle = new FileStream(preferredPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var lockHandle = new FileStream(preferredPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             var writeTask = InvokeWriteConversionManifestAsync(outputDirectory, "{\"ok\":true}");
             await Task.Delay(250);
             await lockHandle.DisposeAsync();
@@ -41,7 +41,7 @@ public sealed class ManifestWriteTests
 
         try
         {
-            await using var lockHandle = new FileStream(preferredPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            await using var lockHandle = new FileStream(preferredPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             var resultPath = await InvokeWriteConversionManifestAsync(outputDirectory, "{\"fallback\":true}");
 
             Assert.NotEqual(preferredPath, resultPath);

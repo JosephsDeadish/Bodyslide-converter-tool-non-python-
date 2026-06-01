@@ -10479,12 +10479,22 @@ internal sealed class LocalExportService(
                 await File.WriteAllTextAsync(preferredPath, manifestJson, cancellationToken);
                 return preferredPath;
             }
-            catch (IOException ex) when (attempt < maxPreferredPathAttempts && IsSharingOrLockViolation(ex))
+            catch (IOException)
             {
+                if (attempt >= maxPreferredPathAttempts)
+                {
+                    break;
+                }
+
                 await Task.Delay(retryDelayMilliseconds, cancellationToken);
             }
-            catch (UnauthorizedAccessException) when (attempt < maxPreferredPathAttempts)
+            catch (UnauthorizedAccessException)
             {
+                if (attempt >= maxPreferredPathAttempts)
+                {
+                    break;
+                }
+
                 await Task.Delay(retryDelayMilliseconds, cancellationToken);
             }
         }
@@ -10494,13 +10504,6 @@ internal sealed class LocalExportService(
             $"conversion-manifest-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}.json");
         await File.WriteAllTextAsync(fallbackPath, manifestJson, cancellationToken);
         return fallbackPath;
-    }
-
-    private static bool IsSharingOrLockViolation(IOException exception)
-    {
-        // Win32 sharing violation (32) and lock violation (33). This remains harmless on non-Windows.
-        var nativeCode = exception.HResult & 0xFFFF;
-        return nativeCode is 32 or 33;
     }
 
     /// <summary>
