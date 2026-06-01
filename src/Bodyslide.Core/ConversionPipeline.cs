@@ -9475,31 +9475,6 @@ internal sealed class LocalExportService(
             return sourcePath;
         }
 
-        private static bool PathsEqual(string leftPath, string rightPath)
-        {
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            return string.Equals(Path.GetFullPath(leftPath), Path.GetFullPath(rightPath), comparison);
-        }
-
-        private static bool IsPathInsideDirectory(string path, string? directoryPath)
-        {
-            if (string.IsNullOrWhiteSpace(directoryPath))
-            {
-                return false;
-            }
-
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (string.Equals(fullPath, fullDirectory, comparison))
-            {
-                return true;
-            }
-
-            return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
-                   fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
-        }
-
         if (File.Exists(sourcePath))
         {
             var sourceDirectory = Path.GetDirectoryName(sourcePath);
@@ -9511,6 +9486,31 @@ internal sealed class LocalExportService(
         }
 
         return sourcePath;
+    }
+
+    private static bool PathsEqual(string leftPath, string rightPath)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(Path.GetFullPath(leftPath), Path.GetFullPath(rightPath), comparison);
+    }
+
+    private static bool IsPathInsideDirectory(string path, string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(fullPath, fullDirectory, comparison))
+        {
+            return true;
+        }
+
+        return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
+               fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
     }
 
     private static string? TryResolveModRootFromMeshesPath(string startDirectory)

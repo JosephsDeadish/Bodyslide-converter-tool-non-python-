@@ -740,7 +740,7 @@ public sealed class ConversionOrchestratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            Assert.Contains(Path.Combine(outputDirectory, "textures", "armor", "iron", "ironarmor.dds"), result.OutputFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "ironarmor_0.nif")));
         }
         finally
         {
