@@ -106,7 +106,9 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
         if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
         {
             Console.WriteLine($"           skeleton: {profile.SkeletonFoundation}");
-            Console.WriteLine($"           soft-body bones: {string.Join(", ", profile.SoftBodyBones)}");
+            Console.WriteLine($"           default physics: {profile.DefaultPhysics}{(profile.HasSoftBodyPhysicsByDefault ? " (active)" : " — override to enable soft-body")}");
+            var bonesLabel = profile.HasSoftBodyPhysicsByDefault ? "active soft-body bones" : "available physics bones (inactive)";
+            Console.WriteLine($"           {bonesLabel}: {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
             Console.WriteLine($"           notes: {profile.Notes}");
         }
     }
@@ -117,12 +119,13 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
 
 if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine("Available physics profiles:");
+    Console.WriteLine("Available physics profiles (can be applied to ANY body via --physics):");
     foreach (var profile in PhysicsProfileCatalog.All)
     {
-        Console.WriteLine($" - {profile}");
+        PhysicsProfileCatalog.Descriptions.TryGetValue(profile, out var desc);
+        Console.WriteLine($" - {profile,-12}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
-    Console.WriteLine(" - auto  => use preset/custom/default target-body physics");
+    Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;
 }
@@ -536,17 +539,25 @@ static void WriteBodyReference(string bodyName)
     if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
     {
         Console.WriteLine($" - Skeleton base    : {profile.SkeletonFoundation}");
-        Console.WriteLine($" - Soft-body bones  : {string.Join(", ", profile.SoftBodyBones)}");
+        Console.WriteLine($" - Default physics  : {profile.DefaultPhysics}{(profile.HasSoftBodyPhysicsByDefault ? " (active by default)" : " — use Physics override to enable soft-body output")}");
+        if (profile.HasSoftBodyPhysicsByDefault)
+        {
+            Console.WriteLine($" - Soft-body bones  : {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
+        }
+        else
+        {
+            Console.WriteLine($" - Available physics bones (inactive): {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
+        }
         Console.WriteLine($" - Notes            : {profile.Notes}");
     }
     else
     {
         Console.WriteLine(" - Skeleton base    : n/a");
+        Console.WriteLine(" - Default physics  : n/a");
         Console.WriteLine(" - Soft-body bones  : n/a");
         Console.WriteLine(" - Notes            : n/a");
     }
 
-    Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.GetDefaultForTargetBody(body.Name)}");
     var matchingPresets = PresetCatalog.All
         .Where(p => string.Equals(p.TargetBody, body.Name, StringComparison.OrdinalIgnoreCase))
         .Select(p => p.Name)

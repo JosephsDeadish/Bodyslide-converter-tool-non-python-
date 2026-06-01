@@ -476,7 +476,23 @@ public static class PhysicsProfileCatalog
             ["Vanilla"] = "none",
         };
 
-    public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc"];
+    /// <summary>
+    /// All recognised physics profile identifiers shown in the GUI/CLI, including "soft-body"
+    /// which is a user-friendly alias for smp+cbpc.  Any profile can be applied to any body
+    /// via the Physics override option — it is not restricted to a body's default.
+    /// </summary>
+    public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc", "soft-body"];
+
+    /// <summary>Short human-readable description for each physics profile, used in the catalog tab.</summary>
+    public static IReadOnlyDictionary<string, string> Descriptions { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["none"]      = "No soft-body bone injection. Armor uses static mesh weights only; safe for all bodies.",
+            ["cbpc"]      = "CBPC (C++ Based Physics for Cloth) bone injection. Fast CPU-side soft-body simulation; lighter mod requirement.",
+            ["smp"]       = "Spriggan MeshPhysics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
+            ["smp+cbpc"]  = "Combined SMP + CBPC bone injection. Full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
+            ["soft-body"] = "Alias for smp+cbpc. Injects full soft-body physics bones for any target body — the most comprehensive physics output.",
+        };
 
     public static bool TryNormalize(string? value, out string normalized)
     {
@@ -489,10 +505,12 @@ public static class PhysicsProfileCatalog
         var candidate = value.Trim().ToLowerInvariant();
         normalized = candidate switch
         {
-            "none" => "none",
-            "cbpc" => "cbpc",
-            "smp" => "smp",
-            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp" => "smp+cbpc",
+            "none"                                                  => "none",
+            "cbpc"                                                  => "cbpc",
+            "smp"                                                   => "smp",
+            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp"  => "smp+cbpc",
+            // "soft-body" is a user-facing alias; it normalises to smp+cbpc internally.
+            "soft-body" or "softbody" or "soft_body"               => "smp+cbpc",
             _ => string.Empty
         };
 
@@ -693,28 +711,52 @@ public static class BodyTypeCatalog
 
 /// <summary>
 /// Human-readable body reference data used by CLI/GUI catalog views.
+/// <para><see cref="DefaultPhysics"/> reflects the physics profile applied automatically when this body
+/// is chosen as the conversion target without an explicit physics override.  Bodies with
+/// <c>"none"</c> still expose <see cref="AvailablePhysicsBones"/> that become active whenever the
+/// user selects a non-none physics profile override (cbpc, smp, smp+cbpc / soft-body).</para>
 /// </summary>
 public sealed record BodyTechnicalProfileInfo(
     string Name,
     string SkeletonFoundation,
-    IReadOnlyList<string> SoftBodyBones,
-    string Notes);
+    /// <summary>
+    /// Bones available for soft-body physics on this body type.
+    /// These are only active by default when <see cref="DefaultPhysics"/> is not <c>"none"</c>.
+    /// They can be activated on any body via a physics profile override.
+    /// </summary>
+    IReadOnlyList<string> AvailablePhysicsBones,
+    string Notes,
+    /// <summary>
+    /// The physics profile applied automatically for this body. One of: none, cbpc, smp, smp+cbpc.
+    /// Any body can use any profile via the Physics override option.
+    /// </summary>
+    string DefaultPhysics)
+{
+    // Backward-compatible alias so existing call-sites that read SoftBodyBones still compile.
+    public IReadOnlyList<string> SoftBodyBones => AvailablePhysicsBones;
+
+    /// <summary>True when physics bones are active by default for this body (DefaultPhysics is not "none").</summary>
+    public bool HasSoftBodyPhysicsByDefault => !string.Equals(DefaultPhysics, "none", StringComparison.OrdinalIgnoreCase);
+}
 
 public static class BodyTechnicalProfileCatalog
 {
     private static readonly IReadOnlyDictionary<string, BodyTechnicalProfileInfo> Profiles =
         new Dictionary<string, BodyTechnicalProfileInfo>(StringComparer.OrdinalIgnoreCase)
         {
-            ["CBBE"] = new("CBBE", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Baseline female body with predictable topology and broad armor support."),
-            ["3BA"] = new("3BA", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"], "CBBE topology with extended soft-body physics weighting."),
-            ["BHUNP"] = new("BHUNP", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"], "UUNP-family topology with broad regional weight painting and advanced physics."),
-            ["UNP"] = new("UNP", "XPMSSE", ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Legacy female body family with lighter physics chain requirements."),
-            ["TBD"] = new("TBD", "XPMSSE", ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Female body variant commonly used with CBPC-style setups."),
-            ["HIMBO"] = new("HIMBO", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"], "Modern male body with pec-driven physics."),
-            ["SAM"] = new("SAM", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"], "Male body ecosystem with custom shape presets and SMP support."),
-            ["SOS"] = new("SOS", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"], "Male body setup with genital bone support layered on XPMSSE."),
-            ["UBE"] = new("UBE", "XPMSSE + custom UBE bones", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping is preferred over strict name-only mapping."),
-            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton", ["NPC Belly"], "Baseline Skyrim body data with minimal soft-body weighting."),
+            // DefaultPhysics mirrors PhysicsProfileCatalog.BuiltInDefaults.
+            // AvailablePhysicsBones lists all bones that become active when a soft-body physics
+            // profile is applied — even for bodies whose default is "none".
+            ["CBBE"]    = new("CBBE",    "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                      "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.", "none"),
+            ["3BA"]     = new("3BA",     "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",                                                                                            "smp+cbpc"),
+            ["BHUNP"]   = new("BHUNP",   "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",                                                                       "smp+cbpc"),
+            ["UNP"]     = new("UNP",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",                                                                                       "cbpc"),
+            ["TBD"]     = new("TBD",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",                                                                                               "cbpc"),
+            ["HIMBO"]   = new("HIMBO",   "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Modern male body with pec-driven physics. SMP enabled by default.",                                                                                                                "smp"),
+            ["SAM"]     = new("SAM",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",                                                                                            "smp"),
+            ["SOS"]     = new("SOS",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],                                                                                                                                "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",                                                                                             "smp"),
+            ["UBE"]     = new("UBE",     "XPMSSE + custom UBE bones",["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",                                                          "smp+cbpc"),
+            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton",  ["NPC Belly"],                                                                                                                                                                                                                  "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",                                           "none"),
         };
 
     public static bool TryGet(string bodyName, out BodyTechnicalProfileInfo profile) =>

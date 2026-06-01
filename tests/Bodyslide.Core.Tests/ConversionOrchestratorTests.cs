@@ -4728,6 +4728,69 @@ public sealed class BodyTypeCatalogTests
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
             Assert.NotEmpty(profile.SoftBodyBones);
+            // SoftBodyBones is an alias for AvailablePhysicsBones.
+            Assert.Equal(profile.SoftBodyBones, profile.AvailablePhysicsBones);
+        }
+    }
+
+    [Fact]
+    public void BodyTechnicalProfileCatalog_DefaultPhysics_MatchesPhysicsProfileCatalogDefaults()
+    {
+        // Bodies with soft-body physics by default must have a non-"none" DefaultPhysics.
+        foreach (var (bodyName, expectedPhysics) in new[]
+        {
+            ("3BA",     "smp+cbpc"),
+            ("BHUNP",   "smp+cbpc"),
+            ("UNP",     "cbpc"),
+            ("TBD",     "cbpc"),
+            ("HIMBO",   "smp"),
+            ("SAM",     "smp"),
+            ("SOS",     "smp"),
+            ("UBE",     "smp+cbpc"),
+        })
+        {
+            Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
+                $"No profile for {bodyName}");
+            Assert.Equal(expectedPhysics, profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
+            Assert.True(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=true");
+        }
+
+        // Bodies without built-in physics must report DefaultPhysics = "none".
+        foreach (var bodyName in new[] { "CBBE", "Vanilla" })
+        {
+            Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
+                $"No profile for {bodyName}");
+            Assert.Equal("none", profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
+            Assert.False(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=false");
+        }
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_All_ContainsSoftBodyAlias()
+    {
+        Assert.Contains("soft-body", PhysicsProfileCatalog.All, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_TryNormalize_SoftBodyNormalizesToSmpCbpc()
+    {
+        Assert.True(PhysicsProfileCatalog.TryNormalize("soft-body", out var normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(PhysicsProfileCatalog.TryNormalize("softbody", out normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(PhysicsProfileCatalog.TryNormalize("soft_body", out normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_Descriptions_HasEntryForEveryProfile()
+    {
+        foreach (var profile in PhysicsProfileCatalog.All)
+        {
+            Assert.True(PhysicsProfileCatalog.Descriptions.ContainsKey(profile),
+                $"Missing description for physics profile '{profile}'");
         }
     }
 }
