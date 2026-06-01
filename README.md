@@ -137,6 +137,8 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
+If `SlideSmith-CLI.exe` is launched with **no arguments** and `SlideSmith.exe` is in the same folder, the CLI now auto-opens the desktop GUI instead of just printing usage and exiting.
+
 ## GitHub Actions (CI)
 
 This repository includes `.github/workflows/build.yml`, which runs automatically on pushes to `main`/`master` and on pull requests.
