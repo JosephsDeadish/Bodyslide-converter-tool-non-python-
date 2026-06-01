@@ -9,11 +9,24 @@ if (TryLaunchDesktopGuiOnWindows(args))
     return;
 }
 
+var parsedArgs = ParseNamedArguments(args);
+
+if (args.Contains("--conversion-guide", StringComparer.OrdinalIgnoreCase))
+{
+    WriteConversionGuide();
+    return;
+}
+
+if (TryGetNamedValue(parsedArgs, "body-reference", out var bodyReference))
+{
+    WriteBodyReference(bodyReference);
+    return;
+}
+
 if (args.Contains("--export-cache", StringComparer.OrdinalIgnoreCase))
 {
-    var parsed = ParseNamedArguments(args);
-    parsed.TryGetValue("export-cache", out var exportCachePath);
-    parsed.TryGetValue("cache-path", out var exportCacheOverridePath);
+    parsedArgs.TryGetValue("export-cache", out var exportCachePath);
+    parsedArgs.TryGetValue("cache-path", out var exportCacheOverridePath);
 
     // Allow --export-cache <path> OR --cache-path <path> to specify the cache file location.
     var resolvedPath = (!string.IsNullOrWhiteSpace(exportCachePath) && exportCachePath != "true")
@@ -255,6 +268,22 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         return false;
     }
 
+    if (!string.IsNullOrWhiteSpace(skeletonNif))
+    {
+        skeletonNif = skeletonNif.Trim().Trim('"');
+        if (!skeletonNif.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"Invalid --skeleton-nif value '{skeletonNif}'. Provide a path to a .nif file.";
+            return false;
+        }
+
+        if (!File.Exists(skeletonNif))
+        {
+            error = $"Could not find skeleton file '{skeletonNif}'. Check the path and try again.";
+            return false;
+        }
+    }
+
     request = new ConversionRequest(
         InputPath: input,
         TargetBody: selectedTargets.FirstOrDefault() ?? string.Empty,
@@ -414,6 +443,23 @@ static bool TryParseBooleanOption(string? value, out bool parsed)
     }
 }
 
+static bool TryGetNamedValue(IReadOnlyDictionary<string, string> args, string key, out string value)
+{
+    value = string.Empty;
+    if (!args.TryGetValue(key, out var rawValue))
+    {
+        return false;
+    }
+
+    if (string.IsNullOrWhiteSpace(rawValue) || string.Equals(rawValue, "true", StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    value = rawValue.Trim();
+    return true;
+}
+
 static void PauseBeforeExit()
 {
     Console.WriteLine();
@@ -431,7 +477,9 @@ static void WriteUsage()
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
+    Console.WriteLine("  SlideSmith --body-reference <body>");
     Console.WriteLine("  SlideSmith --list-physics");
+    Console.WriteLine("  SlideSmith --conversion-guide");
     Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --self-check");
     Console.WriteLine("  SlideSmith --help");
@@ -440,6 +488,8 @@ static void WriteUsage()
     Console.WriteLine("  --source <body>   FROM body (what the input armor currently targets).");
     Console.WriteLine("  --target <body>   TO body (what you want to convert to).");
     Console.WriteLine("  --preset <name>   Shortcut that sets TO body + default deformation/physics.");
+    Console.WriteLine("  --body-reference  Show a focused body profile (tokens, skeleton, soft-body bones, default physics, matching presets).");
+    Console.WriteLine("  --conversion-guide  Print practical body/physics/skeleton conversion guidance.");
     Console.WriteLine();
     Console.WriteLine("Drag a .nif file, supported archive (.zip/.7z/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
 }
@@ -451,4 +501,69 @@ static void WriteSelfCheck()
     {
         Console.WriteLine($" - [{check.Status}] {check.Area}: {check.Details}");
     }
+}
+
+static void WriteBodyReference(string bodyName)
+{
+    var requested = bodyName.Trim();
+    if (requested.Length == 0)
+    {
+        Console.WriteLine("Provide a body name, for example: --body-reference 3BA");
+        return;
+    }
+
+    var body = BodyTypeCatalog.All.FirstOrDefault(b => string.Equals(b.Name, requested, StringComparison.OrdinalIgnoreCase));
+    if (body is null)
+    {
+        Console.WriteLine($"Unknown body '{bodyName}'. Use --list-bodies to view valid names.");
+        var suggestions = BodyTypeCatalog.All
+            .Where(b => b.Name.Contains(requested, StringComparison.OrdinalIgnoreCase))
+            .Select(b => b.Name)
+            .ToArray();
+        if (suggestions.Length > 0)
+        {
+            Console.WriteLine($"Closest matches: {string.Join(", ", suggestions)}");
+        }
+        return;
+    }
+
+    Console.WriteLine($"Body reference: {body.Name}");
+    Console.WriteLine($" - Detection tokens : {string.Join(", ", body.DetectionTokens)}");
+    Console.WriteLine(body.VertexCountMin > 0
+        ? $" - Vertex hint range: {body.VertexCountMin}–{body.VertexCountMax}"
+        : " - Vertex hint range: n/a");
+
+    if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+    {
+        Console.WriteLine($" - Skeleton base    : {profile.SkeletonFoundation}");
+        Console.WriteLine($" - Soft-body bones  : {string.Join(", ", profile.SoftBodyBones)}");
+        Console.WriteLine($" - Notes            : {profile.Notes}");
+    }
+    else
+    {
+        Console.WriteLine(" - Skeleton base    : n/a");
+        Console.WriteLine(" - Soft-body bones  : n/a");
+        Console.WriteLine(" - Notes            : n/a");
+    }
+
+    Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.GetDefaultForTargetBody(body.Name)}");
+    var matchingPresets = PresetCatalog.All
+        .Where(p => string.Equals(p.TargetBody, body.Name, StringComparison.OrdinalIgnoreCase))
+        .Select(p => p.Name)
+        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    Console.WriteLine($" - Matching presets : {(matchingPresets.Length == 0 ? "none" : string.Join(", ", matchingPresets))}");
+}
+
+static void WriteConversionGuide()
+{
+    Console.WriteLine("SlideSmith conversion guide:");
+    Console.WriteLine("  1) Pick a destination with --target <body> or --preset <name>.");
+    Console.WriteLine("  2) If the source body is known, set --source <body> to improve mapping confidence.");
+    Console.WriteLine("  3) Keep --physics auto unless you intentionally need none/cbpc/smp/smp+cbpc.");
+    Console.WriteLine("  4) Use --skeleton-nif <path> with your real XPMSSE/target skeleton for best bone mapping.");
+    Console.WriteLine("  5) Use --list-bodies, --body-reference <body>, --list-presets, and --list-physics before converting.");
+    Console.WriteLine();
+    Console.WriteLine("Recommended command pattern:");
+    Console.WriteLine("  SlideSmith --input <armor> --source <known body> --target <destination body> --physics auto --skeleton-nif <path> --output <folder>");
 }

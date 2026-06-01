@@ -118,8 +118,14 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 # skeleton foundation, and soft-body physics bone reference data
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
+# show deep reference info for one body (tokens, skeleton, soft-body bones, default physics, matching presets)
+dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BA"
+
 # show available physics profiles
 dotnet run --project src/Bodyslide.Standalone -- --list-physics
+
+# show a practical conversion guide (body/physics/skeleton workflow + recommended command shape)
+dotnet run --project src/Bodyslide.Standalone -- --conversion-guide
 
 # inspect the learning cache — prints all cached entries with target body, mesh type, strategy, and regional morphs
 dotnet run --project src/Bodyslide.Standalone -- --export-cache
