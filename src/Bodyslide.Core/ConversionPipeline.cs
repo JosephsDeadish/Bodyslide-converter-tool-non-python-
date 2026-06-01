@@ -8363,8 +8363,8 @@ internal sealed class LocalExportService(
             Steps = steps
         };
 
-        var manifestPath = Path.Combine(outputDirectory, "conversion-manifest.json");
-        await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
+        var manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+        var manifestPath = await WriteConversionManifestAsync(outputDirectory, manifestJson, cancellationToken);
         outputFiles.Add(manifestPath);
 
         // Write converted NIF mesh file(s) to the output directory.
@@ -10461,6 +10461,28 @@ internal sealed class LocalExportService(
         await using var source = File.OpenRead(sourcePath);
         await using var destination = File.Create(destinationPath);
         await source.CopyToAsync(destination, cancellationToken);
+    }
+
+    private static async Task<string> WriteConversionManifestAsync(
+        string outputDirectory,
+        string manifestJson,
+        CancellationToken cancellationToken)
+    {
+        var preferredPath = Path.Combine(outputDirectory, "conversion-manifest.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(preferredPath, manifestJson, cancellationToken);
+            return preferredPath;
+        }
+        catch (IOException)
+        {
+            var fallbackPath = Path.Combine(
+                outputDirectory,
+                $"conversion-manifest-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}.json");
+            await File.WriteAllTextAsync(fallbackPath, manifestJson, cancellationToken);
+            return fallbackPath;
+        }
     }
 
     /// <summary>
