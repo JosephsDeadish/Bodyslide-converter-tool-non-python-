@@ -35,7 +35,8 @@ internal static class Program
 
     private static void ShowFatalError(Exception ex)
     {
-        var crashDetails = BuildCrashDetails(ex);
+        var crashLogPath = TryWriteCrashLog(ex);
+        var crashDetails = BuildCrashDetails(ex, crashLogPath);
         using var dialog = new Form
         {
             Text = "SlideSmith — Fatal Error",
@@ -62,7 +63,9 @@ internal static class Program
         layout.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "SlideSmith encountered a fatal error and could not start.\nYou can copy the details below for bug reports.",
+            Text = crashLogPath is null
+                ? "SlideSmith encountered a fatal error and could not start.\nYou can copy the details below for bug reports."
+                : $"SlideSmith encountered a fatal error and could not start.\nA startup crash log was written to:\n{crashLogPath}",
         }, 0, 0);
 
         var detailsTextBox = new TextBox
@@ -114,12 +117,48 @@ internal static class Program
         dialog.ShowDialog();
     }
 
-    private static string BuildCrashDetails(Exception ex)
+    private static string BuildCrashDetails(Exception ex, string? crashLogPath)
     {
         return
             $"Message: {ex.Message}{Environment.NewLine}" +
             $"Type: {ex.GetType().FullName}{Environment.NewLine}" +
-            $"Timestamp (UTC): {DateTime.UtcNow:O}{Environment.NewLine}{Environment.NewLine}" +
+            $"Timestamp (UTC): {DateTime.UtcNow:O}{Environment.NewLine}" +
+            $"Crash log: {crashLogPath ?? "not written"}{Environment.NewLine}{Environment.NewLine}" +
             $"Stack Trace:{Environment.NewLine}{ex}";
+    }
+
+    private static string? TryWriteCrashLog(Exception ex)
+    {
+        foreach (var baseDirectory in EnumerateCrashLogDirectories())
+        {
+            try
+            {
+                Directory.CreateDirectory(baseDirectory);
+                var crashLogPath = Path.Combine(baseDirectory, "startup-crash.log");
+                File.WriteAllText(
+                    crashLogPath,
+                    $"Timestamp (UTC): {DateTime.UtcNow:O}{Environment.NewLine}" +
+                    $"Message: {ex.Message}{Environment.NewLine}" +
+                    $"Type: {ex.GetType().FullName}{Environment.NewLine}{Environment.NewLine}" +
+                    ex);
+                return crashLogPath;
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateCrashLogDirectories()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(localAppData, "SlideSmith");
+        }
+
+        yield return Path.Combine(Path.GetTempPath(), "SlideSmith");
     }
 }

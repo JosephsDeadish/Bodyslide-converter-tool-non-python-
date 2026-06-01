@@ -25,6 +25,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - live preview HTML output (`preview.html`) with region heatmap and conversion context
 - dropped-item/world-object physics guidance export (`world-physics.json`) describing static vs rigid-proxy behavior for generated meshes
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
+- runtime readiness self-checks in both CLI and desktop GUI so users can verify the executable, pipeline init, cache path, scratch-write access, and preview/runtime availability before converting anything
 
 ## Projects
 
@@ -50,6 +51,7 @@ dotnet run --project src/Bodyslide.Desktop
 # optional profile/source/physics/world-drop-mode override, optional BodySlide export toggle, optional output zip,
 # **optional Skeleton NIF path** — point to your installed skeleton.nif (e.g. XPMSSE) for accurate bone mapping without auto-discovery,
 # optional global learning-cache path override and in-app learning-cache inspector,
+# built-in **Run self-check** action + **Readiness** tab for first-run executable validation,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
 # any previous output folder's preview, quick-open batch reports when available, an in-app files tab
@@ -120,6 +122,9 @@ dotnet run --project src/Bodyslide.Standalone -- --export-cache
 
 # inspect the learning cache at a custom location
 dotnet run --project src/Bodyslide.Standalone -- --export-cache --cache-path "D:\MySlidesmithCache\.conversion-learning-cache.json"
+
+# verify the executable/runtime before attempting a conversion
+dotnet run --project src/Bodyslide.Standalone -- --self-check
 
 # target a custom body profile discovered from a nearby *.slidesmith-body.json file
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "MyFollowerBody"
@@ -267,6 +272,7 @@ Implemented from issue scope:
 - **`--source` flag** to override auto-detected source body type (`--source CBBE`, etc.)
 - **`--list-bodies` flag** to enumerate all supported body types with detection tokens
 - **`--export-cache` flag** — prints all learning-cache entries (target body, mesh type, strategy, per-region morphs, last conversion timestamp) to standard output for inspection/debugging; accepts an optional `--cache-path` to read from a custom location
+- **runtime readiness self-checks** — CLI now exposes `--self-check`, and the desktop GUI includes a **Run self-check** button plus a **Readiness** tab so users can validate the EXE path, pipeline initialization, cache location, scratch-write access, and WebView2/browser preview readiness before running conversions
 - **source→target relative delta conversion** — `StrategyMeshConversionService` now computes `targetField[region] / sourceField[region]` per region so converting e.g. CBBE→UNP applies only the directional difference rather than the full UNP field; emits `conversion-delta:CBBE→UNP` step
 - **vanilla recommended profile auto-apply** — when the vanilla armor database identifies a match and no explicit `--profile` was provided, its `RecommendedProfile` is automatically applied (emits `vanilla-profile:<name>` step)
 - **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step

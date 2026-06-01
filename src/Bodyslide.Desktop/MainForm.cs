@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System.Reflection;
 using System.Text;
@@ -36,6 +37,7 @@ public sealed class MainForm : Form
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
     private readonly Button _inspectCacheButton;
+    private readonly Button _runSelfCheckButton;
     private readonly Button _openCustomProfileButton;
     private readonly Button _removeCustomProfileButton;
     private readonly Button _clearCustomProfilesButton;
@@ -58,6 +60,8 @@ public sealed class MainForm : Form
     private readonly ListView _reportsListView;
     private readonly TabPage _catalogTabPage;
     private readonly ListView _catalogListView;
+    private readonly TabPage _readinessTabPage;
+    private readonly ListView _readinessListView;
     private readonly TabPage _artifactsTabPage;
     private readonly ListView _artifactsListView;
     private readonly TabPage _cacheTabPage;
@@ -583,6 +587,14 @@ public sealed class MainForm : Form
             Height = 34,
         };
         _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync();
+        _runSelfCheckButton = new Button
+        {
+            Text = "Run self-check",
+            Width = 120,
+            Height = 34,
+            Margin = new Padding(8, 0, 0, 0),
+        };
+        _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
@@ -597,6 +609,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
         actionRow.Controls.Add(_inspectCacheButton);
+        actionRow.Controls.Add(_runSelfCheckButton);
         layout.Controls.Add(actionRow, 0, 7);
 
         var bottomPanel = new TableLayoutPanel
@@ -705,6 +718,20 @@ public sealed class MainForm : Form
         _catalogListView.Columns.Add("Details", -2);
         _catalogTabPage.Controls.Add(_catalogListView);
         _resultsTabControl.TabPages.Add(_catalogTabPage);
+        _readinessTabPage = new TabPage("Readiness");
+        _readinessListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _readinessListView.Columns.Add("Area", 180);
+        _readinessListView.Columns.Add("Status", 90);
+        _readinessListView.Columns.Add("Details", -2);
+        _readinessTabPage.Controls.Add(_readinessListView);
+        _resultsTabControl.TabPages.Add(_readinessTabPage);
         _artifactsTabPage = new TabPage("Files");
         _artifactsListView = new ListView
         {
@@ -746,13 +773,14 @@ public sealed class MainForm : Form
         RefreshModeState();
         UpdatePresetDetails();
         PopulateCatalogTab();
+        PopulateReadinessTab(CreateDesktopReadinessReport());
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview.html in-app.");
-        AppendLog("Ready. Choose input, configure options, then click Convert.");
+        AppendLog("Ready. Choose input, configure options, then click Convert, or use Run self-check to verify runtime readiness.");
     }
 
     private void PopulateCatalogTab()
@@ -800,6 +828,50 @@ public sealed class MainForm : Form
 
         _catalogListView.Items.Add(new ListViewItem(["Target alias", "all / any / *", "Expands to every supported body type."]));
         _catalogListView.EndUpdate();
+    }
+
+    private IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReadinessReport()
+    {
+        var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath).ToList();
+
+        try
+        {
+            var version = CoreWebView2Environment.GetAvailableBrowserVersionString();
+            checks.Add(new RuntimeReadinessCheck("Preview runtime", "OK", $"WebView2 runtime detected ({version})."));
+        }
+        catch (WebView2RuntimeNotFoundException)
+        {
+            checks.Add(new RuntimeReadinessCheck("Preview runtime", "Warning", "WebView2 runtime not found; preview.html will open in your default browser instead."));
+        }
+        catch (Exception ex)
+        {
+            checks.Add(new RuntimeReadinessCheck("Preview runtime", "Warning", $"WebView2 runtime probe failed: {ex.Message}"));
+        }
+
+        return checks;
+    }
+
+    private void PopulateReadinessTab(IReadOnlyList<RuntimeReadinessCheck> checks)
+    {
+        _readinessListView.BeginUpdate();
+        _readinessListView.Items.Clear();
+
+        foreach (var check in checks)
+        {
+            _readinessListView.Items.Add(new ListViewItem([check.Area, check.Status, check.Details]));
+        }
+
+        _readinessListView.EndUpdate();
+    }
+
+    private void RunSelfCheck()
+    {
+        var checks = CreateDesktopReadinessReport();
+        PopulateReadinessTab(checks);
+        _resultsTabControl.SelectedTab = _readinessTabPage;
+        var summary = string.Join(", ", checks.Select(static check => $"{check.Status}:{check.Area}"));
+        AppendLog($"Self-check completed — {summary}");
+        _statusLabel.Text = "Readiness self-check completed.";
     }
 
     private static TableLayoutPanel CreateThreeColumnRow(string labelText, out TextBox textBox)

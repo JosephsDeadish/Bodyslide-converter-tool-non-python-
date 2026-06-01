@@ -108,6 +108,12 @@ if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--self-check", StringComparer.OrdinalIgnoreCase))
+{
+    WriteSelfCheck();
+    return;
+}
+
 if (args.Contains("--help", StringComparer.OrdinalIgnoreCase)
     || args.Contains("-h", StringComparer.OrdinalIgnoreCase))
 {
@@ -421,7 +427,17 @@ static void WriteUsage()
     Console.WriteLine("  SlideSmith --list-bodies");
     Console.WriteLine("  SlideSmith --list-physics");
     Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --self-check");
     Console.WriteLine("  SlideSmith --help");
     Console.WriteLine();
     Console.WriteLine("Drag a .nif file, supported archive (.zip/.7z/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
+}
+
+static void WriteSelfCheck()
+{
+    Console.WriteLine("SlideSmith readiness self-check:");
+    foreach (var check in RuntimeReadinessReporter.CreateCliReport(Environment.ProcessPath))
+    {
+        Console.WriteLine($" - [{check.Status}] {check.Area}: {check.Details}");
+    }
 }
