@@ -2904,7 +2904,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         Directory.CreateDirectory(rootOutput);
 
         var armorPackValidation = BuildArmorPackValidationReport(resultsWithPaths, targetBody, conversionLabel);
-        var validationByOutputDirectory = armorPackValidation.Items.ToDictionary(
+        var validationByOutputDirectory = armorPackValidation.Items.ToLookup(
             item => item.OutputDirectory,
             item => item,
             StringComparer.OrdinalIgnoreCase);
@@ -2927,7 +2927,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             GeneratedAt = DateTimeOffset.UtcNow,
             Results = resultsWithPaths.Select(r =>
             {
-                validationByOutputDirectory.TryGetValue(r.Result.OutputDirectory, out var validationItem);
+                var validationItem = validationByOutputDirectory[r.Result.OutputDirectory].FirstOrDefault();
                 return new
                 {
                     MeshFile = Path.GetFileName(r.MeshFile),
@@ -2991,7 +2991,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var needsReviewCount = items.Count(item => item.ValidationStatus.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
         var highRiskCount = items.Count(item => item.ValidationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase));
         var missingQualityReportCount = items.Count(item => item.ValidationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase));
-        var averageValidationScore = qualityReportCount > 0
+        double? averageValidationScore = qualityReportCount > 0
             ? Math.Round(items.Where(item => item.ValidationScore.HasValue).Average(item => item.ValidationScore!.Value), 1)
             : null;
         var packReadinessStatus = ResolvePackReadinessStatus(items);
