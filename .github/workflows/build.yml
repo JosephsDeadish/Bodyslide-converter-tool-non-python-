@@ -86,6 +86,12 @@ jobs:
       - name: Restore
         run: dotnet restore BodyslideConverter.slnx
 
+      - name: Download Linux CLI zip artifact from verify job
+        uses: actions/download-artifact@v4
+        with:
+          name: slidesmith-linux-x64
+          path: artifacts
+
       - name: Publish Windows desktop app (single file)
         run: >
           dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
@@ -118,6 +124,12 @@ jobs:
       - name: Create Windows bundle zip (desktop + CLI)
         run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
 
+      - name: Upload Windows app zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slidesmith-win-x64-main-${{ github.run_number }}
+          path: artifacts/slidesmith-win-x64-bundle.zip
+
       - name: Create or update rolling "latest" GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -142,10 +154,11 @@ jobs:
             artifacts/win-x64/SlideSmith.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
             artifacts/slidesmith-win-x64-bundle.zip
+            artifacts/slidesmith-linux-x64.zip
 
-  package-windows-on-pr:
-    name: Package Windows app on pull request
-    if: github.event_name == 'pull_request'
+  package-windows-artifact:
+    name: Package Windows app artifact (PR/branch push/manual)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
     runs-on: windows-latest
     needs: verify
 
@@ -195,10 +208,10 @@ jobs:
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
       - name: Zip Windows bundle (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
 
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-pr-${{ github.event.pull_request.number }}
-          path: artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
+          name: slidesmith-win-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/slidesmith-win-x64-bundle.zip
