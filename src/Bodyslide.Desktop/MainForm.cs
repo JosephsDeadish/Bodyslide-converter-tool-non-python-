@@ -1513,6 +1513,16 @@ public sealed class MainForm : Form
         void Add(string property, string value) =>
             _summaryListView.Items.Add(new ListViewItem([property, value]));
 
+        void AddWarning(string property, string value)
+        {
+            var item = new ListViewItem([property, value])
+            {
+                BackColor = System.Drawing.Color.FromArgb(255, 255, 180),
+                ForeColor = System.Drawing.Color.FromArgb(120, 60, 0)
+            };
+            _summaryListView.Items.Add(item);
+        }
+
         Add("Items converted", results.Count.ToString());
 
         // Aggregate key steps across all results.

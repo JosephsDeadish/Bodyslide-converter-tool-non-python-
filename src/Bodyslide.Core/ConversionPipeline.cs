@@ -282,7 +282,8 @@ public sealed record PluginAnalysisResult(
     IReadOnlyList<string> ScannedPlugins,
     IReadOnlyList<PluginArmorAddon> ArmorAddons,
     string PatchGuidance,
-    IReadOnlyList<PluginArmorRecord>? ArmorRecords = null);
+    IReadOnlyList<PluginArmorRecord>? ArmorRecords = null,
+    IReadOnlyList<string>? AmbiguousPlugins = null);
 
 /// <summary>
 /// Plugin type classification payload with confidence and reasons for diagnostics.
@@ -2712,6 +2713,15 @@ public sealed class ConversionOrchestrator(
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
                 steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
+            }
+
+            // Emit a dedicated warning step for every plugin whose type could not be
+            // resolved with certainty (ESL flag set but no FE-range FormID evidence).
+            // The rewrite stage honours this flag and skips ambiguous plugins rather
+            // than making assumptions about whether they behave as ESPFE or plain ESP.
+            if (pluginAnalysis.AmbiguousPlugins is { Count: > 0 })
+            {
+                steps.Add($"plugin-ambiguous-warning:{pluginAnalysis.AmbiguousPlugins.Count}");
             }
 
             if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
@@ -6536,26 +6546,34 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         }
 
         var scannedPluginLabels = new List<string>();
-        var armorAddons  = new List<PluginArmorAddon>();
-        var armorRecords = new List<PluginArmorRecord>();
+        var armorAddons         = new List<PluginArmorAddon>();
+        var armorRecords        = new List<PluginArmorRecord>();
+        var ambiguousPlugins    = new List<string>();
 
         foreach (var pluginFile in pluginFiles)
         {
-            var (displayName, addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
+            var (displayName, plainName, pluginType, addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
             scannedPluginLabels.Add(displayName);
             armorAddons.AddRange(addons);
             armorRecords.AddRange(records);
+
+            // Track plugins whose type could not be determined with certainty so callers can
+            // flag them for manual recheck rather than silently treating them as a known type.
+            // Store the plain filename (not the label) so callers can match against file paths.
+            if (pluginType == "AMBIGUOUS")
+                ambiguousPlugins.Add(plainName);
         }
 
-        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count);
+        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count, ambiguousPlugins);
         return new PluginAnalysisResult(
             scannedPluginLabels,
             armorAddons,
             guidance,
-            armorRecords.Count > 0 ? armorRecords : null);
+            armorRecords.Count > 0 ? armorRecords : null,
+            ambiguousPlugins.Count > 0 ? ambiguousPlugins : null);
     }
 
-    private static async Task<(string DisplayName, IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
+    private static async Task<(string DisplayName, string PlainName, string PluginType, IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
         ScanPluginAsync(string pluginPath, CancellationToken cancellationToken)
     {
         try
@@ -6599,12 +6617,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.RaceFormId))
                 .ToList();
 
-            return (pluginLabel, addons, records);
+            return (pluginLabel, pluginName, pluginKind.Type, addons, records);
         }
         catch (IOException)
         {
             var fallback = Path.GetFileName(pluginPath) ?? pluginPath;
-            return ($"{fallback} [unreadable]", [], []);
+            return ($"{fallback} [unreadable]", fallback, "UNKNOWN", [], []);
         }
     }
 
@@ -6795,16 +6813,38 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         return [new PluginArmorAddon(pluginName, paths)];
     }
 
-    private static string BuildPatchGuidance(IReadOnlyList<PluginArmorAddon> addons, string targetBody, int pluginCount)
+    private static string BuildPatchGuidance(
+        IReadOnlyList<PluginArmorAddon> addons,
+        string targetBody,
+        int pluginCount,
+        IReadOnlyList<string>? ambiguousPlugins = null)
     {
         if (pluginCount == 0)
         {
             return $"No plugin files found. Add the converted meshes to an existing .esp or create a new patch plugin targeting {targetBody}.";
         }
 
+        // ── AMBIGUOUS warning block ────────────────────────────────────────────
+        // These plugins have the ESL flag set but no FE-range FormID evidence.
+        // Their true format (ESPFE vs. ESP) cannot be determined from header flags
+        // alone; treat them manually before applying any automated rewrite.
+        string? ambiguousBlock = null;
+        if (ambiguousPlugins is { Count: > 0 })
+        {
+            var sb2 = new System.Text.StringBuilder();
+            sb2.AppendLine($"WARNING: {ambiguousPlugins.Count} plugin(s) flagged AMBIGUOUS — ESL flag present but FE-range FormID evidence absent.");
+            sb2.AppendLine("  These plugins require manual review before any automated patch is applied.");
+            sb2.AppendLine("  Automated rewrite for these plugins has been skipped to avoid incorrect assumptions.");
+            sb2.AppendLine("  Affected plugins:");
+            foreach (var name in ambiguousPlugins)
+                sb2.AppendLine($"    {name}");
+            ambiguousBlock = sb2.ToString().TrimEnd();
+        }
+
         if (addons.Count == 0)
         {
-            return $"Scanned {pluginCount} plugin file(s) — no mesh path references detected. Verify ArmorAddon (ARMA) records manually in xEdit.";
+            var noAddon = $"Scanned {pluginCount} plugin file(s) — no mesh path references detected. Verify ArmorAddon (ARMA) records manually in xEdit.";
+            return ambiguousBlock is not null ? $"{ambiguousBlock}\n\n{noAddon}" : noAddon;
         }
 
         var sb = new System.Text.StringBuilder();
@@ -6825,7 +6865,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
         }
 
-        return sb.ToString().Trim();
+        var main = sb.ToString().Trim();
+        return ambiguousBlock is not null ? $"{ambiguousBlock}\n\n{main}" : main;
     }
 }
 
@@ -9072,6 +9113,10 @@ internal sealed class LocalExportService(
                 pluginAnalysis.ScannedPlugins,
                 pluginAnalysis.ArmorAddons,
                 pluginAnalysis.PatchGuidance,
+                // Plugins flagged AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
+                // These are listed here so downstream tooling can flag them for manual recheck.
+                // The automated rewrite is intentionally skipped for these plugins.
+                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
                 RewriteMappings = pluginRewriteMap
                     .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
                     .ToList(),
@@ -9093,7 +9138,19 @@ internal sealed class LocalExportService(
             if (pluginRewriteMap.Count > 0)
             {
                 var sourcePluginPaths = EnumeratePluginFiles(armor.SourcePath);
-                if (sourcePluginPaths.Count > 0)
+
+                // Do not assume the format of AMBIGUOUS plugins (ESL flag present but no
+                // FE-range FormID evidence).  Rewriting them could corrupt form-ID
+                // addressing; skip them and let the user resolve the ambiguity manually.
+                var ambiguousNames = (pluginAnalysis.AmbiguousPlugins ?? [])
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var safeSourcePluginPaths = ambiguousNames.Count > 0
+                    ? sourcePluginPaths
+                        .Where(p => !ambiguousNames.Contains(Path.GetFileName(p) ?? p))
+                        .ToList()
+                    : sourcePluginPaths;
+
+                if (safeSourcePluginPaths.Count > 0)
                 {
                     // Normalise the rewrite map (lowercase / forward-slash keys) for both
                     // the full-copy rewriter and the new minimal patch generator.
@@ -9106,7 +9163,7 @@ internal sealed class LocalExportService(
                     // can still use this file.
                     var rewriter = new BinaryPluginRewriteService();
                     var rewriteResult = await rewriter.RewriteAsync(
-                        sourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
+                        safeSourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
@@ -9114,7 +9171,7 @@ internal sealed class LocalExportService(
                     // original plugin as its single master.  It is a proper Bethesda
                     // override plugin (ESL-flagged) that can be loaded after the original
                     // in any order without consuming a load order slot.
-                    foreach (var pluginPath in sourcePluginPaths)
+                    foreach (var pluginPath in safeSourcePluginPaths)
                     {
                         try
                         {
