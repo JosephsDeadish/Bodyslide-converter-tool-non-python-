@@ -9438,7 +9438,7 @@ internal sealed class LocalExportService(
 
             var transformedX = centerX + ((x - centerX) * (float)widthScale);
             var transformedY = centerY + ((y - centerY) * (float)depthScale);
-            var transformedZ = minZ + ((z - minZ) * (float)heightFactor);
+            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
 
             // Animation-driven push-out: move vertex outward along its XY direction from the
             // body centre by the push-out depth so that it sits outside the body envelope at
@@ -9566,7 +9566,7 @@ internal sealed class LocalExportService(
 
             var transformedX = centerX + ((x - centerX) * (float)widthScale);
             var transformedY = centerY + ((y - centerY) * (float)depthScale);
-            var transformedZ = minZ + ((z - minZ) * (float)heightFactor);
+            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
 
             var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
