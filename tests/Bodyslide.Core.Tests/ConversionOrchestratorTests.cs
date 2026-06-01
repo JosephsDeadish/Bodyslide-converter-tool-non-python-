@@ -4732,10 +4732,11 @@ public sealed class BodyTypeCatalogTests
             Assert.Equal(profile.SoftBodyBones, profile.AvailablePhysicsBones);
             Assert.True(profile.SupportsPhysics);
             Assert.Equal(profile.RequiredPhysicsBones, profile.AvailablePhysicsBones);
-            Assert.True(profile.PhysicsBoneMap.ContainsKey("none"));
-            Assert.True(profile.PhysicsBoneMap.ContainsKey("cbpc"));
-            Assert.True(profile.PhysicsBoneMap.ContainsKey("smp"));
-            Assert.True(profile.PhysicsBoneMap.ContainsKey("smp+cbpc"));
+            Assert.Equal(
+                profile.RequiredPhysicsBones.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                profile.PhysicsBoneMap.Count);
+            Assert.All(profile.PhysicsBoneMap.Values, v => Assert.False(string.IsNullOrWhiteSpace(v)));
+            Assert.NotEmpty(profile.PhysicsBoneGroups);
         }
     }
 
@@ -5847,9 +5848,16 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
-    public void DetectPluginKind_EspWithLightFlag_ReturnsEspfe()
+    public void DetectPluginKind_EspWithLightFlagAndFeFormId_ReturnsEspfe()
     {
-        var bytes = BuildTes4HeaderWithFlags(0x00000200u);
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x000FE123u);
+        Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlag_AndMixedFormIds_ReturnsEspfeWhenAnyFeRecordExists()
+    {
+        var bytes = BuildPluginWithArmaFormIds(0x00000200u, 0x00012345u, 0x000FE222u);
         Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
     }
 
@@ -5872,6 +5880,13 @@ public sealed class BinaryPluginRewriteServiceTests
     {
         var bytes = BuildTes4HeaderWithFlags(0u);
         Assert.Equal("ESP", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlagButNoFeFormId_DoesNotReturnEspfe()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+        Assert.Equal("ESP (ESL-flagged, non-FE FormIDs)", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
     }
 
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
@@ -5902,6 +5917,34 @@ public sealed class BinaryPluginRewriteServiceTests
         System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
         BitConverter.TryWriteBytes(bytes.AsSpan(8), flags);
         return bytes;
+    }
+
+    private static byte[] BuildPluginWithArmaFormId(uint tes4Flags, uint armaFormId)
+    {
+        return BuildPluginWithArmaFormIds(tes4Flags, armaFormId);
+    }
+
+    private static byte[] BuildPluginWithArmaFormIds(uint tes4Flags, params uint[] armaFormIds)
+    {
+        var pluginBytes = new List<byte>(BuildTes4HeaderWithFlags(tes4Flags));
+        foreach (var formId in armaFormIds)
+        {
+            var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TestArmor\0"));
+            var arma = BuildFlatRecordForTests("ARMA", armaData, formId);
+            pluginBytes.AddRange(arma);
+        }
+
+        return [.. pluginBytes];
+    }
+
+    private static byte[] BuildFlatRecordForTests(string tag, byte[] data, uint formId, uint flags = 0u)
+    {
+        var header = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]).CopyTo(header, 0);
+        BitConverter.TryWriteBytes(header.AsSpan(4), (uint)data.Length);
+        BitConverter.TryWriteBytes(header.AsSpan(8), flags);
+        BitConverter.TryWriteBytes(header.AsSpan(12), formId);
+        return [.. header, .. data];
     }
 
     [Fact]

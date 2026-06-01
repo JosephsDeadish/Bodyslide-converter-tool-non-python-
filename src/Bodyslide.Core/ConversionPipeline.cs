@@ -742,6 +742,11 @@ public sealed record BodyTechnicalProfileInfo(
     /// </summary>
     string DefaultPhysics)
 {
+    private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
+        new(@"[^a-z0-9]+", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private IReadOnlyDictionary<string, string>? _physicsBoneMap;
+    private IReadOnlyDictionary<string, IReadOnlyList<string>>? _physicsBoneGroups;
+
     /// <summary>
     /// Backward-compatible alias for <see cref="AvailablePhysicsBones"/>.
     /// Prefer <see cref="AvailablePhysicsBones"/> in new code.
@@ -769,17 +774,141 @@ public sealed record BodyTechnicalProfileInfo(
                 : "none";
 
     /// <summary>
-    /// Per-profile physics bone activation map. "none" disables physics bones; all physics-enabled profiles
-    /// use this body's required physics bone set.
+    /// Structured semantic map used for cross-body conversion:
+    /// raw bone name -> normalized semantic key (for example "NPC L Breast" => "breast_L").
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneMap =>
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+    public IReadOnlyDictionary<string, string> PhysicsBoneMap =>
+        _physicsBoneMap ??=
+            RequiredPhysicsBones
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    static bone => bone,
+                    static bone => ToSemanticBoneKey(bone),
+                    StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Optional grouped view of the required physics bones by behavior region.
+    /// Group names: Breast, Butt, Belly, Genitals, Hair, Other.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneGroups =>
+        _physicsBoneGroups ??=
+            RequiredPhysicsBones
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .GroupBy(static bone => ToBoneGroup(bone), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    static g => g.Key,
+                    static g => (IReadOnlyList<string>)g.ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+    private static string ToSemanticBoneKey(string boneName)
+    {
+        var bone = boneName.Trim();
+        var lower = bone.ToLowerInvariant();
+        var side = DetectSide(lower);
+
+        if (lower.Contains("breast", StringComparison.Ordinal))
         {
-            ["none"] = [],
-            ["cbpc"] = RequiredPhysicsBones,
-            ["smp"] = RequiredPhysicsBones,
-            ["smp+cbpc"] = RequiredPhysicsBones,
+            return ComposeSemanticName("breast", side, lower);
+        }
+
+        if (lower.Contains("pec", StringComparison.Ordinal))
+        {
+            return ComposeSemanticName("breast", side, lower);
+        }
+
+        if (lower.Contains("butt", StringComparison.Ordinal))
+        {
+            return ComposeSemanticName("butt", side, lower);
+        }
+
+        if (lower.Contains("belly", StringComparison.Ordinal))
+        {
+            return "belly";
+        }
+
+        if (lower.Contains("genital", StringComparison.Ordinal))
+        {
+            return ComposeSemanticName("genitals", side, lower);
+        }
+
+        if (lower.Contains("hair", StringComparison.Ordinal))
+        {
+            return ComposeSemanticName("hair", side, lower);
+        }
+
+        var safe = SemanticBoneSanitizer.Replace(lower, "_").Trim('_');
+        return string.IsNullOrWhiteSpace(safe) ? "physics" : safe;
+    }
+
+    private static string ToBoneGroup(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        if (lower.Contains("breast", StringComparison.Ordinal) || lower.Contains("pec", StringComparison.Ordinal))
+        {
+            return "Breast";
+        }
+
+        if (lower.Contains("butt", StringComparison.Ordinal))
+        {
+            return "Butt";
+        }
+
+        if (lower.Contains("belly", StringComparison.Ordinal))
+        {
+            return "Belly";
+        }
+
+        if (lower.Contains("genital", StringComparison.Ordinal))
+        {
+            return "Genitals";
+        }
+
+        if (lower.Contains("hair", StringComparison.Ordinal))
+        {
+            return "Hair";
+        }
+
+        return "Other";
+    }
+
+    private static string ComposeSemanticName(string baseName, string side, string lowerBoneName)
+    {
+        var variant = lowerBoneName switch
+        {
+            var n when n.Contains("upper", StringComparison.Ordinal) => "upper",
+            var n when n.Contains("lower", StringComparison.Ordinal) => "lower",
+            var n when n.Contains("outer", StringComparison.Ordinal) => "outer",
+            var n when n.Contains("inner", StringComparison.Ordinal) => "inner",
+            var n when n.Contains("base", StringComparison.Ordinal) => "base",
+            var n when n.Contains("01", StringComparison.Ordinal) => "01",
+            var n when n.Contains("02", StringComparison.Ordinal) => "02",
+            var n when n.Contains("03", StringComparison.Ordinal) => "03",
+            _ => string.Empty
         };
+
+        return variant.Length > 0
+            ? $"{baseName}_{variant}{side}"
+            : $"{baseName}{side}";
+    }
+
+    private static string DetectSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" left", StringComparison.Ordinal))
+        {
+            return "_L";
+        }
+
+        if (lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" right", StringComparison.Ordinal))
+        {
+            return "_R";
+        }
+
+        return string.Empty;
+    }
 }
 
 public static class BodyTechnicalProfileCatalog
@@ -6400,17 +6529,21 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         var flags = TryReadTes4Flags(bytes, out var detectedFlags) ? detectedFlags : 0u;
         var hasMasterFlag = (flags & PluginFlagMaster) != 0;
         var hasLightFlag = (flags & PluginFlagLight) != 0;
+        var hasFeFormIds = HasFeLightFormIdEvidence(bytes);
+        var isEspFe = extension == ".esp" && hasLightFlag && hasFeFormIds;
 
         return extension switch
         {
-            ".esp" when hasLightFlag => "ESPFE",
+            ".esp" when isEspFe => "ESPFE",
+            ".esp" when hasLightFlag => "ESP (ESL-flagged, non-FE FormIDs)",
             ".esp" when hasMasterFlag => "ESM",
             ".esp" => "ESP",
             ".esm" when hasLightFlag => "ESM+ESL",
             ".esm" => "ESM",
             ".esl" => "ESL",
             _ when hasLightFlag && hasMasterFlag => "ESM+ESL",
-            _ when hasLightFlag => "ESPFE",
+            _ when hasLightFlag && hasFeFormIds => "ESPFE",
+            _ when hasLightFlag => "ESP (ESL-flagged)",
             _ when hasMasterFlag => "ESM",
             _ => "ESP",
         };
@@ -6431,6 +6564,32 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
         flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4));
         return true;
+    }
+
+    private static bool HasFeLightFormIdEvidence(byte[] bytes)
+    {
+        try
+        {
+            var armaHasFe = BinaryArmaParser.ExtractArmaRecords(bytes)
+                .Any(static desc => IsFeLightFormId(desc.FormId));
+            if (armaHasFe)
+            {
+                return true;
+            }
+
+            return BinaryArmaParser.ExtractArmoRecords(bytes)
+                .Any(static desc => IsFeLightFormId(desc.FormId));
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFeLightFormId(uint formId)
+    {
+        var maskedFormId = formId & 0x00FFFFFFu;
+        return maskedFormId is >= 0x000FE000u and <= 0x000FEFFFu;
     }
 
     private static readonly System.Text.RegularExpressions.Regex NifPathRegex =
