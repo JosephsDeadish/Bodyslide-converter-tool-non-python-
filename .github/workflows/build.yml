@@ -158,7 +158,7 @@ jobs:
 
   package-windows-artifact:
     name: Package Windows app artifact (PR/branch push/manual)
-    if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
     runs-on: windows-latest
     needs: verify
 
