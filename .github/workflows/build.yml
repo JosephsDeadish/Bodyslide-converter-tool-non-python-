@@ -158,7 +158,12 @@ jobs:
 
   package-windows-artifact:
     name: Package Windows app artifact (PR/branch push/manual)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      github.ref != 'refs/heads/main' &&
+      github.ref != 'refs/heads/master')
     runs-on: windows-latest
     needs: verify
 
@@ -210,8 +215,17 @@ jobs:
       - name: Zip Windows bundle (desktop + CLI)
         run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
 
+      - name: Set Windows artifact name
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "pull_request") {
+            "WINDOWS_ARTIFACT_NAME=slidesmith-win-x64-pr-${{ github.event.pull_request.number }}" >> $env:GITHUB_ENV
+          } else {
+            "WINDOWS_ARTIFACT_NAME=slidesmith-win-x64-run-${{ github.run_id }}-${{ github.run_attempt }}" >> $env:GITHUB_ENV
+          }
+
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.run_id, github.run_attempt) }}
+          name: ${{ env.WINDOWS_ARTIFACT_NAME }}
           path: artifacts/slidesmith-win-x64-bundle.zip
