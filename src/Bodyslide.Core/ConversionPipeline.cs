@@ -24,7 +24,8 @@ public sealed record ConversionRequest(
     string? PhysicsProfileOverride = null,
     bool GenerateBodySlideFiles = true,
     IReadOnlyList<string>? CustomProfilePaths = null,
-    string? WorldDropModeOverride = null);
+    string? WorldDropModeOverride = null,
+    string? SkeletonNifPath = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -2227,6 +2228,19 @@ public sealed class ConversionOrchestrator(
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
             armor = CustomBodyProfileSupport.MergeProfiles(armor, normalized.Request.CustomProfilePaths);
+
+            // If the caller supplied an explicit skeleton NIF path, inject it into the
+            // BodyReferenceFiles list so the skeleton mapping service can parse its bones.
+            if (!string.IsNullOrWhiteSpace(normalized.Request.SkeletonNifPath)
+                && File.Exists(normalized.Request.SkeletonNifPath))
+            {
+                armor = armor with
+                {
+                    BodyReferenceFiles = [.. armor.BodyReferenceFiles, normalized.Request.SkeletonNifPath],
+                };
+                steps.Add($"skeleton-nif:{Path.GetFileName(normalized.Request.SkeletonNifPath)}");
+            }
+
             steps.Add($"imported:meshes={armor.MeshFiles.Count},textures={armor.TextureFiles.Count},physics={armor.PhysicsFiles.Count},bodyrefs={armor.BodyReferenceFiles.Count}");
             if (armor.CustomBodyProfiles is { Count: > 0 } customBodies)
             {
@@ -2595,7 +2609,8 @@ public sealed class ConversionInspector(
         string inputPath,
         string? targetBody = null,
         IReadOnlyList<string>? customProfilePaths = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? skeletonNifPath = null)
     {
         if (string.IsNullOrWhiteSpace(inputPath))
         {
@@ -2609,6 +2624,16 @@ public sealed class ConversionInspector(
 
         var armor = await importer.ImportAsync(inputPath, cancellationToken);
         armor = CustomBodyProfileSupport.MergeProfiles(armor, customProfilePaths);
+
+        // If the caller supplied an explicit skeleton NIF path, inject it so the
+        // mapping service can parse custom bones from the user's installed skeleton.
+        if (!string.IsNullOrWhiteSpace(skeletonNifPath) && File.Exists(skeletonNifPath))
+        {
+            armor = armor with
+            {
+                BodyReferenceFiles = [.. armor.BodyReferenceFiles, skeletonNifPath],
+            };
+        }
 
         var detection = await bodyDetector.DetectAsync(armor, cancellationToken);
         var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);

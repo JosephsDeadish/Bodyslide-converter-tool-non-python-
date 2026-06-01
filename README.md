@@ -42,10 +42,13 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
 
-# GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder), inspect selected input before conversion (detected body, mesh type, skeleton compatibility, custom-body count), open selected input path, preset details panel, choose preset or custom target,
+# GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder),
+# separate **"File..."** and **"Folder..."** browse buttons for the input field (no more double-dialog),
+# inspect selected input before conversion (detected body, mesh type, skeleton compatibility, custom-body count), open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # **"Convert to All Bodies" button** — one click sets the target batch to every supported body type,
 # optional profile/source/physics/world-drop-mode override, optional BodySlide export toggle, optional output zip,
+# **optional Skeleton NIF path** — point to your installed skeleton.nif (e.g. XPMSSE) for accurate bone mapping without auto-discovery,
 # optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
@@ -96,6 +99,9 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 # override the global learning-cache location (default: %APPDATA%\SlideSmith\ on Windows)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "3BA" --cache-path "D:\MySlidesmithCache\.conversion-learning-cache.json"
+
+# supply a skeleton NIF for accurate bone mapping (e.g. XPMSSE installed via mod manager)
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --skeleton-nif "C:\Modlist\XPMSSE\meshes\actors\character\character assets\skeleton.nif"
 
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets

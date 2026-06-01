@@ -12,6 +12,7 @@ public sealed class MainForm : Form
     private readonly TextBox _inputTextBox;
     private readonly TextBox _outputTextBox;
     private readonly TextBox _cachePathTextBox;
+    private readonly TextBox _skeletonNifTextBox;
     private readonly ComboBox _presetComboBox;
     private readonly ComboBox _targetComboBox;
     private readonly TextBox _presetBatchTextBox;
@@ -143,8 +144,10 @@ public sealed class MainForm : Form
             UpdatePathActionStates();
             ClearInspectionTab("Input changed. Click Inspect Input to refresh detection and compatibility details.");
         };
-        var browseInputButton = new Button { Text = "Browse...", AutoSize = true };
-        browseInputButton.Click += (_, _) => BrowseInput();
+        var browseInputFileButton = new Button { Text = "File...", AutoSize = true };
+        browseInputFileButton.Click += (_, _) => BrowseInputFile();
+        var browseInputFolderButton = new Button { Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+        browseInputFolderButton.Click += (_, _) => BrowseInputFolder();
         _inspectInputButton = new Button
         {
             Text = "Inspect Input",
@@ -170,7 +173,8 @@ public sealed class MainForm : Form
             Padding = new Padding(0),
             Dock = DockStyle.Fill,
         };
-        inputActions.Controls.Add(browseInputButton);
+        inputActions.Controls.Add(browseInputFileButton);
+        inputActions.Controls.Add(browseInputFolderButton);
         inputActions.Controls.Add(_inspectInputButton);
         inputActions.Controls.Add(_openInputButton);
         inputRow.Controls.Add(inputActions, 2, 0);
@@ -351,7 +355,42 @@ public sealed class MainForm : Form
             _worldModeComboBox.Items.Add(worldMode);
         }
         _worldModeComboBox.SelectedIndex = 0;
+        rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _worldModeComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        _worldModeComboBox.Items.Add("(auto)");
+        foreach (var worldMode in WorldDropModeCatalog.All)
+        {
+            _worldModeComboBox.Items.Add(worldMode);
+        }
+        _worldModeComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_worldModeComboBox, 1, 3);
+
+        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        var skeletonNifPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        skeletonNifPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        skeletonNifPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _skeletonNifTextBox = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            PlaceholderText = "Optional: path to skeleton.nif (e.g. XPMSSE)",
+        };
+        var browseSkeletonNifButton = new Button { Text = "Browse...", AutoSize = true };
+        browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonNif();
+        skeletonNifPanel.Controls.Add(_skeletonNifTextBox, 0, 0);
+        skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
+        rightOptions.Controls.Add(skeletonNifPanel, 1, 4);
+
         conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
         layout.Controls.Add(conversionOptionsPanel, 0, 3);
 
@@ -780,7 +819,7 @@ public sealed class MainForm : Form
         return row;
     }
 
-    private void BrowseInput()
+    private void BrowseInputFile()
     {
         using var fileDialog = new OpenFileDialog
         {
@@ -792,9 +831,11 @@ public sealed class MainForm : Form
         if (fileDialog.ShowDialog(this) == DialogResult.OK)
         {
             _inputTextBox.Text = fileDialog.FileName;
-            return;
         }
+    }
 
+    private void BrowseInputFolder()
+    {
         using var folderDialog = new FolderBrowserDialog
         {
             Description = "Select armor input folder",
@@ -804,6 +845,22 @@ public sealed class MainForm : Form
         if (folderDialog.ShowDialog(this) == DialogResult.OK)
         {
             _inputTextBox.Text = folderDialog.SelectedPath;
+        }
+    }
+
+    private void BrowseSkeletonNif()
+    {
+        using var fileDialog = new OpenFileDialog
+        {
+            Title = "Select skeleton.nif",
+            Filter = "NIF Files (*.nif)|*.nif|All Files (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false,
+        };
+
+        if (fileDialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _skeletonNifTextBox.Text = fileDialog.FileName;
         }
     }
 
@@ -896,6 +953,7 @@ public sealed class MainForm : Form
         var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
             : _sourceComboBox.Text.Trim();
+        var skeletonNifPath = string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim();
 
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -943,7 +1001,8 @@ public sealed class MainForm : Form
                 PhysicsProfileOverride: physicsOverride,
                 GenerateBodySlideFiles: _buildSlidersCheckBox.Checked,
                 CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
-                WorldDropModeOverride: worldModeOverride);
+                WorldDropModeOverride: worldModeOverride,
+                SkeletonNifPath: skeletonNifPath);
 
             ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
             if (!string.IsNullOrWhiteSpace(cachePathOverride))
@@ -1041,7 +1100,8 @@ public sealed class MainForm : Form
             var inspection = await _inspector.InspectAsync(
                 input,
                 ResolveInspectionTargetBody(),
-                _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null);
+                _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
+                skeletonNifPath: string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim());
 
             PopulateInspectionTab(inspection);
             _resultsTabControl.SelectedTab = _inspectTabPage;

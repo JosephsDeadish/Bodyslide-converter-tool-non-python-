@@ -195,6 +195,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("physics", out var physicsOverride);
     parsed.TryGetValue("world-mode", out var worldModeOverride);
     parsed.TryGetValue("build-sliders", out var buildSlidersValue);
+    parsed.TryGetValue("skeleton-nif", out var skeletonNif);
     var outputZip = parsed.ContainsKey("output-zip");
     var selectedTargets = CombineSelections(target, ParseDelimitedValues(targetsValue));
     var selectedPresets = CombineSelections(preset, ParseDelimitedValues(presetsValue));
@@ -248,7 +249,8 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         Presets: selectedPresets.Count > 1 ? selectedPresets : null,
         PhysicsProfileOverride: string.IsNullOrWhiteSpace(normalizedPhysicsOverride) ? null : normalizedPhysicsOverride,
         GenerateBodySlideFiles: generateBodySlideFiles,
-        WorldDropModeOverride: string.IsNullOrWhiteSpace(normalizedWorldModeOverride) ? null : normalizedWorldModeOverride);
+        WorldDropModeOverride: string.IsNullOrWhiteSpace(normalizedWorldModeOverride) ? null : normalizedWorldModeOverride,
+        SkeletonNifPath: string.IsNullOrWhiteSpace(skeletonNif) ? null : skeletonNif);
 
     return true;
 }
@@ -351,7 +353,7 @@ static void WriteUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--skeleton-nif <path to skeleton.nif>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
