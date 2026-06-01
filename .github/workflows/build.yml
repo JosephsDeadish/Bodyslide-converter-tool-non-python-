@@ -127,7 +127,7 @@ jobs:
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-main-run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: slidesmith-win-x64-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/slidesmith-win-x64-bundle.zip
 
       - name: Create or update rolling "latest" GitHub Release
