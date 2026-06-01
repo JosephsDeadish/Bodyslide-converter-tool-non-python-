@@ -58,6 +58,9 @@ jobs:
       - name: Rename CLI exe
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Create Windows bundle zip (desktop + CLI)
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
       - name: Create GitHub Release and upload executables
         uses: softprops/action-gh-release@v2
         with:
@@ -65,3 +68,4 @@ jobs:
           files: |
             artifacts/win-x64/SlideSmith.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
+            artifacts/slidesmith-win-x64-bundle.zip

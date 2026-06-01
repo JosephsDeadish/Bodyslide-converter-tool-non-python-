@@ -10,6 +10,8 @@ namespace Bodyslide.Desktop;
 
 public sealed class MainForm : Form
 {
+    private static readonly string[] PreviewFileCandidates = ["preview-workbench.html", "preview.html"];
+
     private readonly TextBox _inputTextBox;
     private readonly TextBox _outputTextBox;
     private readonly TextBox _cachePathTextBox;
@@ -780,7 +782,7 @@ public sealed class MainForm : Form
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
-        ShowPreviewStatus("Run a conversion to render preview.html in-app.");
+        ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert, or use Run self-check to verify runtime readiness.");
     }
 
@@ -842,7 +844,7 @@ public sealed class MainForm : Form
         }
         catch (WebView2RuntimeNotFoundException)
         {
-            checks.Add(new RuntimeReadinessCheck("Preview runtime", "Warning", "WebView2 runtime not found; preview.html will open in your default browser instead."));
+            checks.Add(new RuntimeReadinessCheck("Preview runtime", "Warning", "WebView2 runtime not found; preview-workbench.html (or preview.html fallback) will open in your default browser instead."));
         }
         catch (Exception ex)
         {
@@ -1099,7 +1101,7 @@ public sealed class MainForm : Form
                 () => _batchRunner.ConvertAsync(request, cancellationToken, progress),
                 cancellationToken);
             _lastOutputDirectory = GetBestOutputDirectory(results);
-            _lastPreviewPath = GetFirstExistingOutputFile(results, "preview.html");
+            _lastPreviewPath = GetFirstExistingOutputFile(results, PreviewFileCandidates);
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             _ = await LoadPreviewInAppAsync(_lastPreviewPath);
@@ -1305,7 +1307,7 @@ public sealed class MainForm : Form
     {
         using var folderDialog = new FolderBrowserDialog
         {
-            Description = "Select a previous SlideSmith output folder containing preview.html",
+            Description = "Select a previous SlideSmith output folder containing preview-workbench.html or preview.html",
             UseDescriptionForTitle = true,
         };
 
@@ -1315,13 +1317,13 @@ public sealed class MainForm : Form
         }
 
         var selectedFolder = folderDialog.SelectedPath;
-        var previewPath = Path.Combine(selectedFolder, "preview.html");
+        var previewPath = ResolvePreviewPath(selectedFolder);
 
-        if (!File.Exists(previewPath))
+        if (previewPath is null)
         {
             MessageBox.Show(
                 this,
-                $"No preview.html was found in the selected folder.{Environment.NewLine}{selectedFolder}",
+                $"No preview-workbench.html or preview.html was found in the selected folder.{Environment.NewLine}{selectedFolder}",
                 "Load result",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -1706,13 +1708,51 @@ public sealed class MainForm : Form
         return Directory.Exists(first) ? first : Path.GetDirectoryName(first);
     }
 
-    private static string? GetFirstExistingOutputFile(IReadOnlyList<ConversionResult> results, string fileName)
+    private static string? GetFirstExistingOutputFile(IReadOnlyList<ConversionResult> results, params string[] fileNames)
     {
+        if (fileNames.Length == 0)
+        {
+            return null;
+        }
+
         return results
             .SelectMany(r => r.OutputFiles)
+            .Where(File.Exists)
+            .OrderBy(path => GetPreviewCandidateRank(Path.GetFileName(path), fileNames))
             .FirstOrDefault(path =>
-                Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase) &&
-                File.Exists(path));
+                fileNames.Any(fileName => Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static int GetPreviewCandidateRank(string? fileName, IReadOnlyList<string> fileNames)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return int.MaxValue;
+        }
+
+        for (var index = 0; index < fileNames.Count; index++)
+        {
+            if (fileName.Equals(fileNames[index], StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return int.MaxValue;
+    }
+
+    private static string? ResolvePreviewPath(string folder)
+    {
+        foreach (var candidate in PreviewFileCandidates)
+        {
+            var path = Path.Combine(folder, candidate);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
     }
 
     private static string? FindCommonDirectory(IEnumerable<string> directories)

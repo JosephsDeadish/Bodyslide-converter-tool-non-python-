@@ -22,7 +22,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
-- live preview HTML output (`preview.html`) with region heatmap and conversion context
+- real 3D preview/workbench output (`preview-workbench.html`) rendered from converted mesh vertices, plus diagnostics report (`preview.html`)
 - dropped-item/world-object physics guidance export (`world-physics.json`) describing static vs rigid-proxy behavior for generated meshes
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 - runtime readiness self-checks in both CLI and desktop GUI so users can verify the executable, pipeline init, cache path, scratch-write access, and preview/runtime availability before converting anything
@@ -54,7 +54,7 @@ dotnet run --project src/Bodyslide.Desktop
 # optional global learning-cache path override and in-app learning-cache inspector,
 # built-in **Run self-check** action + **Readiness** tab for first-run executable validation,
 # cancel in-progress conversion, open output folder,
-# embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
+# embedded in-app preview pane for generated preview-workbench.html (with preview.html fallback), "Load result..." button to browse and reload
 # any previous output folder's preview, quick-open batch reports when available, an in-app files tab
 # that lists generated outputs with double-click/open-button launch, and a catalog tab that lists
 # all built-in presets, supported body signatures, deformation profiles, physics profiles, and
@@ -139,6 +139,7 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
+| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing both GUI + CLI side-by-side |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
@@ -151,8 +152,8 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, publish a single-file Linux CLI binary, and upload it as a temporary Actions artifact.
-- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach `SlideSmith.exe` and `SlideSmith-CLI.exe` directly.
-- **Pull requests:** publish Windows desktop app, zip just the `.exe`, upload as a temporary PR artifact.
+- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
+- **Pull requests:** publish both Windows executables, package them as one bundle zip artifact, and upload it for startup/packaging verification.
 
 All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
 
@@ -221,7 +222,8 @@ output/
   smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
-  preview.html                   ← interactive body heatmap + morph preview
+  preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
+  preview.html                   ← interactive body heatmap + morph diagnostics report
   ...                            ← additional metadata/diagnostic files (see table below)
 ```
 
@@ -250,6 +252,7 @@ output/
 | `<PluginName>_patched.<ext>` | **Full-copy patched plugin** — a direct copy of the source `.esp`/`.esm`/`.esl` with every ARMA `MOD2`/`MOD3`/`MOD4`/`MOD5` mesh-path subrecord updated in-place; supports both Skyrim LE and SE record header formats |
 | `<PluginName>_SlidesmithPatch.esp` | **Minimal override patch ESP** — contains ONLY the patched ARMA records and lists the original plugin as its master; safe to load after the original |
 | `README.txt` | Human-readable installation guide with FOMOD and manual install instructions |
+| `preview-workbench.html` | Browser-openable real 3D workbench rendered from converted mesh vertex data, with drag/zoom controls |
 | `preview.html` | Browser-openable live preview report with regional morph heatmap, pose-clipping summary, and interactive controls |
 | `batch-report.json` | Root batch summary when input is a folder or archive (total/success/fail counts and per-armor results) |
 | `.conversion-learning-cache.json` | Learning cache for faster repeated conversions |
@@ -281,7 +284,7 @@ Implemented from issue scope:
 - **geometry signature scan** — lightweight NIF vertex-count/bounds sampling now feeds body detection evidence (`verts:<count>`) and adds a `spatial-geometry` fallback for armor region binding when readable mesh coordinates are available
 - **batch summary report** — converting a directory or archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`) now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
 - **armor-pack validation rollup** — batch conversions now also write `armor-pack-validation.json`, aggregating each armor's validation status/score plus pack-wide ready/needs-review/high-risk counts and top issue codes so full packs can be triaged faster
-- **live preview HTML** (`preview.html`) — self-contained browser-openable file with an inline SVG body silhouette where each region is colour-coded by morph factor (blue→green→yellow→orange→red scale), plus regional morphing table, BodySlide slider list, physics-node list, pose-clipping risk summary, and interactive controls to swap body profile, rotate view, and adjust sliders; also includes **Auto-Correction Pass**, **Texture Analysis**, and **World/Dropped-Item Physics** panels; `armpits` now has a dedicated SVG shape and is highlighted as a high-risk region in the subtitle badge when flagged; replaces the old metadata-only `preview-renders.json`
+- **real 3D preview/workbench + live diagnostics HTML** (`preview-workbench.html`, `preview.html`) — export now writes a browser-openable 3D workbench that renders sampled vertex data from converted NIF output (drag to rotate, wheel/slider to zoom, optional auto-spin) and links directly to the diagnostics preview report; `preview.html` keeps the regional morph heatmap, BodySlide/physics tables, pose-clipping risk summary, and interactive control panels
 - **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that rewrites matching ARMA world + first-person mesh paths to the generated SlideSmith mesh targets (with rewrite logging)
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step
 - **deeper mesh/physics solver tuning** — strategy conversion now runs a region-adjacency smoothing solver with mesh-type-specific clamp/blend iterations, and physics XML generation now applies adaptive stiffness/offset/damping/restitution tuning (including reduced offsets when physics weights are missing) for more stable outputs
@@ -349,7 +352,7 @@ Implemented from issue scope:
 - **all-body target alias** — `--target all` / `--target any` / `--target *` (and the same tokens inside `--targets`) now expand to every supported body type automatically, so one command can export a full multi-body conversion pack without manually listing each body name
 - **topology + UV mismatch diagnostics** — export now compares source vs converted mesh signatures and writes `TopologyMismatchRisk`, `VertexCountDeltaRatio`, `UvCoverageDeltaRatio`, `UvAspectRatioDelta`, and `QualityWarnings` into `conversion-quality.json`; large drift thresholds flag likely topology/UV mismatch risks early (addressing a major “common failure point” from issue #2)
 - **physics-bone fallback remapping for skeleton compatibility** — skeleton mapping now aligns UNP/TBD targets with their CBPC support set (`NPC L/R Breast01`, `NPC L/R Butt`, `NPC Belly`) and auto-remaps unsupported higher-order source physics bones (e.g. `NPC L/R Breast02/03`) to the best available target equivalent before marking them unsupported, reducing conversion drop-off when source and target skeleton physics depth differ
-- **preview GUI fallback + safer saved target profiles** — when embedded WebView2 preview is unavailable (or fails), the desktop app now automatically opens `preview.html` in the system default browser so preview access is never blocked by missing runtime dependencies; “Save profile...” also now preserves typed target text (fallback `CUSTOM`) instead of relying only on selected dropdown items
+- **preview GUI fallback + safer saved target profiles** — when embedded WebView2 preview is unavailable (or fails), the desktop app now automatically opens `preview-workbench.html` (or `preview.html` fallback) in the system default browser so preview access is never blocked by missing runtime dependencies; “Save profile...” also now preserves typed target text (fallback `CUSTOM`) instead of relying only on selected dropdown items
 - **desktop conversion catalog tab** — GUI now includes a **Catalog** tab that exposes all built-in presets (target/deformation/physics), supported body detection tokens + vertex ranges, deformation profiles, physics profiles, and `all/any/*` target aliases so CLI discovery flags have an in-app equivalent
 - **desktop reports tab** — GUI now includes a native **Reports** tab plus **Open report** action that surfaces key fields from `batch-report.json`, `conversion-quality.json`, `dependency-map.json`, `skeleton-compatibility.json`, `texture-summary.json`, `pose-simulation-report.json`, `world-physics.json`, and `plugin-patches.json` for both fresh conversions and reloaded output folders, so users do not have to dig through raw JSON to inspect converter diagnostics
 - **custom profile management GUI** — the desktop app now shows every loaded custom body profile in a dedicated list with open/remove/clear actions, and “Save profile...” writes a reusable full custom-body payload (transformation field, slider names, gender, output path, detection tokens, physics profile) instead of a minimal stub

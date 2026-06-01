@@ -141,37 +141,6 @@ public static class RuntimeReadinessReporter
             Directory.Delete(scratchDirectory);
             return new("Scratch write", "OK", $"Temporary write access confirmed in {Path.GetTempPath()}");
         }
-
-        private static RuntimeReadinessCheck CreateStartupCrashLogWriteCheck()
-        {
-            var probeDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-startup-check", Guid.NewGuid().ToString("N"));
-            try
-            {
-                Directory.CreateDirectory(probeDirectory);
-                var probePath = Path.Combine(probeDirectory, "startup-crash.log");
-                File.WriteAllText(probePath, "startup-check");
-                File.Delete(probePath);
-                Directory.Delete(probeDirectory);
-                return new("Startup crash log", "OK", "Crash-log write path is writable.");
-            }
-            catch (Exception ex)
-            {
-                return new("Startup crash log", "Warning", $"Could not verify crash-log write path: {ex.Message}");
-            }
-            finally
-            {
-                try
-                {
-                    if (Directory.Exists(probeDirectory))
-                    {
-                        Directory.Delete(probeDirectory, recursive: true);
-                    }
-                }
-                catch
-                {
-                }
-            }
-        }
         catch (Exception ex)
         {
             return new("Scratch write", "Warning", $"Could not write to a temporary directory: {ex.Message}");
@@ -183,6 +152,37 @@ public static class RuntimeReadinessReporter
                 if (Directory.Exists(scratchDirectory))
                 {
                     Directory.Delete(scratchDirectory, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private static RuntimeReadinessCheck CreateStartupCrashLogWriteCheck()
+    {
+        var probeDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-startup-check", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(probeDirectory);
+            var probePath = Path.Combine(probeDirectory, "startup-crash.log");
+            File.WriteAllText(probePath, "startup-check");
+            File.Delete(probePath);
+            Directory.Delete(probeDirectory);
+            return new("Startup crash log", "OK", "Crash-log write path is writable.");
+        }
+        catch (Exception ex)
+        {
+            return new("Startup crash log", "Warning", $"Could not verify crash-log write path: {ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(probeDirectory))
+                {
+                    Directory.Delete(probeDirectory, recursive: true);
                 }
             }
             catch

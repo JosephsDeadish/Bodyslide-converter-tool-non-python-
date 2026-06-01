@@ -115,6 +115,9 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Create Windows bundle zip (desktop + CLI)
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
       - name: Create or update rolling "latest" GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -129,6 +132,7 @@ jobs:
             |---|---|
             | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
             | `SlideSmith-CLI.exe` | Windows command-line tool |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with both GUI + CLI side-by-side |
             | `slidesmith-linux-x64.zip` | Linux CLI binary |
 
             **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
@@ -137,6 +141,7 @@ jobs:
           files: |
             artifacts/win-x64/SlideSmith.exe
             artifacts/win-x64-cli/SlideSmith-CLI.exe
+            artifacts/slidesmith-win-x64-bundle.zip
 
   package-windows-on-pr:
     name: Package Windows app on pull request
@@ -173,8 +178,24 @@ jobs:
           -p:DebugSymbols=false
           --output artifacts/win-x64
 
-      - name: Zip Windows desktop app (single exe only)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
+      - name: Publish Windows standalone CLI (single file)
+        run: >
+          dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-cli
+
+      - name: Rename CLI exe to avoid collision
+        run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
+
+      - name: Zip Windows bundle (desktop + CLI)
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
 
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4

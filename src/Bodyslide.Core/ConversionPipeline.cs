@@ -354,6 +354,13 @@ public sealed record WorldObjectPhysicsReport(
     bool GroundMeshAvailable,
     IReadOnlyList<string> Recommendations);
 
+public sealed record PreviewWorkbenchPayload(
+    string MeshFile,
+    int VertexCount,
+    IReadOnlyList<float> Positions,
+    string Mode,
+    string Note);
+
 /// <summary>
 /// Per-bone rotation delta for a single animation pose (Skyrim Z-up coordinate space).
 /// <c>RotX</c> is the forward/back tilt angle in radians (positive = forward tilt).
@@ -8513,6 +8520,13 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(previewPath);
 
+        var previewWorkbenchPath = Path.Combine(outputDirectory, "preview-workbench.html");
+        await File.WriteAllTextAsync(
+            previewWorkbenchPath,
+            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs),
+            cancellationToken);
+        outputFiles.Add(previewWorkbenchPath);
+
         var logPath = Path.Combine(outputDirectory, "conversion.log");
         await File.WriteAllLinesAsync(logPath, steps, cancellationToken);
         if (synthesizedVariantCount > 0)
@@ -10623,6 +10637,287 @@ internal sealed class LocalExportService(
             <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
             {{svgParts}}</svg>
             """;
+    }
+
+    private static string BuildPreviewWorkbenchHtml(
+        ConversionRequest request,
+        ImportedArmor armor,
+        MeshAnalysis analysis,
+        ConvertedMesh mesh,
+        IReadOnlyList<string> convertedMeshPaths)
+    {
+        var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
+        var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths);
+        var payloadJson = JsonSerializer.Serialize(payload);
+
+        return $$"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <title>SlideSmith 3D Workbench — {{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}}</title>
+              <style>
+                body { font-family: system-ui, sans-serif; background: #101420; color: #e5e8ef; margin: 0; padding: 20px; }
+                h1 { color: #c9a84c; margin: 0 0 8px; }
+                .subtitle { color: #96a0b5; margin: 0 0 14px; font-size: .9rem; }
+                .layout { display: grid; grid-template-columns: minmax(360px, 1.2fr) minmax(280px, .8fr); gap: 18px; align-items: start; }
+                .panel { background: #182138; border: 1px solid #283758; border-radius: 10px; padding: 12px 14px; }
+                canvas { width: 100%; height: 520px; background: #0b1020; border-radius: 8px; border: 1px solid #22304b; display: block; }
+                .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 0; font-size: .85rem; }
+                .controls label { display: flex; align-items: center; gap: 6px; }
+                .kvs { font-size: .85rem; margin: 0; padding-left: 18px; }
+                a { color: #8bc6ff; }
+                @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } canvas { height: 420px; } }
+              </style>
+            </head>
+            <body>
+              <h1>SlideSmith 3D Workbench</h1>
+              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} · {{HtmlEncode(analysis.MeshType)}} · {{mesh.MeshCount}} mesh item(s)</p>
+              <div class="layout">
+                <div class="panel">
+                  <canvas id="workbench-canvas" width="960" height="520"></canvas>
+                  <div class="controls">
+                    <label>Point size <input id="point-size" type="range" min="1" max="4" step="1" value="2"></label>
+                    <label>Zoom <input id="zoom-level" type="range" min="0.6" max="2.8" step="0.05" value="1.2"></label>
+                    <label><input id="auto-spin" type="checkbox" checked> Auto-spin</label>
+                    <button id="reset-view" type="button">Reset view</button>
+                  </div>
+                  <p id="workbench-status" class="subtitle" style="margin-top:10px"></p>
+                </div>
+                <div class="panel">
+                  <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
+                  <ul class="kvs">
+                    <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
+                    <li><strong>Points loaded:</strong> {{payload.VertexCount}}</li>
+                    <li><strong>NIF file:</strong> {{HtmlEncode(payload.MeshFile)}}</li>
+                  </ul>
+                  <p class="subtitle" style="margin-top:10px">{{HtmlEncode(payload.Note)}}</p>
+                  <p style="font-size:.85rem;margin:12px 0 0">
+                    Drag to rotate · mouse wheel (or zoom slider) to zoom · use
+                    <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
+                  </p>
+                </div>
+              </div>
+              <script>
+                const payload = {{payloadJson}};
+                const canvas = document.getElementById('workbench-canvas');
+                const statusText = document.getElementById('workbench-status');
+                const pointSizeSlider = document.getElementById('point-size');
+                const zoomSlider = document.getElementById('zoom-level');
+                const autoSpinCheckbox = document.getElementById('auto-spin');
+                const resetButton = document.getElementById('reset-view');
+
+                const ctx = canvas.getContext('2d');
+                const raw = payload && Array.isArray(payload.Positions) ? payload.Positions : [];
+                if (!ctx || raw.length < 3) {
+                  statusText.textContent = payload && payload.Note ? payload.Note : 'No mesh vertices were available for 3D preview.';
+                } else {
+                  const points = [];
+                  let minX = Infinity, minY = Infinity, minZ = Infinity;
+                  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+                  for (let i = 0; i + 2 < raw.length; i += 3) {
+                    const x = Number(raw[i]);
+                    const y = Number(raw[i + 1]);
+                    const z = Number(raw[i + 2]);
+                    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+                    points.push({ x, y, z });
+                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+                  }
+
+                  const center = {
+                    x: (minX + maxX) / 2,
+                    y: (minY + maxY) / 2,
+                    z: (minZ + maxZ) / 2
+                  };
+                  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 1;
+                  const normalized = points.map(p => ({
+                    x: (p.x - center.x) / extent,
+                    y: (p.y - center.y) / extent,
+                    z: (p.z - center.z) / extent
+                  }));
+
+                  let yaw = 0.38;
+                  let pitch = -0.22;
+                  let zoom = Number(zoomSlider.value);
+                  let pointSize = Number(pointSizeSlider.value);
+                  let drag = null;
+
+                  function rotate(p) {
+                    const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+                    const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+                    const x1 = p.x * cosY - p.z * sinY;
+                    const z1 = p.x * sinY + p.z * cosY;
+                    const y2 = p.y * cosP - z1 * sinP;
+                    const z2 = p.y * sinP + z1 * cosP;
+                    return { x: x1, y: y2, z: z2 };
+                  }
+
+                  function draw() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    const fov = 1.8;
+                    const camDist = 2.8 / Math.max(0.35, zoom);
+                    const cx = canvas.width / 2;
+                    const cy = canvas.height / 2;
+                    const depthSorted = [];
+
+                    for (const p of normalized) {
+                      const r = rotate(p);
+                      const z = r.z + camDist;
+                      if (z <= 0.05) continue;
+                      const sx = cx + (r.x * fov / z) * canvas.height * 0.55;
+                      const sy = cy - (r.y * fov / z) * canvas.height * 0.55;
+                      depthSorted.push({ sx, sy, z, r });
+                    }
+
+                    depthSorted.sort((a, b) => b.z - a.z);
+                    for (const v of depthSorted) {
+                      const depth = Math.max(0, Math.min(1, 1.4 - (v.z / 3.2)));
+                      const alpha = 0.20 + depth * 0.75;
+                      const hue = 208 + (v.r.y * 42);
+                      ctx.fillStyle = `hsla(${hue}, 86%, 67%, ${alpha.toFixed(3)})`;
+                      ctx.fillRect(v.sx, v.sy, pointSize, pointSize);
+                    }
+                  }
+
+                  function resetView() {
+                    yaw = 0.38;
+                    pitch = -0.22;
+                    zoomSlider.value = '1.2';
+                    pointSizeSlider.value = '2';
+                    zoom = Number(zoomSlider.value);
+                    pointSize = Number(pointSizeSlider.value);
+                    draw();
+                  }
+
+                  canvas.addEventListener('mousedown', event => {
+                    drag = { x: event.clientX, y: event.clientY, yaw, pitch };
+                  });
+                  window.addEventListener('mouseup', () => { drag = null; });
+                  window.addEventListener('mousemove', event => {
+                    if (!drag) return;
+                    const dx = event.clientX - drag.x;
+                    const dy = event.clientY - drag.y;
+                    yaw = drag.yaw + dx * 0.01;
+                    pitch = Math.max(-1.3, Math.min(1.3, drag.pitch + dy * 0.01));
+                    draw();
+                  });
+                  canvas.addEventListener('wheel', event => {
+                    event.preventDefault();
+                    zoom = Math.max(0.6, Math.min(2.8, zoom - event.deltaY * 0.0015));
+                    zoomSlider.value = zoom.toFixed(2);
+                    draw();
+                  }, { passive: false });
+
+                  pointSizeSlider.addEventListener('input', () => {
+                    pointSize = Number(pointSizeSlider.value);
+                    draw();
+                  });
+                  zoomSlider.addEventListener('input', () => {
+                    zoom = Number(zoomSlider.value);
+                    draw();
+                  });
+                  resetButton.addEventListener('click', resetView);
+
+                  function tick() {
+                    if (autoSpinCheckbox.checked && !drag) {
+                      yaw += 0.0025;
+                      draw();
+                    }
+                    requestAnimationFrame(tick);
+                  }
+
+                  statusText.textContent = `Loaded ${points.length.toLocaleString()} mesh points from ${payload.MeshFile}.`;
+                  draw();
+                  tick();
+                }
+              </script>
+            </body>
+            </html>
+            """;
+    }
+
+    private static PreviewWorkbenchPayload BuildPreviewWorkbenchPayload(IReadOnlyList<string> convertedMeshPaths)
+    {
+        foreach (var path in convertedMeshPaths)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                var vertices = ExtractPreviewWorkbenchVertices(bytes, maxVertices: 14_000);
+                if (vertices.Count == 0)
+                {
+                    continue;
+                }
+
+                var positions = new List<float>(vertices.Count * 3);
+                foreach (var (x, y, z) in vertices)
+                {
+                    positions.Add(x);
+                    positions.Add(y);
+                    positions.Add(z);
+                }
+
+                return new PreviewWorkbenchPayload(
+                    MeshFile: Path.GetFileName(path),
+                    VertexCount: vertices.Count,
+                    Positions: positions,
+                    Mode: "real-3d-point-cloud",
+                    Note: "Rendered from converted mesh vertex data. Use drag + zoom controls to inspect shape and proportions.");
+            }
+            catch
+            {
+                // Try next mesh candidate.
+            }
+        }
+
+        return new PreviewWorkbenchPayload(
+            MeshFile: "(none)",
+            VertexCount: 0,
+            Positions: [],
+            Mode: "unavailable",
+            Note: "No readable converted NIF vertex data was found for 3D preview.");
+    }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ExtractPreviewWorkbenchVertices(byte[] bytes, int maxVertices)
+    {
+        if (!NifGeometrySignatureReader.TryLocateVertexBlock(bytes, out var offset, out var count) || count <= 0)
+        {
+            return [];
+        }
+
+        const int vertexSize = 12;
+        var required = (long)count * vertexSize;
+        if (offset < 0 || offset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var sampleStride = Math.Max(1, count / Math.Max(1, maxVertices));
+        var sampledCount = Math.Min(count, maxVertices);
+        var vertices = new List<(float, float, float)>(sampledCount);
+        for (var i = 0; i < count; i += sampleStride)
+        {
+            if (vertices.Count >= maxVertices)
+            {
+                break;
+            }
+
+            var o = offset + i * vertexSize;
+            vertices.Add((
+                BitConverter.ToSingle(bytes, o),
+                BitConverter.ToSingle(bytes, o + 4),
+                BitConverter.ToSingle(bytes, o + 8)));
+        }
+
+        return vertices;
     }
 
     private static string BuildPreviewHtml(
