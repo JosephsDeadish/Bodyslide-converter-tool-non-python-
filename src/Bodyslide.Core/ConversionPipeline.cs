@@ -294,6 +294,66 @@ public sealed record PluginTypeClassification(
     IReadOnlyList<string> Reasons);
 
 /// <summary>
+/// Describes what a consumer should do when a plugin cannot be classified with certainty.
+/// </summary>
+public enum PluginFallbackStrategy
+{
+    /// <summary>Plugin is well-understood — proceed with normal processing.</summary>
+    Proceed,
+
+    /// <summary>
+    /// Plugin type is AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
+    /// Automated conversion and rewrite must not proceed; user must resolve the
+    /// ambiguity manually before any assumptions are made.
+    /// </summary>
+    SafeMode,
+
+    /// <summary>
+    /// Plugin type is UNKNOWN — the header could not be read or the format was
+    /// not recognised.  Skip this cycle and queue the plugin for a re-scan once
+    /// more information is available.
+    /// </summary>
+    Rescan,
+}
+
+/// <summary>
+/// Centralised enforcement point that all consumers (converter, patch generator,
+/// batch processor, UI) call to decide how to handle a plugin whose type string
+/// was produced by <see cref="BasicPluginAnalysisService.ClassifyPluginKind"/>.
+///
+/// Rule table:
+///   AMBIGUOUS → <see cref="PluginFallbackStrategy.SafeMode"/>  (conflicting evidence)
+///   UNKNOWN   → <see cref="PluginFallbackStrategy.Rescan"/>    (no evidence at all)
+///   anything else → <see cref="PluginFallbackStrategy.Proceed"/>
+/// </summary>
+public static class PluginClassifierGate
+{
+    /// <summary>Returns true when the plugin type cannot be determined with certainty.</summary>
+    public static bool ShouldBlockAutoConversion(string? type) =>
+        GetFallbackStrategy(type) != PluginFallbackStrategy.Proceed;
+
+    /// <summary>Returns true when the plugin carries conflicting classification signals.</summary>
+    public static bool IsAmbiguous(string? type) =>
+        string.Equals(type, "AMBIGUOUS", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Returns true when the plugin could not be read or its format was unrecognised.</summary>
+    public static bool IsUnknown(string? type) =>
+        string.Equals(type, "UNKNOWN", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the fallback strategy a consumer should apply for the given plugin type.
+    /// AMBIGUOUS → SafeMode; UNKNOWN → Rescan; all other types → Proceed.
+    /// </summary>
+    public static PluginFallbackStrategy GetFallbackStrategy(string? type) =>
+        type switch
+        {
+            "AMBIGUOUS" => PluginFallbackStrategy.SafeMode,
+            "UNKNOWN"   => PluginFallbackStrategy.Rescan,
+            _           => PluginFallbackStrategy.Proceed,
+        };
+}
+
+/// <summary>
 /// Outcome of the binary plugin rewrite pass: how many plugins were processed,
 /// how many ARMA and ARMO records were patched, and the paths of the rewritten plugin files.
 /// </summary>
