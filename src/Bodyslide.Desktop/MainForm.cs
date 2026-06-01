@@ -58,6 +58,8 @@ public sealed class MainForm : Form
     private readonly ListView _catalogListView;
     private readonly TabPage _artifactsTabPage;
     private readonly ListView _artifactsListView;
+    private readonly TabPage _cacheTabPage;
+    private readonly ListView _cacheListView;
     private readonly ListView _customProfilesListView;
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
@@ -663,6 +665,25 @@ public sealed class MainForm : Form
         _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _artifactsTabPage.Controls.Add(_artifactsListView);
         _resultsTabControl.TabPages.Add(_artifactsTabPage);
+        _cacheTabPage = new TabPage("Cache");
+        _cacheListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _cacheListView.Columns.Add("Key", 220);
+        _cacheListView.Columns.Add("Target", 80);
+        _cacheListView.Columns.Add("Mesh", 120);
+        _cacheListView.Columns.Add("Strategy", 180);
+        _cacheListView.Columns.Add("Clipping", 70);
+        _cacheListView.Columns.Add("Correction", 100);
+        _cacheListView.Columns.Add("Cached at (UTC)", 150);
+        _cacheListView.Columns.Add("Regions", -2);
+        _cacheTabPage.Controls.Add(_cacheListView);
+        _resultsTabControl.TabPages.Add(_cacheTabPage);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
@@ -675,6 +696,7 @@ public sealed class MainForm : Form
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab([], null);
+        PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview.html in-app.");
         AppendLog("Ready. Choose input, configure options, then click Convert.");
     }
@@ -1650,6 +1672,8 @@ public sealed class MainForm : Form
             if (entries.Count == 0)
             {
                 AppendLog("Learning cache is empty.");
+                PopulateCacheTab([], cachePathOverride);
+                _resultsTabControl.SelectedTab = _cacheTabPage;
                 MessageBox.Show(this, "Learning cache is empty.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -1659,12 +1683,65 @@ public sealed class MainForm : Form
             {
                 AppendLog($"[{entry.Key}] target={entry.TargetBody}, mesh={entry.MeshType}, strategy={entry.Strategy}, cached={entry.LastSuccessfulConversion:u}");
             }
+            PopulateCacheTab(entries, cachePathOverride);
+            _resultsTabControl.SelectedTab = _cacheTabPage;
 
-            MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the Cache tab and log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, $"Failed to inspect learning cache:\n{ex.Message}", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void PopulateCacheTab(IReadOnlyList<ConversionCacheEntry> entries, string? cachePathOverride)
+    {
+        _cacheListView.BeginUpdate();
+        try
+        {
+            _cacheListView.Items.Clear();
+            if (entries.Count == 0)
+            {
+                var cacheLabel = string.IsNullOrWhiteSpace(cachePathOverride)
+                    ? "(global cache)"
+                    : cachePathOverride;
+                _cacheListView.Items.Add(new ListViewItem(
+                [
+                    "Status",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    $"No cache entries loaded. Source: {cacheLabel}",
+                ]));
+                return;
+            }
+
+            foreach (var entry in entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var regions = entry.RegionalMorphing.Count == 0
+                    ? "None"
+                    : string.Join(", ", entry.RegionalMorphing
+                        .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(kv => $"{kv.Key}={kv.Value:F3}"));
+                _cacheListView.Items.Add(new ListViewItem(
+                [
+                    entry.Key,
+                    entry.TargetBody,
+                    entry.MeshType,
+                    entry.Strategy,
+                    entry.HadClipping ? "Yes" : "No",
+                    entry.CorrectionMethod,
+                    entry.LastSuccessfulConversion.ToString("u"),
+                    regions,
+                ]));
+            }
+        }
+        finally
+        {
+            _cacheListView.EndUpdate();
         }
     }
 
