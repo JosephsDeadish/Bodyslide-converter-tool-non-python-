@@ -10469,20 +10469,38 @@ internal sealed class LocalExportService(
         CancellationToken cancellationToken)
     {
         var preferredPath = Path.Combine(outputDirectory, "conversion-manifest.json");
+        const int maxPreferredPathAttempts = 6;
+        const int retryDelayMilliseconds = 100;
 
-        try
+        for (var attempt = 1; attempt <= maxPreferredPathAttempts; attempt++)
         {
-            await File.WriteAllTextAsync(preferredPath, manifestJson, cancellationToken);
-            return preferredPath;
+            try
+            {
+                await File.WriteAllTextAsync(preferredPath, manifestJson, cancellationToken);
+                return preferredPath;
+            }
+            catch (IOException ex) when (attempt < maxPreferredPathAttempts && IsSharingOrLockViolation(ex))
+            {
+                await Task.Delay(retryDelayMilliseconds, cancellationToken);
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxPreferredPathAttempts)
+            {
+                await Task.Delay(retryDelayMilliseconds, cancellationToken);
+            }
         }
-        catch (IOException)
-        {
-            var fallbackPath = Path.Combine(
-                outputDirectory,
-                $"conversion-manifest-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}.json");
-            await File.WriteAllTextAsync(fallbackPath, manifestJson, cancellationToken);
-            return fallbackPath;
-        }
+
+        var fallbackPath = Path.Combine(
+            outputDirectory,
+            $"conversion-manifest-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}.json");
+        await File.WriteAllTextAsync(fallbackPath, manifestJson, cancellationToken);
+        return fallbackPath;
+    }
+
+    private static bool IsSharingOrLockViolation(IOException exception)
+    {
+        // Win32 sharing violation (32) and lock violation (33). This remains harmless on non-Windows.
+        var nativeCode = exception.HResult & 0xFFFF;
+        return nativeCode is 32 or 33;
     }
 
     /// <summary>
