@@ -6,6 +6,18 @@ public sealed record RuntimeReadinessCheck(string Area, string Status, string De
 
 public static class RuntimeReadinessReporter
 {
+    private static readonly string[] DesktopCompanionExeNames =
+    [
+        "SlideSmith.exe",
+        "SlideSmith-Desktop.exe",
+    ];
+
+    private static readonly string[] CliCompanionExeNames =
+    [
+        "SlideSmith-CLI.exe",
+        "SlideSmith.CLI.exe",
+    ];
+
     private static readonly string[] SupportedInputs =
     [
         ".nif mesh",
@@ -15,12 +27,15 @@ public static class RuntimeReadinessReporter
     ];
 
     public static IReadOnlyList<RuntimeReadinessCheck> CreateCliReport(string? currentExePath) =>
-        CreateReport(currentExePath, includeDesktopProbe: true);
+        CreateReport(currentExePath, includeDesktopProbe: true, includeCliProbe: false);
 
     public static IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReport(string? currentExePath) =>
-        CreateReport(currentExePath, includeDesktopProbe: false);
+        CreateReport(currentExePath, includeDesktopProbe: false, includeCliProbe: true);
 
-    private static IReadOnlyList<RuntimeReadinessCheck> CreateReport(string? currentExePath, bool includeDesktopProbe)
+    private static IReadOnlyList<RuntimeReadinessCheck> CreateReport(
+        string? currentExePath,
+        bool includeDesktopProbe,
+        bool includeCliProbe)
     {
         var checks = new List<RuntimeReadinessCheck>
         {
@@ -42,10 +57,16 @@ public static class RuntimeReadinessReporter
         checks.Add(CreatePipelineCheck());
         checks.Add(CreateCacheCheck());
         checks.Add(CreateScratchWriteCheck());
+        checks.Add(CreateStartupCrashLogWriteCheck());
 
         if (includeDesktopProbe)
         {
             checks.Add(CreateDesktopProbeCheck(currentExePath));
+        }
+
+        if (includeCliProbe)
+        {
+            checks.Add(CreateCliProbeCheck(currentExePath));
         }
 
         return checks;
@@ -120,6 +141,37 @@ public static class RuntimeReadinessReporter
             Directory.Delete(scratchDirectory);
             return new("Scratch write", "OK", $"Temporary write access confirmed in {Path.GetTempPath()}");
         }
+
+        private static RuntimeReadinessCheck CreateStartupCrashLogWriteCheck()
+        {
+            var probeDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-startup-check", Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(probeDirectory);
+                var probePath = Path.Combine(probeDirectory, "startup-crash.log");
+                File.WriteAllText(probePath, "startup-check");
+                File.Delete(probePath);
+                Directory.Delete(probeDirectory);
+                return new("Startup crash log", "OK", "Crash-log write path is writable.");
+            }
+            catch (Exception ex)
+            {
+                return new("Startup crash log", "Warning", $"Could not verify crash-log write path: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(probeDirectory))
+                    {
+                        Directory.Delete(probeDirectory, recursive: true);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
         catch (Exception ex)
         {
             return new("Scratch write", "Warning", $"Could not write to a temporary directory: {ex.Message}");
@@ -160,11 +212,7 @@ public static class RuntimeReadinessReporter
             }
 
             var currentFullPath = Path.GetFullPath(currentExePath);
-            foreach (var candidate in new[]
-                     {
-                         Path.Combine(executableDirectory, "SlideSmith.exe"),
-                         Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
-                     })
+            foreach (var candidate in DesktopCompanionExeNames.Select(fileName => Path.Combine(executableDirectory, fileName)))
             {
                 if (!File.Exists(candidate) ||
                     string.Equals(Path.GetFullPath(candidate), currentFullPath, StringComparison.OrdinalIgnoreCase))
@@ -180,6 +228,46 @@ public static class RuntimeReadinessReporter
         catch (Exception ex)
         {
             return new("Desktop GUI", "Warning", $"Could not inspect sibling desktop EXE: {ex.Message}");
+        }
+    }
+
+    private static RuntimeReadinessCheck CreateCliProbeCheck(string? currentExePath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new("CLI companion", "Info", "CLI companion probe is only relevant on Windows.");
+        }
+
+        if (string.IsNullOrWhiteSpace(currentExePath))
+        {
+            return new("CLI companion", "Warning", "Could not inspect sibling CLI EXE because the desktop path is unavailable.");
+        }
+
+        try
+        {
+            var executableDirectory = Path.GetDirectoryName(Path.GetFullPath(currentExePath));
+            if (string.IsNullOrWhiteSpace(executableDirectory))
+            {
+                return new("CLI companion", "Warning", "Could not resolve the executable directory.");
+            }
+
+            var currentFullPath = Path.GetFullPath(currentExePath);
+            foreach (var candidate in CliCompanionExeNames.Select(fileName => Path.Combine(executableDirectory, fileName)))
+            {
+                if (!File.Exists(candidate) ||
+                    string.Equals(Path.GetFullPath(candidate), currentFullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                return new("CLI companion", "OK", $"Sibling CLI EXE detected: {candidate}");
+            }
+
+            return new("CLI companion", "Warning", "No sibling CLI EXE was found beside the desktop binary.");
+        }
+        catch (Exception ex)
+        {
+            return new("CLI companion", "Warning", $"Could not inspect sibling CLI EXE: {ex.Message}");
         }
     }
 }
