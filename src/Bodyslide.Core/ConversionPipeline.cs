@@ -6302,8 +6302,8 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
 internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 {
     private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
-    private const uint Tes4FlagMaster = 0x00000001u;
-    private const uint Tes4FlagLight = 0x00000200u;
+    private const uint PluginFlagMaster = 0x00000001u;
+    private const uint PluginFlagLight = 0x00000200u;
 
     public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
@@ -6398,8 +6398,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     {
         var extension = Path.GetExtension(pluginPath).Trim().ToLowerInvariant();
         var flags = TryReadTes4Flags(bytes, out var detectedFlags) ? detectedFlags : 0u;
-        var hasMasterFlag = (flags & Tes4FlagMaster) != 0;
-        var hasLightFlag = (flags & Tes4FlagLight) != 0;
+        var hasMasterFlag = (flags & PluginFlagMaster) != 0;
+        var hasLightFlag = (flags & PluginFlagLight) != 0;
 
         return extension switch
         {
@@ -6429,7 +6429,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             return false;
         }
 
-        flags = ReadUInt32Le(bytes, 8);
+        flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4));
         return true;
     }
 

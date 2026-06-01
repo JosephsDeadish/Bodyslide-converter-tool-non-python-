@@ -835,8 +835,7 @@ public sealed class MainForm : Form
                 var bonesLabel = profile.SupportsPhysics
                     ? $"RequiredPhysicsBones=[{string.Join(", ", profile.RequiredPhysicsBones)}]"
                     : "RequiredPhysicsBones=[]";
-                details = $"Vertices={vertexRange}; Skeleton={profile.SkeletonFoundation}; {physicsLabel}; {bonesLabel}; Notes={profile.Notes}";
-                details = $"{details}; {recommendedLabel}; {supportsLabel}";
+                details = $"Vertices={vertexRange}; Skeleton={profile.SkeletonFoundation}; {physicsLabel}; {recommendedLabel}; {supportsLabel}; {bonesLabel}; Notes={profile.Notes}";
             }
             else
             {
