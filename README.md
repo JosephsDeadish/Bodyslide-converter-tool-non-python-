@@ -26,6 +26,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - dropped-item/world-object physics guidance export (`world-physics.json`) describing static vs rigid-proxy behavior for generated meshes
 - optional ZIP output (`--output-zip`) for mod-manager-ready packages
 - runtime readiness self-checks in both CLI and desktop GUI so users can verify the executable, pipeline init, cache path, scratch-write access, and preview/runtime availability before converting anything
+- armor-pack validation reporting with per-conversion readiness summaries and batch-level pack risk rollups
 
 ## Projects
 
@@ -241,7 +242,8 @@ output/
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
 | `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
-| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping regions, correction method, voxel penetration count, skeleton names, mapped + unsupported bone counts, and ISO-8601 generation timestamp |
+| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, readiness score/status, and ISO-8601 generation timestamp |
+| `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
 | `patch-armor.pas` | xEdit Pascal automation script (SSEEdit / TES5Edit): runs ARMA mesh-path rewriting directly inside the tool |
@@ -278,6 +280,7 @@ Implemented from issue scope:
 - **armor region binding by bone names** — new `IArmorRegionBindingService` / `BasicArmorRegionBindingService` detects which body regions (chest, waist, pelvis, legs, shoulders, arms, breasts, belly, butt) the armor covers by scoring physics-file bone name tokens, falling back to mesh filename keywords, then full-body default; emits `regions:<list>,method=<detection-method>` step
 - **geometry signature scan** — lightweight NIF vertex-count/bounds sampling now feeds body detection evidence (`verts:<count>`) and adds a `spatial-geometry` fallback for armor region binding when readable mesh coordinates are available
 - **batch summary report** — converting a directory or archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`) now writes `batch-report.json` to the root output folder with total/success/fail counts, target body, timestamp, and per-armor result entries
+- **armor-pack validation rollup** — batch conversions now also write `armor-pack-validation.json`, aggregating each armor's validation status/score plus pack-wide ready/needs-review/high-risk counts and top issue codes so full packs can be triaged faster
 - **live preview HTML** (`preview.html`) — self-contained browser-openable file with an inline SVG body silhouette where each region is colour-coded by morph factor (blue→green→yellow→orange→red scale), plus regional morphing table, BodySlide slider list, physics-node list, pose-clipping risk summary, and interactive controls to swap body profile, rotate view, and adjust sliders; also includes **Auto-Correction Pass**, **Texture Analysis**, and **World/Dropped-Item Physics** panels; `armpits` now has a dedicated SVG shape and is highlighted as a high-risk region in the subtitle badge when flagged; replaces the old metadata-only `preview-renders.json`
 - **plugin xEdit automation script** (`patch-armor.pas`) — generated alongside `plugin-patches.json` whenever plugins are detected; a runnable Pascal (Delphi) script for SSEEdit/TES5Edit that rewrites matching ARMA world + first-person mesh paths to the generated SlideSmith mesh targets (with rewrite logging)
 - **pose simulation** (`pose-simulation-report.json`) — `BasicPoseSimulationService` tests the converted mesh against 8 animation poses (T-pose, Walk, Run, Idle, Crouch, Combat-Idle, Jump, Sneak) using per-pose per-region stress amplifiers; regions where `morph_factor × pose_amplifier ≥ 1.10` are flagged as at-risk; report written as JSON and visualised in the preview HTML; emits `pose-simulation:tested=8,...` pipeline step

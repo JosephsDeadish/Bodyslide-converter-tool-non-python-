@@ -100,6 +100,15 @@ public sealed record ConversionInspectionResult(
 /// Machine-readable quality summary for a single conversion, written to
 /// <c>conversion-quality.json</c> in the output directory.
 /// </summary>
+public sealed record ConversionValidationIssue(string Code, string Severity, string Message);
+public sealed record ConversionValidationSummary(
+    string Status,
+    int Score,
+    int HighSeverityCount,
+    int MediumSeverityCount,
+    int LowSeverityCount,
+    IReadOnlyList<ConversionValidationIssue> Issues);
+
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
     double BodyDetectionConfidence,
@@ -123,7 +132,13 @@ public sealed record ConversionQualityReport(
     double VertexCountDeltaRatio = 0,
     double? UvCoverageDeltaRatio = null,
     double? UvAspectRatioDelta = null,
-    IReadOnlyList<string>? QualityWarnings = null);
+    IReadOnlyList<string>? QualityWarnings = null,
+    double SourceBodyMatchRatio = 0,
+    bool BodySlideCompatible = false,
+    int HighRiskPoseCount = 0,
+    IReadOnlyList<string>? HighRiskPoseRegions = null,
+    int MissingNormalCount = 0,
+    ConversionValidationSummary? ValidationSummary = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -154,6 +169,35 @@ public sealed record RaceCompatibilityReport(
 
 /// <summary>Reports progress during a batch conversion run.</summary>
 public sealed record BatchProgressUpdate(int Completed, int Total, string CurrentFile, bool Success);
+
+public sealed record ArmorPackValidationIssueCount(string Code, int Count);
+public sealed record ArmorPackValidationItem(
+    string MeshFile,
+    string OutputDirectory,
+    bool Success,
+    string ValidationStatus,
+    int? ValidationScore,
+    IReadOnlyList<string> IssueCodes,
+    IReadOnlyList<string> IssueMessages,
+    string? DetectedSourceBody = null,
+    string? MeshType = null,
+    string? Strategy = null);
+public sealed record ArmorPackValidationReport(
+    string ConversionLabel,
+    string TargetBody,
+    int TotalCount,
+    int SuccessCount,
+    int FailedCount,
+    int QualityReportCount,
+    string PackReadinessStatus,
+    int ReadyCount,
+    int NeedsReviewCount,
+    int HighRiskCount,
+    int MissingQualityReportCount,
+    double? AverageValidationScore,
+    IReadOnlyList<ArmorPackValidationIssueCount> TopIssueCodes,
+    IReadOnlyList<ArmorPackValidationItem> Items,
+    DateTimeOffset GeneratedAt);
 
 /// <summary>
 /// Result of the normal recalculation pass — reports how many vertex normals were
@@ -2859,6 +2903,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     {
         Directory.CreateDirectory(rootOutput);
 
+        var armorPackValidation = BuildArmorPackValidationReport(resultsWithPaths, targetBody, conversionLabel);
+        var validationByOutputDirectory = armorPackValidation.Items.ToDictionary(
+            item => item.OutputDirectory,
+            item => item,
+            StringComparer.OrdinalIgnoreCase);
+
         var report = new
         {
             ConversionLabel = conversionLabel,
@@ -2866,18 +2916,154 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             TotalCount = resultsWithPaths.Count,
             SuccessCount = resultsWithPaths.Count(r => r.Result.Success),
             FailedCount = resultsWithPaths.Count(r => !r.Result.Success),
+            QualityReportCount = armorPackValidation.QualityReportCount,
+            PackReadinessStatus = armorPackValidation.PackReadinessStatus,
+            ReadyCount = armorPackValidation.ReadyCount,
+            NeedsReviewCount = armorPackValidation.NeedsReviewCount,
+            HighRiskCount = armorPackValidation.HighRiskCount,
+            MissingQualityReportCount = armorPackValidation.MissingQualityReportCount,
+            AverageValidationScore = armorPackValidation.AverageValidationScore,
+            TopIssueCodes = armorPackValidation.TopIssueCodes,
             GeneratedAt = DateTimeOffset.UtcNow,
-            Results = resultsWithPaths.Select(r => new
+            Results = resultsWithPaths.Select(r =>
             {
-                MeshFile = Path.GetFileName(r.MeshFile),
-                r.Result.OutputDirectory,
-                r.Result.Success,
-                StepCount = r.Result.Steps.Count,
+                validationByOutputDirectory.TryGetValue(r.Result.OutputDirectory, out var validationItem);
+                return new
+                {
+                    MeshFile = Path.GetFileName(r.MeshFile),
+                    r.Result.OutputDirectory,
+                    r.Result.Success,
+                    StepCount = r.Result.Steps.Count,
+                    ValidationStatus = validationItem?.ValidationStatus,
+                    ValidationScore = validationItem?.ValidationScore,
+                    IssueCodes = validationItem?.IssueCodes,
+                };
             }).ToList(),
         };
 
         var reportJson = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(rootOutput, "batch-report.json"), reportJson, cancellationToken);
+
+        var validationJson = JsonSerializer.Serialize(armorPackValidation, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(Path.Combine(rootOutput, "armor-pack-validation.json"), validationJson, cancellationToken);
+    }
+
+    private static ArmorPackValidationReport BuildArmorPackValidationReport(
+        IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
+        string targetBody,
+        string conversionLabel)
+    {
+        var items = new List<ArmorPackValidationItem>(resultsWithPaths.Count);
+
+        foreach (var (meshFile, result) in resultsWithPaths)
+        {
+            var qualityReport = TryReadConversionQualityReport(result);
+            var issueCodes = qualityReport?.ValidationSummary?.Issues
+                .Select(issue => issue.Code)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+            var issueMessages = qualityReport?.ValidationSummary?.Issues
+                .Select(issue => issue.Message)
+                .ToList() ?? [];
+
+            var validationStatus = !result.Success
+                ? "failed"
+                : qualityReport?.ValidationSummary?.Status
+                    ?? (File.Exists(Path.Combine(result.OutputDirectory, "conversion-quality.json"))
+                        ? "unclassified"
+                        : "missing-quality-report");
+
+            items.Add(new ArmorPackValidationItem(
+                MeshFile: Path.GetFileName(meshFile),
+                OutputDirectory: result.OutputDirectory,
+                Success: result.Success,
+                ValidationStatus: validationStatus,
+                ValidationScore: qualityReport?.ValidationSummary?.Score,
+                IssueCodes: issueCodes,
+                IssueMessages: issueMessages,
+                DetectedSourceBody: qualityReport?.DetectedSourceBody,
+                MeshType: qualityReport?.MeshType,
+                Strategy: qualityReport?.Strategy));
+        }
+
+        var qualityReportCount = items.Count(item => item.ValidationScore.HasValue);
+        var readyCount = items.Count(item => item.ValidationStatus.Equals("ready", StringComparison.OrdinalIgnoreCase));
+        var needsReviewCount = items.Count(item => item.ValidationStatus.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
+        var highRiskCount = items.Count(item => item.ValidationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase));
+        var missingQualityReportCount = items.Count(item => item.ValidationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase));
+        var averageValidationScore = qualityReportCount > 0
+            ? Math.Round(items.Where(item => item.ValidationScore.HasValue).Average(item => item.ValidationScore!.Value), 1)
+            : null;
+        var packReadinessStatus = ResolvePackReadinessStatus(items);
+        var topIssueCodes = items
+            .SelectMany(item => item.IssueCodes)
+            .GroupBy(code => code, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new ArmorPackValidationIssueCount(group.Key, group.Count()))
+            .OrderByDescending(entry => entry.Count)
+            .ThenBy(entry => entry.Code, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+        return new ArmorPackValidationReport(
+            ConversionLabel: conversionLabel,
+            TargetBody: targetBody,
+            TotalCount: resultsWithPaths.Count,
+            SuccessCount: resultsWithPaths.Count(r => r.Result.Success),
+            FailedCount: resultsWithPaths.Count(r => !r.Result.Success),
+            QualityReportCount: qualityReportCount,
+            PackReadinessStatus: packReadinessStatus,
+            ReadyCount: readyCount,
+            NeedsReviewCount: needsReviewCount,
+            HighRiskCount: highRiskCount,
+            MissingQualityReportCount: missingQualityReportCount,
+            AverageValidationScore: averageValidationScore,
+            TopIssueCodes: topIssueCodes,
+            Items: items,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
+
+    private static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
+    {
+        var qualityPath = result.OutputFiles.FirstOrDefault(path =>
+            path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase))
+            ?? Path.Combine(result.OutputDirectory, "conversion-quality.json");
+
+        if (string.IsNullOrWhiteSpace(qualityPath) || !File.Exists(qualityPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ConversionQualityReport>(
+                File.ReadAllText(qualityPath),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string ResolvePackReadinessStatus(IReadOnlyList<ArmorPackValidationItem> items)
+    {
+        if (items.Any(item => item.ValidationStatus.Equals("failed", StringComparison.OrdinalIgnoreCase) ||
+                              item.ValidationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "high-risk";
+        }
+
+        if (items.Any(item => item.ValidationStatus.Equals("needs-review", StringComparison.OrdinalIgnoreCase) ||
+                              item.ValidationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase) ||
+                              item.ValidationStatus.Equals("unclassified", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "needs-review";
+        }
+
+        return "ready";
     }
 }
 
@@ -8025,6 +8211,18 @@ internal sealed class LocalExportService(
         // mod managers, and the learning cache can consume without parsing the conversion log.
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
             AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
+        var validationSummary = BuildValidationSummary(
+            detectedBody,
+            morphs,
+            clipping,
+            correction,
+            voxelResult,
+            skeletonMapping,
+            textureSummary,
+            poseSimulation,
+            topologyMismatchRisk,
+            qualityWarnings,
+            steps);
         var qualityReport = new ConversionQualityReport(
             DetectedSourceBody:        detectedBody.Body,
             BodyDetectionConfidence:   detectedBody.Confidence,
@@ -8048,7 +8246,13 @@ internal sealed class LocalExportService(
             VertexCountDeltaRatio:     vertexCountDeltaRatio,
             UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
             UvAspectRatioDelta:        uvAspectRatioDelta,
-            QualityWarnings:           qualityWarnings);
+            QualityWarnings:           qualityWarnings,
+            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
+            BodySlideCompatible:       morphs.BodySlideCompatible,
+            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
+            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
+            MissingNormalCount:        textureSummary.MissingNormals.Count,
+            ValidationSummary:         validationSummary);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -9452,6 +9656,154 @@ internal sealed class LocalExportService(
         return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
             ? token[..^2]
             : token;
+    }
+
+    private static ConversionValidationSummary BuildValidationSummary(
+        BodyDetectionReport detectedBody,
+        MorphSet morphs,
+        ClippingReport clipping,
+        CorrectionResult correction,
+        VoxelCollisionResult voxelResult,
+        SkeletonMappingResult skeletonMapping,
+        TextureSummary textureSummary,
+        PoseSimulationResult poseSimulation,
+        bool topologyMismatchRisk,
+        IReadOnlyList<string> qualityWarnings,
+        IReadOnlyList<string> steps)
+    {
+        var issues = new List<ConversionValidationIssue>();
+
+        if (detectedBody.Confidence < 0.70d)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "low-detection-confidence",
+                "medium",
+                $"Detected source body confidence is only {detectedBody.Confidence:P0}."));
+        }
+
+        if (morphs.SourceBodyMatchRatio > 0d && morphs.SourceBodyMatchRatio < 0.55d)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "low-body-match",
+                "high",
+                $"Generated morphs only matched {morphs.SourceBodyMatchRatio:P0} of the source body signature."));
+        }
+        else if (morphs.SourceBodyMatchRatio > 0d && morphs.SourceBodyMatchRatio < 0.75d)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "low-body-match",
+                "medium",
+                $"Generated morphs matched {morphs.SourceBodyMatchRatio:P0} of the source body signature."));
+        }
+
+        if (!morphs.BodySlideCompatible)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "bodyslide-incompatible",
+                "high",
+                "Generated morphs are not marked BodySlide-compatible."));
+        }
+
+        if (topologyMismatchRisk)
+        {
+            var detail = qualityWarnings.Count > 0
+                ? $" ({string.Join(", ", qualityWarnings)})"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "topology-mismatch-risk",
+                "high",
+                $"Converted mesh topology or UV layout drifted significantly from the source{detail}."));
+        }
+
+        if (clipping.HasClipping)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "clipping-detected",
+                "medium",
+                $"Clipping risk was detected in {clipping.Regions.Count} region(s): {string.Join(", ", clipping.Regions)}."));
+        }
+
+        if (correction.Applied)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "auto-correction-applied",
+                "low",
+                $"Auto-correction was required using '{correction.Method}'."));
+        }
+
+        if (voxelResult.HasPenetrations)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "voxel-penetration",
+                voxelResult.AffectedRegions.Count >= 3 ? "high" : "medium",
+                $"Voxel collision checks still found penetration in {voxelResult.AffectedRegions.Count} region(s): {string.Join(", ", voxelResult.AffectedRegions)}."));
+        }
+
+        if (skeletonMapping.UnsupportedBones.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "unsupported-bones",
+                skeletonMapping.UnsupportedBones.Count >= 6 ? "high" : "medium",
+                $"{skeletonMapping.UnsupportedBones.Count} source bone(s) had no target equivalent."));
+        }
+
+        if (poseSimulation.TotalPosesAtRisk > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "pose-risk",
+                poseSimulation.TotalPosesAtRisk >= 3 ? "high" : "medium",
+                $"{poseSimulation.TotalPosesAtRisk} simulated pose(s) remained at risk; hot regions: {string.Join(", ", poseSimulation.HighRiskRegions)}."));
+        }
+
+        if (textureSummary.MissingNormals.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-normal-maps",
+                "low",
+                $"{textureSummary.MissingNormals.Count} diffuse texture(s) were missing authored normal maps and needed generated stubs."));
+        }
+
+        var raceWarnings = ExtractRaceCompatibilityWarnings(steps);
+        if (raceWarnings.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "race-compatibility-warning",
+                "medium",
+                $"Plugin race compatibility needs review for: {string.Join(", ", raceWarnings)}."));
+        }
+
+        var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
+        var mediumSeverityCount = issues.Count(issue => issue.Severity.Equals("medium", StringComparison.OrdinalIgnoreCase));
+        var lowSeverityCount = issues.Count(issue => issue.Severity.Equals("low", StringComparison.OrdinalIgnoreCase));
+        var score = Math.Max(0, 100 - (highSeverityCount * 25) - (mediumSeverityCount * 12) - (lowSeverityCount * 5));
+        var status = highSeverityCount > 0
+            ? "high-risk"
+            : mediumSeverityCount > 0 || lowSeverityCount > 0
+                ? "needs-review"
+                : "ready";
+
+        return new ConversionValidationSummary(
+            Status: status,
+            Score: score,
+            HighSeverityCount: highSeverityCount,
+            MediumSeverityCount: mediumSeverityCount,
+            LowSeverityCount: lowSeverityCount,
+            Issues: issues);
+    }
+
+    private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
+    {
+        const string prefix = "race-compat:warnings=";
+        var warningStep = steps.FirstOrDefault(step => step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(warningStep))
+        {
+            return [];
+        }
+
+        return warningStep[prefix.Length..]
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static (bool TopologyMismatchRisk, double VertexCountDeltaRatio, double? UvCoverageDeltaRatio, double? UvAspectRatioDelta, IReadOnlyList<string> QualityWarnings)

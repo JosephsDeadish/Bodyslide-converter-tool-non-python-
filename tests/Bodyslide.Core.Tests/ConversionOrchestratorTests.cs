@@ -4817,6 +4817,9 @@ public sealed class BatchReportTests
             Assert.Contains("\"TargetBody\"",   content, StringComparison.Ordinal);
             Assert.Contains("\"CBBE\"",         content, StringComparison.Ordinal);
             Assert.Contains("\"Results\"",      content, StringComparison.Ordinal);
+            Assert.Contains("\"PackReadinessStatus\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"AverageValidationScore\"", content, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "armor-pack-validation.json")), "armor-pack-validation.json was not written.");
         }
         finally
         {
@@ -4845,6 +4848,7 @@ public sealed class BatchReportTests
             Assert.Contains("\"TotalCount\": 3",   content, StringComparison.Ordinal);
             Assert.Contains("\"SuccessCount\": 3", content, StringComparison.Ordinal);
             Assert.Contains("\"FailedCount\": 0",  content, StringComparison.Ordinal);
+            Assert.Contains("\"QualityReportCount\": 3", content, StringComparison.Ordinal);
         }
         finally
         {
@@ -9282,6 +9286,9 @@ public sealed class OutputCompletenessTests
             Assert.Contains("TopologyMismatchRisk", json);
             Assert.Contains("VertexCountDeltaRatio", json);
             Assert.Contains("QualityWarnings", json);
+            Assert.Contains("ValidationSummary", json);
+            Assert.Contains("HighRiskPoseCount", json);
+            Assert.Contains("MissingNormalCount", json);
         }
         finally
         {

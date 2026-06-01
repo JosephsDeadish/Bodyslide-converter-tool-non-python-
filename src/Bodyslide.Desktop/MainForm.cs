@@ -78,6 +78,7 @@ public sealed class MainForm : Form
     private readonly List<string> _customProfilePaths = [];
     private static readonly string[] ReportFileNames =
     [
+        "armor-pack-validation.json",
         "batch-report.json",
         "conversion-quality.json",
         "dependency-map.json",
@@ -2360,6 +2361,23 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Total items", TryReadInt(root, "TotalCount"), filePath);
                     AddReportMetric(reportName, "Succeeded", TryReadInt(root, "SuccessCount"), filePath);
                     AddReportMetric(reportName, "Failed", TryReadInt(root, "FailedCount"), filePath);
+                    AddReportMetric(reportName, "Pack status", TryReadString(root, "PackReadinessStatus"), filePath);
+                    AddReportMetric(reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    AddReportMetric(reportName, "Ready", TryReadInt(root, "ReadyCount"), filePath);
+                    AddReportMetric(reportName, "Needs review", TryReadInt(root, "NeedsReviewCount"), filePath);
+                    AddReportMetric(reportName, "High risk", TryReadInt(root, "HighRiskCount"), filePath);
+                    AddReportMetric(reportName, "Missing quality", TryReadInt(root, "MissingQualityReportCount"), filePath);
+                    break;
+                case "armor-pack-validation.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Conversion label", TryReadString(root, "ConversionLabel"), filePath);
+                    AddReportMetric(reportName, "Pack status", TryReadString(root, "PackReadinessStatus"), filePath);
+                    AddReportMetric(reportName, "Items", TryReadInt(root, "TotalCount"), filePath);
+                    AddReportMetric(reportName, "Quality reports", TryReadInt(root, "QualityReportCount"), filePath);
+                    AddReportMetric(reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    AddReportMetric(reportName, "Ready", TryReadInt(root, "ReadyCount"), filePath);
+                    AddReportMetric(reportName, "Needs review", TryReadInt(root, "NeedsReviewCount"), filePath);
+                    AddReportMetric(reportName, "High risk", TryReadInt(root, "HighRiskCount"), filePath);
                     break;
                 case "conversion-quality.json":
                     AddReportMetric(reportName, "Source body", TryReadString(root, "DetectedSourceBody"), filePath);
@@ -2369,6 +2387,10 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Clipping detected", TryReadBool(root, "ClippingDetected"), filePath);
                     AddReportMetric(reportName, "Correction applied", TryReadBool(root, "CorrectionApplied"), filePath);
                     AddReportMetric(reportName, "Topology risk", TryReadBool(root, "TopologyMismatchRisk"), filePath);
+                    AddReportMetric(reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
+                    AddReportMetric(reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
+                    AddReportMetric(reportName, "High-risk poses", TryReadInt(root, "HighRiskPoseCount"), filePath);
+                    AddReportMetric(reportName, "Missing normals", TryReadInt(root, "MissingNormalCount"), filePath);
                     AddReportMetric(reportName, "Quality warnings", TryReadArray(root, "QualityWarnings"), filePath);
                     break;
                 case "dependency-map.json":
@@ -2459,6 +2481,11 @@ public sealed class MainForm : Form
     private static string? TryReadBool(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
             ? (value.GetBoolean() ? "Yes" : "No")
+            : null;
+
+    private static string? TryReadNestedString(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadString(nested, nestedPropertyName)
             : null;
 
     private static string? TryReadArray(JsonElement element, string propertyName)
