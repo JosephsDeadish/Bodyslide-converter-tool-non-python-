@@ -197,13 +197,13 @@ public sealed class MainForm : Form
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Preset mode (recommended)",
+            Text = "Preset mode (quick destination setup)",
             AutoSize = true,
             Checked = true,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Manual target mode",
+            Text = "Manual mode (choose destination body)",
             AutoSize = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
@@ -214,7 +214,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(12, 4, 0, 0),
-            Text = "Choose one mode: presets OR manual target bodies.",
+            Text = "Converts armor/clothes: FROM body = source armor body, TO body = destination fit.",
         });
         layout.Controls.Add(modeRow, 0, 2);
 
@@ -236,7 +236,16 @@ public sealed class MainForm : Form
         };
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        leftOptions.Controls.Add(new Label { Text = "Preset (to-body + slider profile)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        var conversionGuideLabel = new Label
+        {
+            Text = "Tip: each supported body includes a \"<Body> Zeroed\" preset.",
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        leftOptions.Controls.Add(conversionGuideLabel, 0, 0);
+        leftOptions.SetColumnSpan(conversionGuideLabel, 2);
+        leftOptions.Controls.Add(new Label { Text = "Preset (to-body + slider shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -248,15 +257,15 @@ public sealed class MainForm : Form
         }
 
         _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
-        leftOptions.Controls.Add(_presetComboBox, 1, 0);
-        leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        leftOptions.Controls.Add(_presetComboBox, 1, 1);
+        leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _presetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
-        leftOptions.Controls.Add(_presetBatchTextBox, 1, 1);
-        leftOptions.Controls.Add(new Label { Text = "To body (target)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        leftOptions.Controls.Add(_presetBatchTextBox, 1, 2);
+        leftOptions.Controls.Add(new Label { Text = "To body (destination)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -270,18 +279,18 @@ public sealed class MainForm : Form
         {
             _targetComboBox.SelectedIndex = 0;
         }
-        leftOptions.Controls.Add(_targetComboBox, 1, 2);
-        leftOptions.Controls.Add(new Label { Text = "Target batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        leftOptions.Controls.Add(_targetComboBox, 1, 3);
+        leftOptions.Controls.Add(new Label { Text = "Destination batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _targetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: CBBE, 3BA, HIMBO",
         };
-        leftOptions.Controls.Add(_targetBatchTextBox, 1, 3);
-        leftOptions.Controls.Add(new Label(), 0, 4);
+        leftOptions.Controls.Add(_targetBatchTextBox, 1, 4);
+        leftOptions.Controls.Add(new Label(), 0, 5);
         var allBodiesButton = new Button
         {
-            Text = "Convert to All Bodies",
+            Text = "Convert armor to all bodies",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 4),
@@ -290,16 +299,16 @@ public sealed class MainForm : Form
         {
             _useCustomTargetRadio.Checked = true;
             _targetBatchTextBox.Text = "all";
-            AppendLog("Target set to all supported body types.");
+            AppendLog("Destination set to all supported body types.");
         };
-        leftOptions.Controls.Add(allBodiesButton, 1, 4);
-        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 5);
+        leftOptions.Controls.Add(allBodiesButton, 1, 5);
+        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
         _presetDetailsLabel = new Label
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
         };
-        leftOptions.Controls.Add(_presetDetailsLabel, 1, 5);
+        leftOptions.Controls.Add(_presetDetailsLabel, 1, 6);
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
@@ -328,7 +337,7 @@ public sealed class MainForm : Form
         _profileComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_profileComboBox, 1, 0);
 
-        rightOptions.Controls.Add(new Label { Text = "From body (source, optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        rightOptions.Controls.Add(new Label { Text = "From body (source armor body, optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -777,7 +786,7 @@ public sealed class MainForm : Form
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
-        AppendLog("Ready. Choose input, configure options, then click Convert, or use Run self-check to verify runtime readiness.");
+        AppendLog("Ready. Choose armor/clothing input, set FROM (source, optional) and TO (destination), then click Convert.");
     }
 
     private void PopulateCatalogTab()
@@ -1044,7 +1053,7 @@ public sealed class MainForm : Form
 
         if (!usingPreset && selectedTargets.Count == 0)
         {
-            MessageBox.Show(this, "Please select at least one target body.", "Missing target body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Please select at least one destination body (TO body).", "Missing destination body", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1057,7 +1066,7 @@ public sealed class MainForm : Form
         _statusLabel.Text = $"Converting 0%: {Path.GetFileName(input)}";
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
-            : $"Starting conversion (targets: {string.Join(", ", selectedTargets)})...");
+            : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
 
         try
         {
@@ -1829,7 +1838,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _presetDetailsLabel.Text = $"To body: {preset.TargetBody} | Slider profile: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
+        _presetDetailsLabel.Text = $"TO body: {preset.TargetBody} | Slider shape: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
     }
 
     private bool TryGetSelectedPreset(out ConversionPreset preset)

@@ -1059,7 +1059,7 @@ internal static class VanillaBodySignatureDatabase
         new("TBD",     ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
         new("SAM",     ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
         new("SOS",     ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
-        new("UBE",     ["ube"],                      ["femalebody"],                  [],            6800, 7200, 4.3, 7.4, 0.30, 0.80),
+        new("UBE",     ["ube", "ubebody"],          ["ube", "ubebody"],              [],            6800, 7200, 4.3, 7.4, 0.30, 0.80),
         new("Vanilla", ["vanilla", "femalebody", "malebody"], ["femalebody", "malebody"], [],        4000, 6100, 4.0, 7.5, 0.28, 0.90),
     ];
 }
@@ -4275,6 +4275,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         {
             evidence.Add($"reference:{referenceHitRatio:P0}");
         }
+        var referenceMeshHitRatio = MatchRatio(bodyReferenceNames, template.MeshTokens);
+        if (referenceMeshHitRatio > 0)
+        {
+            evidence.Add($"reference-mesh:{referenceMeshHitRatio:P0}");
+        }
 
         // Bone signature: check if specific physics bone names appear in XML content.
         double boneSignatureScore = 0;
@@ -4332,6 +4337,17 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             physicsExpectationBoost,
             0,
             1);
+
+        if (template.Body.Equals("UBE", StringComparison.OrdinalIgnoreCase) &&
+            meshHitRatio <= 0 &&
+            referenceMeshHitRatio <= 0 &&
+            boneSignatureScore <= 0 &&
+            physicsHitRatio <= 0)
+        {
+            score = Math.Min(score, 0.24);
+            evidence.Add("gated:needs-explicit-ube-token");
+        }
+
         return (template, score, evidence);
     }
 

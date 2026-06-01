@@ -31,7 +31,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 ## Projects
 
 - `/src/Bodyslide.Core` - conversion pipeline + modules
-- `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or custom target mode, optional profile/source override, output-zip toggle, convert/cancel)
+- `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or manual destination mode, explicit source-body override, output-zip toggle, convert/cancel)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
 
@@ -46,7 +46,9 @@ dotnet run --project src/Bodyslide.Desktop
 
 # GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder),
 # separate **"File..."** and **"Folder..."** browse buttons for the input field (no more double-dialog),
+# explicit FROM/TO wording in the conversion options (FROM = source armor body, TO = destination body),
 # inspect selected input before conversion (detected body, mesh type, skeleton compatibility, custom-body count), open selected input path, preset details panel, choose preset or custom target,
+# preset panel tip that every supported body has a matching `<Body> Zeroed` preset,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # **"Convert to All Bodies" button** — one click sets the target batch to every supported body type,
 # optional profile/source/physics/world-drop-mode override, optional BodySlide export toggle, optional output zip,
