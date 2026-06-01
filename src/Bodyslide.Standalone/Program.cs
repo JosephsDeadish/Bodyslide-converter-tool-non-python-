@@ -293,63 +293,63 @@ static bool ShouldPauseOnExit(string[] args)
         return true;
     }
 
-    static bool TryLaunchDesktopGuiOnWindows(string[] args)
+    return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
+}
+
+static bool TryLaunchDesktopGuiOnWindows(string[] args)
+{
+    if (args.Length != 0 || !OperatingSystem.IsWindows())
     {
-        if (args.Length != 0 || !OperatingSystem.IsWindows())
+        return false;
+    }
+
+    try
+    {
+        var currentExePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(currentExePath))
         {
             return false;
         }
 
-        try
+        var executableDirectory = Path.GetDirectoryName(currentExePath);
+        if (string.IsNullOrWhiteSpace(executableDirectory))
         {
-            var currentExePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(currentExePath))
-            {
-                return false;
-            }
-
-            var executableDirectory = Path.GetDirectoryName(currentExePath);
-            if (string.IsNullOrWhiteSpace(executableDirectory))
-            {
-                return false;
-            }
-
-            var currentExeFullPath = Path.GetFullPath(currentExePath);
-            foreach (var desktopExePath in new[]
-                     {
-                         Path.Combine(executableDirectory, "SlideSmith.exe"),
-                         Path.Combine(executableDirectory, "SlideSmith-Desktop.exe")
-                     })
-            {
-                if (!File.Exists(desktopExePath))
-                {
-                    continue;
-                }
-
-                if (string.Equals(Path.GetFullPath(desktopExePath), currentExeFullPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = desktopExePath,
-                    WorkingDirectory = executableDirectory,
-                    UseShellExecute = true
-                });
-
-                return true;
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Could not auto-launch desktop GUI: {ex.Message}");
+            return false;
         }
 
-        return false;
+        var currentExeFullPath = Path.GetFullPath(currentExePath);
+        foreach (var desktopExePath in new[]
+                 {
+                     Path.Combine(executableDirectory, "SlideSmith.exe"),
+                     Path.Combine(executableDirectory, "SlideSmith-Desktop.exe")
+                 })
+        {
+            if (!File.Exists(desktopExePath))
+            {
+                continue;
+            }
+
+            if (string.Equals(Path.GetFullPath(desktopExePath), currentExeFullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = desktopExePath,
+                WorkingDirectory = executableDirectory,
+                UseShellExecute = true
+            });
+
+            return true;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Could not auto-launch desktop GUI: {ex.Message}");
     }
 
-    return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
+    return false;
 }
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
