@@ -114,7 +114,8 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 # show available deformation profiles
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
-# show supported body types with detection tokens and vertex-count hints
+# show supported body types with detection tokens, vertex-count hints,
+# skeleton foundation, and soft-body physics bone reference data
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
 # show available physics profiles

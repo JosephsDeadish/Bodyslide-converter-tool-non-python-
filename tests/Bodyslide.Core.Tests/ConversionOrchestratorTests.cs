@@ -4676,6 +4676,17 @@ public sealed class BodyTypeCatalogTests
             Assert.NotEmpty(body.DetectionTokens);
         }
     }
+
+    [Fact]
+    public void BodyTechnicalProfileCatalog_HasSoftBodyData_ForKnownBodies()
+    {
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        {
+            Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
+            Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
+            Assert.NotEmpty(profile.SoftBodyBones);
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9634,6 +9645,20 @@ public sealed class BasicWeightTransferServicePhysicsTests
         var result = await svc.TransferAsync(mesh, analysis, "3BA", null, CancellationToken.None);
 
         Assert.Null(result.TargetPhysicsBones);
+    }
+
+    [Fact]
+    public async Task TransferAsync_UbeTarget_PopulatesUbeSoftBodyBones()
+    {
+        var svc      = new BasicWeightTransferService();
+        var mesh     = new ConvertedMesh("cloth", "vertex-projection", 1, new Dictionary<string, double> { ["chest"] = 1.0 });
+        var analysis = new MeshAnalysis("cloth", true, 1);
+
+        var result = await svc.TransferAsync(mesh, analysis, "UBE", null, CancellationToken.None);
+
+        Assert.NotNull(result.TargetPhysicsBones);
+        Assert.Contains("BreastUpper", result.TargetPhysicsBones!);
+        Assert.Contains("NPC L Breast01", result.TargetPhysicsBones!);
     }
 }
 

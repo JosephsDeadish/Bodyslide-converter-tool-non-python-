@@ -809,11 +809,14 @@ public sealed class MainForm : Form
             var vertexRange = body.VertexCountMin > 0
                 ? $"{body.VertexCountMin}-{body.VertexCountMax}"
                 : "n/a";
+            var technical = BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile)
+                ? $"Skeleton={profile.SkeletonFoundation}; Soft-body=[{string.Join(", ", profile.SoftBodyBones)}]; Notes={profile.Notes}"
+                : "No technical profile data.";
             _catalogListView.Items.Add(new ListViewItem(
             [
                 "Body",
                 body.Name,
-                $"Tokens=[{string.Join(", ", body.DetectionTokens)}]; Vertices={vertexRange}",
+                $"Tokens=[{string.Join(", ", body.DetectionTokens)}]; Vertices={vertexRange}; {technical}",
             ]));
         }
 
@@ -1577,15 +1580,22 @@ public sealed class MainForm : Form
                 _inspectListView.Items.Add(new ListViewItem([property, value]));
 
             Add("Input", inspection.InputPath);
+            Add("FROM body (source selection)", IsSourceAutoSelection() ? "(auto-detect)" : _sourceComboBox.Text.Trim());
             if (!string.IsNullOrWhiteSpace(inspection.RequestedTargetBody))
             {
-                Add("Target body", inspection.RequestedTargetBody);
+                Add("TO body (destination selection)", inspection.RequestedTargetBody);
             }
 
             Add("Detected body", $"{inspection.Detection.Body} ({inspection.Detection.Confidence:P1})");
             Add("Detection evidence", inspection.Detection.Evidence.Count == 0
                 ? "None"
                 : string.Join(", ", inspection.Detection.Evidence));
+            if (BodyTechnicalProfileCatalog.TryGet(inspection.Detection.Body, out var detectedProfile))
+            {
+                Add("Detected skeleton base", detectedProfile.SkeletonFoundation);
+                Add("Detected soft-body bones", string.Join(", ", detectedProfile.SoftBodyBones));
+                Add("Detected body notes", detectedProfile.Notes);
+            }
             Add("Mesh type", inspection.Analysis.MeshType);
             Add("Physics enabled", inspection.Analysis.PhysicsEnabled ? "Yes" : "No");
             if (!string.IsNullOrWhiteSpace(inspection.Analysis.HeadgearSubType))

@@ -83,13 +83,19 @@ if (args.Contains("--list-profiles", StringComparer.OrdinalIgnoreCase))
 
 if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine("Supported body types (signature detection):");
+    Console.WriteLine("Supported body types (signature detection + conversion reference):");
     foreach (var body in BodyTypeCatalog.All)
     {
         var vcRange = body.VertexCountMin > 0
             ? $"  vertices: {body.VertexCountMin}–{body.VertexCountMax}"
             : string.Empty;
         Console.WriteLine($" - {body.Name,-8} tokens: [{string.Join(", ", body.DetectionTokens)}]{vcRange}");
+        if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+        {
+            Console.WriteLine($"           skeleton: {profile.SkeletonFoundation}");
+            Console.WriteLine($"           soft-body bones: {string.Join(", ", profile.SoftBodyBones)}");
+            Console.WriteLine($"           notes: {profile.Notes}");
+        }
     }
     Console.WriteLine(" - all/any/*  alias: convert to every supported body type");
 
@@ -429,6 +435,11 @@ static void WriteUsage()
     Console.WriteLine("  SlideSmith --export-cache [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --self-check");
     Console.WriteLine("  SlideSmith --help");
+    Console.WriteLine();
+    Console.WriteLine("Core options:");
+    Console.WriteLine("  --source <body>   FROM body (what the input armor currently targets).");
+    Console.WriteLine("  --target <body>   TO body (what you want to convert to).");
+    Console.WriteLine("  --preset <name>   Shortcut that sets TO body + default deformation/physics.");
     Console.WriteLine();
     Console.WriteLine("Drag a .nif file, supported archive (.zip/.7z/.tar/.tar.gz/.tgz), or folder onto SlideSmith.exe, or run it from a command prompt.");
 }
