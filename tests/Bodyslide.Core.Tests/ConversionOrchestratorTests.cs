@@ -1302,7 +1302,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestImporter : IArmorImportService
     {
-        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken) =>
+        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null) =>
             Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
     }
 
@@ -5128,6 +5128,32 @@ public sealed class BatchReportTests
             Assert.Contains("\"SuccessCount\": 3", content, StringComparison.Ordinal);
             Assert.Contains("\"FailedCount\": 0",  content, StringComparison.Ordinal);
             Assert.Contains("\"QualityReportCount\": 3", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_Directory_IgnoresOutputFolderInsideInputRoot()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "Converted");
+        Directory.CreateDirectory(workingDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "armor_source.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(outputDirectory, "armor_generated.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.Single(results);
+            Assert.All(results, r => Assert.True(r.Success));
+            Assert.Contains(results, r => r.OutputDirectory.Contains("armor_source", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -9997,7 +10023,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
 
     private sealed class TestRigidImporter : IArmorImportService
     {
-        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken ct) =>
+        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken ct, IReadOnlyList<string>? excludedDirectories = null) =>
             Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
     }
     private sealed class TestRigidDetector : IBodyDetectionService
@@ -10536,6 +10562,39 @@ public sealed class CustomBodyProfileSupportTests
                 "chest": 1.14,
                 "waist": 0.95,
                 "pelvis": 1.08
+              }
+            }
+
+            [Fact]
+            public async Task ImportAsync_IgnoresPreviouslyGeneratedOutputTrees()
+            {
+              var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+              var generatedDir = Path.Combine(tmpDir, "Converted");
+              Directory.CreateDirectory(tmpDir);
+              Directory.CreateDirectory(generatedDir);
+
+              var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
+              var sourceTexture = Path.Combine(tmpDir, "DX_MAC_Gwelda.dds");
+              await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
+              await File.WriteAllBytesAsync(sourceTexture, new byte[128]);
+
+              await File.WriteAllTextAsync(Path.Combine(generatedDir, "conversion-manifest.json"), "{}");
+              var generatedShapeData = Path.Combine(generatedDir, "CalienteTools", "BodySlide", "ShapeData", "LoopProject");
+              Directory.CreateDirectory(generatedShapeData);
+              await File.WriteAllBytesAsync(Path.Combine(generatedShapeData, "armor_0.nif"), new byte[64]);
+              await File.WriteAllBytesAsync(Path.Combine(generatedDir, "DX_MAC_Gwelda_n.dds"), new byte[128]);
+
+              try
+              {
+                  var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+                  Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+                  Assert.DoesNotContain(armor.MeshFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+                  Assert.DoesNotContain(armor.TextureFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+              }
+              finally
+              {
+                  Directory.Delete(tmpDir, recursive: true);
               }
             }
             """);

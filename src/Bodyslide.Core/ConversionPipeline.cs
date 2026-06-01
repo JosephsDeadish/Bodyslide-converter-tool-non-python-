@@ -2383,7 +2383,7 @@ internal static class CustomBodyProfileSupport
 
 public interface IArmorImportService
 {
-    Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken);
+    Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null);
 }
 
 public interface IBodyDetectionService
@@ -2691,7 +2691,8 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"deformation-profile:{deformationProfile}");
             }
 
-            armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
+            var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
+            armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories);
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
@@ -3074,6 +3075,25 @@ public sealed class ConversionOrchestrator(
 
         return PhysicsProfileCatalog.GetDefaultForTargetBody(request.TargetBody);
     }
+
+    private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
+    {
+        var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.OutputDirectory));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SharedPluginOutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.SharedPluginOutputDirectory));
+        }
+
+        exclusions.Add(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output")));
+
+        return exclusions.ToList();
+    }
 }
 
 public sealed class ConversionInspector(
@@ -3203,7 +3223,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
-        var meshFiles = Directory.GetFiles(sourceDirectory, "*.nif", SearchOption.AllDirectories)
+        var excludedDirectories = BuildExcludedScanDirectories(request);
+        var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories)
             .Where(IsConvertibleBatchMesh)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -3314,9 +3335,156 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             return Path.Combine(originalRequest.OutputDirectory, variant.OutputSegment);
         }
 
+        private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
+        {
+            var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
+            {
+                exclusions.Add(Path.GetFullPath(request.OutputDirectory));
+            }
+
+            var defaultOutputRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output"));
+            exclusions.Add(defaultOutputRoot);
+
+            return exclusions.ToList();
+        }
+
         return batchMode
             ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
             : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
+    }
+
+    internal static class SourceScanEnumerator
+    {
+        private static readonly string[] ConverterMarkerFiles =
+        [
+            "conversion-manifest.json",
+            "conversion-quality.json",
+            "dependency-map.json",
+            "morphs.json",
+            "physics.json",
+            "skeleton-compatibility.json",
+            "plugin-patches.json",
+            "patch-armor.pas",
+            "armor-pack-validation.json",
+            "batch-report.json"
+        ];
+
+        public static IReadOnlyList<string> EnumerateFiles(
+            string path,
+            IReadOnlyCollection<string> extensions,
+            IReadOnlyList<string>? excludedDirectories = null)
+        {
+            if (File.Exists(path))
+            {
+                return extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
+                    ? [Path.GetFullPath(path)]
+                    : [];
+            }
+
+            if (!Directory.Exists(path))
+            {
+                return [];
+            }
+
+            var files = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(Path.GetFullPath(path));
+
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                foreach (var childDirectory in Directory.EnumerateDirectories(directory))
+                {
+                    if (ShouldSkipDirectory(childDirectory, excludedDirectories))
+                    {
+                        continue;
+                    }
+
+                    pending.Push(childDirectory);
+                }
+
+                foreach (var file in Directory.EnumerateFiles(directory))
+                {
+                    if (extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                    {
+                        files.Add(Path.GetFullPath(file));
+                    }
+                }
+            }
+
+            return files
+                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool ShouldSkipDirectory(string directoryPath, IReadOnlyList<string>? excludedDirectories)
+        {
+            if (IsPathInsideAnyDirectory(directoryPath, excludedDirectories))
+            {
+                return true;
+            }
+
+            var normalizedPath = Path.GetFullPath(directoryPath).Replace('\\', '/');
+            if (normalizedPath.Contains("/calientetools/bodyslide", StringComparison.OrdinalIgnoreCase) ||
+                normalizedPath.Contains("/meshes/slidesmith", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (ContainsConverterMarkers(directoryPath))
+            {
+                return true;
+            }
+
+            var directoryName = Path.GetFileName(directoryPath);
+            if (string.Equals(directoryName, "Converted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(directoryName, "output", StringComparison.OrdinalIgnoreCase))
+            {
+                return ContainsConverterOutputArtifacts(directoryPath);
+            }
+
+            return false;
+        }
+
+        private static bool ContainsConverterMarkers(string directoryPath) =>
+            ConverterMarkerFiles.Any(file =>
+                File.Exists(Path.Combine(directoryPath, file)));
+
+        private static bool ContainsConverterOutputArtifacts(string directoryPath) =>
+            ContainsConverterMarkers(directoryPath) ||
+            Directory.Exists(Path.Combine(directoryPath, "CalienteTools", "BodySlide")) ||
+            Directory.Exists(Path.Combine(directoryPath, "meshes", "slidesmith"));
+
+        private static bool IsPathInsideAnyDirectory(string path, IReadOnlyList<string>? directories)
+        {
+            if (directories is null || directories.Count == 0)
+            {
+                return false;
+            }
+
+            return directories.Any(directory => IsPathInsideDirectory(path, directory));
+        }
+
+        private static bool IsPathInsideDirectory(string path, string? directoryPath)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return false;
+            }
+
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(fullPath, fullDirectory, comparison))
+            {
+                return true;
+            }
+
+            return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
+                   fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
+        }
     }
 
     /// <summary>
@@ -4358,7 +4526,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
     private static bool IsPluginFile(string path) =>
         PluginFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
-    public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken)
+    public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null)
     {
         var fullInputPath = Path.GetFullPath(inputPath);
         var sourcePath = fullInputPath;
@@ -4377,7 +4545,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             sourcePath = ResolveSupportScanRoot(fullInputPath);
         }
 
-        var meshFiles = EnumerateFiles(sourcePath, [".nif"]);
+        var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories);
 
         // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
         // sibling half so the full pair is processed together and weight interpolation works.
@@ -4396,9 +4564,9 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"]);
-        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"]);
-        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"])
+        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
+        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"], excludedDirectories);
+        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"], excludedDirectories)
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -4409,7 +4577,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             })
             .ToList();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
-            EnumerateFiles(supportScanRoot, [".json"])
+            EnumerateFiles(supportScanRoot, [".json"], excludedDirectories)
                 .Where(CustomBodyProfileSupport.IsProfileFile)
                 .ToArray());
 
@@ -4476,20 +4644,8 @@ internal sealed class LocalArmorImportService : IArmorImportService
         return File.Exists(siblingPath) ? Path.GetFullPath(siblingPath) : null;
     }
 
-    private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions)
-    {
-        if (File.Exists(path))
-        {
-            return extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
-                ? [Path.GetFullPath(path)]
-                : [];
-        }
-
-        return Directory.GetFiles(path, "*.*", SearchOption.AllDirectories)
-            .Where(file => extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+    private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions, IReadOnlyList<string>? excludedDirectories) =>
+        SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories);
 
     private static string ResolveSupportScanRoot(string sourcePath)
     {
