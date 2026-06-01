@@ -4732,10 +4732,24 @@ public sealed class BodyTypeCatalogTests
             Assert.Equal(profile.SoftBodyBones, profile.AvailablePhysicsBones);
             Assert.True(profile.SupportsPhysics);
             Assert.Equal(profile.RequiredPhysicsBones, profile.AvailablePhysicsBones);
-            Assert.Equal(
-                profile.RequiredPhysicsBones.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                profile.PhysicsBoneMap.Count);
-            Assert.All(profile.PhysicsBoneMap.Values, v => Assert.False(string.IsNullOrWhiteSpace(v)));
+            Assert.NotEmpty(profile.PhysicsBoneMap);
+            Assert.All(profile.PhysicsBoneMap.Values, definition =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(definition.Group));
+                Assert.True(definition.Bone is not null || (definition.Sides?.Count ?? 0) > 0);
+            });
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Breast", StringComparison.OrdinalIgnoreCase) || b.Contains("Pec", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("breast"));
+            }
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Butt", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("butt"));
+            }
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Belly", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("belly"));
+            }
             Assert.NotEmpty(profile.PhysicsBoneGroups);
         }
     }
@@ -5865,7 +5879,7 @@ public sealed class BinaryPluginRewriteServiceTests
     public void DetectPluginKind_EslExtension_ReturnsEsl()
     {
         var bytes = BuildTes4HeaderWithFlags(0u);
-        Assert.Equal("ESL", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
+        Assert.Equal("ESL-light", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
     }
 
     [Fact]
@@ -5886,7 +5900,19 @@ public sealed class BinaryPluginRewriteServiceTests
     public void DetectPluginKind_EspWithLightFlagButNoFeFormId_DoesNotReturnEspfe()
     {
         var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
-        Assert.Equal("ESP (ESL-flagged, non-FE FormIDs)", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+        Assert.Equal("ESP", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void ClassifyPluginKind_ReturnsConfidenceAndReasons()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x000FE123u);
+        var classification = BasicPluginAnalysisService.ClassifyPluginKind("Test.esp", bytes);
+
+        Assert.Equal("ESPFE", classification.Type);
+        Assert.True(classification.Confidence > 0.90d);
+        Assert.Contains(classification.Reasons, reason => reason.Contains("ESL flag present", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(classification.Reasons, reason => reason.Contains("FE FormID range detected", StringComparison.OrdinalIgnoreCase));
     }
 
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
