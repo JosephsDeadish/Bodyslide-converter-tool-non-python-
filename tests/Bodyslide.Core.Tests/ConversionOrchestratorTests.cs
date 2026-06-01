@@ -2802,6 +2802,92 @@ internal static class SyntheticNifTestData
             writer.Write(z);
         }
     }
+
+    /// <summary>
+    /// Writes a minimal SSE-style NIF containing a BSTriShape block with BSVertexData
+    /// elements (half-precision 16-bit float XYZ at byte offsets 0, 2, 4 within each
+    /// 20-byte vertex element).  Layout matches the real SSE format closely enough for
+    /// the <c>TryLocateHalfFloatVertexBlock</c> heuristic to detect and transform it.
+    /// </summary>
+    public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        // NIF file header
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        // Block type string so NifBlockGraphParser and NifGeometrySignatureReader recognise this as SSE
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSTriShape"));
+        writer.Write((byte)0); // null terminator for the block type string
+
+        // BSVertexDesc: bits 44-47 encode stride / 4.
+        // stride = 20 bytes (non-skinned: pos(6) + bitX(2) + uv(4) + normal(4) + tangent(4))
+        // → strideDiv4 = 5 → bits 44-47 = 5 → (5UL << 44) | flags = 0x0000_5000_0000_0057UL
+        const ulong bsVertexDesc = 0x0000_5000_0000_0057UL;
+        const int stride = 20;
+
+        // Minimal triangle list (degenerate but sufficient for the transform test)
+        var numTriangles = Math.Max(1, vertices.Count / 3);
+        writer.Write(bsVertexDesc);
+        writer.Write(numTriangles);
+        writer.Write((ushort)vertices.Count);
+
+        // Triangle data: degenerate triangles (all indices 0) just to fill the expected bytes
+        for (var t = 0; t < numTriangles; t++)
+        {
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+        }
+
+        // Vertex data: BSVertexData layout — Half XYZ at bytes 0,2,4; remaining 14 bytes zero.
+        var padding = new byte[stride - 6];
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(BitConverter.GetBytes((Half)x));
+            writer.Write(BitConverter.GetBytes((Half)y));
+            writer.Write(BitConverter.GetBytes((Half)z));
+            writer.Write(padding);
+        }
+    }
+
+    /// <summary>
+    /// Reads half-float vertex positions from the BSTriShape-style test NIF written by
+    /// <see cref="WriteBsTriShapeStyleAsync"/>.  Looks for the vertex data directly after
+    /// the BSVertexDesc + triangle data at the known offset.
+    /// </summary>
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsTriShapeVertices(byte[] bytes)
+    {
+        const int stride = 20;
+        var bsToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+        var tokenPos = bytes.AsSpan().IndexOf(bsToken);
+        if (tokenPos < 0)
+            return [];
+
+        // Desc is at tokenPos + len(BSTriShape) + 1 (null terminator)
+        var descOffset = tokenPos + bsToken.Length + 1;
+        if (descOffset + 14 >= bytes.Length)
+            return [];
+
+        var numTriangles = BitConverter.ToInt32(bytes, descOffset + 8);
+        var numVertices = (int)BitConverter.ToUInt16(bytes, descOffset + 12);
+        var vertStart = descOffset + 14 + numTriangles * 6;
+
+        if (vertStart + (long)numVertices * stride > bytes.Length)
+            return [];
+
+        var result = new List<(float, float, float)>(numVertices);
+        for (var i = 0; i < numVertices; i++)
+        {
+            var off = vertStart + i * stride;
+            result.Add((
+                (float)BitConverter.ToHalf(bytes.AsSpan(off)),
+                (float)BitConverter.ToHalf(bytes.AsSpan(off + 2)),
+                (float)BitConverter.ToHalf(bytes.AsSpan(off + 4))));
+        }
+
+        return result;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3026,6 +3112,48 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     // ── --source override ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConvertAsync_WithBsTriShapeStyleNif_AppliesHalfFloatVertexTransform()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bstriShape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "sse_bstriShape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            Assert.Contains("Gamebryo File Format", System.Text.Encoding.ASCII.GetString(writtenBytes), StringComparison.Ordinal);
+            Assert.NotEqual(sourceBytes, writtenBytes);
+
+            var sourceRead = SyntheticNifTestData.ReadBsTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+
+            var anyChanged = sourceRead.Zip(transformedRead, (src, dst) =>
+                    MathF.Abs(src.X - dst.X) > 0.001f ||
+                    MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                    MathF.Abs(src.Z - dst.Z) > 0.001f)
+                .Any(changed => changed);
+
+            Assert.True(anyChanged, "Expected at least one SSE half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 
     [Fact]
     public async Task ConvertAsync_WithSourceOverride_StepRecordsOverride()

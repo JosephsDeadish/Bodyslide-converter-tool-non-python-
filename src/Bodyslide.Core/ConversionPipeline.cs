@@ -710,7 +710,11 @@ internal static class NifBlockGraphParser
 
         for (var offset = 0; offset < bytes.Length - 2; offset++)
         {
-            if (bytes[offset] != (byte)'N' || bytes[offset + 1] != (byte)'i')
+            var b0 = bytes[offset];
+            var b1 = bytes[offset + 1];
+            var isNiPrefix = b0 == (byte)'N' && b1 == (byte)'i';
+            var isBsPrefix = b0 == (byte)'B' && b1 == (byte)'S';
+            if (!isNiPrefix && !isBsPrefix)
             {
                 continue;
             }
@@ -742,7 +746,14 @@ internal static class NifBlockGraphParser
 
     private static bool IsLikelyBlockTypeName(string value)
     {
-        if (!value.StartsWith("Ni", StringComparison.Ordinal) || value.Length < 4)
+        if (value.Length < 4)
+        {
+            return false;
+        }
+
+        var hasKnownPrefix = value.StartsWith("Ni", StringComparison.Ordinal)
+            || value.StartsWith("BS", StringComparison.Ordinal);
+        if (!hasKnownPrefix)
         {
             return false;
         }
@@ -962,6 +973,7 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
+    private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
 
     public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
     {
@@ -1100,6 +1112,125 @@ internal static class NifGeometrySignatureReader
         vertexCount = bestCount;
         return true;
     }
+
+    /// <summary>
+    /// Locates the half-precision (16-bit) float vertex data block in an SSE NIF file
+    /// (BSTriShape / BSVertexData format, v20.2.0.7 user version 12 / user version 2 = 130).
+    /// Scans for a BSVertexDesc uint64 whose stride bits (44-47) encode a plausible vertex
+    /// stride, then validates the vertex positions at the expected offset using Half plausibility
+    /// checks.  Returns the start offset of the vertex data, the vertex count, and the stride.
+    /// </summary>
+    public static bool TryLocateHalfFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        if (bytes.Length < 64)
+            return false;
+
+        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+            return false;
+
+        // Must be an SSE NIF containing at least one BSTriShape block type string.
+        if (bytes.AsSpan().IndexOf(BsTriShapeToken) < 0)
+            return false;
+
+        var bestScore = 0;
+        var bestOffset = -1;
+        var bestCount = 0;
+        var bestStride = 0;
+
+        // Scan for BSVertexDesc (uint64).  Bits 44-47 encode stride / 4.
+        // Layout following a valid BSVertexDesc:
+        //   +0  BSVertexDesc  uint64 (8 bytes)
+        //   +8  NumTriangles  int32  (4 bytes)
+        //  +12  NumVertices   uint16 (2 bytes)
+        //  +14  Triangle data (NumTriangles × 6 bytes)
+        //  +14+NumTriangles*6  Vertex data (NumVertices × stride bytes)
+        //
+        // Scan one byte at a time so we don't miss unaligned BSVertexDesc fields.
+        // The fail-fast vertex validation keeps the overall cost low even on large NIFs.
+        var scanEnd = bytes.Length - 16;
+        for (var offset = 32; offset <= scanEnd; offset++)
+        {
+            var desc = BitConverter.ToUInt64(bytes, offset);
+            var strideDiv4 = (int)((desc >> 44) & 0xF);
+
+            // Accept strides 12–40 bytes (common SSE armor: 20 non-skinned, 32 skinned).
+            if (strideDiv4 < 3 || strideDiv4 > 10)
+                continue;
+
+            var candidateStride = strideDiv4 * 4;
+
+            var numTriangles = BitConverter.ToInt32(bytes, offset + 8);
+            if (numTriangles < 0 || numTriangles > 200_000)
+                continue;
+
+            var numVertices = (int)BitConverter.ToUInt16(bytes, offset + 12);
+            if (numVertices < MinPlausibleVertexCount)
+                continue;
+
+            var vertStart = offset + 14 + numTriangles * 6;
+            var vertSize = (long)numVertices * candidateStride;
+            if (vertStart < 0 || vertStart + vertSize > bytes.Length)
+                continue;
+
+            var score = ScoreHalfFloatVertexBlock(bytes, vertStart, numVertices, candidateStride);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestOffset = vertStart;
+                bestCount = numVertices;
+                bestStride = candidateStride;
+            }
+        }
+
+        if (bestOffset < 0 || bestScore < bestCount / 2)
+            return false;
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        vertexStride = bestStride;
+        return true;
+    }
+
+    /// <summary>
+    /// Samples up to 256 vertices from the candidate block and validates their half-float
+    /// XYZ positions (offsets 0, 2, 4 within each element).  Returns 0 on first bad sample
+    /// (fail-fast) or the number of valid samples examined.
+    /// </summary>
+    private static int ScoreHalfFloatVertexBlock(byte[] bytes, int dataOffset, int vertexCount, int stride)
+    {
+        var sampleCount = Math.Min(vertexCount, 256);
+        var step = Math.Max(1, vertexCount / sampleCount);
+        var valid = 0;
+
+        for (var i = 0; i < vertexCount; i += step)
+        {
+            var off = dataOffset + i * stride;
+            if (off + 6 > bytes.Length)
+                break;
+
+            var x = (float)BitConverter.ToHalf(bytes.AsSpan(off));
+            var y = (float)BitConverter.ToHalf(bytes.AsSpan(off + 2));
+            var z = (float)BitConverter.ToHalf(bytes.AsSpan(off + 4));
+
+            if (!IsPlausibleHalfCoordinate(x) || !IsPlausibleHalfCoordinate(y) || !IsPlausibleHalfCoordinate(z))
+                return 0;
+
+            valid++;
+        }
+
+        return valid;
+    }
+
+    private static bool IsPlausibleHalfCoordinate(float value) =>
+        float.IsFinite(value) && MathF.Abs(value) <= 512f;
 
     private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
     {
@@ -8884,7 +9015,8 @@ internal sealed class LocalExportService(
     {
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
-            return sourceBytes;
+            // SSE NIFs use BSTriShape with half-precision (16-bit) float vertices — try that path.
+            return TryApplyNifHalfFloatVertexTransform(sourceBytes, regionalMorphing);
         }
 
         if (vertexCount <= 0)
@@ -8999,6 +9131,132 @@ internal sealed class LocalExportService(
 
         return transformed;
     }
+
+    /// <summary>
+    /// SSE NIF variant of <see cref="TryApplyNifVertexTransform"/>: reads and writes vertex
+    /// positions as three consecutive <see cref="System.Half"/> values (half-precision 16-bit
+    /// floats) stored in BSVertexData elements produced by the BSTriShape block format used in
+    /// Skyrim SE / AE (v20.2.0.7, user version 12).  The transform logic is identical to the
+    /// LE float32 path; only the read/write encoding differs.
+    /// </summary>
+    private static byte[] TryApplyNifHalfFloatVertexTransform(
+        byte[] sourceBytes,
+        IReadOnlyDictionary<string, double> regionalMorphing)
+    {
+        if (!NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(
+                sourceBytes,
+                out var vertexDataOffset,
+                out var vertexCount,
+                out var vertexStride))
+        {
+            return sourceBytes;
+        }
+
+        if (vertexCount <= 0 || vertexStride < 6)
+            return sourceBytes;
+
+        var transformed = sourceBytes.ToArray();
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
+            return sourceBytes;
+
+        var minX = float.MaxValue;
+        var maxX = float.MinValue;
+        var minY = float.MaxValue;
+        var maxY = float.MinValue;
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+
+        // First pass: bounding box + collect positions for the animation-driven solver.
+        var rawVertices = new (float X, float Y, float Z)[vertexCount];
+        for (var i = 0; i < vertexCount; i++)
+        {
+            var off = vertexDataOffset + i * vertexStride;
+            var x = (float)BitConverter.ToHalf(transformed.AsSpan(off));
+            var y = (float)BitConverter.ToHalf(transformed.AsSpan(off + 2));
+            var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
+            rawVertices[i] = (x, y, z);
+            minX = MathF.Min(minX, x); maxX = MathF.Max(maxX, x);
+            minY = MathF.Min(minY, y); maxY = MathF.Max(maxY, y);
+            minZ = MathF.Min(minZ, z); maxZ = MathF.Max(maxZ, z);
+        }
+
+        var zRange = Math.Max(0.0001f, maxZ - minZ);
+        var centerX = (minX + maxX) / 2f;
+        var centerY = (minY + maxY) / 2f;
+        var upperFactor = AverageMorph(regionalMorphing, "chest", "breasts", "shoulders", "arms");
+        var midFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis");
+        var lowerFactor = AverageMorph(regionalMorphing, "legs", "thighs", "calves", "butt", "pelvis");
+        var depthFactor = AverageMorph(regionalMorphing, "waist", "belly", "pelvis", "butt");
+        var heightFactor = AverageMorph(regionalMorphing, "chest", "pelvis", "legs", "thighs");
+
+        var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
+        var pushOut = solverResult.MaxPushOutPerRegion;
+        var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+
+        // Second pass: apply the same regional morph + push-out + shrinkwrap as the LE path,
+        // but encode results back as Half to preserve the BSVertexData layout.
+        for (var i = 0; i < vertexCount; i++)
+        {
+            var off = vertexDataOffset + i * vertexStride;
+            var x = (float)BitConverter.ToHalf(transformed.AsSpan(off));
+            var y = (float)BitConverter.ToHalf(transformed.AsSpan(off + 2));
+            var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
+
+            var normalizedHeight = (z - minZ) / zRange;
+            var lowerWeight = 1.0f - normalizedHeight;
+            var upperWeight = normalizedHeight;
+            var midWeight = Math.Max(0f, 1f - Math.Abs((normalizedHeight - 0.5f) * 2f));
+            var widthScale = (upperFactor * upperWeight) + (lowerFactor * lowerWeight) + (midFactor * midWeight * 0.5);
+            var depthScale = (depthFactor * 0.65) + (midFactor * 0.35);
+
+            var transformedX = centerX + ((x - centerX) * (float)widthScale);
+            var transformedY = centerY + ((y - centerY) * (float)depthScale);
+            var transformedZ = minZ + ((z - minZ) * (float)heightFactor);
+
+            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            if (pushOut.TryGetValue(region, out var depth) && depth > 0)
+            {
+                var dx = transformedX - centerX;
+                var dy = transformedY - centerY;
+                var xyDist = MathF.Sqrt(dx * dx + dy * dy);
+                if (xyDist > 0.0001f)
+                {
+                    var pushOutModelSpace = (float)(depth * normScale);
+                    transformedX += (dx / xyDist) * pushOutModelSpace;
+                    transformedY += (dy / xyDist) * pushOutModelSpace;
+                }
+            }
+
+            if (regionalMorphing.Count > 0)
+            {
+                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
+                ApplyShrinkwrapProjection(
+                    centerX,
+                    centerY,
+                    normScale,
+                    shrinkRegion,
+                    regionalMorphing,
+                    clearanceNorm,
+                    ref transformedX,
+                    ref transformedY);
+            }
+
+            // Clamp to Half range (±65504) and write back the 6 position bytes only;
+            // the remaining bytes within the vertex element (UV, normals, tangents, etc.)
+            // are left unchanged.
+            transformedX = Math.Clamp(transformedX, -65504f, 65504f);
+            transformedY = Math.Clamp(transformedY, -65504f, 65504f);
+            transformedZ = Math.Clamp(transformedZ, -65504f, 65504f);
+            BitConverter.TryWriteBytes(transformed.AsSpan(off),     (Half)transformedX);
+            BitConverter.TryWriteBytes(transformed.AsSpan(off + 2), (Half)transformedY);
+            BitConverter.TryWriteBytes(transformed.AsSpan(off + 4), (Half)transformedZ);
+        }
+
+        return transformed;
+    }
+
 
     internal static void ApplyShrinkwrapProjection(
         float centerX,
