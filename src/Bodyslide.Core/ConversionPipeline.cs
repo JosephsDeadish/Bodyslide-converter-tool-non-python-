@@ -398,34 +398,42 @@ public static class PresetCatalog
         ["3BA Curvy"]         = new("3BA Curvy",         "3BA",   "curvy",    "smp+cbpc"),
         ["3BA Slim"]          = new("3BA Slim",           "3BA",   "slim",     "smp+cbpc"),
         ["3BA Athletic"]      = new("3BA Athletic",       "3BA",   "athletic", "smp+cbpc"),
+        ["3BA Zeroed"]        = new("3BA Zeroed",         "3BA",   "zeroed",   "smp+cbpc"),
         // ── BHUNP ────────────────────────────────────────────────────────────
         ["BHUNP Curvy"]       = new("BHUNP Curvy",        "BHUNP", "curvy",    "smp+cbpc"),
         ["BHUNP Slim"]        = new("BHUNP Slim",         "BHUNP", "slim",     "smp+cbpc"),
         ["BHUNP Athletic"]    = new("BHUNP Athletic",     "BHUNP", "athletic", "smp+cbpc"),
+        ["BHUNP Zeroed"]      = new("BHUNP Zeroed",       "BHUNP", "zeroed",   "smp+cbpc"),
         // ── CBBE ────────────────────────────────────────────────────────────
         ["CBBE Curvy"]        = new("CBBE Curvy",         "CBBE",  "curvy",    "none"),
         ["CBBE Slim"]         = new("CBBE Slim",          "CBBE",  "slim",     "none"),
         ["CBBE Athletic"]     = new("CBBE Athletic",      "CBBE",  "athletic", "none"),
         ["CBBE Petite"]       = new("CBBE Petite",        "CBBE",  "petite",   "none"),
+        ["CBBE Zeroed"]       = new("CBBE Zeroed",        "CBBE",  "zeroed",   "none"),
         // ── UNP ─────────────────────────────────────────────────────────────
         ["UNP Petite"]        = new("UNP Petite",         "UNP",   "petite",   "cbpc"),
         ["UNP Athletic"]      = new("UNP Athletic",       "UNP",   "athletic", "cbpc"),
         ["UNP Curvy"]         = new("UNP Curvy",          "UNP",   "curvy",    "cbpc"),
         ["UNP Slim"]          = new("UNP Slim",           "UNP",   "slim",     "cbpc"),
+        ["UNP Zeroed"]        = new("UNP Zeroed",         "UNP",   "zeroed",   "cbpc"),
         // ── TBD ─────────────────────────────────────────────────────────────
         ["TBD Lean"]          = new("TBD Lean",           "TBD",   "lean",     "cbpc"),
         ["TBD Curvy"]         = new("TBD Curvy",          "TBD",   "curvy",    "cbpc"),
         ["TBD Athletic"]      = new("TBD Athletic",       "TBD",   "athletic", "cbpc"),
+        ["TBD Zeroed"]        = new("TBD Zeroed",         "TBD",   "zeroed",   "cbpc"),
         // ── SAM ─────────────────────────────────────────────────────────────
         ["SAM Athletic"]      = new("SAM Athletic",       "SAM",   "athletic", "smp"),
         ["SAM Lean"]          = new("SAM Lean",           "SAM",   "lean",     "smp"),
         ["SAM Muscular"]      = new("SAM Muscular",       "SAM",   "muscular", "smp"),
+        ["SAM Zeroed"]        = new("SAM Zeroed",         "SAM",   "zeroed",   "smp"),
         // ── SOS ─────────────────────────────────────────────────────────────
         ["SOS Lean"]          = new("SOS Lean",           "SOS",   "lean",     "smp"),
         ["SOS Athletic"]      = new("SOS Athletic",       "SOS",   "athletic", "smp"),
+        ["SOS Zeroed"]        = new("SOS Zeroed",         "SOS",   "zeroed",   "smp"),
         // ── UBE ─────────────────────────────────────────────────────────────
         ["UBE Petite"]        = new("UBE Petite",         "UBE",   "petite",   "none"),
         ["UBE Curvy"]         = new("UBE Curvy",          "UBE",   "curvy",    "none"),
+        ["UBE Zeroed"]        = new("UBE Zeroed",         "UBE",   "zeroed",   "none"),
         // ── Anime ───────────────────────────────────────────────────────────
         ["CBBE Anime"]        = new("CBBE Anime",         "CBBE",  "anime",    "none"),
         ["3BA Anime"]         = new("3BA Anime",          "3BA",   "anime",    "smp+cbpc"),
@@ -433,6 +441,7 @@ public static class PresetCatalog
         ["UNP Anime"]         = new("UNP Anime",          "UNP",   "anime",    "cbpc"),
         // ── Vanilla ─────────────────────────────────────────────────────────
         ["Vanilla Balanced"]  = new("Vanilla Balanced",   "Vanilla", "balanced", "none"),
+        ["Vanilla Zeroed"]    = new("Vanilla Zeroed",     "Vanilla", "zeroed",   "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
         ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
         ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
@@ -441,6 +450,7 @@ public static class PresetCatalog
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
         ["HIMBO Athletic"]    = new("HIMBO Athletic",     "HIMBO", "athletic", "smp"),
+        ["HIMBO Zeroed"]      = new("HIMBO Zeroed",       "HIMBO", "zeroed",   "smp"),
     };
 
     public static IReadOnlyCollection<ConversionPreset> All => Presets.Values;
@@ -4408,9 +4418,43 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return 0;
         }
 
-        var combined = string.Join(' ', fileNames);
-        var hits = tokens.Count(token => combined.Contains(token, StringComparison.OrdinalIgnoreCase));
+        var hits = tokens.Count(token => fileNames.Any(fileName => TokenMatches(fileName, token)));
         return (double)hits / tokens.Count;
+    }
+
+    private static bool TokenMatches(string fileName, string token)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        if (token.Length > 3)
+        {
+            return fileName.Contains(token, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var startIndex = 0;
+        while (startIndex < fileName.Length)
+        {
+            var index = fileName.IndexOf(token, startIndex, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                break;
+            }
+
+            var leftBoundary = index == 0 || !char.IsLetterOrDigit(fileName[index - 1]);
+            var end = index + token.Length;
+            var rightBoundary = end >= fileName.Length || !char.IsLetterOrDigit(fileName[end]);
+            if (leftBoundary && rightBoundary)
+            {
+                return true;
+            }
+
+            startIndex = index + 1;
+        }
+
+        return false;
     }
 }
 
@@ -5677,7 +5721,8 @@ public static class DeformationProfileModifier
             ["athletic"] = 1.08,
             ["muscular"] = 1.25,
             ["lean"]     = 0.88,
-            ["anime"]    = 1.45    // strongly amplified proportions for stylised anime aesthetics
+            ["anime"]    = 1.45,   // strongly amplified proportions for stylised anime aesthetics
+            ["zeroed"]   = 0.00
         };
 
     public static IReadOnlyDictionary<string, double> Apply(IReadOnlyDictionary<string, double> field, string? profile)

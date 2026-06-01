@@ -1138,6 +1138,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("slim", 0.82)]
     [InlineData("petite", 0.75)]
     [InlineData("muscular", 1.25)]
+    [InlineData("zeroed", 0.00)]
     public void DeformationProfileModifier_ScalesDeltaCorrectly(string profile, double amplifier)
     {
         // Base chest delta = 0.08 (value 1.08 - 1.0).  After applying amplifier: 1 + (0.08 * amplifier).
@@ -1166,6 +1167,7 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("muscular", profiles);
         Assert.Contains("lean", profiles);
         Assert.Contains("athletic", profiles);
+        Assert.Contains("zeroed", profiles);
     }
 
     [Fact]
@@ -4115,6 +4117,22 @@ public sealed class BodySignatureVertexCountTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+
+        [Fact]
+        public async Task SignatureBodyDetectionService_DoesNotTreatSubstringAsShortTokenMatch()
+        {
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(
+                SourcePath: "/tmp/relics_of_hyrule_cubearmor.nif",
+                MeshFiles: ["/tmp/relics_of_hyrule_cubearmor.nif"],
+                TextureFiles: [],
+                PhysicsFiles: [],
+                BodyReferenceFiles: []);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("CUSTOM", result.Body);
+        }
     }
 }
 
@@ -4484,6 +4502,16 @@ public sealed class ExpandedPresetTests
     [InlineData("SOS Athletic",  "SOS")]
     [InlineData("UBE Petite",    "UBE")]
     [InlineData("UBE Curvy",     "UBE")]
+    [InlineData("CBBE Zeroed",   "CBBE")]
+    [InlineData("3BA Zeroed",    "3BA")]
+    [InlineData("BHUNP Zeroed",  "BHUNP")]
+    [InlineData("UNP Zeroed",    "UNP")]
+    [InlineData("TBD Zeroed",    "TBD")]
+    [InlineData("HIMBO Zeroed",  "HIMBO")]
+    [InlineData("SAM Zeroed",    "SAM")]
+    [InlineData("SOS Zeroed",    "SOS")]
+    [InlineData("UBE Zeroed",    "UBE")]
+    [InlineData("Vanilla Zeroed","Vanilla")]
     [InlineData("Vanilla Balanced", "Vanilla")]
     [InlineData("HIMBO Athletic","HIMBO")]
     public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)

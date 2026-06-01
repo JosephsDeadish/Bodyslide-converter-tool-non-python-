@@ -197,19 +197,25 @@ public sealed class MainForm : Form
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Use preset",
+            Text = "Preset mode (recommended)",
             AutoSize = true,
             Checked = true,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Use custom target",
+            Text = "Manual target mode",
             AutoSize = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
         _useCustomTargetRadio.CheckedChanged += (_, _) => RefreshModeState();
         modeRow.Controls.Add(_usePresetRadio);
         modeRow.Controls.Add(_useCustomTargetRadio);
+        modeRow.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(12, 4, 0, 0),
+            Text = "Choose one mode: presets OR manual target bodies.",
+        });
         layout.Controls.Add(modeRow, 0, 2);
 
         var conversionOptionsPanel = new TableLayoutPanel
@@ -230,7 +236,7 @@ public sealed class MainForm : Form
         };
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        leftOptions.Controls.Add(new Label { Text = "Preset", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        leftOptions.Controls.Add(new Label { Text = "Preset (to-body + slider profile)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
         _presetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -250,7 +256,7 @@ public sealed class MainForm : Form
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
         leftOptions.Controls.Add(_presetBatchTextBox, 1, 1);
-        leftOptions.Controls.Add(new Label { Text = "Target Body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        leftOptions.Controls.Add(new Label { Text = "To body (target)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -322,7 +328,7 @@ public sealed class MainForm : Form
         _profileComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_profileComboBox, 1, 0);
 
-        rightOptions.Controls.Add(new Label { Text = "Source Body (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        rightOptions.Controls.Add(new Label { Text = "From body (source, optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -350,18 +356,6 @@ public sealed class MainForm : Form
         _physicsComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_physicsComboBox, 1, 2);
 
-        rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
-        _worldModeComboBox = new ComboBox
-        {
-            Dock = DockStyle.Fill,
-            DropDownStyle = ComboBoxStyle.DropDownList,
-        };
-        _worldModeComboBox.Items.Add("(auto)");
-        foreach (var worldMode in WorldDropModeCatalog.All)
-        {
-            _worldModeComboBox.Items.Add(worldMode);
-        }
-        _worldModeComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _worldModeComboBox = new ComboBox
         {
@@ -1056,7 +1050,11 @@ public sealed class MainForm : Form
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
-        _statusLabel.Text = "Converting...";
+        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.Minimum = 0;
+        _progressBar.Maximum = 100;
+        _progressBar.Value = 0;
+        _statusLabel.Text = $"Converting 0%: {Path.GetFileName(input)}";
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (targets: {string.Join(", ", selectedTargets)})...");
@@ -1091,10 +1089,13 @@ public sealed class MainForm : Form
             // during batch runs instead of showing a marquee spinner throughout.
             var progress = new Progress<BatchProgressUpdate>(update =>
             {
+                var total = Math.Max(1, update.Total);
+                var completed = Math.Clamp(update.Completed, 0, total);
+                var percent = (int)Math.Round((double)completed / total * 100d, MidpointRounding.AwayFromZero);
                 _progressBar.Style = ProgressBarStyle.Continuous;
-                _progressBar.Maximum = update.Total;
-                _progressBar.Value = Math.Min(update.Completed, update.Total);
-                _statusLabel.Text = $"Converting {update.Completed}/{update.Total}: {update.CurrentFile}";
+                _progressBar.Maximum = 100;
+                _progressBar.Value = Math.Clamp(percent, 0, 100);
+                _statusLabel.Text = $"Converting {completed}/{total} ({percent}%): {update.CurrentFile}";
             });
 
             var results = await Task.Run(
@@ -1179,6 +1180,7 @@ public sealed class MainForm : Form
                 skeletonNifPath: string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim());
 
             PopulateInspectionTab(inspection);
+            ApplyDetectedSourceBodySelection(inspection.Detection);
             _resultsTabControl.SelectedTab = _inspectTabPage;
             _statusLabel.Text = "Inspection complete.";
             AppendLog($"Inspection complete: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}.");
@@ -1206,6 +1208,29 @@ public sealed class MainForm : Form
             ? _targetComboBox.SelectedItem?.ToString()
             : _targetComboBox.Text.Trim();
     }
+
+    private void ApplyDetectedSourceBodySelection(BodyDetectionReport detection)
+    {
+        if (!IsSourceAutoSelection() ||
+            string.IsNullOrWhiteSpace(detection.Body) ||
+            detection.Body.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var index = _sourceComboBox.FindStringExact(detection.Body);
+        if (index < 0)
+        {
+            return;
+        }
+
+        _sourceComboBox.SelectedIndex = index;
+        AppendLog($"Auto-selected source body from inspection: {detection.Body} ({detection.Confidence:P0}).");
+    }
+
+    private bool IsSourceAutoSelection() =>
+        string.IsNullOrWhiteSpace(_sourceComboBox.Text) ||
+        string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase);
 
     private void CancelConversion()
     {
@@ -1804,7 +1829,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _presetDetailsLabel.Text = $"Target: {preset.TargetBody} | Deformation: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
+        _presetDetailsLabel.Text = $"To body: {preset.TargetBody} | Slider profile: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
     }
 
     private bool TryGetSelectedPreset(out ConversionPreset preset)
