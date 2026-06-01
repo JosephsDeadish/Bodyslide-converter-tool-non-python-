@@ -4117,22 +4117,22 @@ public sealed class BodySignatureVertexCountTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
 
-        [Fact]
-        public async Task SignatureBodyDetectionService_DoesNotTreatSubstringAsShortTokenMatch()
-        {
-            var service = new SignatureBodyDetectionService();
-            var armor = new ImportedArmor(
-                SourcePath: "/tmp/relics_of_hyrule_cubearmor.nif",
-                MeshFiles: ["/tmp/relics_of_hyrule_cubearmor.nif"],
-                TextureFiles: [],
-                PhysicsFiles: [],
-                BodyReferenceFiles: []);
+    [Fact]
+    public async Task SignatureBodyDetectionService_DoesNotTreatSubstringAsShortTokenMatch()
+    {
+        var service = new SignatureBodyDetectionService();
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/relics_of_hyrule_cubearmor.nif",
+            MeshFiles: ["/tmp/relics_of_hyrule_cubearmor.nif"],
+            TextureFiles: [],
+            PhysicsFiles: [],
+            BodyReferenceFiles: []);
 
-            var result = await service.DetectAsync(armor, CancellationToken.None);
+        var result = await service.DetectAsync(armor, CancellationToken.None);
 
-            Assert.Equal("CUSTOM", result.Body);
-        }
+        Assert.Equal("CUSTOM", result.Body);
     }
 }
 
