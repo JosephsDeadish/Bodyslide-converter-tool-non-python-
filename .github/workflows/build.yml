@@ -1,0 +1,204 @@
+name: Build and Test SlideSmith
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Restore, build, test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Build
+        run: dotnet build BodyslideConverter.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/Bodyslide.Core.Tests/Bodyslide.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Publish standalone Linux CLI (single file)
+        run: >
+          dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
+          --configuration Release
+          --runtime linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/linux-x64
+
+      - name: Zip Linux CLI (single binary)
+        run: |
+          cd artifacts/linux-x64
+          zip ../slidesmith-linux-x64.zip SlideSmith
+
+      - name: Upload Linux CLI zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slidesmith-linux-x64
+          path: artifacts/slidesmith-linux-x64.zip
+
+  package-windows-on-merge:
+    name: Package Windows app on merge — create rolling release
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: windows-latest
+    needs: verify
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Publish Windows desktop app (single file)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64
+
+      - name: Publish Windows standalone CLI (single file)
+        run: >
+          dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-cli
+
+      - name: Rename CLI exe to avoid collision
+        run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
+
+      - name: Create Windows bundle zip (desktop + CLI)
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Create or update rolling "latest" GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "SlideSmith — latest build"
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            **Automatically updated on every push to main.**
+
+            | File | Description |
+            |---|---|
+            | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
+            | `SlideSmith-CLI.exe` | Windows command-line tool |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with both GUI + CLI side-by-side |
+            | `slidesmith-linux-x64.zip` | Linux CLI binary |
+
+            **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
+            **Quick start (CLI):** `.\SlideSmith-CLI.exe --input "path\to\armor.nif" --target CBBE --output "C:\output"`
+            Run `.\SlideSmith-CLI.exe --help` for all options.
+          files: |
+            artifacts/win-x64/SlideSmith.exe
+            artifacts/win-x64-cli/SlideSmith-CLI.exe
+            artifacts/slidesmith-win-x64-bundle.zip
+
+  package-windows-on-pr:
+    name: Package Windows app on pull request
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    needs: verify
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            global.json
+
+      - name: Restore
+        run: dotnet restore BodyslideConverter.slnx
+
+      - name: Publish Windows desktop app (single file)
+        run: >
+          dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64
+
+      - name: Publish Windows standalone CLI (single file)
+        run: >
+          dotnet publish src/Bodyslide.Standalone/Bodyslide.Standalone.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:DebugSymbols=false
+          --output artifacts/win-x64-cli
+
+      - name: Rename CLI exe to avoid collision
+        run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
+
+      - name: Zip Windows bundle (desktop + CLI)
+        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
+
+      - name: Upload Windows app zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: slidesmith-win-x64-pr-${{ github.event.pull_request.number }}
+          path: artifacts/slidesmith-win-x64-pr-${{ github.event.pull_request.number }}.zip
