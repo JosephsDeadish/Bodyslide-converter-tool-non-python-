@@ -732,7 +732,10 @@ public sealed record BodyTechnicalProfileInfo(
     /// </summary>
     string DefaultPhysics)
 {
-    // Backward-compatible alias so existing call-sites that read SoftBodyBones still compile.
+    /// <summary>
+    /// Backward-compatible alias for <see cref="AvailablePhysicsBones"/>.
+    /// Prefer <see cref="AvailablePhysicsBones"/> in new code.
+    /// </summary>
     public IReadOnlyList<string> SoftBodyBones => AvailablePhysicsBones;
 
     /// <summary>True when physics bones are active by default for this body (DefaultPhysics is not "none").</summary>
