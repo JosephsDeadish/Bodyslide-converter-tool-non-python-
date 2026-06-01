@@ -127,7 +127,7 @@ jobs:
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
         with:
-          name: slidesmith-win-x64-main-${{ github.run_number }}
+          name: slidesmith-win-x64-main-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/slidesmith-win-x64-bundle.zip
 
       - name: Create or update rolling "latest" GitHub Release
@@ -218,7 +218,7 @@ jobs:
       - name: Set Windows artifact name
         shell: pwsh
         run: |
-          if ("${{ github.event_name }}" -eq "pull_request") {
+          if ('${{ github.event_name }}' -eq 'pull_request') {
             "WINDOWS_ARTIFACT_NAME=slidesmith-win-x64-pr-${{ github.event.pull_request.number }}" >> $env:GITHUB_ENV
           } else {
             "WINDOWS_ARTIFACT_NAME=slidesmith-win-x64-run-${{ github.run_id }}-${{ github.run_attempt }}" >> $env:GITHUB_ENV
