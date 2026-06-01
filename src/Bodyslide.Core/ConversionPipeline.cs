@@ -733,7 +733,12 @@ public static class BodyTypeCatalog
 public sealed record PhysicsBoneSemanticDefinition(
     string Group,
     IReadOnlyDictionary<string, string>? Sides = null,
-    string? Bone = null,
+    string? Bone = null);
+
+/// <summary>
+/// Engine capability support flags for a semantic physics-bone slot.
+/// </summary>
+public sealed record PhysicsBoneCapabilityDefinition(
     bool Smp = true,
     bool Cbpc = true,
     bool Collision = true);
@@ -764,6 +769,7 @@ public sealed record BodyTechnicalProfileInfo(
     private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
         new(@"[^a-z0-9]+", System.Text.RegularExpressions.RegexOptions.Compiled);
     private IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition>? _physicsBoneMap;
+    private IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition>? _physicsCapabilityMap;
     private IReadOnlyDictionary<string, IReadOnlyList<string>>? _physicsBoneGroups;
 
     /// <summary>
@@ -794,24 +800,37 @@ public sealed record BodyTechnicalProfileInfo(
 
     /// <summary>
     /// Structured semantic map used for cross-body conversion.
-    /// Example: breast.left/right -> raw bone names, plus group/profile capability metadata.
+    /// Example: breast.left/right -> raw bone names grouped by semantic region.
     /// </summary>
     public IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> PhysicsBoneMap =>
         _physicsBoneMap ??=
             BuildSemanticPhysicsBoneMap(RequiredPhysicsBones);
 
     /// <summary>
-    /// Optional grouped view of the required physics bones by behavior region.
+    /// Capability support per semantic physics slot.
+    /// Example: breast => supports SMP/CBPC/collision.
+    /// </summary>
+    public IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition> PhysicsCapabilityMap =>
+        _physicsCapabilityMap ??=
+            BuildPhysicsCapabilityMap(RequiredPhysicsBones);
+
+    /// <summary>
+    /// Optional grouped view computed from <see cref="PhysicsBoneMap"/>.
     /// Group names: Breast, Butt, Belly, Genitals, Hair, Other.
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneGroups =>
         _physicsBoneGroups ??=
-            RequiredPhysicsBones
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .GroupBy(static bone => ToBoneGroup(bone), StringComparer.OrdinalIgnoreCase)
+            PhysicsBoneMap
+                .SelectMany(static pair => EnumerateSemanticBones(pair.Value)
+                    .Select(bone => (Group: pair.Value.Group, Bone: bone)))
+                .Distinct()
+                .GroupBy(static item => item.Group, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
                     static g => g.Key,
-                    static g => (IReadOnlyList<string>)g.ToList(),
+                    static g => (IReadOnlyList<string>)g
+                        .Select(static item => item.Bone)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
@@ -823,7 +842,7 @@ public sealed record BodyTechnicalProfileInfo(
             var slot = ClassifySemanticSlot(rawBone);
             if (!builders.TryGetValue(slot.Key, out var builder))
             {
-                builder = new SemanticBoneBuilder(slot.Group, slot.SupportSmp, slot.SupportCbpc, slot.SupportCollision);
+                builder = new SemanticBoneBuilder(slot.Group);
                 builders[slot.Key] = builder;
             }
 
@@ -841,6 +860,31 @@ public sealed record BodyTechnicalProfileInfo(
             static pair => pair.Key,
             static pair => pair.Value.Build(),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition> BuildPhysicsCapabilityMap(
+        IReadOnlyList<string> requiredBones)
+    {
+        var capabilities = new Dictionary<string, PhysicsBoneCapabilityDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawBone in requiredBones.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var slot = ClassifySemanticSlot(rawBone);
+            if (capabilities.TryGetValue(slot.Key, out var existing))
+            {
+                capabilities[slot.Key] = new PhysicsBoneCapabilityDefinition(
+                    Smp: existing.Smp || slot.SupportSmp,
+                    Cbpc: existing.Cbpc || slot.SupportCbpc,
+                    Collision: existing.Collision || slot.SupportCollision);
+                continue;
+            }
+
+            capabilities[slot.Key] = new PhysicsBoneCapabilityDefinition(
+                Smp: slot.SupportSmp,
+                Cbpc: slot.SupportCbpc,
+                Collision: slot.SupportCollision);
+        }
+
+        return capabilities;
     }
 
     private static SemanticBoneSlot ClassifySemanticSlot(string boneName)
@@ -894,37 +938,6 @@ public sealed record BodyTechnicalProfileInfo(
             false);
     }
 
-    private static string ToBoneGroup(string boneName)
-    {
-        var lower = boneName.Trim().ToLowerInvariant();
-        if (lower.Contains("breast", StringComparison.Ordinal) || lower.Contains("pec", StringComparison.Ordinal))
-        {
-            return "Breast";
-        }
-
-        if (lower.Contains("butt", StringComparison.Ordinal))
-        {
-            return "Butt";
-        }
-
-        if (lower.Contains("belly", StringComparison.Ordinal))
-        {
-            return "Belly";
-        }
-
-        if (lower.Contains("genital", StringComparison.Ordinal))
-        {
-            return "Genitals";
-        }
-
-        if (lower.Contains("hair", StringComparison.Ordinal))
-        {
-            return "Hair";
-        }
-
-        return "Other";
-    }
-
     private static string DetectSide(string lowerBoneName)
     {
         if (lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
@@ -944,7 +957,7 @@ public sealed record BodyTechnicalProfileInfo(
         return string.Empty;
     }
 
-    private sealed class SemanticBoneBuilder(string group, bool supportSmp, bool supportCbpc, bool supportCollision)
+    private sealed class SemanticBoneBuilder(string group)
     {
         public Dictionary<string, string> Sides { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string? Bone { get; set; }
@@ -953,10 +966,25 @@ public sealed record BodyTechnicalProfileInfo(
             new(
                 Group: group,
                 Sides: Sides.Count > 0 ? new Dictionary<string, string>(Sides, StringComparer.OrdinalIgnoreCase) : null,
-                Bone: Bone,
-                Smp: supportSmp,
-                Cbpc: supportCbpc,
-                Collision: supportCollision);
+                Bone: Bone);
+    }
+
+    private static IEnumerable<string> EnumerateSemanticBones(PhysicsBoneSemanticDefinition definition)
+    {
+        if (!string.IsNullOrWhiteSpace(definition.Bone))
+        {
+            yield return definition.Bone;
+        }
+
+        if (definition.Sides is null)
+        {
+            yield break;
+        }
+
+        foreach (var sideBone in definition.Sides.Values.Where(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            yield return sideBone;
+        }
     }
 
     private readonly record struct SemanticBoneSlot(
@@ -6583,13 +6611,17 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     internal static string DetectPluginKind(string pluginPath, byte[] bytes) =>
         ClassifyPluginKind(pluginPath, bytes).Type;
 
-    internal static PluginTypeClassification ClassifyPluginKind(string pluginPath, byte[] bytes)
+    internal static PluginTypeClassification ClassifyPluginKind(
+        string pluginPath,
+        byte[] bytes,
+        IReadOnlyList<uint>? resolvedRuntimeFormIds = null)
     {
         var extension = Path.GetExtension(pluginPath).Trim().ToLowerInvariant();
         var hasTes4Flags = TryReadTes4Flags(bytes, out var flags);
         var hasMasterFlag = (flags & PluginFlagMaster) != 0;
         var hasLightFlag = (flags & PluginFlagLight) != 0;
-        var hasFeFormIds = HasFeLightFormIdEvidence(bytes);
+        var hasRuntimeFormIdEvidence = resolvedRuntimeFormIds is { Count: > 0 };
+        var hasFeFormIds = HasFeLightFormIdEvidence(bytes, resolvedRuntimeFormIds);
         var reasons = new List<string>();
         if (hasTes4Flags)
         {
@@ -6608,7 +6640,13 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
         if (hasFeFormIds)
         {
-            reasons.Add("FE FormID range detected");
+            reasons.Add(hasRuntimeFormIdEvidence
+                ? "Resolved runtime FormIDs in FE range detected"
+                : "Raw plugin FormIDs in FE range detected");
+        }
+        else if (hasLightFlag)
+        {
+            reasons.Add("ESL flag present but FE runtime evidence not yet resolved");
         }
 
         if (extension is ".esp" or ".esm" or ".esl")
@@ -6617,7 +6655,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         }
 
         var type = ResolvePluginTypeFromHierarchy(extension, hasMasterFlag, hasLightFlag, hasFeFormIds);
-        var confidence = CalculateClassificationConfidence(type, hasTes4Flags, extension, hasMasterFlag, hasLightFlag, hasFeFormIds);
+        var confidence = CalculateClassificationConfidence(
+            type,
+            hasTes4Flags,
+            extension,
+            hasMasterFlag,
+            hasLightFlag,
+            hasFeFormIds,
+            hasRuntimeFormIdEvidence);
         return new PluginTypeClassification(type, confidence, reasons);
     }
 
@@ -6638,8 +6683,13 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         return true;
     }
 
-    private static bool HasFeLightFormIdEvidence(byte[] bytes)
+    private static bool HasFeLightFormIdEvidence(byte[] bytes, IReadOnlyList<uint>? resolvedRuntimeFormIds = null)
     {
+        if (resolvedRuntimeFormIds is { Count: > 0 })
+        {
+            return resolvedRuntimeFormIds.Any(static formId => IsFeLightFormId(formId));
+        }
+
         try
         {
             var armaHasFe = BinaryArmaParser.ExtractArmaRecords(bytes)
@@ -6672,22 +6722,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     {
         // Requested precedence:
         // 1) ESM (Master flag)
-        // 2) ESP
-        // 3) ESPFE (ESL flag + FE FormIDs)
-        // 4) ESL-light (compact light plugin semantics)
+        // 2) ESPFE (ESL flag + FE FormIDs)
+        // 3) AMBIGUOUS (ESL flag without FE evidence)
+        // 4) ESP
+        // 5) ESL-light (compact light plugin semantics)
+        // 6) UNKNOWN
         if (hasMasterFlag || string.Equals(extension, ".esm", StringComparison.OrdinalIgnoreCase))
         {
             return "ESM";
-        }
-
-        if (string.Equals(extension, ".esp", StringComparison.OrdinalIgnoreCase))
-        {
-            if (hasLightFlag && hasFeFormIds)
-            {
-                return "ESPFE";
-            }
-
-            return "ESP";
         }
 
         if (hasLightFlag && hasFeFormIds)
@@ -6695,12 +6737,22 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             return "ESPFE";
         }
 
-        if (string.Equals(extension, ".esl", StringComparison.OrdinalIgnoreCase) || hasLightFlag)
+        if (hasLightFlag && !hasFeFormIds)
+        {
+            return "AMBIGUOUS";
+        }
+
+        if (string.Equals(extension, ".esp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESP";
+        }
+
+        if (string.Equals(extension, ".esl", StringComparison.OrdinalIgnoreCase))
         {
             return "ESL-light";
         }
 
-        return "ESP";
+        return "UNKNOWN";
     }
 
     private static double CalculateClassificationConfidence(
@@ -6709,7 +6761,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         string extension,
         bool hasMasterFlag,
         bool hasLightFlag,
-        bool hasFeFormIds)
+        bool hasFeFormIds,
+        bool hasRuntimeFormIdEvidence)
     {
         double confidence = 0.50d;
         if (hasTes4Flags) confidence += 0.20d;
@@ -6718,10 +6771,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         if (type == "ESP" && extension == ".esp") confidence += 0.20d;
         if (type == "ESPFE" && hasLightFlag && hasFeFormIds) confidence += 0.25d;
         if (type == "ESL-light" && (hasLightFlag || extension == ".esl")) confidence += 0.20d;
+        if (type == "AMBIGUOUS" && hasLightFlag && !hasFeFormIds) confidence += 0.05d;
+        if (type == "AMBIGUOUS" && !hasRuntimeFormIdEvidence) confidence -= 0.10d;
 
         if (extension is ".esp" or ".esm" or ".esl") confidence += 0.05d;
 
-        return Math.Round(Math.Min(1.0d, confidence), 2, MidpointRounding.AwayFromZero);
+        return Math.Round(Math.Clamp(confidence, 0.0d, 1.0d), 2, MidpointRounding.AwayFromZero);
     }
 
     private static readonly System.Text.RegularExpressions.Regex NifPathRegex =

@@ -4733,10 +4733,16 @@ public sealed class BodyTypeCatalogTests
             Assert.True(profile.SupportsPhysics);
             Assert.Equal(profile.RequiredPhysicsBones, profile.AvailablePhysicsBones);
             Assert.NotEmpty(profile.PhysicsBoneMap);
+            Assert.NotEmpty(profile.PhysicsCapabilityMap);
+            Assert.Equal(profile.PhysicsBoneMap.Keys.OrderBy(static k => k), profile.PhysicsCapabilityMap.Keys.OrderBy(static k => k));
             Assert.All(profile.PhysicsBoneMap.Values, definition =>
             {
                 Assert.False(string.IsNullOrWhiteSpace(definition.Group));
                 Assert.True(definition.Bone is not null || (definition.Sides?.Count ?? 0) > 0);
+            });
+            Assert.All(profile.PhysicsCapabilityMap.Values, capability =>
+            {
+                Assert.True(capability.Smp || capability.Cbpc || capability.Collision);
             });
             if (profile.RequiredPhysicsBones.Any(b => b.Contains("Breast", StringComparison.OrdinalIgnoreCase) || b.Contains("Pec", StringComparison.OrdinalIgnoreCase)))
             {
@@ -5900,7 +5906,7 @@ public sealed class BinaryPluginRewriteServiceTests
     public void DetectPluginKind_EspWithLightFlagButNoFeFormId_DoesNotReturnEspfe()
     {
         var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
-        Assert.Equal("ESP", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+        Assert.Equal("AMBIGUOUS", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
     }
 
     [Fact]
@@ -5912,7 +5918,25 @@ public sealed class BinaryPluginRewriteServiceTests
         Assert.Equal("ESPFE", classification.Type);
         Assert.True(classification.Confidence > 0.90d);
         Assert.Contains(classification.Reasons, reason => reason.Contains("ESL flag present", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(classification.Reasons, reason => reason.Contains("FE FormID range detected", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(classification.Reasons, reason => reason.Contains("FE range detected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ClassifyPluginKind_LightFlagWithoutFeEvidence_ReturnsAmbiguous()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+        var classification = BasicPluginAnalysisService.ClassifyPluginKind("Test.esp", bytes);
+
+        Assert.Equal("AMBIGUOUS", classification.Type);
+        Assert.True(classification.Confidence < 0.80d);
+        Assert.Contains(classification.Reasons, reason => reason.Contains("not yet resolved", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void DetectPluginKind_UnknownExtensionWithoutFlags_ReturnsUnknown()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("UNKNOWN", BasicPluginAnalysisService.DetectPluginKind("Test.mod", bytes));
     }
 
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
