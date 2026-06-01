@@ -8999,6 +8999,8 @@ internal sealed class LocalExportService(
 
         foreach (var texturePath in armor.TextureFiles)
         {
+            if (IsPathInsideDirectory(texturePath, outputDirectory)) continue;
+
             var fileName = Path.GetFileName(texturePath);
             if (!missingSet.Contains(fileName)) continue;
             if (!File.Exists(texturePath)) continue;
@@ -9215,6 +9217,8 @@ internal sealed class LocalExportService(
 
         foreach (var texturePath in armor.TextureFiles)
         {
+            if (IsPathInsideDirectory(texturePath, outputDirectory)) continue;
+
             var fileName = Path.GetFileName(texturePath);
 
             // Resolve the output directory path for this diffuse.
@@ -9351,8 +9355,8 @@ internal sealed class LocalExportService(
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
-        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath));
-        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath));
+        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath, outputDirectory));
+        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath, outputDirectory));
 
         var copied = new List<string>();
         var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -9361,7 +9365,9 @@ internal sealed class LocalExportService(
         foreach (var sourceFile in supportFiles)
         {
             var fullSource = Path.GetFullPath(sourceFile);
-            if (!seenSources.Add(fullSource) || !File.Exists(fullSource))
+            if (!seenSources.Add(fullSource) ||
+                !File.Exists(fullSource) ||
+                IsPathInsideDirectory(fullSource, outputDirectory))
             {
                 continue;
             }
@@ -9374,6 +9380,11 @@ internal sealed class LocalExportService(
             }
 
             if (!seenDestinations.Add(destinationPath) || File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            if (PathsEqual(fullSource, destinationPath))
             {
                 continue;
             }
@@ -9393,7 +9404,7 @@ internal sealed class LocalExportService(
         return copied;
     }
 
-    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath)
+    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath, string? excludedDirectory = null)
     {
         static bool IsPlugin(string path) =>
             Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
@@ -9411,11 +9422,12 @@ internal sealed class LocalExportService(
 
         return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
             .Where(IsPlugin)
+            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath)
+    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath, string? excludedDirectory = null)
     {
         static bool IsMaterial(string path) =>
             Path.GetExtension(path) is ".bgsm" or ".bgem";
@@ -9433,6 +9445,7 @@ internal sealed class LocalExportService(
 
         return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
             .Where(IsMaterial)
+            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -9460,6 +9473,31 @@ internal sealed class LocalExportService(
         if (Directory.Exists(sourcePath))
         {
             return sourcePath;
+        }
+
+        private static bool PathsEqual(string leftPath, string rightPath)
+        {
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            return string.Equals(Path.GetFullPath(leftPath), Path.GetFullPath(rightPath), comparison);
+        }
+
+        private static bool IsPathInsideDirectory(string path, string? directoryPath)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return false;
+            }
+
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(fullPath, fullDirectory, comparison))
+            {
+                return true;
+            }
+
+            return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
+                   fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
         }
 
         if (File.Exists(sourcePath))
@@ -10452,6 +10490,11 @@ internal sealed class LocalExportService(
 
     private static async Task CopyFileAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
     {
+        if (PathsEqual(sourcePath, destinationPath))
+        {
+            return;
+        }
+
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrWhiteSpace(destinationDirectory))
         {

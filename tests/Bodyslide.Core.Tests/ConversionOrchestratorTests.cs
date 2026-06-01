@@ -707,6 +707,49 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithNestedOutputArtifacts_DoesNotReadLockedOutputDds()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(inputDirectory, "output");
+        var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "iron");
+        var textureDirectory = Path.Combine(inputDirectory, "textures", "armor", "iron");
+        var staleOutputTextureDirectory = Path.Combine(outputDirectory, "textures", "armor", "iron");
+
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(textureDirectory);
+        Directory.CreateDirectory(staleOutputTextureDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "ironarmor_0.nif");
+        var texturePath = Path.Combine(textureDirectory, "ironarmor.dds");
+        var staleOutputTexturePath = Path.Combine(staleOutputTextureDirectory, "ironarmor.dds");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllBytesAsync(texturePath, [0x44, 0x44, 0x53, 0x20]);
+        await File.WriteAllBytesAsync(staleOutputTexturePath, [0x44, 0x44, 0x53, 0x20]);
+
+        var lockHandle = new FileStream(
+            staleOutputTexturePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(Path.Combine(outputDirectory, "textures", "armor", "iron", "ironarmor.dds"), result.OutputFiles, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await lockHandle.DisposeAsync();
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_StepsIncludeSkeletonAndPartitions()
     {
         var inputFile = Path.GetTempFileName();
