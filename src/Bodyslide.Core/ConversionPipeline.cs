@@ -23,7 +23,8 @@ public sealed record ConversionRequest(
     IReadOnlyList<string>? Presets = null,
     string? PhysicsProfileOverride = null,
     bool GenerateBodySlideFiles = true,
-    IReadOnlyList<string>? CustomProfilePaths = null);
+    IReadOnlyList<string>? CustomProfilePaths = null,
+    string? WorldDropModeOverride = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -427,6 +428,29 @@ public static class PhysicsProfileCatalog
             : "none";
 }
 
+public static class WorldDropModeCatalog
+{
+    public static IReadOnlyList<string> All { get; } = ["static", "rigid-proxy"];
+
+    public static bool TryNormalize(string? value, out string normalized)
+    {
+        normalized = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        normalized = value.Trim().ToLowerInvariant() switch
+        {
+            "static" => "static",
+            "rigid-proxy" or "rigidproxy" or "rigid_proxy" => "rigid-proxy",
+            _ => string.Empty
+        };
+
+        return normalized.Length > 0;
+    }
+}
+
 public static class RequestNormalizer
 {
     private static readonly string[] AllTargetAliases = ["all", "any", "*"];
@@ -455,7 +479,7 @@ public static class RequestNormalizer
         {
             var normalized = Normalize(candidate);
             var outputSegment = MakeSafePathSegment(displayName);
-            var key = $"{normalized.Request.TargetBody}|{normalized.Request.Preset}|{normalized.Request.DeformationProfile}|{normalized.Request.PhysicsProfileOverride}|{normalized.Request.GenerateBodySlideFiles}|{outputSegment}";
+            var key = $"{normalized.Request.TargetBody}|{normalized.Request.Preset}|{normalized.Request.DeformationProfile}|{normalized.Request.PhysicsProfileOverride}|{normalized.Request.GenerateBodySlideFiles}|{normalized.Request.WorldDropModeOverride}|{outputSegment}";
             if (!seen.Add(key))
             {
                 return;
@@ -2496,6 +2520,10 @@ public sealed class ConversionOrchestrator(
             if (!string.IsNullOrWhiteSpace(normalized.Request.PhysicsProfileOverride))
             {
                 steps.Add($"physics-override:{physicsProfile}");
+            }
+            if (WorldDropModeCatalog.TryNormalize(normalized.Request.WorldDropModeOverride, out var worldModeOverride))
+            {
+                steps.Add($"world-mode-override:{worldModeOverride}");
             }
             var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
             steps.Add($"physics:{physics.Profile}");
@@ -8234,7 +8262,7 @@ internal sealed class LocalExportService(
 
         // Write dropped-item/world-object physics guidance.
         var worldPhysicsPath = Path.Combine(outputDirectory, "world-physics.json");
-        var worldPhysics = BuildWorldObjectPhysicsReport(analysis, mesh, physics, armor, groundMeshRelativePath);
+        var worldPhysics = BuildWorldObjectPhysicsReport(analysis, mesh, physics, armor, groundMeshRelativePath, request.WorldDropModeOverride);
         await File.WriteAllTextAsync(worldPhysicsPath,
             JsonSerializer.Serialize(worldPhysics, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
@@ -10120,30 +10148,54 @@ internal sealed class LocalExportService(
         ConvertedMesh mesh,
         PhysicsConfig physics,
         ImportedArmor armor,
-        string? groundMeshRelativePath)
+        string? groundMeshRelativePath,
+        string? worldModeOverride)
     {
         var sourcePhysicsDetected = analysis.PhysicsEnabled || armor.PhysicsFiles.Count > 0;
         var runtimePhysicsProfileGenerated = !string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase);
         var physicsDrivenMesh = sourcePhysicsDetected || runtimePhysicsProfileGenerated || string.Equals(analysis.MeshType, "physics-enabled", StringComparison.OrdinalIgnoreCase);
         var groundMeshAvailable = !string.IsNullOrWhiteSpace(groundMeshRelativePath);
+        var hasModeOverride = WorldDropModeCatalog.TryNormalize(worldModeOverride, out var modeOverride);
+        var useRigidProxyMode = hasModeOverride
+            ? string.Equals(modeOverride, "rigid-proxy", StringComparison.OrdinalIgnoreCase)
+            : physicsDrivenMesh;
+        var overrideHint = hasModeOverride
+            ? $"World drop mode override active: {modeOverride}."
+            : null;
 
-        if (physicsDrivenMesh)
+        if (useRigidProxyMode)
         {
+            var recommendations = new List<string>();
+            if (!string.IsNullOrWhiteSpace(overrideHint))
+            {
+                recommendations.Add(overrideHint);
+            }
+
+            recommendations.Add("Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects.");
+            recommendations.Add("Prefer a simplified proxy collision shape for stability.");
+            recommendations.Add(groundMeshAvailable
+                ? "Use the generated *_ground.nif as the dropped-item world model."
+                : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
+
             return new WorldObjectPhysicsReport(
                 Mode: "rigid-proxy",
                 CollisionShape: "convex-hull",
                 SourcePhysicsDetected: sourcePhysicsDetected,
                 RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
                 GroundMeshAvailable: groundMeshAvailable,
-                Recommendations:
-                [
-                    "Use rigid-body world physics for dropped items; actor SMP/CBPC does not run on world objects.",
-                    "Prefer a simplified proxy collision shape for stability.",
-                    groundMeshAvailable
-                        ? "Use the generated *_ground.nif as the dropped-item world model."
-                        : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback."
-                ]);
+                Recommendations: recommendations);
         }
+
+        var staticRecommendations = new List<string>();
+        if (!string.IsNullOrWhiteSpace(overrideHint))
+        {
+            staticRecommendations.Add(overrideHint);
+        }
+
+        staticRecommendations.Add("Use a static dropped-item model for maximum compatibility.");
+        staticRecommendations.Add(groundMeshAvailable
+            ? "Use the generated *_ground.nif for world/inventory model paths."
+            : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
 
         return new WorldObjectPhysicsReport(
             Mode: "static",
@@ -10151,13 +10203,7 @@ internal sealed class LocalExportService(
             SourcePhysicsDetected: sourcePhysicsDetected,
             RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
             GroundMeshAvailable: groundMeshAvailable,
-            Recommendations:
-            [
-                "Use a static dropped-item model for maximum compatibility.",
-                groundMeshAvailable
-                    ? "Use the generated *_ground.nif for world/inventory model paths."
-                    : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback."
-            ]);
+            Recommendations: staticRecommendations);
     }
 
     /// <summary>

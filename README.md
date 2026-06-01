@@ -45,7 +45,7 @@ dotnet run --project src/Bodyslide.Desktop
 # GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder), inspect selected input before conversion (detected body, mesh type, skeleton compatibility, custom-body count), open selected input path, preset details panel, choose preset or custom target,
 # optional preset-batch / target-batch comma-separated lists for one-run multi-body conversions,
 # **"Convert to All Bodies" button** — one click sets the target batch to every supported body type,
-# optional profile/source/physics override, optional BodySlide export toggle, optional output zip,
+# optional profile/source/physics/world-drop-mode override, optional BodySlide export toggle, optional output zip,
 # optional global learning-cache path override and in-app learning-cache inspector,
 # cancel in-progress conversion, open output folder,
 # embedded in-app preview pane for generated preview.html, "Load result..." button to browse and reload
@@ -81,6 +81,9 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 # override the auto-selected physics profile
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --physics none
+
+# override dropped-item world mode generation in world-physics.json
+dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --world-mode rigid-proxy
 
 # skip BodySlide slider/project export for a lighter output package
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "3BA" --build-sliders false
@@ -334,6 +337,7 @@ Implemented from issue scope:
 - **desktop reports tab** — GUI now includes a native **Reports** tab plus **Open report** action that surfaces key fields from `batch-report.json`, `conversion-quality.json`, `dependency-map.json`, `skeleton-compatibility.json`, `texture-summary.json`, `pose-simulation-report.json`, `world-physics.json`, and `plugin-patches.json` for both fresh conversions and reloaded output folders, so users do not have to dig through raw JSON to inspect converter diagnostics
 - **custom profile management GUI** — the desktop app now shows every loaded custom body profile in a dedicated list with open/remove/clear actions, and “Save profile...” writes a reusable full custom-body payload (transformation field, slider names, gender, output path, detection tokens, physics profile) instead of a minimal stub
 - **learning-cache GUI tab** — the desktop app now includes a dedicated **Cache** tab that lists loaded conversion-learning-cache entries (key, target body, mesh type, strategy, clipping/correction status, timestamp, and regional morph factors); **Inspect cache** now populates this tab and auto-focuses it while still logging cache details
+- **world drop-mode override controls** — CLI/GUI now expose world dropped-item mode override (`auto` / `static` / `rigid-proxy`) so users can force `world-physics.json` behavior even when source physics heuristics would choose a different default; override state is recorded in conversion steps and world-physics recommendations
 
 Issue #2 baseline coverage has been expanded substantially (import/dependency scan, body detection, mesh strategy, plugin rewriting, patch generation, output packaging, morph payload export, headgear sub-type/partition handling, ground mesh NIF output, biped slot passthrough, scratch plugin generation for plugin-free inputs, first-person mesh paths, rigid island detection, target physics bone injection, and armor-type/keyword injection in scratch plugins).
 

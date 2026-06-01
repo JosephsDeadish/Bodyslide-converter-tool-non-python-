@@ -193,6 +193,7 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     parsed.TryGetValue("targets", out var targetsValue);
     parsed.TryGetValue("cache-path", out cachePath);
     parsed.TryGetValue("physics", out var physicsOverride);
+    parsed.TryGetValue("world-mode", out var worldModeOverride);
     parsed.TryGetValue("build-sliders", out var buildSlidersValue);
     var outputZip = parsed.ContainsKey("output-zip");
     var selectedTargets = CombineSelections(target, ParseDelimitedValues(targetsValue));
@@ -211,6 +212,15 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         !TryParseBooleanOption(buildSlidersValue, out generateBodySlideFiles))
     {
         error = $"Invalid --build-sliders value '{buildSlidersValue}'. Use true/false, yes/no, on/off, or 1/0.";
+        return false;
+    }
+
+    var normalizedWorldModeOverride = string.Empty;
+    if (!string.IsNullOrWhiteSpace(worldModeOverride) &&
+        !string.Equals(worldModeOverride, "auto", StringComparison.OrdinalIgnoreCase) &&
+        !WorldDropModeCatalog.TryNormalize(worldModeOverride, out normalizedWorldModeOverride))
+    {
+        error = $"Unknown --world-mode value '{worldModeOverride}'. Use auto, static, or rigid-proxy.";
         return false;
     }
 
@@ -237,7 +247,8 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
         TargetBodies: selectedTargets.Count > 1 ? selectedTargets : null,
         Presets: selectedPresets.Count > 1 ? selectedPresets : null,
         PhysicsProfileOverride: string.IsNullOrWhiteSpace(normalizedPhysicsOverride) ? null : normalizedPhysicsOverride,
-        GenerateBodySlideFiles: generateBodySlideFiles);
+        GenerateBodySlideFiles: generateBodySlideFiles,
+        WorldDropModeOverride: string.IsNullOrWhiteSpace(normalizedWorldModeOverride) ? null : normalizedWorldModeOverride);
 
     return true;
 }
@@ -340,7 +351,7 @@ static void WriteUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--build-sliders <true|false>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");

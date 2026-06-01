@@ -5140,6 +5140,63 @@ public sealed class PoseSimulationAndPreviewTests
         }
     }
 
+    [Fact]
+    public async Task Convert_WithWorldModeOverrideStatic_UsesStaticModeEvenForPhysicsMesh()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "dress_smp.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "dress_smp.nif"),
+                "CBBE",
+                outputDirectory,
+                WorldDropModeOverride: "static"));
+
+            var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+            var json = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"static\"", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("\"rigid-proxy\"", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("World drop mode override active", json, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithWorldModeOverrideRigidProxy_UsesRigidProxyModeForNonPhysicsMesh()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "testarmor.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(
+                Path.Combine(workingDirectory, "testarmor.nif"),
+                "CBBE",
+                outputDirectory,
+                WorldDropModeOverride: "rigid-proxy"));
+
+            var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+            var json = await File.ReadAllTextAsync(reportPath);
+            Assert.Contains("\"rigid-proxy\"", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("World drop mode override active", json, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     // ── patch-armor.pas (xEdit script) ────────────────────────────────────────
 
     [Fact]

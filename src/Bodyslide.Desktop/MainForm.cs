@@ -19,6 +19,7 @@ public sealed class MainForm : Form
     private readonly ComboBox _profileComboBox;
     private readonly ComboBox _sourceComboBox;
     private readonly ComboBox _physicsComboBox;
+    private readonly ComboBox _worldModeComboBox;
     private readonly TextBox _logTextBox;
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
@@ -337,6 +338,20 @@ public sealed class MainForm : Form
         }
         _physicsComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_physicsComboBox, 1, 2);
+
+        rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _worldModeComboBox = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+        };
+        _worldModeComboBox.Items.Add("(auto)");
+        foreach (var worldMode in WorldDropModeCatalog.All)
+        {
+            _worldModeComboBox.Items.Add(worldMode);
+        }
+        _worldModeComboBox.SelectedIndex = 0;
+        rightOptions.Controls.Add(_worldModeComboBox, 1, 3);
         conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
         layout.Controls.Add(conversionOptionsPanel, 0, 3);
 
@@ -739,6 +754,11 @@ public sealed class MainForm : Form
             _catalogListView.Items.Add(new ListViewItem(["Physics profile", physics, ""]));
         }
 
+        foreach (var worldMode in WorldDropModeCatalog.All.OrderBy(static mode => mode, StringComparer.OrdinalIgnoreCase))
+        {
+            _catalogListView.Items.Add(new ListViewItem(["World drop mode", worldMode, "Controls world-physics.json mode output."]));
+        }
+
         _catalogListView.Items.Add(new ListViewItem(["Target alias", "all / any / *", "Expands to every supported body type."]));
         _catalogListView.EndUpdate();
     }
@@ -871,6 +891,7 @@ public sealed class MainForm : Form
         var selectedTargets = CombineSelections(target, ParseDelimitedValues(_targetBatchTextBox.Text));
         var profile = ReadOptionalComboValue(_profileComboBox);
         var physicsOverride = ReadOptionalComboValue(_physicsComboBox);
+        var worldModeOverride = ReadOptionalComboValue(_worldModeComboBox);
         var cachePathOverride = ReadOptionalPathValue(_cachePathTextBox.Text);
         var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
@@ -921,7 +942,8 @@ public sealed class MainForm : Form
                 Presets: usingPreset && selectedPresets.Count > 1 ? selectedPresets : null,
                 PhysicsProfileOverride: physicsOverride,
                 GenerateBodySlideFiles: _buildSlidersCheckBox.Checked,
-                CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null);
+                CustomProfilePaths: _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
+                WorldDropModeOverride: worldModeOverride);
 
             ConversionLearningCache.SetGlobalCachePath(cachePathOverride);
             if (!string.IsNullOrWhiteSpace(cachePathOverride))
@@ -1309,6 +1331,8 @@ public sealed class MainForm : Form
                     Add("Physics profile", step["physics:".Length..]);
                 else if (step.StartsWith("physics-override:", StringComparison.Ordinal))
                     Add("Physics (override)", step["physics-override:".Length..]);
+                else if (step.StartsWith("world-mode-override:", StringComparison.Ordinal))
+                    Add("World drop mode (override)", step["world-mode-override:".Length..]);
                 else if (step.StartsWith("skeleton:", StringComparison.Ordinal))
                     Add("Skeleton mapping", step["skeleton:".Length..]);
                 else if (step.StartsWith("skeleton-warnings:", StringComparison.Ordinal))
