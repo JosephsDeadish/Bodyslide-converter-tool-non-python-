@@ -13,7 +13,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
 - physics profile generation (CBPC + SMP XML config file output)
-- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions
+- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (`soft-body` is accepted as an alias for `smp+cbpc`)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
@@ -118,7 +118,7 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 # skeleton foundation, and soft-body physics bone reference data
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
-# show deep reference info for one body (tokens, skeleton, soft-body bones, default physics, matching presets)
+# show deep reference info for one body (tokens, skeleton, SupportsPhysics, required physics bones, default/recommended physics, matching presets)
 dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BA"
 
 # show available physics profiles

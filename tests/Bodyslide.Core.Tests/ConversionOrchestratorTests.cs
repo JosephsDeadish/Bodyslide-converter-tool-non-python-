@@ -4721,7 +4721,7 @@ public sealed class BodyTypeCatalogTests
     }
 
     [Fact]
-    public void BodyTechnicalProfileCatalog_HasSoftBodyData_ForKnownBodies()
+    public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
         foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
         {
@@ -4730,6 +4730,12 @@ public sealed class BodyTypeCatalogTests
             Assert.NotEmpty(profile.SoftBodyBones);
             // SoftBodyBones is an alias for AvailablePhysicsBones.
             Assert.Equal(profile.SoftBodyBones, profile.AvailablePhysicsBones);
+            Assert.True(profile.SupportsPhysics);
+            Assert.Equal(profile.RequiredPhysicsBones, profile.AvailablePhysicsBones);
+            Assert.True(profile.PhysicsBoneMap.ContainsKey("none"));
+            Assert.True(profile.PhysicsBoneMap.ContainsKey("cbpc"));
+            Assert.True(profile.PhysicsBoneMap.ContainsKey("smp"));
+            Assert.True(profile.PhysicsBoneMap.ContainsKey("smp+cbpc"));
         }
     }
 
@@ -4753,6 +4759,7 @@ public sealed class BodyTypeCatalogTests
                 $"No profile for {bodyName}");
             Assert.Equal(expectedPhysics, profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
             Assert.True(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=true");
+            Assert.Equal(expectedPhysics, profile.RecommendedPhysicsProfile, StringComparer.OrdinalIgnoreCase);
         }
 
         // Bodies without built-in physics must report DefaultPhysics = "none".
@@ -4762,13 +4769,15 @@ public sealed class BodyTypeCatalogTests
                 $"No profile for {bodyName}");
             Assert.Equal("none", profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
             Assert.False(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=false");
+            Assert.Equal("smp+cbpc", profile.RecommendedPhysicsProfile, StringComparer.OrdinalIgnoreCase);
         }
     }
 
     [Fact]
-    public void PhysicsProfileCatalog_All_ContainsSoftBodyAlias()
+    public void PhysicsProfileCatalog_All_ContainsCanonicalProfilesOnly()
     {
-        Assert.Contains("soft-body", PhysicsProfileCatalog.All, StringComparer.OrdinalIgnoreCase);
+        Assert.Equal(["none", "cbpc", "smp", "smp+cbpc"], PhysicsProfileCatalog.All);
+        Assert.DoesNotContain("soft-body", PhysicsProfileCatalog.All, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -4782,6 +4791,13 @@ public sealed class BodyTypeCatalogTests
 
         Assert.True(PhysicsProfileCatalog.TryNormalize("soft_body", out normalized));
         Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_ToDisplayName_ShowsSoftBodyLabelForSmpCbpc()
+    {
+        Assert.Equal("Soft Body (CBPC + SMP)", PhysicsProfileCatalog.ToDisplayName("smp+cbpc"));
+        Assert.Equal("Soft Body (CBPC + SMP)", PhysicsProfileCatalog.ToDisplayName("soft-body"));
     }
 
     [Fact]
@@ -5830,6 +5846,34 @@ public sealed class BinaryPluginRewriteServiceTests
         Assert.Equal(24, BinaryPluginRewriteService.DetectHeaderSize(bytes));
     }
 
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlag_ReturnsEspfe()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0x00000200u);
+        Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EslExtension_ReturnsEsl()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("ESL", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EsmExtension_ReturnsEsm()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0x00000001u);
+        Assert.Equal("ESM", BasicPluginAnalysisService.DetectPluginKind("Test.esm", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithoutLightFlag_ReturnsEsp()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("ESP", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
 
     [Fact]
@@ -5850,6 +5894,14 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Equal(0, rewritten);
         Assert.Equal(data, newData);
+    }
+
+    private static byte[] BuildTes4HeaderWithFlags(uint flags)
+    {
+        var bytes = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        BitConverter.TryWriteBytes(bytes.AsSpan(8), flags);
+        return bytes;
     }
 
     [Fact]

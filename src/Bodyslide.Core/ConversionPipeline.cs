@@ -477,11 +477,10 @@ public static class PhysicsProfileCatalog
         };
 
     /// <summary>
-    /// All recognised physics profile identifiers shown in the GUI/CLI, including "soft-body"
-    /// which is a user-friendly alias for smp+cbpc.  Any profile can be applied to any body
-    /// via the Physics override option — it is not restricted to a body's default.
+    /// Canonical physics engine profile identifiers.
+    /// Any profile can be applied to any body via the Physics override option.
     /// </summary>
-    public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc", "soft-body"];
+    public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc"];
 
     /// <summary>Short human-readable description for each physics profile, used in the catalog tab.</summary>
     public static IReadOnlyDictionary<string, string> Descriptions { get; } =
@@ -490,8 +489,7 @@ public static class PhysicsProfileCatalog
             ["none"]      = "No soft-body bone injection. Armor uses static mesh weights only; safe for all bodies.",
             ["cbpc"]      = "CBPC (C++ Based Physics for Cloth) bone injection. Fast CPU-side soft-body simulation; lighter mod requirement.",
             ["smp"]       = "Spriggan MeshPhysics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
-            ["smp+cbpc"]  = "Combined SMP + CBPC bone injection. Full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
-            ["soft-body"] = "Alias for smp+cbpc. Injects full soft-body physics bones for any target body — the most comprehensive physics output.",
+            ["smp+cbpc"]  = "Soft Body (CBPC + SMP). Combined SMP + CBPC bone injection with full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
         };
 
     public static bool TryNormalize(string? value, out string normalized)
@@ -509,12 +507,24 @@ public static class PhysicsProfileCatalog
             "cbpc"                                                  => "cbpc",
             "smp"                                                   => "smp",
             "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp"  => "smp+cbpc",
-            // "soft-body" is a user-facing alias; it normalises to smp+cbpc internally.
-            "soft-body" or "softbody" or "soft_body"               => "smp+cbpc",
+            // "soft-body" is a behavior-facing alias; it normalises to canonical smp+cbpc.
+            "soft-body" or "soft body" or "softbody" or "soft_body" or "soft body (cbpc + smp)" => "smp+cbpc",
             _ => string.Empty
         };
 
         return normalized.Length > 0;
+    }
+
+    public static string ToDisplayName(string? profile)
+    {
+        if (!TryNormalize(profile, out var normalized))
+        {
+            return profile?.Trim() ?? string.Empty;
+        }
+
+        return string.Equals(normalized, "smp+cbpc", StringComparison.OrdinalIgnoreCase)
+            ? "Soft Body (CBPC + SMP)"
+            : normalized;
     }
 
     public static string GetDefaultForTargetBody(string? targetBody) =>
@@ -740,6 +750,36 @@ public sealed record BodyTechnicalProfileInfo(
 
     /// <summary>True when physics bones are active by default for this body (DefaultPhysics is not "none").</summary>
     public bool HasSoftBodyPhysicsByDefault => !string.Equals(DefaultPhysics, "none", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when this body type supports physics-capable bones, regardless of its default profile.</summary>
+    public bool SupportsPhysics => AvailablePhysicsBones.Count > 0;
+
+    /// <summary>Bone set required for physics-enabled conversion output on this body.</summary>
+    public IReadOnlyList<string> RequiredPhysicsBones => AvailablePhysicsBones;
+
+    /// <summary>
+    /// Recommended canonical physics profile for this body. Bodies with no active default but physics support
+    /// still recommend smp+cbpc for broad compatibility.
+    /// </summary>
+    public string RecommendedPhysicsProfile =>
+        !string.Equals(DefaultPhysics, "none", StringComparison.OrdinalIgnoreCase)
+            ? DefaultPhysics
+            : SupportsPhysics
+                ? "smp+cbpc"
+                : "none";
+
+    /// <summary>
+    /// Per-profile physics bone activation map. "none" disables physics bones; all physics-enabled profiles
+    /// use this body's required physics bone set.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneMap =>
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["none"] = [],
+            ["cbpc"] = RequiredPhysicsBones,
+            ["smp"] = RequiredPhysicsBones,
+            ["smp+cbpc"] = RequiredPhysicsBones,
+        };
 }
 
 public static class BodyTechnicalProfileCatalog
@@ -6262,6 +6302,8 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
 internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 {
     private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
+    private const uint Tes4FlagMaster = 0x00000001u;
+    private const uint Tes4FlagLight = 0x00000200u;
 
     public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
@@ -6279,31 +6321,35 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             pluginFiles.Add(armor.SourcePath);
         }
 
+        var scannedPluginLabels = new List<string>();
         var armorAddons  = new List<PluginArmorAddon>();
         var armorRecords = new List<PluginArmorRecord>();
 
         foreach (var pluginFile in pluginFiles)
         {
-            var (addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
+            var (displayName, addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
+            scannedPluginLabels.Add(displayName);
             armorAddons.AddRange(addons);
             armorRecords.AddRange(records);
         }
 
         var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count);
         return new PluginAnalysisResult(
-            pluginFiles.Select(f => Path.GetFileName(f) ?? f).ToList(),
+            scannedPluginLabels,
             armorAddons,
             guidance,
             armorRecords.Count > 0 ? armorRecords : null);
     }
 
-    private static async Task<(IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
+    private static async Task<(string DisplayName, IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
         ScanPluginAsync(string pluginPath, CancellationToken cancellationToken)
     {
         try
         {
             var bytes      = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
-            var pluginName = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
+            var pluginKind = DetectPluginKind(pluginPath, bytes);
+            var pluginName = Path.GetFileName(pluginPath) ?? pluginPath;
+            var pluginLabel = $"{pluginName} [{pluginKind}]";
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
@@ -6313,7 +6359,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             {
                 addons = armaDescriptors
                     .Select(d => new PluginArmorAddon(
-                        pluginName,
+                        pluginLabel,
                         d.MeshPaths,
                         d.FormId,
                         d.EditorId,
@@ -6324,14 +6370,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             else
             {
                 // Fallback: regex scan when no structured ARMA records found.
-                addons = RegexScanForNifPaths(bytes, pluginName).ToList();
+                addons = RegexScanForNifPaths(bytes, pluginLabel).ToList();
             }
 
             // ── ARMO records (Armor — world/inventory models) ──────────────────
             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes);
             var records = armoDescriptors
                 .Select(d => new PluginArmorRecord(
-                    pluginName,
+                    pluginLabel,
                     d.MeshPaths,
                     d.FormId,
                     d.EditorId,
@@ -6339,12 +6385,52 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.RaceFormId))
                 .ToList();
 
-            return (addons, records);
+            return (pluginLabel, addons, records);
         }
         catch (IOException)
         {
-            return ([], []);
+            var fallback = Path.GetFileName(pluginPath) ?? pluginPath;
+            return ($"{fallback} [unreadable]", [], []);
         }
+    }
+
+    internal static string DetectPluginKind(string pluginPath, byte[] bytes)
+    {
+        var extension = Path.GetExtension(pluginPath).Trim().ToLowerInvariant();
+        var flags = TryReadTes4Flags(bytes, out var detectedFlags) ? detectedFlags : 0u;
+        var hasMasterFlag = (flags & Tes4FlagMaster) != 0;
+        var hasLightFlag = (flags & Tes4FlagLight) != 0;
+
+        return extension switch
+        {
+            ".esp" when hasLightFlag => "ESPFE",
+            ".esp" when hasMasterFlag => "ESM",
+            ".esp" => "ESP",
+            ".esm" when hasLightFlag => "ESM+ESL",
+            ".esm" => "ESM",
+            ".esl" => "ESL",
+            _ when hasLightFlag && hasMasterFlag => "ESM+ESL",
+            _ when hasLightFlag => "ESPFE",
+            _ when hasMasterFlag => "ESM",
+            _ => "ESP",
+        };
+    }
+
+    private static bool TryReadTes4Flags(byte[] bytes, out uint flags)
+    {
+        flags = 0u;
+        if (bytes.Length < 12)
+        {
+            return false;
+        }
+
+        if (bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return false;
+        }
+
+        flags = ReadUInt32Le(bytes, 8);
+        return true;
     }
 
     private static readonly System.Text.RegularExpressions.Regex NifPathRegex =

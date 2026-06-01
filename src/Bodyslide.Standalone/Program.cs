@@ -105,10 +105,12 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
         Console.WriteLine($" - {body.Name,-8} tokens: [{string.Join(", ", body.DetectionTokens)}]{vcRange}");
         if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
         {
+            var defaultPhysicsDisplay = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
             Console.WriteLine($"           skeleton: {profile.SkeletonFoundation}");
-            Console.WriteLine($"           default physics: {profile.DefaultPhysics}{(profile.HasSoftBodyPhysicsByDefault ? " (active)" : " — override to enable soft-body")}");
-            var bonesLabel = profile.HasSoftBodyPhysicsByDefault ? "active soft-body bones" : "available physics bones (inactive)";
-            Console.WriteLine($"           {bonesLabel}: {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
+            Console.WriteLine($"           supports physics: {(profile.SupportsPhysics ? "yes" : "no")}");
+            Console.WriteLine($"           default physics: {defaultPhysicsDisplay} [{profile.DefaultPhysics}]");
+            Console.WriteLine($"           recommended physics: {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+            Console.WriteLine($"           physics-capable bones: {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
             Console.WriteLine($"           notes: {profile.Notes}");
         }
     }
@@ -119,12 +121,17 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
 
 if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine("Available physics profiles (can be applied to ANY body via --physics):");
+    Console.WriteLine("Available canonical physics engine profiles (can be applied to ANY body via --physics):");
     foreach (var profile in PhysicsProfileCatalog.All)
     {
         PhysicsProfileCatalog.Descriptions.TryGetValue(profile, out var desc);
-        Console.WriteLine($" - {profile,-12}{(desc is not null ? $"  {desc}" : string.Empty)}");
+        var display = PhysicsProfileCatalog.ToDisplayName(profile);
+        var label = string.Equals(display, profile, StringComparison.OrdinalIgnoreCase)
+            ? profile
+            : $"{display} [{profile}]";
+        Console.WriteLine($" - {label,-34}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
+    Console.WriteLine("Alias accepted: soft-body => smp+cbpc");
     Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;
@@ -539,15 +546,10 @@ static void WriteBodyReference(string bodyName)
     if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
     {
         Console.WriteLine($" - Skeleton base    : {profile.SkeletonFoundation}");
-        Console.WriteLine($" - Default physics  : {profile.DefaultPhysics}{(profile.HasSoftBodyPhysicsByDefault ? " (active by default)" : " — use Physics override to enable soft-body output")}");
-        if (profile.HasSoftBodyPhysicsByDefault)
-        {
-            Console.WriteLine($" - Soft-body bones  : {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
-        }
-        else
-        {
-            Console.WriteLine($" - Available physics bones (inactive): {(profile.AvailablePhysicsBones.Count > 0 ? string.Join(", ", profile.AvailablePhysicsBones) : "none")}");
-        }
+        Console.WriteLine($" - Supports physics : {(profile.SupportsPhysics ? "yes" : "no")}");
+        Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]");
+        Console.WriteLine($" - Recommended phys : {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+        Console.WriteLine($" - Physics bones    : {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
         Console.WriteLine($" - Notes            : {profile.Notes}");
     }
     else
