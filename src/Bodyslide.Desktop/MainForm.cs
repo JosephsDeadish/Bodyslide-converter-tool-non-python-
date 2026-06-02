@@ -1099,11 +1099,12 @@ public sealed class MainForm : Form
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
-        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.MarqueeAnimationSpeed = 30;
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
-        _statusLabel.Text = $"Converting 0%: {Path.GetFileName(input)}";
+        _statusLabel.Text = $"Converting: {Path.GetFileName(input)}";
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
@@ -1142,6 +1143,7 @@ public sealed class MainForm : Form
                 var completed = Math.Clamp(update.Completed, 0, total);
                 var percent = (int)Math.Round((double)completed / total * 100d, MidpointRounding.AwayFromZero);
                 _progressBar.Style = ProgressBarStyle.Continuous;
+                _progressBar.MarqueeAnimationSpeed = 0;
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 _statusLabel.Text = $"Converting {completed}/{total} ({percent}%): {update.CurrentFile}";
@@ -1308,8 +1310,9 @@ public sealed class MainForm : Form
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
-        UseWaitCursor = isBusy;
-        _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
+        UseWaitCursor = false;
+        _progressBar.Style = isBusy ? _progressBar.Style : ProgressBarStyle.Continuous;
+        _progressBar.MarqueeAnimationSpeed = isBusy && _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
         _progressBar.Value = 0;
     }
 
