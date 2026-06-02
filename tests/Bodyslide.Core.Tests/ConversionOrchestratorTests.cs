@@ -9399,7 +9399,7 @@ public sealed class LocalExportServiceGroundMeshTests
     }
 
     [Fact]
-    public async Task ExportAsync_WithGroundMeshGen_WritesGroundNifForEachConvertedMesh()
+    public async Task ExportAsync_WithGroundMeshGen_WritesUnweightedGroundNif()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -9417,9 +9417,8 @@ public sealed class LocalExportServiceGroundMeshTests
                 .Where(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            Assert.Equal(2, groundNifs.Count);
-            Assert.Contains(groundNifs, p => p.EndsWith("iron_0_ground.nif", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(groundNifs, p => p.EndsWith("iron_1_ground.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Single(groundNifs);
+            Assert.Contains(groundNifs, p => p.EndsWith("iron_ground.nif", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -9585,7 +9584,7 @@ public sealed class LocalExportServiceGroundMeshTests
             var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
 
             var firstPersonMesh = files.FirstOrDefault(f => f.EndsWith(
-                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_0_1stperson.nif",
+                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_1stperson_0.nif",
                 StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(firstPersonMesh);
             Assert.True(File.Exists(firstPersonMesh), "Fallback first-person NIF should exist on disk.");
@@ -10262,7 +10261,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
 public sealed class ScratchPluginFirstPersonPathTests
 {
     [Fact]
-    public void Generate_MOD4MOD5_ContainFirstPersonSuffix()
+    public void Generate_MOD4MOD5_ContainFirstPersonTagAndWeightSuffix()
     {
         var svc    = new BasicScratchPluginGeneratorService();
         var result = svc.Generate("Iron Armor", "3BA", ["meshes/slidesmith/3ba/iron_0.nif"], [32], null);
@@ -10279,9 +10278,9 @@ public sealed class ScratchPluginFirstPersonPathTests
         Assert.NotNull(mod4);
         Assert.NotNull(mod5);
 
-        // MOD4 and MOD5 must contain the _1stperson suffix
-        Assert.EndsWith("_1stperson.nif", mod4, StringComparison.OrdinalIgnoreCase);
-        Assert.EndsWith("_1stperson.nif", mod5, StringComparison.OrdinalIgnoreCase);
+        // MOD4 and MOD5 should keep weight suffixes (_0/_1) while inserting the first-person tag.
+        Assert.EndsWith("_1stperson_0.nif", mod4, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("_1stperson_0.nif", mod5, StringComparison.OrdinalIgnoreCase);
 
         // They must NOT equal the equipped mesh path
         Assert.NotEqual(mod2, mod4, StringComparer.OrdinalIgnoreCase);
@@ -10298,7 +10297,7 @@ public sealed class ScratchPluginFirstPersonPathTests
         var bytes = result!.Value.PluginBytes;
         var mod4  = ExtractSubrecordPath(bytes, "MOD4");
         Assert.NotNull(mod4);
-        Assert.Equal("meshes/slidesmith/bhunp/fur_0_1stperson.nif", mod4, ignoreCase: true);
+        Assert.Equal("meshes/slidesmith/bhunp/fur_1stperson_0.nif", mod4, ignoreCase: true);
     }
 
     // Minimal binary search for a named subrecord's null-terminated ASCII path payload.

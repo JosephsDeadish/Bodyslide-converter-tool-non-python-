@@ -4160,12 +4160,9 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         WriteSubrecord(armaDataMs, "MOD3", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
 
         // 1st-person mesh (MOD4 = male 1st-person, MOD5 = female 1st-person).
-        // Skyrim loads a separate NIF for the first-person camera; we derive its path by
-        // inserting the "_1stperson" suffix before the file extension. The export step stages
-        // a fallback copy at that path so the generated plugin is immediately usable.
-        var fpExt           = Path.GetExtension(primaryPath);                    // ".nif"
-        var fpStem          = primaryPath[..^fpExt.Length];                      // "meshes/slidesmith/..."
-        var firstPersonPath = $"{fpStem}_1stperson{fpExt}";                     // "..._1stperson.nif"
+        // Preserve Skyrim weight-suffix layout (_0/_1 at the end) so file names remain
+        // game-compatible and avoid names like "..._0_1stperson.nif".
+        var firstPersonPath = BuildFirstPersonMeshPath(primaryPath);
         WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
         WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
 
@@ -4331,6 +4328,28 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         var bits = BitConverter.GetBytes(v);
         if (!BitConverter.IsLittleEndian) Array.Reverse(bits);
         ms.Write(bits);
+    }
+
+    private static string BuildFirstPersonMeshPath(string primaryPath)
+    {
+        var extension = Path.GetExtension(primaryPath);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return primaryPath + "_1stperson";
+        }
+
+        var stem = primaryPath[..^extension.Length];
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^2] + "_1stperson" + stem[^2..];
+        }
+        else
+        {
+            stem += "_1stperson";
+        }
+
+        return stem + extension;
     }
 
     // Sanitises a string to a valid Bethesda editor ID (ASCII alphanumeric + underscore, ≤255).
@@ -9371,18 +9390,29 @@ internal sealed class LocalExportService(
         string? groundMeshRelativePath = null;
         if (groundMeshGen is not null && writtenNifs.Count > 0)
         {
+            var generatedGroundPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var writtenNifPath in writtenNifs)
             {
                 var sourceNifBytes = await File.ReadAllBytesAsync(writtenNifPath, cancellationToken);
                 var groundNifBytes = await groundMeshGen.GenerateAsync(sourceNifBytes, analysis.MeshType, cancellationToken);
 
-                var stem = Path.GetFileNameWithoutExtension(writtenNifPath);
-                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{stem}_ground.nif";
+                var stem = Path.GetFileNameWithoutExtension(writtenNifPath) ?? string.Empty;
+                var groundStem = stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                                 stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+                    ? stem[..^2]
+                    : stem;
+                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{groundStem}_ground.nif";
                 groundMeshRelativePath ??= groundRelativePath;
 
                 var groundAbsPath = Path.Combine(
                     outputDirectory,
                     groundRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+                if (!generatedGroundPaths.Add(groundAbsPath))
+                {
+                    continue;
+                }
+
                 Directory.CreateDirectory(Path.GetDirectoryName(groundAbsPath)!);
                 await File.WriteAllBytesAsync(groundAbsPath, groundNifBytes, cancellationToken);
                 outputFiles.Add(groundAbsPath);
@@ -11509,7 +11539,12 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            var firstPersonFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_1stperson{extension}";
+            var stem = Path.GetFileNameWithoutExtension(fileName);
+            var firstPersonStem = stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                                  stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+                ? stem[..^2] + "_1stperson" + stem[^2..]
+                : stem + "_1stperson";
+            var firstPersonFileName = $"{firstPersonStem}{extension}";
             var firstPersonAbsolutePath = Path.Combine(
                 outputDirectory,
                 $"meshes/slidesmith/{safeBodyToken}/{firstPersonFileName}".Replace('/', Path.DirectorySeparatorChar));
