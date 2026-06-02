@@ -1114,32 +1114,41 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_StagesSourceNifInShapeDataFolder()
+    public async Task ConvertAsync_WithDefaultModules_StagesAllArmorNifsInSingleShapeDataFolder()
     {
-        // BodySlide needs a source NIF at CalienteTools\BodySlide\ShapeData\<project>\<project>.nif
-        // to display the base reference mesh when the user opens the slider editor.
+        // BodySlide source meshes must all live in one ShapeData project folder, without textures
+        // or other support assets being copied into that BodySlide source tree.
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
-        Directory.CreateDirectory(workingDirectory);
-        var inputFile = Path.Combine(workingDirectory, "helmet.nif");
-        await File.WriteAllTextAsync(inputFile, "mesh");
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        var textureDirectory = Path.Combine(workingDirectory, "textures", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(textureDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_1.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_1.nif"), "mesh");
+        await File.WriteAllBytesAsync(Path.Combine(textureDirectory, "DX_MAC_Gwelda.dds"), [0x44, 0x44, 0x53, 0x20]);
 
         try
         {
             var orchestrator = StandaloneConversionModules.CreateDefault();
-            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
 
             Assert.True(result.Success);
 
             var shapeDataBase = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
-            var sourceNifFiles = Directory.GetFiles(shapeDataBase, "*.nif", SearchOption.AllDirectories);
-            Assert.NotEmpty(sourceNifFiles);
-
-            // The source NIF filename should match the project name.
-            Assert.True(sourceNifFiles.Any(f =>
-                Path.GetFileName(f).Equals($"{Path.GetFileNameWithoutExtension(inputFile)}.nif", StringComparison.OrdinalIgnoreCase)
-                || Path.GetFileNameWithoutExtension(f).Length > 0),
-                "ShapeData should contain a source NIF for BodySlide.");
+            var shapeDataProjects = Directory.GetDirectories(shapeDataBase);
+            var shapeDataProject = Assert.Single(shapeDataProjects);
+            var sourceNifFiles = Directory.GetFiles(shapeDataProject, "*.nif", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(static fileName => fileName is not null)
+                .Cast<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cuirass_0.nif", "cuirass_1.nif", "boots_0.nif", "boots_1.nif" },
+                sourceNifFiles);
+            Assert.Empty(Directory.GetFiles(shapeDataProject, "*.dds", SearchOption.AllDirectories));
         }
         finally
         {
@@ -1232,7 +1241,8 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
-            Assert.Contains("femalebody_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\cuirass_3BA\cuirass.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -1259,8 +1269,44 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_1.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\armor_HIMBO\armor.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideOspProjectService_MultiMeshArmorFolder_UsesSingleShapeDataFolderAndPerMeshSliderSets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        Directory.CreateDirectory(meshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_1.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_1.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var ospFile = Assert.Single(Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories));
+            var ospXml = await File.ReadAllTextAsync(ospFile);
+            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(ospXml, "<SliderSet name=").Count);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\cuirass_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\boots_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"<OutputPath>meshes\DX\MiniArmorsCollection\Armors\GweldaWitch\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">cuirass_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">cuirass_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">boots_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">boots_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -10659,7 +10705,8 @@ public sealed class CustomBodyProfileSupportTests
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\myfollower_armor\myfollower_armor_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
             Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));
             Assert.False(File.Exists(Path.Combine(outputDir, "cbpc-config.xml")));

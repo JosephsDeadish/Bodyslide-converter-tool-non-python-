@@ -6477,14 +6477,6 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             ["Vanilla"] = ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
         };
 
-    private static readonly IReadOnlyDictionary<string, string> BodyOutputPaths =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["HIMBO"] = @"meshes\actors\character\character assets male\",
-            ["SAM"]   = @"meshes\actors\character\character assets male\",
-            ["SOS"]   = @"meshes\actors\character\character assets male\"
-        };
-
     private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "HIMBO", "SAM", "SOS"
@@ -6492,9 +6484,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 
     public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
-        var rawName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "ConvertedArmor";
-        var projectName = new string(rawName.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ').ToArray()).Trim();
-        if (string.IsNullOrWhiteSpace(projectName)) projectName = "ConvertedArmor";
+        var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
 
         var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
         var sliders = customProfileFound
@@ -6503,56 +6493,45 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
                 ? bodySliders
                 : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
 
-        var outputPath = customProfileFound && !string.IsNullOrWhiteSpace(customProfile.BodyOutputPath)
-            ? customProfile.BodyOutputPath
-            : BodyOutputPaths.TryGetValue(targetBody, out var builtInOutputPath)
-                ? builtInOutputPath
-                : @"meshes\actors\character\character assets\";
-
         var isMale = customProfileFound
             ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase)
             : MaleBodies.Contains(targetBody);
         var gender = isMale ? "male" : "female";
-        var outputFile0 = isMale ? "malebody_0.nif" : "femalebody_0.nif";
-        var outputFile1 = isMale ? "malebody_1.nif" : "femalebody_1.nif";
-
-        var shapeDataFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
-        var sourceFile = $@"{shapeDataFolder}\{projectName}.nif";
-
-        var ospXml = BuildOspXml(projectName, sliders, shapeDataFolder, sourceFile, outputPath, gender, outputFile0, outputFile1);
+        var ospXml = BuildOspXml(sliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
 
         return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml));
     }
 
     private static string BuildOspXml(
-        string projectName,
         IReadOnlyList<string> sliders,
-        string setFolder,
-        string sourceFile,
-        string outputPath,
-        string gender,
-        string outputFile0,
-        string outputFile1)
+        IReadOnlyList<BodySlideMeshTarget> targets,
+        string gender)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<SliderSetInfo version=\"1\">");
-        sb.AppendLine($"    <SliderSet name=\"{Escape(projectName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
-        sb.AppendLine($"        <SetFolder>{Escape(setFolder)}</SetFolder>");
-        sb.AppendLine($"        <SourceFile>{Escape(sourceFile)}</SourceFile>");
-        sb.AppendLine($"        <OutputPath>{Escape(outputPath)}</OutputPath>");
-        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(outputFile0)}</OutputFile>");
-        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(outputFile1)}</OutputFile>");
-
-        foreach (var slider in sliders)
+        foreach (var target in targets)
         {
-            sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
-            sb.AppendLine("            <Low value=\"0\" />");
-            sb.AppendLine("            <High value=\"100\" />");
-            sb.AppendLine("        </Slider>");
-        }
+            sb.AppendLine($"    <SliderSet name=\"{Escape(target.SliderSetName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
+            sb.AppendLine($"        <SetFolder>{Escape(target.SetFolder)}</SetFolder>");
+            sb.AppendLine($"        <SourceFile>{Escape(target.SourceFile)}</SourceFile>");
+            sb.AppendLine($"        <OutputPath>{Escape(target.OutputPath)}</OutputPath>");
+            sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(target.OutputFile0)}</OutputFile>");
+            if (!string.IsNullOrWhiteSpace(target.OutputFile1))
+            {
+                sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(target.OutputFile1)}</OutputFile>");
+            }
 
-        sb.AppendLine("    </SliderSet>");
+            foreach (var slider in sliders)
+            {
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
+                sb.AppendLine("            <Low value=\"0\" />");
+                sb.AppendLine("            <High value=\"100\" />");
+                sb.AppendLine("        </Slider>");
+            }
+
+            sb.AppendLine("    </SliderSet>");
+        }
         sb.AppendLine("</SliderSetInfo>");
         return sb.ToString();
     }
@@ -6560,6 +6539,219 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
     // Minimal XML attribute/content escaping for values embedded in the OSP document.
     private static string Escape(string value) =>
         value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+}
+
+internal sealed record BodySlideMeshTarget(
+    string SliderSetName,
+    string SetFolder,
+    string SourceFile,
+    string OutputPath,
+    string OutputFile0,
+    string? OutputFile1 = null);
+
+internal static class BodySlideLayoutPlanner
+{
+    public static string BuildProjectName(ImportedArmor armor, string targetBody)
+    {
+        var baseName = BuildProjectBaseName(armor);
+        var safeBaseName = SanitizeToken(baseName);
+        var safeTargetBody = SanitizeToken(targetBody);
+
+        if (!safeBaseName.Contains(safeTargetBody, StringComparison.OrdinalIgnoreCase))
+        {
+            safeBaseName = $"{safeBaseName}_{safeTargetBody}";
+        }
+
+        return safeBaseName;
+    }
+
+    public static IReadOnlyList<BodySlideMeshTarget> BuildTargets(ImportedArmor armor, string projectName)
+    {
+        var setFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
+        var meshInfos = armor.MeshFiles
+            .Select(meshPath => CreateMeshInfo(armor.SourcePath, meshPath))
+            .Where(info => !string.IsNullOrWhiteSpace(info.FileName))
+            .ToList();
+
+        if (meshInfos.Count == 0)
+        {
+            return
+            [
+                new BodySlideMeshTarget(
+                    projectName,
+                    setFolder,
+                    $@"{setFolder}\{projectName}.nif",
+                    @"meshes\",
+                    $"{projectName}.nif")
+            ];
+        }
+
+        return meshInfos
+            .GroupBy(info => $"{info.OutputPath}|{info.GroupName}", StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var items = group.ToList();
+                var primary = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? items[0];
+                var lowVariant = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? primary;
+                var highVariant = items.FirstOrDefault(static item => item.IsHighWeightVariant);
+                var sliderSetName = meshInfos.Count > 1
+                    ? $"{projectName} - {group.First().GroupName}"
+                    : projectName;
+
+                return new BodySlideMeshTarget(
+                    sliderSetName,
+                    setFolder,
+                    $@"{setFolder}\{primary.FileName}",
+                    lowVariant.OutputPath,
+                    lowVariant.FileName,
+                    highVariant?.FileName);
+            })
+            .ToList();
+    }
+
+    private static MeshInfo CreateMeshInfo(string sourcePath, string meshPath)
+    {
+        var fileName = Path.GetFileName(meshPath) ?? string.Empty;
+        return new MeshInfo(
+            fileName,
+            TrimWeightSuffix(Path.GetFileNameWithoutExtension(fileName) ?? string.Empty),
+            ResolveOutputPath(sourcePath, meshPath),
+            fileName.EndsWith("_0.nif", StringComparison.OrdinalIgnoreCase),
+            fileName.EndsWith("_1.nif", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildProjectBaseName(ImportedArmor armor)
+    {
+        if (!Directory.Exists(armor.SourcePath))
+        {
+            var firstMeshName = armor.MeshFiles.Count > 0
+                ? TrimWeightSuffix(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? string.Empty)
+                : string.Empty;
+            return string.IsNullOrWhiteSpace(firstMeshName) ? "ConvertedArmor" : firstMeshName;
+        }
+
+        var meshDirectories = armor.MeshFiles
+            .Select(Path.GetDirectoryName)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (meshDirectories.Count == 1)
+        {
+            var directoryName = Path.GetFileName(meshDirectories[0]);
+            if (!string.IsNullOrWhiteSpace(directoryName) &&
+                !directoryName.Equals("meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                return directoryName;
+            }
+        }
+
+        var fallbackMeshName = armor.MeshFiles.Count > 0
+            ? TrimWeightSuffix(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? string.Empty)
+            : string.Empty;
+
+        return string.IsNullOrWhiteSpace(fallbackMeshName) ? "ConvertedArmor" : fallbackMeshName;
+    }
+
+    private static string ResolveOutputPath(string sourcePath, string meshPath)
+    {
+        var meshDirectory = Path.GetDirectoryName(Path.GetFullPath(meshPath));
+        if (string.IsNullOrWhiteSpace(meshDirectory))
+        {
+            return @"meshes\";
+        }
+
+        var segmentedPath = meshDirectory
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var meshesIndex = Array.FindIndex(segmentedPath, static segment =>
+            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (meshesIndex >= 0)
+        {
+            return EnsureTrailingSlash(string.Join('\\', segmentedPath[meshesIndex..]));
+        }
+
+        var sourceRoot = ResolveSourceRoot(sourcePath);
+        if (Directory.Exists(sourceRoot))
+        {
+            var relativeDirectory = Path.GetRelativePath(sourceRoot, meshDirectory)
+                .Replace('/', '\\')
+                .Trim('\\');
+            if (string.Equals(relativeDirectory, ".", StringComparison.Ordinal))
+            {
+                return @"meshes\";
+            }
+
+            if (!string.IsNullOrWhiteSpace(relativeDirectory) &&
+                !relativeDirectory.StartsWith("..", StringComparison.Ordinal) &&
+                !Path.IsPathRooted(relativeDirectory))
+            {
+                return EnsureTrailingSlash($@"meshes\{relativeDirectory}");
+            }
+        }
+
+        return @"meshes\";
+    }
+
+    private static string ResolveSourceRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return Path.GetFullPath(sourcePath);
+        }
+
+        if (File.Exists(sourcePath))
+        {
+            var sourceDirectory = Path.GetDirectoryName(Path.GetFullPath(sourcePath));
+            if (!string.IsNullOrWhiteSpace(sourceDirectory))
+            {
+                return TryResolveModRootFromMeshesPath(sourceDirectory) ?? sourceDirectory;
+            }
+        }
+
+        return Path.GetFullPath(sourcePath);
+    }
+
+    private static string? TryResolveModRootFromMeshesPath(string startDirectory)
+    {
+        var current = startDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (string.Equals(Path.GetFileName(current), "meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetDirectoryName(current);
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return null;
+    }
+
+    private static string EnsureTrailingSlash(string path) =>
+        path.EndsWith('\\') ? path : path + '\\';
+
+    private static string TrimWeightSuffix(string value) =>
+        value.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || value.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+            ? value[..^2]
+            : value;
+
+    private static string SanitizeToken(string value)
+    {
+        var sanitized = new string(value
+            .Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or ' ')
+            .ToArray())
+            .Trim()
+            .Replace(' ', '_');
+        return string.IsNullOrWhiteSpace(sanitized) ? "ConvertedArmor" : sanitized;
+    }
+
+    private sealed record MeshInfo(
+        string FileName,
+        string GroupName,
+        string OutputPath,
+        bool IsLowWeightVariant,
+        bool IsHighWeightVariant);
 }
 
 /// <summary>
@@ -9353,11 +9545,19 @@ internal sealed class LocalExportService(
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
             Directory.CreateDirectory(shapeDataDirectory);
 
-            // Stage source-shape NIF into ShapeData so BodySlide can display the base mesh.
-            var shapeDataNifPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.nif");
-            if (writtenNifs.Count > 0)
+            // Stage all source-shape NIFs into one ShapeData project folder so BodySlide can edit
+            // the full armor set without rescanning generated output or splitting meshes per folder.
+            var stagedShapeDataNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var writtenNif in writtenNifs)
             {
-                await CopyFileAsync(writtenNifs[0], shapeDataNifPath, cancellationToken);
+                var shapeDataFileName = Path.GetFileName(writtenNif);
+                if (string.IsNullOrWhiteSpace(shapeDataFileName) || !stagedShapeDataNames.Add(shapeDataFileName))
+                {
+                    continue;
+                }
+
+                var shapeDataNifPath = Path.Combine(shapeDataDirectory, shapeDataFileName);
+                await CopyFileAsync(writtenNif, shapeDataNifPath, cancellationToken);
                 outputFiles.Add(shapeDataNifPath);
             }
 
