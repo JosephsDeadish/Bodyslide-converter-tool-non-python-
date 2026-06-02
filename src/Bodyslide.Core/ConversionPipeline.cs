@@ -3442,7 +3442,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             if (string.Equals(directoryName, "Converted", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(directoryName, "output", StringComparison.OrdinalIgnoreCase))
             {
-                return ContainsConverterOutputArtifacts(directoryPath);
+                return true;
             }
 
             return false;
@@ -6939,18 +6939,7 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
         var root = ResolveSupportRootForScan(sourcePath);
         if (File.Exists(root)) return IsMaterial(root) ? [Path.GetFullPath(root)] : [];
         if (!Directory.Exists(root)) return [];
-
-        var opts = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            MatchCasing = MatchCasing.CaseInsensitive,
-        };
-
-        return Directory.GetFiles(root, "*.*", opts)
-            .Where(IsMaterial)
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".bgsm", ".bgem"]);
     }
 
     private static string ResolveSupportRootForScan(string sourcePath)
@@ -7008,9 +6997,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
         if (Directory.Exists(armor.SourcePath))
         {
-            pluginFiles.AddRange(Directory.GetFiles(armor.SourcePath, "*.*", SearchOption.AllDirectories)
-                .Where(f => PluginExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+            pluginFiles.AddRange(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(armor.SourcePath, PluginExtensions));
         }
         else if (File.Exists(armor.SourcePath) &&
                  PluginExtensions.Contains(Path.GetExtension(armor.SourcePath), StringComparer.OrdinalIgnoreCase))
@@ -10470,7 +10457,7 @@ internal sealed class LocalExportService(
             return [];
         }
 
-        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".esp", ".esm", ".esl"])
             .Where(IsPlugin)
             .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -10493,7 +10480,7 @@ internal sealed class LocalExportService(
             return [];
         }
 
-        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".bgsm", ".bgem"])
             .Where(IsMaterial)
             .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)

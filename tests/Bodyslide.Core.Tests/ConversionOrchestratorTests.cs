@@ -473,6 +473,32 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ImportAsync_IgnoresConvertedFolderWithoutMarkerFiles()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var generatedDir = Path.Combine(tmpDir, "Converted");
+        Directory.CreateDirectory(tmpDir);
+        Directory.CreateDirectory(generatedDir);
+
+        var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
+        var generatedMesh = Path.Combine(generatedDir, "armor_0.nif");
+        await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
+        await File.WriteAllBytesAsync(generatedMesh, new byte[64]);
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(generatedMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConversionLearningCache_LoadMergedEntries_PrefersMoreRecentEntry()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1527,6 +1553,48 @@ public sealed class ConversionOrchestratorTests
             var service = new BasicMeshAnalysisService();
             var result = await service.AnalyzeAsync(armor, CancellationToken.None);
             Assert.Equal(expectedType, result.MeshType);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshesDir = Path.Combine(dir, "meshes", "armor");
+        var materialsDir = Path.Combine(dir, "materials", "armor");
+        var generatedMaterialsDir = Path.Combine(dir, "Converted", "materials", "armor");
+        Directory.CreateDirectory(meshesDir);
+        Directory.CreateDirectory(materialsDir);
+        Directory.CreateDirectory(generatedMaterialsDir);
+
+        var nifPath = Path.Combine(meshesDir, "armor.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+        await File.WriteAllTextAsync(Path.Combine(materialsDir, "source.bgsm"),
+            """
+            {
+              "textures": ["textures/armor/source_d.dds"]
+            }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(generatedMaterialsDir, "generated.bgsm"),
+            """
+            {
+              "textures": ["textures/armor/generated_d.dds"]
+            }
+            """);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicTextureAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.MaterialTexturePaths);
+            Assert.Contains("textures/armor/source_d.dds", result.MaterialTexturePaths!);
+            Assert.DoesNotContain("textures/armor/generated_d.dds", result.MaterialTexturePaths!, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
