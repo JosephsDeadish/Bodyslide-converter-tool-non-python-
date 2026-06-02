@@ -1311,8 +1311,11 @@ public sealed class MainForm : Form
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
         UseWaitCursor = false;
-        _progressBar.Style = isBusy ? _progressBar.Style : ProgressBarStyle.Continuous;
-        _progressBar.MarqueeAnimationSpeed = isBusy && _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
+        if (!isBusy)
+        {
+            _progressBar.Style = ProgressBarStyle.Continuous;
+        }
+        _progressBar.MarqueeAnimationSpeed = _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
         _progressBar.Value = 0;
     }
 

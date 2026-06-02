@@ -3452,11 +3452,6 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             ConverterMarkerFiles.Any(file =>
                 File.Exists(Path.Combine(directoryPath, file)));
 
-        private static bool ContainsConverterOutputArtifacts(string directoryPath) =>
-            ContainsConverterMarkers(directoryPath) ||
-            Directory.Exists(Path.Combine(directoryPath, "CalienteTools", "BodySlide")) ||
-            Directory.Exists(Path.Combine(directoryPath, "meshes", "slidesmith"));
-
         private static bool IsPathInsideAnyDirectory(string path, IReadOnlyList<string>? directories)
         {
             if (directories is null || directories.Count == 0)
