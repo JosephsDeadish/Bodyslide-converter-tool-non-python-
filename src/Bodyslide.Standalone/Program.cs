@@ -105,8 +105,12 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
         Console.WriteLine($" - {body.Name,-8} tokens: [{string.Join(", ", body.DetectionTokens)}]{vcRange}");
         if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
         {
+            var defaultPhysicsDisplay = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
             Console.WriteLine($"           skeleton: {profile.SkeletonFoundation}");
-            Console.WriteLine($"           soft-body bones: {string.Join(", ", profile.SoftBodyBones)}");
+            Console.WriteLine($"           supports physics: {(profile.SupportsPhysics ? "yes" : "no")}");
+            Console.WriteLine($"           default physics: {defaultPhysicsDisplay} [{profile.DefaultPhysics}]");
+            Console.WriteLine($"           recommended physics: {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+            Console.WriteLine($"           physics-capable bones: {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
             Console.WriteLine($"           notes: {profile.Notes}");
         }
     }
@@ -117,12 +121,18 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
 
 if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine("Available physics profiles:");
+    Console.WriteLine("Available canonical physics engine profiles (can be applied to ANY body via --physics):");
     foreach (var profile in PhysicsProfileCatalog.All)
     {
-        Console.WriteLine($" - {profile}");
+        PhysicsProfileCatalog.Descriptions.TryGetValue(profile, out var desc);
+        var display = PhysicsProfileCatalog.ToDisplayName(profile);
+        var label = string.Equals(display, profile, StringComparison.OrdinalIgnoreCase)
+            ? profile
+            : $"{display} [{profile}]";
+        Console.WriteLine($" - {label,-34}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
-    Console.WriteLine(" - auto  => use preset/custom/default target-body physics");
+    Console.WriteLine("Alias accepted: soft-body => smp+cbpc");
+    Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;
 }
@@ -536,17 +546,24 @@ static void WriteBodyReference(string bodyName)
     if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
     {
         Console.WriteLine($" - Skeleton base    : {profile.SkeletonFoundation}");
-        Console.WriteLine($" - Soft-body bones  : {string.Join(", ", profile.SoftBodyBones)}");
+        Console.WriteLine($" - Supports physics : {(profile.SupportsPhysics ? "yes" : "no")}");
+        Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]");
+        Console.WriteLine($" - Recommended phys : {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+        Console.WriteLine($" - Physics bones    : {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
+        if (profile.SupportsPhysics)
+        {
+            Console.WriteLine($" - Bone groups      : {string.Join(", ", profile.PhysicsBoneGroups.Keys.OrderBy(static k => k, StringComparer.OrdinalIgnoreCase))}");
+        }
         Console.WriteLine($" - Notes            : {profile.Notes}");
     }
     else
     {
         Console.WriteLine(" - Skeleton base    : n/a");
+        Console.WriteLine(" - Default physics  : n/a");
         Console.WriteLine(" - Soft-body bones  : n/a");
         Console.WriteLine(" - Notes            : n/a");
     }
 
-    Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.GetDefaultForTargetBody(body.Name)}");
     var matchingPresets = PresetCatalog.All
         .Where(p => string.Equals(p.TargetBody, body.Name, StringComparison.OrdinalIgnoreCase))
         .Select(p => p.Name)

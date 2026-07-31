@@ -473,6 +473,32 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ImportAsync_IgnoresConvertedFolderWithoutMarkerFiles()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var generatedDir = Path.Combine(tmpDir, "Converted");
+        Directory.CreateDirectory(tmpDir);
+        Directory.CreateDirectory(generatedDir);
+
+        var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
+        var generatedMesh = Path.Combine(generatedDir, "armor_0.nif");
+        await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
+        await File.WriteAllBytesAsync(generatedMesh, new byte[64]);
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(generatedMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConversionLearningCache_LoadMergedEntries_PrefersMoreRecentEntry()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -702,6 +728,49 @@ public sealed class ConversionOrchestratorTests
         }
         finally
         {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithNestedOutputArtifacts_DoesNotReadLockedOutputDds()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(inputDirectory, "output");
+        var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "iron");
+        var textureDirectory = Path.Combine(inputDirectory, "textures", "armor", "iron");
+        var staleOutputTextureDirectory = Path.Combine(outputDirectory, "textures", "armor", "iron");
+
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(textureDirectory);
+        Directory.CreateDirectory(staleOutputTextureDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "ironarmor_0.nif");
+        var texturePath = Path.Combine(textureDirectory, "ironarmor.dds");
+        var staleOutputTexturePath = Path.Combine(staleOutputTextureDirectory, "ironarmor.dds");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllBytesAsync(texturePath, [0x44, 0x44, 0x53, 0x20]);
+        await File.WriteAllBytesAsync(staleOutputTexturePath, [0x44, 0x44, 0x53, 0x20]);
+
+        var lockHandle = new FileStream(
+            staleOutputTexturePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif")));
+        }
+        finally
+        {
+            await lockHandle.DisposeAsync();
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
@@ -1071,32 +1140,41 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithDefaultModules_StagesSourceNifInShapeDataFolder()
+    public async Task ConvertAsync_WithDefaultModules_StagesAllArmorNifsInSingleShapeDataFolder()
     {
-        // BodySlide needs a source NIF at CalienteTools\BodySlide\ShapeData\<project>\<project>.nif
-        // to display the base reference mesh when the user opens the slider editor.
+        // BodySlide source meshes must all live in one ShapeData project folder, without textures
+        // or other support assets being copied into that BodySlide source tree.
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
-        Directory.CreateDirectory(workingDirectory);
-        var inputFile = Path.Combine(workingDirectory, "helmet.nif");
-        await File.WriteAllTextAsync(inputFile, "mesh");
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        var textureDirectory = Path.Combine(workingDirectory, "textures", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(textureDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_1.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_1.nif"), "mesh");
+        await File.WriteAllBytesAsync(Path.Combine(textureDirectory, "DX_MAC_Gwelda.dds"), [0x44, 0x44, 0x53, 0x20]);
 
         try
         {
             var orchestrator = StandaloneConversionModules.CreateDefault();
-            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
 
             Assert.True(result.Success);
 
             var shapeDataBase = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
-            var sourceNifFiles = Directory.GetFiles(shapeDataBase, "*.nif", SearchOption.AllDirectories);
-            Assert.NotEmpty(sourceNifFiles);
-
-            // The source NIF filename should match the project name.
-            Assert.True(sourceNifFiles.Any(f =>
-                Path.GetFileName(f).Equals($"{Path.GetFileNameWithoutExtension(inputFile)}.nif", StringComparison.OrdinalIgnoreCase)
-                || Path.GetFileNameWithoutExtension(f).Length > 0),
-                "ShapeData should contain a source NIF for BodySlide.");
+            var shapeDataProjects = Directory.GetDirectories(shapeDataBase);
+            var shapeDataProject = Assert.Single(shapeDataProjects);
+            var sourceNifFiles = Directory.GetFiles(shapeDataProject, "*.nif", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(static fileName => fileName is not null)
+                .Cast<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cuirass_0.nif", "cuirass_1.nif", "boots_0.nif", "boots_1.nif" },
+                sourceNifFiles);
+            Assert.Empty(Directory.GetFiles(shapeDataProject, "*.dds", SearchOption.AllDirectories));
         }
         finally
         {
@@ -1189,7 +1267,8 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("BreastsPhysics", ospXml, StringComparison.Ordinal);
-            Assert.Contains("femalebody_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\cuirass_3BA\cuirass.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -1216,8 +1295,44 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(ospFile);
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Pecs", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_1.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\armor_HIMBO\armor.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideOspProjectService_MultiMeshArmorFolder_UsesSingleShapeDataFolderAndPerMeshSliderSets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "DX", "MiniArmorsCollection", "Armors", "GweldaWitch");
+        Directory.CreateDirectory(meshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "cuirass_1.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_0.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "boots_1.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var ospFile = Assert.Single(Directory.GetFiles(outputDirectory, "*.osp", SearchOption.AllDirectories));
+            var ospXml = await File.ReadAllTextAsync(ospFile);
+            Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(ospXml, "<SliderSet name=").Count);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\cuirass_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\GweldaWitch_3BA\boots_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"<OutputPath>meshes\DX\MiniArmorsCollection\Armors\GweldaWitch\</OutputPath>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">cuirass_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">cuirass_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">boots_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+            Assert.Contains(">boots_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
         }
         finally
         {
@@ -1259,7 +1374,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestImporter : IArmorImportService
     {
-        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken) =>
+        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null) =>
             Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
     }
 
@@ -1438,6 +1553,48 @@ public sealed class ConversionOrchestratorTests
             var service = new BasicMeshAnalysisService();
             var result = await service.AnalyzeAsync(armor, CancellationToken.None);
             Assert.Equal(expectedType, result.MeshType);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshesDir = Path.Combine(dir, "meshes", "armor");
+        var materialsDir = Path.Combine(dir, "materials", "armor");
+        var generatedMaterialsDir = Path.Combine(dir, "Converted", "materials", "armor");
+        Directory.CreateDirectory(meshesDir);
+        Directory.CreateDirectory(materialsDir);
+        Directory.CreateDirectory(generatedMaterialsDir);
+
+        var nifPath = Path.Combine(meshesDir, "armor.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+        await File.WriteAllTextAsync(Path.Combine(materialsDir, "source.bgsm"),
+            """
+            {
+              "textures": ["textures/armor/source_d.dds"]
+            }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(generatedMaterialsDir, "generated.bgsm"),
+            """
+            {
+              "textures": ["textures/armor/generated_d.dds"]
+            }
+            """);
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var service = new BasicTextureAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.MaterialTexturePaths);
+            Assert.Contains("textures/armor/source_d.dds", result.MaterialTexturePaths!);
+            Assert.DoesNotContain("textures/armor/generated_d.dds", result.MaterialTexturePaths!, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -2955,7 +3112,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
-            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif");
+            var nifFiles = Directory.GetFiles(outputDirectory, "*.nif", SearchOption.AllDirectories);
             Assert.NotEmpty(nifFiles);
             // The output NIF must reproduce the source content.
             var written = await File.ReadAllTextAsync(nifFiles[0]);
@@ -3019,7 +3176,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "synthetic_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "synthetic_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
@@ -3061,7 +3218,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "block_graph_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "block_graph_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
@@ -3111,7 +3268,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "Vanilla", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "shrinkwrap_projection.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "vanilla", "shrinkwrap_projection.nif");
             Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
 
             var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
@@ -3194,7 +3351,7 @@ public sealed class NifOutputAndSourceOverrideTests
                 detectedBody, skeletonMapping, voxelResult,
                 CancellationToken.None);
 
-            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "arm_bias.nif")));
+            var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "arm_bias.nif")));
             var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
 
             var chestExpansion = MathF.Abs(transformedRead[5].X) - MathF.Abs(sourceRead[5].X);
@@ -3228,7 +3385,7 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
 
             Assert.True(result.Success);
-            var writtenPath = Path.Combine(outputDirectory, "sse_bstriShape_armor.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bstriShape_armor.nif");
             Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
 
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
@@ -4678,13 +4835,113 @@ public sealed class BodyTypeCatalogTests
     }
 
     [Fact]
-    public void BodyTechnicalProfileCatalog_HasSoftBodyData_ForKnownBodies()
+    public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
         foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
             Assert.NotEmpty(profile.SoftBodyBones);
+            // SoftBodyBones is an alias for AvailablePhysicsBones.
+            Assert.Equal(profile.SoftBodyBones, profile.AvailablePhysicsBones);
+            Assert.True(profile.SupportsPhysics);
+            Assert.Equal(profile.RequiredPhysicsBones, profile.AvailablePhysicsBones);
+            Assert.NotEmpty(profile.PhysicsBoneMap);
+            Assert.NotEmpty(profile.PhysicsCapabilityMap);
+            Assert.Equal(profile.PhysicsBoneMap.Keys.OrderBy(static k => k), profile.PhysicsCapabilityMap.Keys.OrderBy(static k => k));
+            Assert.All(profile.PhysicsBoneMap.Values, definition =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(definition.Group));
+                Assert.True(definition.Bone is not null || (definition.Sides?.Count ?? 0) > 0);
+            });
+            Assert.All(profile.PhysicsCapabilityMap.Values, capability =>
+            {
+                Assert.True(capability.Smp || capability.Cbpc || capability.Collision);
+            });
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Breast", StringComparison.OrdinalIgnoreCase) || b.Contains("Pec", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("breast"));
+            }
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Butt", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("butt"));
+            }
+            if (profile.RequiredPhysicsBones.Any(b => b.Contains("Belly", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.True(profile.PhysicsBoneMap.ContainsKey("belly"));
+            }
+            Assert.NotEmpty(profile.PhysicsBoneGroups);
+        }
+    }
+
+    [Fact]
+    public void BodyTechnicalProfileCatalog_DefaultPhysics_MatchesPhysicsProfileCatalogDefaults()
+    {
+        // Bodies with soft-body physics by default must have a non-"none" DefaultPhysics.
+        foreach (var (bodyName, expectedPhysics) in new[]
+        {
+            ("3BA",     "smp+cbpc"),
+            ("BHUNP",   "smp+cbpc"),
+            ("UNP",     "cbpc"),
+            ("TBD",     "cbpc"),
+            ("HIMBO",   "smp"),
+            ("SAM",     "smp"),
+            ("SOS",     "smp"),
+            ("UBE",     "smp+cbpc"),
+        })
+        {
+            Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
+                $"No profile for {bodyName}");
+            Assert.Equal(expectedPhysics, profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
+            Assert.True(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=true");
+            Assert.Equal(expectedPhysics, profile.RecommendedPhysicsProfile, StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Bodies without built-in physics must report DefaultPhysics = "none".
+        foreach (var bodyName in new[] { "CBBE", "Vanilla" })
+        {
+            Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
+                $"No profile for {bodyName}");
+            Assert.Equal("none", profile.DefaultPhysics, StringComparer.OrdinalIgnoreCase);
+            Assert.False(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=false");
+            Assert.Equal("smp+cbpc", profile.RecommendedPhysicsProfile, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_All_ContainsCanonicalProfilesOnly()
+    {
+        Assert.Equal(["none", "cbpc", "smp", "smp+cbpc"], PhysicsProfileCatalog.All);
+        Assert.DoesNotContain("soft-body", PhysicsProfileCatalog.All, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_TryNormalize_SoftBodyNormalizesToSmpCbpc()
+    {
+        Assert.True(PhysicsProfileCatalog.TryNormalize("soft-body", out var normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(PhysicsProfileCatalog.TryNormalize("softbody", out normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True(PhysicsProfileCatalog.TryNormalize("soft_body", out normalized));
+        Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_ToDisplayName_ShowsSoftBodyLabelForSmpCbpc()
+    {
+        Assert.Equal("Soft Body (CBPC + SMP)", PhysicsProfileCatalog.ToDisplayName("smp+cbpc"));
+        Assert.Equal("Soft Body (CBPC + SMP)", PhysicsProfileCatalog.ToDisplayName("soft-body"));
+    }
+
+    [Fact]
+    public void PhysicsProfileCatalog_Descriptions_HasEntryForEveryProfile()
+    {
+        foreach (var profile in PhysicsProfileCatalog.All)
+        {
+            Assert.True(PhysicsProfileCatalog.Descriptions.ContainsKey(profile),
+                $"Missing description for physics profile '{profile}'");
         }
     }
 }
@@ -4985,6 +5242,32 @@ public sealed class BatchReportTests
             Assert.Contains("\"SuccessCount\": 3", content, StringComparison.Ordinal);
             Assert.Contains("\"FailedCount\": 0",  content, StringComparison.Ordinal);
             Assert.Contains("\"QualityReportCount\": 3", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_Directory_IgnoresOutputFolderInsideInputRoot()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "Converted");
+        Directory.CreateDirectory(workingDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "armor_source.nif"), "mesh");
+        await File.WriteAllTextAsync(Path.Combine(outputDirectory, "armor_generated.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.Single(results);
+            Assert.All(results, r => Assert.True(r.Success));
+            Assert.Contains(results, r => r.OutputDirectory.Contains("armor_source", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -5724,6 +6007,78 @@ public sealed class BinaryPluginRewriteServiceTests
         Assert.Equal(24, BinaryPluginRewriteService.DetectHeaderSize(bytes));
     }
 
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlagAndFeFormId_ReturnsEspfe()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x000FE123u);
+        Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlag_AndMixedFormIds_ReturnsEspfeWhenAnyFeRecordExists()
+    {
+        var bytes = BuildPluginWithArmaFormIds(0x00000200u, 0x00012345u, 0x000FE222u);
+        Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EslExtension_ReturnsEsl()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("ESL-light", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EsmExtension_ReturnsEsm()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0x00000001u);
+        Assert.Equal("ESM", BasicPluginAnalysisService.DetectPluginKind("Test.esm", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithoutLightFlag_ReturnsEsp()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("ESP", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EspWithLightFlagButNoFeFormId_DoesNotReturnEspfe()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+        Assert.Equal("AMBIGUOUS", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
+    public void ClassifyPluginKind_ReturnsConfidenceAndReasons()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x000FE123u);
+        var classification = BasicPluginAnalysisService.ClassifyPluginKind("Test.esp", bytes);
+
+        Assert.Equal("ESPFE", classification.Type);
+        Assert.True(classification.Confidence > 0.90d);
+        Assert.Contains(classification.Reasons, reason => reason.Contains("ESL flag present", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(classification.Reasons, reason => reason.Contains("FE range detected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ClassifyPluginKind_LightFlagWithoutFeEvidence_ReturnsAmbiguous()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+        var classification = BasicPluginAnalysisService.ClassifyPluginKind("Test.esp", bytes);
+
+        Assert.Equal("AMBIGUOUS", classification.Type);
+        Assert.True(classification.Confidence < 0.80d);
+        Assert.Contains(classification.Reasons, reason => reason.Contains("not yet resolved", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void DetectPluginKind_UnknownExtensionWithoutFlags_ReturnsUnknown()
+    {
+        var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("UNKNOWN", BasicPluginAnalysisService.DetectPluginKind("Test.mod", bytes));
+    }
+
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
 
     [Fact]
@@ -5744,6 +6099,42 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Equal(0, rewritten);
         Assert.Equal(data, newData);
+    }
+
+    private static byte[] BuildTes4HeaderWithFlags(uint flags)
+    {
+        var bytes = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(bytes, 0);
+        BitConverter.TryWriteBytes(bytes.AsSpan(8), flags);
+        return bytes;
+    }
+
+    private static byte[] BuildPluginWithArmaFormId(uint tes4Flags, uint armaFormId)
+    {
+        return BuildPluginWithArmaFormIds(tes4Flags, armaFormId);
+    }
+
+    private static byte[] BuildPluginWithArmaFormIds(uint tes4Flags, params uint[] armaFormIds)
+    {
+        var pluginBytes = new List<byte>(BuildTes4HeaderWithFlags(tes4Flags));
+        foreach (var formId in armaFormIds)
+        {
+            var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TestArmor\0"));
+            var arma = BuildFlatRecordForTests("ARMA", armaData, formId);
+            pluginBytes.AddRange(arma);
+        }
+
+        return [.. pluginBytes];
+    }
+
+    private static byte[] BuildFlatRecordForTests(string tag, byte[] data, uint formId, uint flags = 0u)
+    {
+        var header = new byte[24];
+        System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]).CopyTo(header, 0);
+        BitConverter.TryWriteBytes(header.AsSpan(4), (uint)data.Length);
+        BitConverter.TryWriteBytes(header.AsSpan(8), flags);
+        BitConverter.TryWriteBytes(header.AsSpan(12), formId);
+        return [.. header, .. data];
     }
 
     [Fact]
@@ -9008,7 +9399,7 @@ public sealed class LocalExportServiceGroundMeshTests
     }
 
     [Fact]
-    public async Task ExportAsync_WithGroundMeshGen_WritesGroundNifForEachConvertedMesh()
+    public async Task ExportAsync_WithGroundMeshGen_WritesUnweightedGroundNif()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -9026,9 +9417,8 @@ public sealed class LocalExportServiceGroundMeshTests
                 .Where(f => f.EndsWith("_ground.nif", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            Assert.Equal(2, groundNifs.Count);
-            Assert.Contains(groundNifs, p => p.EndsWith("iron_0_ground.nif", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(groundNifs, p => p.EndsWith("iron_1_ground.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Single(groundNifs);
+            Assert.Contains(groundNifs, p => p.EndsWith("iron_ground.nif", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -9194,7 +9584,7 @@ public sealed class LocalExportServiceGroundMeshTests
             var (_, files) = await RunExportAsync(service, nifPath, tmpDir, "CBBE");
 
             var firstPersonMesh = files.FirstOrDefault(f => f.EndsWith(
-                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_0_1stperson.nif",
+                $"{Path.DirectorySeparatorChar}meshes{Path.DirectorySeparatorChar}slidesmith{Path.DirectorySeparatorChar}cbbe{Path.DirectorySeparatorChar}iron_1stperson_0.nif",
                 StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(firstPersonMesh);
             Assert.True(File.Exists(firstPersonMesh), "Fallback first-person NIF should exist on disk.");
@@ -9746,7 +10136,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
 
     private sealed class TestRigidImporter : IArmorImportService
     {
-        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken ct) =>
+        public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken ct, IReadOnlyList<string>? excludedDirectories = null) =>
             Task.FromResult(new ImportedArmor(inputPath, [inputPath], [], [], []));
     }
     private sealed class TestRigidDetector : IBodyDetectionService
@@ -9871,7 +10261,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
 public sealed class ScratchPluginFirstPersonPathTests
 {
     [Fact]
-    public void Generate_MOD4MOD5_ContainFirstPersonSuffix()
+    public void Generate_MOD4MOD5_ContainFirstPersonTagAndWeightSuffix()
     {
         var svc    = new BasicScratchPluginGeneratorService();
         var result = svc.Generate("Iron Armor", "3BA", ["meshes/slidesmith/3ba/iron_0.nif"], [32], null);
@@ -9888,9 +10278,9 @@ public sealed class ScratchPluginFirstPersonPathTests
         Assert.NotNull(mod4);
         Assert.NotNull(mod5);
 
-        // MOD4 and MOD5 must contain the _1stperson suffix
-        Assert.EndsWith("_1stperson.nif", mod4, StringComparison.OrdinalIgnoreCase);
-        Assert.EndsWith("_1stperson.nif", mod5, StringComparison.OrdinalIgnoreCase);
+        // MOD4 and MOD5 should keep weight suffixes (_0/_1) while inserting the first-person tag.
+        Assert.EndsWith("_1stperson_0.nif", mod4, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("_1stperson_0.nif", mod5, StringComparison.OrdinalIgnoreCase);
 
         // They must NOT equal the equipped mesh path
         Assert.NotEqual(mod2, mod4, StringComparer.OrdinalIgnoreCase);
@@ -9907,7 +10297,7 @@ public sealed class ScratchPluginFirstPersonPathTests
         var bytes = result!.Value.PluginBytes;
         var mod4  = ExtractSubrecordPath(bytes, "MOD4");
         Assert.NotNull(mod4);
-        Assert.Equal("meshes/slidesmith/bhunp/fur_0_1stperson.nif", mod4, ignoreCase: true);
+        Assert.Equal("meshes/slidesmith/bhunp/fur_1stperson_0.nif", mod4, ignoreCase: true);
     }
 
     // Minimal binary search for a named subrecord's null-terminated ASCII path payload.
@@ -10308,6 +10698,39 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task ImportAsync_IgnoresPreviouslyGeneratedOutputTrees()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var generatedDir = Path.Combine(tmpDir, "Converted");
+        Directory.CreateDirectory(tmpDir);
+        Directory.CreateDirectory(generatedDir);
+
+        var sourceMesh = Path.Combine(tmpDir, "armor_0.nif");
+        var sourceTexture = Path.Combine(tmpDir, "DX_MAC_Gwelda.dds");
+        await File.WriteAllBytesAsync(sourceMesh, new byte[64]);
+        await File.WriteAllBytesAsync(sourceTexture, new byte[128]);
+
+        await File.WriteAllTextAsync(Path.Combine(generatedDir, "conversion-manifest.json"), "{}");
+        var generatedShapeData = Path.Combine(generatedDir, "CalienteTools", "BodySlide", "ShapeData", "LoopProject");
+        Directory.CreateDirectory(generatedShapeData);
+        await File.WriteAllBytesAsync(Path.Combine(generatedShapeData, "armor_0.nif"), new byte[64]);
+        await File.WriteAllBytesAsync(Path.Combine(generatedDir, "DX_MAC_Gwelda_n.dds"), new byte[128]);
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(armor.MeshFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(armor.TextureFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_CustomBodyProfileFile_UsesCustomDetectionAndTargetSettings()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10349,7 +10772,8 @@ public sealed class CustomBodyProfileSupportTests
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
-            Assert.Contains("malebody_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains(@"CalienteTools\BodySlide\ShapeData\myfollower_armor\myfollower_armor_0.nif", ospXml, StringComparison.Ordinal);
+            Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
             Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));
             Assert.False(File.Exists(Path.Combine(outputDir, "cbpc-config.xml")));

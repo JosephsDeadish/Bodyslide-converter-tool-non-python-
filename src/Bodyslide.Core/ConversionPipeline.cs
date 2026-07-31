@@ -25,7 +25,8 @@ public sealed record ConversionRequest(
     bool GenerateBodySlideFiles = true,
     IReadOnlyList<string>? CustomProfilePaths = null,
     string? WorldDropModeOverride = null,
-    string? SkeletonNifPath = null);
+    string? SkeletonNifPath = null,
+    string? SharedPluginOutputDirectory = null);
 public sealed record ConversionPreset(string Name, string TargetBody, string DeformationProfile, string PhysicsProfile);
 internal sealed record NormalizedConversionRequest(ConversionRequest Request, ConversionPreset? Preset, string DisplayName, string OutputSegment);
 
@@ -282,7 +283,76 @@ public sealed record PluginAnalysisResult(
     IReadOnlyList<string> ScannedPlugins,
     IReadOnlyList<PluginArmorAddon> ArmorAddons,
     string PatchGuidance,
-    IReadOnlyList<PluginArmorRecord>? ArmorRecords = null);
+    IReadOnlyList<PluginArmorRecord>? ArmorRecords = null,
+    IReadOnlyList<string>? AmbiguousPlugins = null);
+
+/// <summary>
+/// Plugin type classification payload with confidence and reasons for diagnostics.
+/// </summary>
+public sealed record PluginTypeClassification(
+    string Type,
+    double Confidence,
+    IReadOnlyList<string> Reasons);
+
+/// <summary>
+/// Describes what a consumer should do when a plugin cannot be classified with certainty.
+/// </summary>
+public enum PluginFallbackStrategy
+{
+    /// <summary>Plugin is well-understood — proceed with normal processing.</summary>
+    Proceed,
+
+    /// <summary>
+    /// Plugin type is AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
+    /// Automated conversion and rewrite must not proceed; user must resolve the
+    /// ambiguity manually before any assumptions are made.
+    /// </summary>
+    SafeMode,
+
+    /// <summary>
+    /// Plugin type is UNKNOWN — the header could not be read or the format was
+    /// not recognised.  Skip this cycle and queue the plugin for a re-scan once
+    /// more information is available.
+    /// </summary>
+    Rescan,
+}
+
+/// <summary>
+/// Centralised enforcement point that all consumers (converter, patch generator,
+/// batch processor, UI) call to decide how to handle a plugin whose type string
+/// was produced by <see cref="BasicPluginAnalysisService.ClassifyPluginKind"/>.
+///
+/// Rule table:
+///   AMBIGUOUS → <see cref="PluginFallbackStrategy.SafeMode"/>  (conflicting evidence)
+///   UNKNOWN   → <see cref="PluginFallbackStrategy.Rescan"/>    (no evidence at all)
+///   anything else → <see cref="PluginFallbackStrategy.Proceed"/>
+/// </summary>
+public static class PluginClassifierGate
+{
+    /// <summary>Returns true when the plugin type cannot be determined with certainty.</summary>
+    public static bool ShouldBlockAutoConversion(string? type) =>
+        GetFallbackStrategy(type) != PluginFallbackStrategy.Proceed;
+
+    /// <summary>Returns true when the plugin carries conflicting classification signals.</summary>
+    public static bool IsAmbiguous(string? type) =>
+        string.Equals(type, "AMBIGUOUS", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Returns true when the plugin could not be read or its format was unrecognised.</summary>
+    public static bool IsUnknown(string? type) =>
+        string.Equals(type, "UNKNOWN", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns the fallback strategy a consumer should apply for the given plugin type.
+    /// AMBIGUOUS → SafeMode; UNKNOWN → Rescan; all other types → Proceed.
+    /// </summary>
+    public static PluginFallbackStrategy GetFallbackStrategy(string? type) =>
+        type switch
+        {
+            "AMBIGUOUS" => PluginFallbackStrategy.SafeMode,
+            "UNKNOWN"   => PluginFallbackStrategy.Rescan,
+            _           => PluginFallbackStrategy.Proceed,
+        };
+}
 
 /// <summary>
 /// Outcome of the binary plugin rewrite pass: how many plugins were processed,
@@ -476,7 +546,21 @@ public static class PhysicsProfileCatalog
             ["Vanilla"] = "none",
         };
 
+    /// <summary>
+    /// Canonical physics engine profile identifiers.
+    /// Any profile can be applied to any body via the Physics override option.
+    /// </summary>
     public static IReadOnlyList<string> All { get; } = ["none", "cbpc", "smp", "smp+cbpc"];
+
+    /// <summary>Short human-readable description for each physics profile, used in the catalog tab.</summary>
+    public static IReadOnlyDictionary<string, string> Descriptions { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["none"]      = "No soft-body bone injection. Armor uses static mesh weights only; safe for all bodies.",
+            ["cbpc"]      = "CBPC (C++ Based Physics for Cloth) bone injection. Fast CPU-side soft-body simulation; lighter mod requirement.",
+            ["smp"]       = "Spriggan MeshPhysics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
+            ["smp+cbpc"]  = "Soft Body (CBPC + SMP). Combined SMP + CBPC bone injection with full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
+        };
 
     public static bool TryNormalize(string? value, out string normalized)
     {
@@ -489,14 +573,28 @@ public static class PhysicsProfileCatalog
         var candidate = value.Trim().ToLowerInvariant();
         normalized = candidate switch
         {
-            "none" => "none",
-            "cbpc" => "cbpc",
-            "smp" => "smp",
-            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp" => "smp+cbpc",
+            "none"                                                  => "none",
+            "cbpc"                                                  => "cbpc",
+            "smp"                                                   => "smp",
+            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp"  => "smp+cbpc",
+            // "soft-body" is a behavior-facing alias; it normalises to canonical smp+cbpc.
+            "soft-body" or "soft body" or "softbody" or "soft_body" or "soft body (cbpc + smp)" => "smp+cbpc",
             _ => string.Empty
         };
 
         return normalized.Length > 0;
+    }
+
+    public static string ToDisplayName(string? profile)
+    {
+        if (!TryNormalize(profile, out var normalized))
+        {
+            return profile?.Trim() ?? string.Empty;
+        }
+
+        return string.Equals(normalized, "smp+cbpc", StringComparison.OrdinalIgnoreCase)
+            ? "Soft Body (CBPC + SMP)"
+            : normalized;
     }
 
     public static string GetDefaultForTargetBody(string? targetBody) =>
@@ -692,29 +790,292 @@ public static class BodyTypeCatalog
 }
 
 /// <summary>
+/// Semantic physics-bone descriptor used for cross-body conversion.
+/// </summary>
+public sealed record PhysicsBoneSemanticDefinition(
+    string Group,
+    IReadOnlyDictionary<string, string>? Sides = null,
+    string? Bone = null);
+
+/// <summary>
+/// Engine capability support flags for a semantic physics-bone slot.
+/// </summary>
+public sealed record PhysicsBoneCapabilityDefinition(
+    bool Smp = true,
+    bool Cbpc = true,
+    bool Collision = true);
+
+/// <summary>
 /// Human-readable body reference data used by CLI/GUI catalog views.
+/// <para><see cref="DefaultPhysics"/> reflects the physics profile applied automatically when this body
+/// is chosen as the conversion target without an explicit physics override.  Bodies with
+/// <c>"none"</c> still expose <see cref="AvailablePhysicsBones"/> that become active whenever the
+/// user selects a non-none physics profile override (cbpc, smp, smp+cbpc / soft-body).</para>
 /// </summary>
 public sealed record BodyTechnicalProfileInfo(
     string Name,
     string SkeletonFoundation,
-    IReadOnlyList<string> SoftBodyBones,
-    string Notes);
+    /// <summary>
+    /// Bones available for soft-body physics on this body type.
+    /// These are only active by default when <see cref="DefaultPhysics"/> is not <c>"none"</c>.
+    /// They can be activated on any body via a physics profile override.
+    /// </summary>
+    IReadOnlyList<string> AvailablePhysicsBones,
+    string Notes,
+    /// <summary>
+    /// The physics profile applied automatically for this body. One of: none, cbpc, smp, smp+cbpc.
+    /// Any body can use any profile via the Physics override option.
+    /// </summary>
+    string DefaultPhysics)
+{
+    private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
+        new(@"[^a-z0-9]+", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition>? _physicsBoneMap;
+    private IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition>? _physicsCapabilityMap;
+    private IReadOnlyDictionary<string, IReadOnlyList<string>>? _physicsBoneGroups;
+
+    /// <summary>
+    /// Backward-compatible alias for <see cref="AvailablePhysicsBones"/>.
+    /// Prefer <see cref="AvailablePhysicsBones"/> in new code.
+    /// </summary>
+    public IReadOnlyList<string> SoftBodyBones => AvailablePhysicsBones;
+
+    /// <summary>True when physics bones are active by default for this body (DefaultPhysics is not "none").</summary>
+    public bool HasSoftBodyPhysicsByDefault => !string.Equals(DefaultPhysics, "none", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when this body type supports physics-capable bones, regardless of its default profile.</summary>
+    public bool SupportsPhysics => AvailablePhysicsBones.Count > 0;
+
+    /// <summary>Bone set required for physics-enabled conversion output on this body.</summary>
+    public IReadOnlyList<string> RequiredPhysicsBones => AvailablePhysicsBones;
+
+    /// <summary>
+    /// Recommended canonical physics profile for this body. Bodies with no active default but physics support
+    /// still recommend smp+cbpc for broad compatibility.
+    /// </summary>
+    public string RecommendedPhysicsProfile =>
+        !string.Equals(DefaultPhysics, "none", StringComparison.OrdinalIgnoreCase)
+            ? DefaultPhysics
+            : SupportsPhysics
+                ? "smp+cbpc"
+                : "none";
+
+    /// <summary>
+    /// Structured semantic map used for cross-body conversion.
+    /// Example: breast.left/right -> raw bone names grouped by semantic region.
+    /// </summary>
+    public IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> PhysicsBoneMap =>
+        _physicsBoneMap ??=
+            BuildSemanticPhysicsBoneMap(RequiredPhysicsBones);
+
+    /// <summary>
+    /// Capability support per semantic physics slot.
+    /// Example: breast => supports SMP/CBPC/collision.
+    /// </summary>
+    public IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition> PhysicsCapabilityMap =>
+        _physicsCapabilityMap ??=
+            BuildPhysicsCapabilityMap(RequiredPhysicsBones);
+
+    /// <summary>
+    /// Optional grouped view computed from <see cref="PhysicsBoneMap"/>.
+    /// Group names: Breast, Butt, Belly, Genitals, Hair, Other.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneGroups =>
+        _physicsBoneGroups ??=
+            PhysicsBoneMap
+                .SelectMany(static pair => EnumerateSemanticBones(pair.Value)
+                    .Select(bone => (Group: pair.Value.Group, Bone: bone)))
+                .Distinct()
+                .GroupBy(static item => item.Group, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    static g => g.Key,
+                    static g => (IReadOnlyList<string>)g
+                        .Select(static item => item.Bone)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
+        IReadOnlyList<string> requiredBones)
+    {
+        var builders = new Dictionary<string, SemanticBoneBuilder>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawBone in requiredBones.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var slot = ClassifySemanticSlot(rawBone);
+            if (!builders.TryGetValue(slot.Key, out var builder))
+            {
+                builder = new SemanticBoneBuilder(slot.Group);
+                builders[slot.Key] = builder;
+            }
+
+            if (slot.Side is not null)
+            {
+                builder.Sides[slot.Side] = rawBone;
+            }
+            else if (builder.Bone is null)
+            {
+                builder.Bone = rawBone;
+            }
+        }
+
+        return builders.ToDictionary(
+            static pair => pair.Key,
+            static pair => pair.Value.Build(),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, PhysicsBoneCapabilityDefinition> BuildPhysicsCapabilityMap(
+        IReadOnlyList<string> requiredBones)
+    {
+        var capabilities = new Dictionary<string, PhysicsBoneCapabilityDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawBone in requiredBones.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var slot = ClassifySemanticSlot(rawBone);
+            if (capabilities.TryGetValue(slot.Key, out var existing))
+            {
+                capabilities[slot.Key] = new PhysicsBoneCapabilityDefinition(
+                    Smp: existing.Smp || slot.SupportSmp,
+                    Cbpc: existing.Cbpc || slot.SupportCbpc,
+                    Collision: existing.Collision || slot.SupportCollision);
+                continue;
+            }
+
+            capabilities[slot.Key] = new PhysicsBoneCapabilityDefinition(
+                Smp: slot.SupportSmp,
+                Cbpc: slot.SupportCbpc,
+                Collision: slot.SupportCollision);
+        }
+
+        return capabilities;
+    }
+
+    private static SemanticBoneSlot ClassifySemanticSlot(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        var side = DetectSide(lower);
+        var sideLabel = side switch
+        {
+            "_L" => "left",
+            "_R" => "right",
+            _ => null
+        };
+
+        if (lower.Contains("breast", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("breast", "soft_body", sideLabel, true, true, true);
+        }
+
+        if (lower.Contains("pec", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("breast", "soft_body", sideLabel, true, true, true);
+        }
+
+        if (lower.Contains("butt", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("butt", "soft_body", sideLabel, true, true, true);
+        }
+
+        if (lower.Contains("belly", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("belly", "soft_body", null, true, true, true);
+        }
+
+        if (lower.Contains("genital", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("genitals", "genitals", sideLabel, true, false, false);
+        }
+
+        if (lower.Contains("hair", StringComparison.Ordinal))
+        {
+            return new SemanticBoneSlot("hair", "hair", sideLabel, true, false, false);
+        }
+
+        var safe = SemanticBoneSanitizer.Replace(lower, "_").Trim('_');
+        return new SemanticBoneSlot(
+            string.IsNullOrWhiteSpace(safe) ? "physics" : safe,
+            "other",
+            null,
+            true,
+            true,
+            false);
+    }
+
+    private static string DetectSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" left", StringComparison.Ordinal))
+        {
+            return "_L";
+        }
+
+        if (lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" right", StringComparison.Ordinal))
+        {
+            return "_R";
+        }
+
+        return string.Empty;
+    }
+
+    private sealed class SemanticBoneBuilder(string group)
+    {
+        public Dictionary<string, string> Sides { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? Bone { get; set; }
+
+        public PhysicsBoneSemanticDefinition Build() =>
+            new(
+                Group: group,
+                Sides: Sides.Count > 0 ? new Dictionary<string, string>(Sides, StringComparer.OrdinalIgnoreCase) : null,
+                Bone: Bone);
+    }
+
+    private static IEnumerable<string> EnumerateSemanticBones(PhysicsBoneSemanticDefinition definition)
+    {
+        if (!string.IsNullOrWhiteSpace(definition.Bone))
+        {
+            yield return definition.Bone;
+        }
+
+        if (definition.Sides is null)
+        {
+            yield break;
+        }
+
+        foreach (var sideBone in definition.Sides.Values.Where(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            yield return sideBone;
+        }
+    }
+
+    private readonly record struct SemanticBoneSlot(
+        string Key,
+        string Group,
+        string? Side,
+        bool SupportSmp,
+        bool SupportCbpc,
+        bool SupportCollision);
+}
 
 public static class BodyTechnicalProfileCatalog
 {
     private static readonly IReadOnlyDictionary<string, BodyTechnicalProfileInfo> Profiles =
         new Dictionary<string, BodyTechnicalProfileInfo>(StringComparer.OrdinalIgnoreCase)
         {
-            ["CBBE"] = new("CBBE", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Baseline female body with predictable topology and broad armor support."),
-            ["3BA"] = new("3BA", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"], "CBBE topology with extended soft-body physics weighting."),
-            ["BHUNP"] = new("BHUNP", "XPMSSE", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"], "UUNP-family topology with broad regional weight painting and advanced physics."),
-            ["UNP"] = new("UNP", "XPMSSE", ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Legacy female body family with lighter physics chain requirements."),
-            ["TBD"] = new("TBD", "XPMSSE", ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"], "Female body variant commonly used with CBPC-style setups."),
-            ["HIMBO"] = new("HIMBO", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"], "Modern male body with pec-driven physics."),
-            ["SAM"] = new("SAM", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"], "Male body ecosystem with custom shape presets and SMP support."),
-            ["SOS"] = new("SOS", "XPMSSE", ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"], "Male body setup with genital bone support layered on XPMSSE."),
-            ["UBE"] = new("UBE", "XPMSSE + custom UBE bones", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping is preferred over strict name-only mapping."),
-            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton", ["NPC Belly"], "Baseline Skyrim body data with minimal soft-body weighting."),
+            // DefaultPhysics mirrors PhysicsProfileCatalog.BuiltInDefaults.
+            // AvailablePhysicsBones lists all bones that become active when a soft-body physics
+            // profile is applied — even for bodies whose default is "none".
+            ["CBBE"]    = new("CBBE",    "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                      "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.", "none"),
+            ["3BA"]     = new("3BA",     "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",                                                                                            "smp+cbpc"),
+            ["BHUNP"]   = new("BHUNP",   "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",                                                                       "smp+cbpc"),
+            ["UNP"]     = new("UNP",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",                                                                                       "cbpc"),
+            ["TBD"]     = new("TBD",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",                                                                                               "cbpc"),
+            ["HIMBO"]   = new("HIMBO",   "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Modern male body with pec-driven physics. SMP enabled by default.",                                                                                                                "smp"),
+            ["SAM"]     = new("SAM",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",                                                                                            "smp"),
+            ["SOS"]     = new("SOS",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],                                                                                                                                "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",                                                                                             "smp"),
+            ["UBE"]     = new("UBE",     "XPMSSE + custom UBE bones",["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",                                                          "smp+cbpc"),
+            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton",  ["NPC Belly"],                                                                                                                                                                                                                  "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",                                           "none"),
         };
 
     public static bool TryGet(string bodyName, out BodyTechnicalProfileInfo profile) =>
@@ -2022,7 +2383,7 @@ internal static class CustomBodyProfileSupport
 
 public interface IArmorImportService
 {
-    Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken);
+    Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null);
 }
 
 public interface IBodyDetectionService
@@ -2330,7 +2691,8 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"deformation-profile:{deformationProfile}");
             }
 
-            armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken);
+            var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
+            armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories);
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
@@ -2413,6 +2775,15 @@ public sealed class ConversionOrchestrator(
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
                 steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
+            }
+
+            // Emit a dedicated warning step for every plugin whose type could not be
+            // resolved with certainty (ESL flag set but no FE-range FormID evidence).
+            // The rewrite stage honours this flag and skips ambiguous plugins rather
+            // than making assumptions about whether they behave as ESPFE or plain ESP.
+            if (pluginAnalysis.AmbiguousPlugins is { Count: > 0 })
+            {
+                steps.Add($"plugin-ambiguous-warning:{pluginAnalysis.AmbiguousPlugins.Count}");
             }
 
             if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
@@ -2704,6 +3075,25 @@ public sealed class ConversionOrchestrator(
 
         return PhysicsProfileCatalog.GetDefaultForTargetBody(request.TargetBody);
     }
+
+    private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
+    {
+        var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.OutputDirectory));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.SharedPluginOutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.SharedPluginOutputDirectory));
+        }
+
+        exclusions.Add(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output")));
+
+        return exclusions.ToList();
+    }
 }
 
 public sealed class ConversionInspector(
@@ -2833,7 +3223,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
-        var meshFiles = Directory.GetFiles(sourceDirectory, "*.nif", SearchOption.AllDirectories)
+        var excludedDirectories = BuildExcludedScanDirectories(request);
+        var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories)
             .Where(IsConvertibleBatchMesh)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -2843,17 +3234,28 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             throw new InvalidDataException($"No convertible armor .nif files were found in '{request.InputPath}'.");
         }
 
+        // Deduplicate _0/_1 weight-variant pairs: keep one representative per pair so that
+        // LocalArmorImportService can locate the sibling and both halves land in the same
+        // per-armor output folder instead of being split across separate sub-directories.
+        var processableMeshFiles = meshFiles
+            .GroupBy(
+                f => StripWeightSuffix(Path.GetFileNameWithoutExtension(f) ?? string.Empty),
+                StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).First())
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         if (variants.Count <= 1)
         {
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
                 Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
-            var resultsWithPaths = await ConvertMeshSetAsync(meshFiles, variant.Request, rootOutput, meshFiles.Count, progress, cancellationToken);
+            var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             return resultsWithPaths.Select(x => x.Result).ToList();
         }
 
-        var total = meshFiles.Count * variants.Count;
+        var total = processableMeshFiles.Count * variants.Count;
         var completed = 0;
         var allResults = new List<ConversionResult>(total);
 
@@ -2861,7 +3263,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
             var resultsWithPaths = await ConvertMeshSetAsync(
-                meshFiles,
+                processableMeshFiles,
                 variant.Request,
                 variantRootOutput,
                 total,
@@ -2900,8 +3302,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             },
             async (meshFile, ct) =>
             {
-                var perArmorOutput = Path.Combine(rootOutput, Path.GetFileNameWithoutExtension(meshFile));
-                var perArmorRequest = request with { InputPath = meshFile, OutputDirectory = perArmorOutput };
+                var baseStem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
+                var perArmorOutput = Path.Combine(rootOutput, baseStem);
+                var perArmorRequest = request with
+                {
+                    InputPath = meshFile,
+                    OutputDirectory = perArmorOutput,
+                    SharedPluginOutputDirectory = rootOutput
+                };
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
                 resultBag.Add((meshFile, result));
 
@@ -2930,6 +3338,163 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return batchMode
             ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
             : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
+    }
+
+    private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
+    {
+        var exclusions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(request.OutputDirectory))
+        {
+            exclusions.Add(Path.GetFullPath(request.OutputDirectory));
+        }
+
+        var defaultOutputRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output"));
+        exclusions.Add(defaultOutputRoot);
+
+        return exclusions.ToList();
+    }
+
+    internal static class SourceScanEnumerator
+    {
+        private static readonly string[] ConverterMarkerFiles =
+        [
+            "conversion-manifest.json",
+            "conversion-quality.json",
+            "dependency-map.json",
+            "morphs.json",
+            "physics.json",
+            "skeleton-compatibility.json",
+            "plugin-patches.json",
+            "patch-armor.pas",
+            "armor-pack-validation.json",
+            "batch-report.json"
+        ];
+
+        public static IReadOnlyList<string> EnumerateFiles(
+            string path,
+            IReadOnlyCollection<string> extensions,
+            IReadOnlyList<string>? excludedDirectories = null)
+        {
+            if (File.Exists(path))
+            {
+                return extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
+                    ? [Path.GetFullPath(path)]
+                    : [];
+            }
+
+            if (!Directory.Exists(path))
+            {
+                return [];
+            }
+
+            var files = new List<string>();
+            var pending = new Stack<string>();
+            pending.Push(Path.GetFullPath(path));
+
+            while (pending.Count > 0)
+            {
+                var directory = pending.Pop();
+                foreach (var childDirectory in Directory.EnumerateDirectories(directory))
+                {
+                    if (ShouldSkipDirectory(childDirectory, excludedDirectories))
+                    {
+                        continue;
+                    }
+
+                    pending.Push(childDirectory);
+                }
+
+                foreach (var file in Directory.EnumerateFiles(directory))
+                {
+                    if (extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                    {
+                        files.Add(Path.GetFullPath(file));
+                    }
+                }
+            }
+
+            return files
+                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool ShouldSkipDirectory(string directoryPath, IReadOnlyList<string>? excludedDirectories)
+        {
+            if (IsPathInsideAnyDirectory(directoryPath, excludedDirectories))
+            {
+                return true;
+            }
+
+            var normalizedPath = Path.GetFullPath(directoryPath).Replace('\\', '/');
+            if (normalizedPath.Contains("/calientetools/bodyslide", StringComparison.OrdinalIgnoreCase) ||
+                normalizedPath.Contains("/meshes/slidesmith", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (ContainsConverterMarkers(directoryPath))
+            {
+                return true;
+            }
+
+            var directoryName = Path.GetFileName(directoryPath);
+            if (string.Equals(directoryName, "Converted", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(directoryName, "output", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ContainsConverterMarkers(string directoryPath) =>
+            ConverterMarkerFiles.Any(file =>
+                File.Exists(Path.Combine(directoryPath, file)));
+
+        private static bool IsPathInsideAnyDirectory(string path, IReadOnlyList<string>? directories)
+        {
+            if (directories is null || directories.Count == 0)
+            {
+                return false;
+            }
+
+            return directories.Any(directory => IsPathInsideDirectory(path, directory));
+        }
+
+        private static bool IsPathInsideDirectory(string path, string? directoryPath)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return false;
+            }
+
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(fullPath, fullDirectory, comparison))
+            {
+                return true;
+            }
+
+            return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
+                   fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
+        }
+    }
+
+    /// <summary>
+    /// Strips a <c>_0</c> or <c>_1</c> weight-variant suffix from a NIF stem so that both
+    /// halves of a pair are placed in the same output folder rather than separate sub-directories.
+    /// </summary>
+    private static string StripWeightSuffix(string stem)
+    {
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            return stem[..^2];
+        }
+
+        return stem;
     }
 
     private static bool IsConvertibleBatchMesh(string path)
@@ -3595,12 +4160,9 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         WriteSubrecord(armaDataMs, "MOD3", System.Text.Encoding.ASCII.GetBytes(primaryPath + '\0'));
 
         // 1st-person mesh (MOD4 = male 1st-person, MOD5 = female 1st-person).
-        // Skyrim loads a separate NIF for the first-person camera; we derive its path by
-        // inserting the "_1stperson" suffix before the file extension. The export step stages
-        // a fallback copy at that path so the generated plugin is immediately usable.
-        var fpExt           = Path.GetExtension(primaryPath);                    // ".nif"
-        var fpStem          = primaryPath[..^fpExt.Length];                      // "meshes/slidesmith/..."
-        var firstPersonPath = $"{fpStem}_1stperson{fpExt}";                     // "..._1stperson.nif"
+        // Preserve Skyrim weight-suffix layout (_0/_1 at the end) so file names remain
+        // game-compatible and avoid names like "..._0_1stperson.nif".
+        var firstPersonPath = BuildFirstPersonMeshPath(primaryPath);
         WriteSubrecord(armaDataMs, "MOD4", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
         WriteSubrecord(armaDataMs, "MOD5", System.Text.Encoding.ASCII.GetBytes(firstPersonPath + '\0'));
 
@@ -3766,6 +4328,28 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         var bits = BitConverter.GetBytes(v);
         if (!BitConverter.IsLittleEndian) Array.Reverse(bits);
         ms.Write(bits);
+    }
+
+    private static string BuildFirstPersonMeshPath(string primaryPath)
+    {
+        var extension = Path.GetExtension(primaryPath);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return primaryPath + "_1stperson";
+        }
+
+        var stem = primaryPath[..^extension.Length];
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^2] + "_1stperson" + stem[^2..];
+        }
+        else
+        {
+            stem += "_1stperson";
+        }
+
+        return stem + extension;
     }
 
     // Sanitises a string to a valid Bethesda editor ID (ASCII alphanumeric + underscore, ≤255).
@@ -3956,7 +4540,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
     private static bool IsPluginFile(string path) =>
         PluginFileExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
-    public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken)
+    public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null)
     {
         var fullInputPath = Path.GetFullPath(inputPath);
         var sourcePath = fullInputPath;
@@ -3975,16 +4559,28 @@ internal sealed class LocalArmorImportService : IArmorImportService
             sourcePath = ResolveSupportScanRoot(fullInputPath);
         }
 
-        var meshFiles = EnumerateFiles(sourcePath, [".nif"]);
+        var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories);
+
+        // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
+        // sibling half so the full pair is processed together and weight interpolation works.
+        if (File.Exists(fullInputPath) && meshFiles.Count == 1)
+        {
+            var sibling = FindWeightSibling(fullInputPath);
+            if (sibling is not null)
+            {
+                meshFiles = [fullInputPath, sibling];
+            }
+        }
+
         if (meshFiles.Count == 0)
         {
             throw new InvalidDataException("No .nif mesh files were found in the input.");
         }
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"]);
-        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"]);
-        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"])
+        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
+        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"], excludedDirectories);
+        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"], excludedDirectories)
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -3995,7 +4591,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             })
             .ToList();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
-            EnumerateFiles(supportScanRoot, [".json"])
+            EnumerateFiles(supportScanRoot, [".json"], excludedDirectories)
                 .Where(CustomBodyProfileSupport.IsProfileFile)
                 .ToArray());
 
@@ -4042,20 +4638,28 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .ToList();
     }
 
-    private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions)
+    /// <summary>
+    /// Returns the full path of the opposing weight-variant NIF (<c>_0</c>↔<c>_1</c>) that
+    /// sits alongside <paramref name="meshFilePath"/>, or <see langword="null"/> when the
+    /// file does not have a weight suffix or the sibling does not exist on disk.
+    /// </summary>
+    private static string? FindWeightSibling(string meshFilePath)
     {
-        if (File.Exists(path))
-        {
-            return extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
-                ? [Path.GetFullPath(path)]
-                : [];
-        }
-
-        return Directory.GetFiles(path, "*.*", SearchOption.AllDirectories)
-            .Where(file => extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var dir = Path.GetDirectoryName(meshFilePath);
+        if (string.IsNullOrEmpty(dir)) return null;
+        var stem = Path.GetFileNameWithoutExtension(meshFilePath);
+        var ext  = Path.GetExtension(meshFilePath);
+        string? siblingName =
+            stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ? stem[..^2] + "_1" + ext :
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase) ? stem[..^2] + "_0" + ext :
+            null;
+        if (siblingName is null) return null;
+        var siblingPath = Path.Combine(dir, siblingName);
+        return File.Exists(siblingPath) ? Path.GetFullPath(siblingPath) : null;
     }
+
+    private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions, IReadOnlyList<string>? excludedDirectories) =>
+        BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories);
 
     private static string ResolveSupportScanRoot(string sourcePath)
     {
@@ -5887,14 +6491,6 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             ["Vanilla"] = ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
         };
 
-    private static readonly IReadOnlyDictionary<string, string> BodyOutputPaths =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["HIMBO"] = @"meshes\actors\character\character assets male\",
-            ["SAM"]   = @"meshes\actors\character\character assets male\",
-            ["SOS"]   = @"meshes\actors\character\character assets male\"
-        };
-
     private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "HIMBO", "SAM", "SOS"
@@ -5902,9 +6498,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 
     public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
-        var rawName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "ConvertedArmor";
-        var projectName = new string(rawName.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or ' ').ToArray()).Trim();
-        if (string.IsNullOrWhiteSpace(projectName)) projectName = "ConvertedArmor";
+        var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
 
         var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
         var sliders = customProfileFound
@@ -5913,56 +6507,45 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
                 ? bodySliders
                 : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
 
-        var outputPath = customProfileFound && !string.IsNullOrWhiteSpace(customProfile.BodyOutputPath)
-            ? customProfile.BodyOutputPath
-            : BodyOutputPaths.TryGetValue(targetBody, out var builtInOutputPath)
-                ? builtInOutputPath
-                : @"meshes\actors\character\character assets\";
-
         var isMale = customProfileFound
             ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase)
             : MaleBodies.Contains(targetBody);
         var gender = isMale ? "male" : "female";
-        var outputFile0 = isMale ? "malebody_0.nif" : "femalebody_0.nif";
-        var outputFile1 = isMale ? "malebody_1.nif" : "femalebody_1.nif";
-
-        var shapeDataFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
-        var sourceFile = $@"{shapeDataFolder}\{projectName}.nif";
-
-        var ospXml = BuildOspXml(projectName, sliders, shapeDataFolder, sourceFile, outputPath, gender, outputFile0, outputFile1);
+        var ospXml = BuildOspXml(sliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
 
         return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml));
     }
 
     private static string BuildOspXml(
-        string projectName,
         IReadOnlyList<string> sliders,
-        string setFolder,
-        string sourceFile,
-        string outputPath,
-        string gender,
-        string outputFile0,
-        string outputFile1)
+        IReadOnlyList<BodySlideMeshTarget> targets,
+        string gender)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<SliderSetInfo version=\"1\">");
-        sb.AppendLine($"    <SliderSet name=\"{Escape(projectName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
-        sb.AppendLine($"        <SetFolder>{Escape(setFolder)}</SetFolder>");
-        sb.AppendLine($"        <SourceFile>{Escape(sourceFile)}</SourceFile>");
-        sb.AppendLine($"        <OutputPath>{Escape(outputPath)}</OutputPath>");
-        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(outputFile0)}</OutputFile>");
-        sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(outputFile1)}</OutputFile>");
-
-        foreach (var slider in sliders)
+        foreach (var target in targets)
         {
-            sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
-            sb.AppendLine("            <Low value=\"0\" />");
-            sb.AppendLine("            <High value=\"100\" />");
-            sb.AppendLine("        </Slider>");
-        }
+            sb.AppendLine($"    <SliderSet name=\"{Escape(target.SliderSetName)}\" baseShape=\"Base Shape\" bsversion=\"20\">");
+            sb.AppendLine($"        <SetFolder>{Escape(target.SetFolder)}</SetFolder>");
+            sb.AppendLine($"        <SourceFile>{Escape(target.SourceFile)}</SourceFile>");
+            sb.AppendLine($"        <OutputPath>{Escape(target.OutputPath)}</OutputPath>");
+            sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(target.OutputFile0)}</OutputFile>");
+            if (!string.IsNullOrWhiteSpace(target.OutputFile1))
+            {
+                sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(target.OutputFile1)}</OutputFile>");
+            }
 
-        sb.AppendLine("    </SliderSet>");
+            foreach (var slider in sliders)
+            {
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
+                sb.AppendLine("            <Low value=\"0\" />");
+                sb.AppendLine("            <High value=\"100\" />");
+                sb.AppendLine("        </Slider>");
+            }
+
+            sb.AppendLine("    </SliderSet>");
+        }
         sb.AppendLine("</SliderSetInfo>");
         return sb.ToString();
     }
@@ -5970,6 +6553,219 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
     // Minimal XML attribute/content escaping for values embedded in the OSP document.
     private static string Escape(string value) =>
         value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+}
+
+internal sealed record BodySlideMeshTarget(
+    string SliderSetName,
+    string SetFolder,
+    string SourceFile,
+    string OutputPath,
+    string OutputFile0,
+    string? OutputFile1 = null);
+
+internal static class BodySlideLayoutPlanner
+{
+    public static string BuildProjectName(ImportedArmor armor, string targetBody)
+    {
+        var baseName = BuildProjectBaseName(armor);
+        var safeBaseName = SanitizeToken(baseName);
+        var safeTargetBody = SanitizeToken(targetBody);
+
+        if (!safeBaseName.Contains(safeTargetBody, StringComparison.OrdinalIgnoreCase))
+        {
+            safeBaseName = $"{safeBaseName}_{safeTargetBody}";
+        }
+
+        return safeBaseName;
+    }
+
+    public static IReadOnlyList<BodySlideMeshTarget> BuildTargets(ImportedArmor armor, string projectName)
+    {
+        var setFolder = $@"CalienteTools\BodySlide\ShapeData\{projectName}";
+        var meshInfos = armor.MeshFiles
+            .Select(meshPath => CreateMeshInfo(armor.SourcePath, meshPath))
+            .Where(info => !string.IsNullOrWhiteSpace(info.FileName))
+            .ToList();
+
+        if (meshInfos.Count == 0)
+        {
+            return
+            [
+                new BodySlideMeshTarget(
+                    projectName,
+                    setFolder,
+                    $@"{setFolder}\{projectName}.nif",
+                    @"meshes\",
+                    $"{projectName}.nif")
+            ];
+        }
+
+        return meshInfos
+            .GroupBy(info => $"{info.OutputPath}|{info.GroupName}", StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var items = group.ToList();
+                var primary = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? items[0];
+                var lowVariant = items.FirstOrDefault(static item => item.IsLowWeightVariant) ?? primary;
+                var highVariant = items.FirstOrDefault(static item => item.IsHighWeightVariant);
+                var sliderSetName = meshInfos.Count > 1
+                    ? $"{projectName} - {group.First().GroupName}"
+                    : projectName;
+
+                return new BodySlideMeshTarget(
+                    sliderSetName,
+                    setFolder,
+                    $@"{setFolder}\{primary.FileName}",
+                    lowVariant.OutputPath,
+                    lowVariant.FileName,
+                    highVariant?.FileName);
+            })
+            .ToList();
+    }
+
+    private static MeshInfo CreateMeshInfo(string sourcePath, string meshPath)
+    {
+        var fileName = Path.GetFileName(meshPath) ?? string.Empty;
+        return new MeshInfo(
+            fileName,
+            TrimWeightSuffix(Path.GetFileNameWithoutExtension(fileName) ?? string.Empty),
+            ResolveOutputPath(sourcePath, meshPath),
+            fileName.EndsWith("_0.nif", StringComparison.OrdinalIgnoreCase),
+            fileName.EndsWith("_1.nif", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildProjectBaseName(ImportedArmor armor)
+    {
+        if (!Directory.Exists(armor.SourcePath))
+        {
+            var firstMeshName = armor.MeshFiles.Count > 0
+                ? TrimWeightSuffix(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? string.Empty)
+                : string.Empty;
+            return string.IsNullOrWhiteSpace(firstMeshName) ? "ConvertedArmor" : firstMeshName;
+        }
+
+        var meshDirectories = armor.MeshFiles
+            .Select(Path.GetDirectoryName)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (meshDirectories.Count == 1)
+        {
+            var directoryName = Path.GetFileName(meshDirectories[0]);
+            if (!string.IsNullOrWhiteSpace(directoryName) &&
+                !directoryName.Equals("meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                return directoryName;
+            }
+        }
+
+        var fallbackMeshName = armor.MeshFiles.Count > 0
+            ? TrimWeightSuffix(Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? string.Empty)
+            : string.Empty;
+
+        return string.IsNullOrWhiteSpace(fallbackMeshName) ? "ConvertedArmor" : fallbackMeshName;
+    }
+
+    private static string ResolveOutputPath(string sourcePath, string meshPath)
+    {
+        var meshDirectory = Path.GetDirectoryName(Path.GetFullPath(meshPath));
+        if (string.IsNullOrWhiteSpace(meshDirectory))
+        {
+            return @"meshes\";
+        }
+
+        var segmentedPath = meshDirectory
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        var meshesIndex = Array.FindIndex(segmentedPath, static segment =>
+            segment.Equals("meshes", StringComparison.OrdinalIgnoreCase));
+        if (meshesIndex >= 0)
+        {
+            return EnsureTrailingSlash(string.Join('\\', segmentedPath[meshesIndex..]));
+        }
+
+        var sourceRoot = ResolveSourceRoot(sourcePath);
+        if (Directory.Exists(sourceRoot))
+        {
+            var relativeDirectory = Path.GetRelativePath(sourceRoot, meshDirectory)
+                .Replace('/', '\\')
+                .Trim('\\');
+            if (string.Equals(relativeDirectory, ".", StringComparison.Ordinal))
+            {
+                return @"meshes\";
+            }
+
+            if (!string.IsNullOrWhiteSpace(relativeDirectory) &&
+                !relativeDirectory.StartsWith("..", StringComparison.Ordinal) &&
+                !Path.IsPathRooted(relativeDirectory))
+            {
+                return EnsureTrailingSlash($@"meshes\{relativeDirectory}");
+            }
+        }
+
+        return @"meshes\";
+    }
+
+    private static string ResolveSourceRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return Path.GetFullPath(sourcePath);
+        }
+
+        if (File.Exists(sourcePath))
+        {
+            var sourceDirectory = Path.GetDirectoryName(Path.GetFullPath(sourcePath));
+            if (!string.IsNullOrWhiteSpace(sourceDirectory))
+            {
+                return TryResolveModRootFromMeshesPath(sourceDirectory) ?? sourceDirectory;
+            }
+        }
+
+        return Path.GetFullPath(sourcePath);
+    }
+
+    private static string? TryResolveModRootFromMeshesPath(string startDirectory)
+    {
+        var current = startDirectory;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (string.Equals(Path.GetFileName(current), "meshes", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetDirectoryName(current);
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return null;
+    }
+
+    private static string EnsureTrailingSlash(string path) =>
+        path.EndsWith('\\') ? path : path + '\\';
+
+    private static string TrimWeightSuffix(string value) =>
+        value.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || value.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+            ? value[..^2]
+            : value;
+
+    private static string SanitizeToken(string value)
+    {
+        var sanitized = new string(value
+            .Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or ' ')
+            .ToArray())
+            .Trim()
+            .Replace(' ', '_');
+        return string.IsNullOrWhiteSpace(sanitized) ? "ConvertedArmor" : sanitized;
+    }
+
+    private sealed record MeshInfo(
+        string FileName,
+        string GroupName,
+        string OutputPath,
+        bool IsLowWeightVariant,
+        bool IsHighWeightVariant);
 }
 
 /// <summary>
@@ -6157,18 +6953,7 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
         var root = ResolveSupportRootForScan(sourcePath);
         if (File.Exists(root)) return IsMaterial(root) ? [Path.GetFullPath(root)] : [];
         if (!Directory.Exists(root)) return [];
-
-        var opts = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            MatchCasing = MatchCasing.CaseInsensitive,
-        };
-
-        return Directory.GetFiles(root, "*.*", opts)
-            .Where(IsMaterial)
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(root, [".bgsm", ".bgem"]);
     }
 
     private static string ResolveSupportRootForScan(string sourcePath)
@@ -6217,6 +7002,8 @@ internal sealed class BasicTextureAnalysisService : ITextureAnalysisService
 internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 {
     private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
+    private const uint PluginFlagMaster = 0x00000001u;
+    private const uint PluginFlagLight = 0x00000200u;
 
     public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
@@ -6224,9 +7011,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
 
         if (Directory.Exists(armor.SourcePath))
         {
-            pluginFiles.AddRange(Directory.GetFiles(armor.SourcePath, "*.*", SearchOption.AllDirectories)
-                .Where(f => PluginExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
-                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+            pluginFiles.AddRange(BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(armor.SourcePath, PluginExtensions));
         }
         else if (File.Exists(armor.SourcePath) &&
                  PluginExtensions.Contains(Path.GetExtension(armor.SourcePath), StringComparer.OrdinalIgnoreCase))
@@ -6234,31 +7019,43 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             pluginFiles.Add(armor.SourcePath);
         }
 
-        var armorAddons  = new List<PluginArmorAddon>();
-        var armorRecords = new List<PluginArmorRecord>();
+        var scannedPluginLabels = new List<string>();
+        var armorAddons         = new List<PluginArmorAddon>();
+        var armorRecords        = new List<PluginArmorRecord>();
+        var ambiguousPlugins    = new List<string>();
 
         foreach (var pluginFile in pluginFiles)
         {
-            var (addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
+            var (displayName, plainName, pluginType, addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
+            scannedPluginLabels.Add(displayName);
             armorAddons.AddRange(addons);
             armorRecords.AddRange(records);
+
+            // Track plugins whose type could not be determined with certainty so callers can
+            // flag them for manual recheck rather than silently treating them as a known type.
+            // Store the plain filename (not the label) so callers can match against file paths.
+            if (pluginType == "AMBIGUOUS")
+                ambiguousPlugins.Add(plainName);
         }
 
-        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count);
+        var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count, ambiguousPlugins);
         return new PluginAnalysisResult(
-            pluginFiles.Select(f => Path.GetFileName(f) ?? f).ToList(),
+            scannedPluginLabels,
             armorAddons,
             guidance,
-            armorRecords.Count > 0 ? armorRecords : null);
+            armorRecords.Count > 0 ? armorRecords : null,
+            ambiguousPlugins.Count > 0 ? ambiguousPlugins : null);
     }
 
-    private static async Task<(IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
+    private static async Task<(string DisplayName, string PlainName, string PluginType, IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
         ScanPluginAsync(string pluginPath, CancellationToken cancellationToken)
     {
         try
         {
             var bytes      = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
-            var pluginName = Path.GetFileNameWithoutExtension(pluginPath) ?? "unknown";
+            var pluginKind = ClassifyPluginKind(pluginPath, bytes);
+            var pluginName = Path.GetFileName(pluginPath) ?? pluginPath;
+            var pluginLabel = $"{pluginName} [{pluginKind.Type}; confidence={pluginKind.Confidence:0.00}]";
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
@@ -6268,7 +7065,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             {
                 addons = armaDescriptors
                     .Select(d => new PluginArmorAddon(
-                        pluginName,
+                        pluginLabel,
                         d.MeshPaths,
                         d.FormId,
                         d.EditorId,
@@ -6279,14 +7076,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             else
             {
                 // Fallback: regex scan when no structured ARMA records found.
-                addons = RegexScanForNifPaths(bytes, pluginName).ToList();
+                addons = RegexScanForNifPaths(bytes, pluginLabel).ToList();
             }
 
             // ── ARMO records (Armor — world/inventory models) ──────────────────
             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes);
             var records = armoDescriptors
                 .Select(d => new PluginArmorRecord(
-                    pluginName,
+                    pluginLabel,
                     d.MeshPaths,
                     d.FormId,
                     d.EditorId,
@@ -6294,12 +7091,184 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.RaceFormId))
                 .ToList();
 
-            return (addons, records);
+            return (pluginLabel, pluginName, pluginKind.Type, addons, records);
         }
         catch (IOException)
         {
-            return ([], []);
+            var fallback = Path.GetFileName(pluginPath) ?? pluginPath;
+            return ($"{fallback} [unreadable]", fallback, "UNKNOWN", [], []);
         }
+    }
+
+    internal static string DetectPluginKind(string pluginPath, byte[] bytes) =>
+        ClassifyPluginKind(pluginPath, bytes).Type;
+
+    internal static PluginTypeClassification ClassifyPluginKind(
+        string pluginPath,
+        byte[] bytes,
+        IReadOnlyList<uint>? resolvedRuntimeFormIds = null)
+    {
+        var extension = Path.GetExtension(pluginPath).Trim().ToLowerInvariant();
+        var hasTes4Flags = TryReadTes4Flags(bytes, out var flags);
+        var hasMasterFlag = (flags & PluginFlagMaster) != 0;
+        var hasLightFlag = (flags & PluginFlagLight) != 0;
+        var hasRuntimeFormIdEvidence = resolvedRuntimeFormIds is { Count: > 0 };
+        var hasFeFormIds = HasFeLightFormIdEvidence(bytes, resolvedRuntimeFormIds);
+        var reasons = new List<string>();
+        if (hasTes4Flags)
+        {
+            reasons.Add("TES4 flags parsed");
+        }
+
+        if (hasMasterFlag)
+        {
+            reasons.Add("Master flag present");
+        }
+
+        if (hasLightFlag)
+        {
+            reasons.Add("ESL flag present");
+        }
+
+        if (hasFeFormIds)
+        {
+            reasons.Add(hasRuntimeFormIdEvidence
+                ? "Resolved runtime FormIDs in FE range detected"
+                : "Raw plugin FormIDs in FE range detected");
+        }
+        else if (hasLightFlag)
+        {
+            reasons.Add("ESL flag present but FE runtime evidence not yet resolved");
+        }
+
+        if (extension is ".esp" or ".esm" or ".esl")
+        {
+            reasons.Add($"Extension {extension}");
+        }
+
+        var type = ResolvePluginTypeFromHierarchy(extension, hasMasterFlag, hasLightFlag, hasFeFormIds);
+        var confidence = CalculateClassificationConfidence(
+            type,
+            hasTes4Flags,
+            extension,
+            hasMasterFlag,
+            hasLightFlag,
+            hasFeFormIds,
+            hasRuntimeFormIdEvidence);
+        return new PluginTypeClassification(type, confidence, reasons);
+    }
+
+    private static bool TryReadTes4Flags(byte[] bytes, out uint flags)
+    {
+        flags = 0u;
+        if (bytes.Length < 12)
+        {
+            return false;
+        }
+
+        if (bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return false;
+        }
+
+        flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4));
+        return true;
+    }
+
+    private static bool HasFeLightFormIdEvidence(byte[] bytes, IReadOnlyList<uint>? resolvedRuntimeFormIds = null)
+    {
+        if (resolvedRuntimeFormIds is { Count: > 0 })
+        {
+            return resolvedRuntimeFormIds.Any(static formId => IsFeLightFormId(formId));
+        }
+
+        try
+        {
+            var armaHasFe = BinaryArmaParser.ExtractArmaRecords(bytes)
+                .Any(static desc => IsFeLightFormId(desc.FormId));
+            if (armaHasFe)
+            {
+                return true;
+            }
+
+            return BinaryArmaParser.ExtractArmoRecords(bytes)
+                .Any(static desc => IsFeLightFormId(desc.FormId));
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsFeLightFormId(uint formId)
+    {
+        var maskedFormId = formId & 0x00FFFFFFu;
+        return maskedFormId is >= 0x000FE000u and <= 0x000FEFFFu;
+    }
+
+    private static string ResolvePluginTypeFromHierarchy(
+        string extension,
+        bool hasMasterFlag,
+        bool hasLightFlag,
+        bool hasFeFormIds)
+    {
+        // Requested precedence:
+        // 1) ESM (Master flag)
+        // 2) ESPFE (ESL flag + FE FormIDs)
+        // 3) AMBIGUOUS (ESL flag without FE evidence)
+        // 4) ESP
+        // 5) ESL-light (compact light plugin semantics)
+        // 6) UNKNOWN
+        if (hasMasterFlag || string.Equals(extension, ".esm", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESM";
+        }
+
+        if (hasLightFlag && hasFeFormIds)
+        {
+            return "ESPFE";
+        }
+
+        if (hasLightFlag && !hasFeFormIds)
+        {
+            return "AMBIGUOUS";
+        }
+
+        if (string.Equals(extension, ".esp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESP";
+        }
+
+        if (string.Equals(extension, ".esl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESL-light";
+        }
+
+        return "UNKNOWN";
+    }
+
+    private static double CalculateClassificationConfidence(
+        string type,
+        bool hasTes4Flags,
+        string extension,
+        bool hasMasterFlag,
+        bool hasLightFlag,
+        bool hasFeFormIds,
+        bool hasRuntimeFormIdEvidence)
+    {
+        double confidence = 0.50d;
+        if (hasTes4Flags) confidence += 0.20d;
+
+        if (type == "ESM" && (hasMasterFlag || extension == ".esm")) confidence += 0.20d;
+        if (type == "ESP" && extension == ".esp") confidence += 0.20d;
+        if (type == "ESPFE" && hasLightFlag && hasFeFormIds) confidence += 0.25d;
+        if (type == "ESL-light" && (hasLightFlag || extension == ".esl")) confidence += 0.20d;
+        if (type == "AMBIGUOUS" && hasLightFlag && !hasFeFormIds) confidence += 0.05d;
+        if (type == "AMBIGUOUS" && !hasRuntimeFormIdEvidence) confidence -= 0.10d;
+
+        if (extension is ".esp" or ".esm" or ".esl") confidence += 0.05d;
+
+        return Math.Round(Math.Clamp(confidence, 0.0d, 1.0d), 2, MidpointRounding.AwayFromZero);
     }
 
     private static readonly System.Text.RegularExpressions.Regex NifPathRegex =
@@ -6318,16 +7287,38 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         return [new PluginArmorAddon(pluginName, paths)];
     }
 
-    private static string BuildPatchGuidance(IReadOnlyList<PluginArmorAddon> addons, string targetBody, int pluginCount)
+    private static string BuildPatchGuidance(
+        IReadOnlyList<PluginArmorAddon> addons,
+        string targetBody,
+        int pluginCount,
+        IReadOnlyList<string>? ambiguousPlugins = null)
     {
         if (pluginCount == 0)
         {
             return $"No plugin files found. Add the converted meshes to an existing .esp or create a new patch plugin targeting {targetBody}.";
         }
 
+        // ── AMBIGUOUS warning block ────────────────────────────────────────────
+        // These plugins have the ESL flag set but no FE-range FormID evidence.
+        // Their true format (ESPFE vs. ESP) cannot be determined from header flags
+        // alone; treat them manually before applying any automated rewrite.
+        string? ambiguousBlock = null;
+        if (ambiguousPlugins is { Count: > 0 })
+        {
+            var sb2 = new System.Text.StringBuilder();
+            sb2.AppendLine($"WARNING: {ambiguousPlugins.Count} plugin(s) flagged AMBIGUOUS — ESL flag present but FE-range FormID evidence absent.");
+            sb2.AppendLine("  These plugins require manual review before any automated patch is applied.");
+            sb2.AppendLine("  Automated rewrite for these plugins has been skipped to avoid incorrect assumptions.");
+            sb2.AppendLine("  Affected plugins:");
+            foreach (var name in ambiguousPlugins)
+                sb2.AppendLine($"    {name}");
+            ambiguousBlock = sb2.ToString().TrimEnd();
+        }
+
         if (addons.Count == 0)
         {
-            return $"Scanned {pluginCount} plugin file(s) — no mesh path references detected. Verify ArmorAddon (ARMA) records manually in xEdit.";
+            var noAddon = $"Scanned {pluginCount} plugin file(s) — no mesh path references detected. Verify ArmorAddon (ARMA) records manually in xEdit.";
+            return ambiguousBlock is not null ? $"{ambiguousBlock}\n\n{noAddon}" : noAddon;
         }
 
         var sb = new System.Text.StringBuilder();
@@ -6348,7 +7339,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
         }
 
-        return sb.ToString().Trim();
+        var main = sb.ToString().Trim();
+        return ambiguousBlock is not null ? $"{ambiguousBlock}\n\n{main}" : main;
     }
 }
 
@@ -8373,7 +9365,8 @@ internal sealed class LocalExportService(
         // half using weight-scaled morphs so the game can interpolate between body weights.
         // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
         // detected; otherwise the source bytes are copied through unchanged.
-        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, cancellationToken);
+        var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
         var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
@@ -8397,19 +9390,29 @@ internal sealed class LocalExportService(
         string? groundMeshRelativePath = null;
         if (groundMeshGen is not null && writtenNifs.Count > 0)
         {
-            var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+            var generatedGroundPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var writtenNifPath in writtenNifs)
             {
                 var sourceNifBytes = await File.ReadAllBytesAsync(writtenNifPath, cancellationToken);
                 var groundNifBytes = await groundMeshGen.GenerateAsync(sourceNifBytes, analysis.MeshType, cancellationToken);
 
-                var stem = Path.GetFileNameWithoutExtension(writtenNifPath);
-                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{stem}_ground.nif";
+                var stem = Path.GetFileNameWithoutExtension(writtenNifPath) ?? string.Empty;
+                var groundStem = stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                                 stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+                    ? stem[..^2]
+                    : stem;
+                var groundRelativePath = $"meshes/slidesmith/{safeBodyToken}/{groundStem}_ground.nif";
                 groundMeshRelativePath ??= groundRelativePath;
 
                 var groundAbsPath = Path.Combine(
                     outputDirectory,
                     groundRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+                if (!generatedGroundPaths.Add(groundAbsPath))
+                {
+                    continue;
+                }
+
                 Directory.CreateDirectory(Path.GetDirectoryName(groundAbsPath)!);
                 await File.WriteAllBytesAsync(groundAbsPath, groundNifBytes, cancellationToken);
                 outputFiles.Add(groundAbsPath);
@@ -8418,7 +9421,7 @@ internal sealed class LocalExportService(
 
         // Carry source support assets (textures, material configs, physics configs, plugins, body refs)
         // into the output package so converted outputs stay mod-ready.
-        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, cancellationToken);
+        var copiedSupportAssets = await CopySupportAssetsAsync(armor, outputDirectory, request.SharedPluginOutputDirectory, cancellationToken);
         outputFiles.AddRange(copiedSupportAssets);
 
         // Generate flat-normal DDS stubs for any diffuse textures that have no matching _n.dds.
@@ -8554,11 +9557,19 @@ internal sealed class LocalExportService(
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
             Directory.CreateDirectory(shapeDataDirectory);
 
-            // Stage source-shape NIF into ShapeData so BodySlide can display the base mesh.
-            var shapeDataNifPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.nif");
-            if (writtenNifs.Count > 0)
+            // Stage all source-shape NIFs into one ShapeData project folder so BodySlide can edit
+            // the full armor set without rescanning generated output or splitting meshes per folder.
+            var stagedShapeDataNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var writtenNif in writtenNifs)
             {
-                await CopyFileAsync(writtenNifs[0], shapeDataNifPath, cancellationToken);
+                var shapeDataFileName = Path.GetFileName(writtenNif);
+                if (string.IsNullOrWhiteSpace(shapeDataFileName) || !stagedShapeDataNames.Add(shapeDataFileName))
+                {
+                    continue;
+                }
+
+                var shapeDataNifPath = Path.Combine(shapeDataDirectory, shapeDataFileName);
+                await CopyFileAsync(writtenNif, shapeDataNifPath, cancellationToken);
                 outputFiles.Add(shapeDataNifPath);
             }
 
@@ -8595,6 +9606,10 @@ internal sealed class LocalExportService(
                 pluginAnalysis.ScannedPlugins,
                 pluginAnalysis.ArmorAddons,
                 pluginAnalysis.PatchGuidance,
+                // Plugins flagged AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
+                // These are listed here so downstream tooling can flag them for manual recheck.
+                // The automated rewrite is intentionally skipped for these plugins.
+                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
                 RewriteMappings = pluginRewriteMap
                     .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
                     .ToList(),
@@ -8616,7 +9631,19 @@ internal sealed class LocalExportService(
             if (pluginRewriteMap.Count > 0)
             {
                 var sourcePluginPaths = EnumeratePluginFiles(armor.SourcePath);
-                if (sourcePluginPaths.Count > 0)
+
+                // Do not assume the format of AMBIGUOUS plugins (ESL flag present but no
+                // FE-range FormID evidence).  Rewriting them could corrupt form-ID
+                // addressing; skip them and let the user resolve the ambiguity manually.
+                var ambiguousNames = (pluginAnalysis.AmbiguousPlugins ?? [])
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var safeSourcePluginPaths = ambiguousNames.Count > 0
+                    ? sourcePluginPaths
+                        .Where(p => !ambiguousNames.Contains(Path.GetFileName(p) ?? p))
+                        .ToList()
+                    : sourcePluginPaths;
+
+                if (safeSourcePluginPaths.Count > 0)
                 {
                     // Normalise the rewrite map (lowercase / forward-slash keys) for both
                     // the full-copy rewriter and the new minimal patch generator.
@@ -8627,9 +9654,15 @@ internal sealed class LocalExportService(
                     // ── Existing: full-copy patched plugin (_patched.esp) ──────────────
                     // Kept for compatibility; users who want a single self-contained plugin
                     // can still use this file.
+                    var espDestDirectory = request.SharedPluginOutputDirectory ?? outputDirectory;
+                    if (!string.IsNullOrWhiteSpace(espDestDirectory))
+                    {
+                        Directory.CreateDirectory(espDestDirectory);
+                    }
+
                     var rewriter = new BinaryPluginRewriteService();
                     var rewriteResult = await rewriter.RewriteAsync(
-                        sourcePluginPaths, pluginRewriteMap, outputDirectory, cancellationToken);
+                        safeSourcePluginPaths, pluginRewriteMap, espDestDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
@@ -8637,7 +9670,7 @@ internal sealed class LocalExportService(
                     // original plugin as its single master.  It is a proper Bethesda
                     // override plugin (ESL-flagged) that can be loaded after the original
                     // in any order without consuming a load order slot.
-                    foreach (var pluginPath in sourcePluginPaths)
+                    foreach (var pluginPath in safeSourcePluginPaths)
                     {
                         try
                         {
@@ -8654,7 +9687,7 @@ internal sealed class LocalExportService(
                             if (included > 0)
                             {
                                 var baseName       = Path.GetFileNameWithoutExtension(pluginPath);
-                                var patchPath      = Path.Combine(outputDirectory, $"{baseName}_SlidesmithPatch.esp");
+                                var patchPath      = Path.Combine(espDestDirectory, $"{baseName}_SlidesmithPatch.esp");
                                 await File.WriteAllBytesAsync(patchPath, patchBytes, cancellationToken);
                                 outputFiles.Add(patchPath);
                                 patchEspGenerated = true;
@@ -8707,7 +9740,6 @@ internal sealed class LocalExportService(
                     .ToList();
             }
 
-            var safeBodyToken  = BuildSafeBodyToken(request.TargetBody);
             var pluginNifPaths = writtenNifs
                 .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")
                 .ToList();
@@ -8718,7 +9750,13 @@ internal sealed class LocalExportService(
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
-                var espPath = Path.Combine(outputDirectory, pluginFileName);
+                var scratchEspDir = request.SharedPluginOutputDirectory ?? outputDirectory;
+                if (!string.IsNullOrWhiteSpace(scratchEspDir))
+                {
+                    Directory.CreateDirectory(scratchEspDir);
+                }
+
+                var espPath = Path.Combine(scratchEspDir, pluginFileName);
                 await File.WriteAllBytesAsync(espPath, pluginBytes, cancellationToken);
                 outputFiles.Add(espPath);
             }
@@ -8887,10 +9925,16 @@ internal sealed class LocalExportService(
         ImportedArmor armor,
         ConvertedMesh mesh,
         string outputDirectory,
+        string safeBodyToken,
         CancellationToken cancellationToken)
     {
         var written = new List<string>();
         var synthesizedCount = 0;
+
+        // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
+        // loader can find them and the installed structure matches the expected Data\ layout.
+        var nifDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", safeBodyToken);
+        Directory.CreateDirectory(nifDirectory);
 
         // Build a set of mesh files that are part of a detected _0/_1 pair so we can
         // treat unpaired singletons differently.
@@ -8905,8 +9949,8 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(pair.LowWeightMesh);
                     pairedFiles.Add(pair.HighWeightMesh);
 
-                    var lowDest  = Path.Combine(outputDirectory, Path.GetFileName(pair.LowWeightMesh)!);
-                    var highDest = Path.Combine(outputDirectory, Path.GetFileName(pair.HighWeightMesh)!);
+                    var lowDest  = Path.Combine(nifDirectory, Path.GetFileName(pair.LowWeightMesh)!);
+                    var highDest = Path.Combine(nifDirectory, Path.GetFileName(pair.HighWeightMesh)!);
 
                     await CopyNifAsync(pair.LowWeightMesh, lowDest, mesh, cancellationToken);
                     await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
@@ -8921,9 +9965,9 @@ internal sealed class LocalExportService(
                     var isSourceLow = pair.LowWeightMesh is not null; // true → have _0, missing _1
                     var ext         = Path.GetExtension(sourceMesh);
 
-                    var destSource = Path.Combine(outputDirectory, Path.GetFileName(sourceMesh)!);
+                    var destSource = Path.Combine(nifDirectory, Path.GetFileName(sourceMesh)!);
                     var synthName  = pair.BaseName + (isSourceLow ? "_1" : "_0") + ext;
-                    var destSynth  = Path.Combine(outputDirectory, synthName);
+                    var destSynth  = Path.Combine(nifDirectory, synthName);
 
                     // Write the existing half with regular morphs.
                     await CopyNifAsync(sourceMesh, destSource, mesh, cancellationToken);
@@ -8949,7 +9993,7 @@ internal sealed class LocalExportService(
         {
             if (pairedFiles.Contains(meshFile)) continue;
 
-            var dest = Path.Combine(outputDirectory, Path.GetFileName(meshFile)!);
+            var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
         }
@@ -8999,6 +10043,8 @@ internal sealed class LocalExportService(
 
         foreach (var texturePath in armor.TextureFiles)
         {
+            if (IsPathInsideDirectory(texturePath, outputDirectory)) continue;
+
             var fileName = Path.GetFileName(texturePath);
             if (!missingSet.Contains(fileName)) continue;
             if (!File.Exists(texturePath)) continue;
@@ -9215,6 +10261,8 @@ internal sealed class LocalExportService(
 
         foreach (var texturePath in armor.TextureFiles)
         {
+            if (IsPathInsideDirectory(texturePath, outputDirectory)) continue;
+
             var fileName = Path.GetFileName(texturePath);
 
             // Resolve the output directory path for this diffuse.
@@ -9342,6 +10390,7 @@ internal sealed class LocalExportService(
     private static async Task<IReadOnlyList<string>> CopySupportAssetsAsync(
         ImportedArmor armor,
         string outputDirectory,
+        string? sharedPluginOutputDirectory,
         CancellationToken cancellationToken)
     {
         var supportFiles = new List<string>();
@@ -9351,8 +10400,8 @@ internal sealed class LocalExportService(
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
-        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath));
-        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath));
+        supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath, outputDirectory));
+        supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath, outputDirectory));
 
         var copied = new List<string>();
         var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -9361,19 +10410,43 @@ internal sealed class LocalExportService(
         foreach (var sourceFile in supportFiles)
         {
             var fullSource = Path.GetFullPath(sourceFile);
-            if (!seenSources.Add(fullSource) || !File.Exists(fullSource))
+            if (!seenSources.Add(fullSource) ||
+                !File.Exists(fullSource) ||
+                IsPathInsideDirectory(fullSource, outputDirectory))
             {
                 continue;
             }
 
-            var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
-            var destinationPath = Path.GetFullPath(Path.Combine(outputDirectory, relativePath));
-            if (!destinationPath.StartsWith(Path.GetFullPath(outputDirectory), StringComparison.OrdinalIgnoreCase))
+            // Plugin files are shared across all per-armor outputs; route them to the shared
+            // plugin directory so only one copy exists rather than one per armor sub-folder.
+            var ext = Path.GetExtension(fullSource);
+            var isPlugin = ext is ".esp" or ".esm" or ".esl";
+            var destRoot = isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory)
+                ? sharedPluginOutputDirectory
+                : outputDirectory;
+
+            string destinationPath;
+            if (isPlugin && !string.IsNullOrWhiteSpace(sharedPluginOutputDirectory))
             {
-                destinationPath = Path.Combine(outputDirectory, Path.GetFileName(fullSource));
+                // Place the plugin directly at the root of the shared directory (no sub-folders).
+                destinationPath = Path.GetFullPath(Path.Combine(destRoot, Path.GetFileName(fullSource)));
+            }
+            else
+            {
+                var relativePath = GetSafeRelativeAssetPath(armor.SourcePath, fullSource);
+                destinationPath = Path.GetFullPath(Path.Combine(destRoot, relativePath));
+                if (!destinationPath.StartsWith(Path.GetFullPath(destRoot), StringComparison.OrdinalIgnoreCase))
+                {
+                    destinationPath = Path.Combine(destRoot, Path.GetFileName(fullSource));
+                }
             }
 
             if (!seenDestinations.Add(destinationPath) || File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            if (PathsEqual(fullSource, destinationPath))
             {
                 continue;
             }
@@ -9393,7 +10466,7 @@ internal sealed class LocalExportService(
         return copied;
     }
 
-    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath)
+    private static IReadOnlyList<string> EnumeratePluginFiles(string sourcePath, string? excludedDirectory = null)
     {
         static bool IsPlugin(string path) =>
             Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
@@ -9409,13 +10482,14 @@ internal sealed class LocalExportService(
             return [];
         }
 
-        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".esp", ".esm", ".esl"])
             .Where(IsPlugin)
+            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath)
+    private static IReadOnlyList<string> EnumerateMaterialFiles(string sourcePath, string? excludedDirectory = null)
     {
         static bool IsMaterial(string path) =>
             Path.GetExtension(path) is ".bgsm" or ".bgem";
@@ -9431,8 +10505,9 @@ internal sealed class LocalExportService(
             return [];
         }
 
-        return Directory.GetFiles(scanRoot, "*.*", SearchOption.AllDirectories)
+        return BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(scanRoot, [".bgsm", ".bgem"])
             .Where(IsMaterial)
+            .Where(path => !IsPathInsideDirectory(path, excludedDirectory))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -9473,6 +10548,31 @@ internal sealed class LocalExportService(
         }
 
         return sourcePath;
+    }
+
+    private static bool PathsEqual(string leftPath, string rightPath)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(Path.GetFullPath(leftPath), Path.GetFullPath(rightPath), comparison);
+    }
+
+    private static bool IsPathInsideDirectory(string path, string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullDirectory = Path.GetFullPath(directoryPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(fullPath, fullDirectory, comparison))
+        {
+            return true;
+        }
+
+        return fullPath.StartsWith(fullDirectory + Path.DirectorySeparatorChar, comparison) ||
+               fullPath.StartsWith(fullDirectory + Path.AltDirectorySeparatorChar, comparison);
     }
 
     private static string? TryResolveModRootFromMeshesPath(string startDirectory)
@@ -10439,7 +11539,12 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            var firstPersonFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_1stperson{extension}";
+            var stem = Path.GetFileNameWithoutExtension(fileName);
+            var firstPersonStem = stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+                                  stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+                ? stem[..^2] + "_1stperson" + stem[^2..]
+                : stem + "_1stperson";
+            var firstPersonFileName = $"{firstPersonStem}{extension}";
             var firstPersonAbsolutePath = Path.Combine(
                 outputDirectory,
                 $"meshes/slidesmith/{safeBodyToken}/{firstPersonFileName}".Replace('/', Path.DirectorySeparatorChar));
@@ -10452,6 +11557,11 @@ internal sealed class LocalExportService(
 
     private static async Task CopyFileAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
     {
+        if (PathsEqual(sourcePath, destinationPath))
+        {
+            return;
+        }
+
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrWhiteSpace(destinationDirectory))
         {

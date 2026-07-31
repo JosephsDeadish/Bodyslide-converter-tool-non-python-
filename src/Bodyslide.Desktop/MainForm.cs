@@ -360,9 +360,19 @@ public sealed class MainForm : Form
         _physicsComboBox.Items.Add("(auto)");
         foreach (var profile in PhysicsProfileCatalog.All)
         {
-            _physicsComboBox.Items.Add(profile);
+            _physicsComboBox.Items.Add(PhysicsProfileCatalog.ToDisplayName(profile));
         }
         _physicsComboBox.SelectedIndex = 0;
+        var physicsToolTip = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400 };
+        physicsToolTip.SetToolTip(_physicsComboBox,
+            "Overrides the physics bone injection for the target body.\n" +
+            "ANY body can use ANY physics profile — this is not restricted to a body's default.\n" +
+            "  (auto)     — uses each body's built-in default (e.g. smp+cbpc for 3BA, none for CBBE)\n" +
+            "  none       — no soft-body bones injected; safe for all bodies\n" +
+            "  cbpc       — CBPC CPU soft-body bones\n" +
+            "  smp        — SMP GPU soft-body bones\n" +
+            "  Soft Body (CBPC + SMP) — full soft-body (SMP + CBPC combined)\n" +
+            "  alias accepted on CLI: soft-body => smp+cbpc");
         rightOptions.Controls.Add(_physicsComboBox, 1, 2);
 
         rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
@@ -794,6 +804,7 @@ public sealed class MainForm : Form
         _catalogListView.BeginUpdate();
         _catalogListView.Items.Clear();
 
+        // ── Presets ──────────────────────────────────────────────────────────
         foreach (var preset in PresetCatalog.All.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
         {
             _catalogListView.Items.Add(new ListViewItem(
@@ -804,32 +815,58 @@ public sealed class MainForm : Form
             ]));
         }
 
+        // ── Bodies ───────────────────────────────────────────────────────────
+        // Each body shows its default physics profile, skeleton foundation, and the
+        // physics bones that are AVAILABLE if a non-none physics profile is applied.
+        // Bodies with default physics "none" do NOT use soft-body physics by default;
+        // their physics bones are only activated via the Physics override option.
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
         {
             var vertexRange = body.VertexCountMin > 0
                 ? $"{body.VertexCountMin}-{body.VertexCountMax}"
                 : "n/a";
-            var technical = BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile)
-                ? $"Skeleton={profile.SkeletonFoundation}; Soft-body=[{string.Join(", ", profile.SoftBodyBones)}]; Notes={profile.Notes}"
-                : "No technical profile data.";
-            _catalogListView.Items.Add(new ListViewItem(
-            [
-                "Body",
-                body.Name,
-                $"Tokens=[{string.Join(", ", body.DetectionTokens)}]; Vertices={vertexRange}; {technical}",
-            ]));
+
+            string details;
+            if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+            {
+                var physicsLabel = $"Default physics={PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]";
+                var recommendedLabel = $"Recommended physics={PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]";
+                var supportsLabel = $"SupportsPhysics={profile.SupportsPhysics}";
+                var bonesLabel = profile.SupportsPhysics
+                    ? $"RequiredPhysicsBones=[{string.Join(", ", profile.RequiredPhysicsBones)}]"
+                    : "RequiredPhysicsBones=[]";
+                var groupLabel = profile.SupportsPhysics
+                    ? $"BoneGroups=[{string.Join(", ", profile.PhysicsBoneGroups.Keys.OrderBy(static k => k, StringComparer.OrdinalIgnoreCase))}]"
+                    : "BoneGroups=[]";
+                details = $"Vertices={vertexRange}; Skeleton={profile.SkeletonFoundation}; {physicsLabel}; {recommendedLabel}; {supportsLabel}; {bonesLabel}; {groupLabel}; Notes={profile.Notes}";
+            }
+            else
+            {
+                details = $"Vertices={vertexRange}; No technical profile data. Any physics profile can still be applied via the Physics override.";
+            }
+
+            _catalogListView.Items.Add(new ListViewItem(["Body", body.Name, details]));
         }
 
-        foreach (var profile in DeformationProfileModifier.All.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
+        // ── Deformation profiles ─────────────────────────────────────────────
+        foreach (var deformProfile in DeformationProfileModifier.All.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
         {
-            _catalogListView.Items.Add(new ListViewItem(["Deformation profile", profile, ""]));
+            _catalogListView.Items.Add(new ListViewItem(["Deformation profile", deformProfile, ""]));
         }
 
+        // ── Physics profiles ─────────────────────────────────────────────────
+        // All profiles can be applied to ANY body via the Physics override dropdown.
         foreach (var physics in PhysicsProfileCatalog.All.OrderBy(static p => p, StringComparer.OrdinalIgnoreCase))
         {
-            _catalogListView.Items.Add(new ListViewItem(["Physics profile", physics, ""]));
+            PhysicsProfileCatalog.Descriptions.TryGetValue(physics, out var physDesc);
+            var displayName = PhysicsProfileCatalog.ToDisplayName(physics);
+            var name = string.Equals(displayName, physics, StringComparison.OrdinalIgnoreCase)
+                ? physics
+                : $"{displayName} [{physics}]";
+            _catalogListView.Items.Add(new ListViewItem(["Physics profile", name, physDesc ?? ""]));
         }
 
+        // ── World drop modes ─────────────────────────────────────────────────
         foreach (var worldMode in WorldDropModeCatalog.All.OrderBy(static mode => mode, StringComparer.OrdinalIgnoreCase))
         {
             _catalogListView.Items.Add(new ListViewItem(["World drop mode", worldMode, "Controls world-physics.json mode output."]));
@@ -1062,11 +1099,12 @@ public sealed class MainForm : Form
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
-        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.MarqueeAnimationSpeed = 30;
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
-        _statusLabel.Text = $"Converting 0%: {Path.GetFileName(input)}";
+        _statusLabel.Text = $"Converting: {Path.GetFileName(input)}";
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
@@ -1105,6 +1143,7 @@ public sealed class MainForm : Form
                 var completed = Math.Clamp(update.Completed, 0, total);
                 var percent = (int)Math.Round((double)completed / total * 100d, MidpointRounding.AwayFromZero);
                 _progressBar.Style = ProgressBarStyle.Continuous;
+                _progressBar.MarqueeAnimationSpeed = 0;
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 _statusLabel.Text = $"Converting {completed}/{total} ({percent}%): {update.CurrentFile}";
@@ -1271,8 +1310,12 @@ public sealed class MainForm : Form
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
-        UseWaitCursor = isBusy;
-        _progressBar.Style = isBusy ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
+        UseWaitCursor = false;
+        if (!isBusy)
+        {
+            _progressBar.Style = ProgressBarStyle.Continuous;
+        }
+        _progressBar.MarqueeAnimationSpeed = _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
         _progressBar.Value = 0;
     }
 
@@ -1476,6 +1519,16 @@ public sealed class MainForm : Form
         void Add(string property, string value) =>
             _summaryListView.Items.Add(new ListViewItem([property, value]));
 
+        void AddWarning(string property, string value)
+        {
+            var item = new ListViewItem([property, value])
+            {
+                BackColor = System.Drawing.Color.FromArgb(255, 255, 180),
+                ForeColor = System.Drawing.Color.FromArgb(120, 60, 0)
+            };
+            _summaryListView.Items.Add(item);
+        }
+
         Add("Items converted", results.Count.ToString());
 
         // Aggregate key steps across all results.
@@ -1593,7 +1646,13 @@ public sealed class MainForm : Form
             if (BodyTechnicalProfileCatalog.TryGet(inspection.Detection.Body, out var detectedProfile))
             {
                 Add("Detected skeleton base", detectedProfile.SkeletonFoundation);
-                Add("Detected soft-body bones", string.Join(", ", detectedProfile.SoftBodyBones));
+                Add("SupportsPhysics", detectedProfile.SupportsPhysics ? "true" : "false");
+                Add("Default physics", $"{PhysicsProfileCatalog.ToDisplayName(detectedProfile.DefaultPhysics)} [{detectedProfile.DefaultPhysics}]");
+                Add("Recommended physics", $"{PhysicsProfileCatalog.ToDisplayName(detectedProfile.RecommendedPhysicsProfile)} [{detectedProfile.RecommendedPhysicsProfile}]");
+                if (detectedProfile.SupportsPhysics)
+                {
+                    Add("Required physics bones", string.Join(", ", detectedProfile.RequiredPhysicsBones));
+                }
                 Add("Detected body notes", detectedProfile.Notes);
             }
             Add("Mesh type", inspection.Analysis.MeshType);
@@ -1626,6 +1685,16 @@ public sealed class MainForm : Form
             else
             {
                 Add("Skeleton mapping", "Select a target or preset to inspect compatibility.");
+            }
+
+            // Show the physics profile that will actually be used for the conversion.
+            if (!string.IsNullOrWhiteSpace(inspection.RequestedTargetBody))
+            {
+                var effectivePhysics = ResolveEffectivePhysicsProfile(inspection.RequestedTargetBody);
+                Add("Effective physics for target", $"{PhysicsProfileCatalog.ToDisplayName(effectivePhysics)} [{effectivePhysics}]" +
+                    (string.Equals(effectivePhysics, "none", StringComparison.OrdinalIgnoreCase)
+                        ? " — select a physics override above to enable soft-body output"
+                        : " — soft-body bones will be injected into the converted mesh"));
             }
         }
         finally
