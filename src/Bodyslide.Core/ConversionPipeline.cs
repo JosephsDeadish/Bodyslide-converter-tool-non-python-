@@ -12414,7 +12414,7 @@ internal sealed class LocalExportService(
 
             void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
             {
-                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, morphTransferContext: null, out _, out var wasRetargeted))
+                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, morphTransferContext, out _, out var wasRetargeted))
                 {
                     if (wasRetargeted)
                     {
