@@ -2,7 +2,9 @@
   "maleBodyTargets": [
     "HIMBO",
     "SAM",
-    "SOS"
+    "SAM Light",
+    "SOS",
+    "TNG"
   ],
   "defaultProfile": {
     "meshType": "default",

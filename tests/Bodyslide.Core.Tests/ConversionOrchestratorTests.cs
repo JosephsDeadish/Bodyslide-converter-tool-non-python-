@@ -4969,6 +4969,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal(1.12d, plate.ClippingThreshold);
         Assert.Equal(0.072d, plate.BaseInflation);
         Assert.Contains("SAM", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("SAM Light", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("TNG", MeshBehaviorCatalog.MaleBodyTargets);
         Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
         Assert.Contains("NPC L Breast02", fallbacks);
