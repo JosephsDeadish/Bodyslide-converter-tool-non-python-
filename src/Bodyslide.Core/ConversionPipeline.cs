@@ -6535,12 +6535,9 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
     private static string ResolveTargetSkeletonLabel(string targetBody, ImportedArmor armor, bool hasPhysicsBones)
     {
         var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
-        var label = IsAmbiguousSkeletonFoundation(prefix)
-            ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}"
-            : prefix;
         return hasPhysicsBones
-            ? $"{label}-physics"
-            : label;
+            ? $"{prefix}-physics"
+            : prefix;
     }
 
     private static string ResolveTargetSkeletonPrefix(string targetBody, ImportedArmor armor)
@@ -6588,11 +6585,6 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         return builder.ToString().Trim('-') is { Length: > 0 } slug ? slug : "target";
     }
 
-    private static bool IsAmbiguousSkeletonFoundation(string foundationSlug) =>
-        foundationSlug.Equals("xpmsse", StringComparison.OrdinalIgnoreCase) ||
-        foundationSlug.Equals("xpmse", StringComparison.OrdinalIgnoreCase) ||
-        foundationSlug.Equals("vanilla", StringComparison.OrdinalIgnoreCase) ||
-        foundationSlug.Equals("unknown", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
