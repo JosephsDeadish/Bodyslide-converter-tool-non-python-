@@ -452,10 +452,10 @@ internal static class BodySlideSourceProjectSupport
 
             var signals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var score = 0;
-            score += ScoreTokens(body.ReferenceTokens, "reference");
-            score += ScoreTokens(body.DetectionTokens, "detection");
-            score += ScoreTokens(body.TextureTokens, "texture");
-            score += ScoreTokens(body.Aliases, "alias");
+            score += ScoreTokens(body.ReferenceTokens, "reference", signals);
+            score += ScoreTokens(body.DetectionTokens, "detection", signals);
+            score += ScoreTokens(body.TextureTokens, "texture", signals);
+            score += ScoreTokens(body.Aliases, "alias", signals);
 
             if (score < 4 || signals.Count == 0)
             {
@@ -471,7 +471,7 @@ internal static class BodySlideSourceProjectSupport
 
         return best;
 
-        int ScoreTokens(IEnumerable<string> tokens, string category)
+        int ScoreTokens(IEnumerable<string> tokens, string category, ISet<string> signals)
         {
             var score = 0;
             foreach (var token in tokens.Where(static token => !string.IsNullOrWhiteSpace(token)).Distinct(StringComparer.OrdinalIgnoreCase))

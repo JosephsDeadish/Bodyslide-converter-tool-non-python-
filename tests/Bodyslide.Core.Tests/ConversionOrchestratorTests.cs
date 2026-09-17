@@ -10326,9 +10326,9 @@ public sealed class OutputCompletenessTests
 
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
-            Assert.Contains("\"RequestedVariantCount\": 1", qualityJson);
+            Assert.Contains("\"RequestedVariantCount\": 2", qualityJson);
             Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
-            Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 2", qualityJson);
         }
         finally
         {
