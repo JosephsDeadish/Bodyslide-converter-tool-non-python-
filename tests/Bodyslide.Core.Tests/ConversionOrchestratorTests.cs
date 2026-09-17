@@ -4387,6 +4387,33 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_ReturnsUnknownForReferenceOnlyCocoFamilyMatch()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mystery_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "cocobody_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("UNKNOWN", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.Equals("confidence-band:ambiguous", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_PrefersDirectReferenceSpecificityAndAddsConfidenceBand()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

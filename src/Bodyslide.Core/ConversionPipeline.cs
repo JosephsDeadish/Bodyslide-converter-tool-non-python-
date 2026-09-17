@@ -5227,9 +5227,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var top = scoredCandidates[0];
         var runnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
+        var sharedReferenceAmbiguity = runnerUp is { } candidate &&
+            top.ReferenceHitRatio >= 0.5 &&
+            candidate.ReferenceHitRatio >= 0.5;
         if (runnerUp is null ||
             top.Score < AmbiguityScoreFloor ||
-            runnerUp.Value.Score < MediumConfidenceThreshold ||
+            runnerUp.Value.Score < (sharedReferenceAmbiguity ? AmbiguityScoreFloor : MediumConfidenceThreshold) ||
             top.Score >= HighConfidenceThreshold ||
             HasReferencePriority(top, runnerUp.Value) ||
             Math.Abs(top.Score - runnerUp.Value.Score) > AmbiguityMargin)
