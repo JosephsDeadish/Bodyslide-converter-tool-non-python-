@@ -714,6 +714,7 @@ internal static class BodySlideSourceProjectSupport
             bool hasReferenceAssets,
             InferredSourceBodySupport? inferredSourceBody)
         {
+            var effectiveHasReferenceAssets = hasReferenceAssets || HasOsp || HasTriPayloads || HasBsdPayloads;
             var missingAssets = new List<string>();
             if (!HasOsp)
             {
@@ -725,7 +726,7 @@ internal static class BodySlideSourceProjectSupport
                 missingAssets.Add("morph-payloads");
             }
 
-            if (!hasReferenceAssets)
+            if (!effectiveHasReferenceAssets)
             {
                 missingAssets.Add("reference-assets");
             }
@@ -734,7 +735,7 @@ internal static class BodySlideSourceProjectSupport
                 HasOsp,
                 HasTriPayloads,
                 HasBsdPayloads,
-                hasReferenceAssets,
+                effectiveHasReferenceAssets,
                 usedFallbackSliders,
                 missingAssets,
                 ReusableMorphPayloads.Count,
