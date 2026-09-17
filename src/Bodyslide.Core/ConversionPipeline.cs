@@ -1451,7 +1451,7 @@ internal static class VanillaBodySignatureDatabase
     [
         new("CBBE",    ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
         new("UNP",     ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
-        new("UUNP",    ["uunp", "unp", "7base", "dreamgirl"], ["femalebody", "uunp"], ["uunp", "7base", "dreamgirl"], 8200, 9800, 4.1, 7.3, 0.30, 0.82),
+        new("UUNP",    ["uunp", "un7b", "7base", "dreamgirl"], ["femalebody", "uunp"], ["uunp", "7base", "dreamgirl"], 8200, 9800, 4.1, 7.3, 0.30, 0.82),
         new("HIMBO",   ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
         new("BHUNP",   ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
         new("3BA",     ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc", "3bbb"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
