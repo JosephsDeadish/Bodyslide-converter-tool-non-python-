@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Formats.Tar;
+using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security;
@@ -189,6 +190,17 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
     IReadOnlyList<string>? Warnings = null);
 
+public sealed record PartitionSignalReport(
+    IReadOnlyList<int> SourceNifSlots,
+    IReadOnlyList<int> PluginSlots,
+    IReadOnlyList<int> FinalSlots,
+    IReadOnlyList<string> Regions,
+    string RegionBindingMethod,
+    IReadOnlyList<int>? MissingSourceSlots = null,
+    IReadOnlyList<int>? MissingPluginSlots = null,
+    IReadOnlyList<string>? UnknownFinalPartitions = null,
+    IReadOnlyList<string>? Warnings = null);
+
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
     double BodyDetectionConfidence,
@@ -223,7 +235,8 @@ public sealed record ConversionQualityReport(
     SourceAssetSupportMetrics? SourceAssetSupport = null,
     MorphPayloadReuseSummary? PayloadReuse = null,
     IReadOnlyList<NifSupportReport>? NifSupport = null,
-    PluginRewriteVerificationReport? PluginRewriteVerification = null);
+    PluginRewriteVerificationReport? PluginRewriteVerification = null,
+    PartitionSignalReport? PartitionSignals = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -3443,8 +3456,6 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"nif-skin-partitions:{string.Join(',', nifPartitionSlots)}");
             }
 
-            steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
-
             // Biped slot passthrough — supplement the mesh-analysis-driven partition list with any
             // additional equipment slots declared in the source plugin's BOD2/BODT subrecords.
             // Slots already present in the rebuilt list are silently skipped; only genuinely new
@@ -3460,6 +3471,8 @@ public sealed class ConversionOrchestrator(
                 partitions = AugmentPartitionsWithSlots(partitions, pluginBipedSlots);
                 steps.Add($"biped-slots-passthrough:{string.Join(',', pluginBipedSlots)}");
             }
+
+            steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
             var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
@@ -7187,6 +7200,22 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
         ("body",        "chest"),
     ];
 
+    private static readonly IReadOnlyDictionary<int, IReadOnlyList<string>> PartitionRegionRules =
+        new Dictionary<int, IReadOnlyList<string>>
+        {
+            [30] = ["shoulders"],
+            [31] = ["shoulders"],
+            [32] = ["chest", "waist", "pelvis"],
+            [33] = ["arms"],
+            [34] = ["arms"],
+            [37] = ["legs"],
+            [38] = ["legs"],
+            [40] = ["pelvis", "legs"],
+            [42] = ["shoulders"],
+            [43] = ["shoulders"],
+            [56] = ["pelvis"],
+        };
+
     public Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken)
     {
         // Phase 1: score regions from physics file content (bone names).
@@ -7223,7 +7252,14 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "bone-names"));
         }
 
-        // Phase 2: use sampled mesh geometry when readable to infer coverage by vertical band
+        // Phase 2: use parsed NIF skin partition slots when available.
+        var partitionBinding = TryBindFromPartitions(armor.MeshFiles);
+        if (partitionBinding is not null)
+        {
+            return Task.FromResult(partitionBinding);
+        }
+
+        // Phase 3: use sampled mesh geometry when readable to infer coverage by vertical band
         // and lateral spread rather than relying on filenames alone.
         var geometryBinding = TryBindFromGeometry(armor.MeshFiles);
         if (geometryBinding is not null)
@@ -7231,7 +7267,7 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(geometryBinding);
         }
 
-        // Phase 3: fall back to filename keyword scoring.
+        // Phase 4: fall back to filename keyword scoring.
         var fileScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var meshFile in armor.MeshFiles)
         {
@@ -7256,8 +7292,40 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "filename-keywords"));
         }
 
-        // Phase 4: default — full-body coverage when no signals are available.
+        // Phase 5: default — full-body coverage when no signals are available.
         return Task.FromResult(new ArmorRegionBinding(["chest", "waist", "pelvis", "legs"], "default-full-body"));
+    }
+
+    private static ArmorRegionBinding? TryBindFromPartitions(IReadOnlyList<string> meshFiles)
+    {
+        var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var slot in meshFiles.SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots))
+        {
+            if (!PartitionRegionRules.TryGetValue(slot, out var regions))
+            {
+                continue;
+            }
+
+            foreach (var region in regions)
+            {
+                scores[region] = scores.GetValueOrDefault(region) + 2;
+            }
+        }
+
+        if (scores.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = scores
+            .OrderByDescending(static pair => pair.Value)
+            .Select(static pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+        return resolved.Count == 0
+            ? null
+            : new ArmorRegionBinding(resolved, "nif-partitions");
     }
 
     private static ArmorRegionBinding? TryBindFromGeometry(IReadOnlyList<string> meshFiles)
@@ -10574,6 +10642,12 @@ internal sealed class LocalExportService(
             patchVerificationPaths,
             pluginPatchWarnings);
 
+        var partitionSignals = BuildPartitionSignalReport(steps);
+        qualityWarnings = qualityWarnings
+            .Concat(partitionSignals?.Warnings ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var validationSummary = BuildValidationSummary(
             detectedBody,
             morphs,
@@ -10586,6 +10660,7 @@ internal sealed class LocalExportService(
             poseSimulation,
             topologyMismatchRisk,
             nifSupport,
+            partitionSignals,
             pluginRewriteVerification,
             qualityWarnings,
             steps);
@@ -10624,7 +10699,8 @@ internal sealed class LocalExportService(
             SourceAssetSupport:        morphs.SourceAssetSupport,
             PayloadReuse:              payloadReuse,
             NifSupport:                nifSupport,
-            PluginRewriteVerification: pluginRewriteVerification);
+            PluginRewriteVerification: pluginRewriteVerification,
+            PartitionSignals:          partitionSignals);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -12054,6 +12130,7 @@ internal sealed class LocalExportService(
         PoseSimulationResult poseSimulation,
         bool topologyMismatchRisk,
         IReadOnlyList<NifSupportReport>? nifSupport,
+        PartitionSignalReport? partitionSignals,
         PluginRewriteVerificationReport? pluginRewriteVerification,
         IReadOnlyList<string> qualityWarnings,
         IReadOnlyList<string> steps)
@@ -12168,6 +12245,33 @@ internal sealed class LocalExportService(
                     "heuristic-nif-read",
                     "medium",
                     $"Some NIF meshes were handled through heuristic geometry scanning instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
+            }
+        }
+
+        if (partitionSignals is not null)
+        {
+            if (partitionSignals.MissingSourceSlots is { Count: > 0 } missingSourceSlots)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-source-partitions",
+                    missingSourceSlots.Count >= 2 ? "high" : "medium",
+                    $"Final exported partitions dropped source NIF slot signal(s): {string.Join(", ", missingSourceSlots)}."));
+            }
+
+            if (partitionSignals.MissingPluginSlots is { Count: > 0 } missingPluginSlots)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-plugin-partitions",
+                    missingPluginSlots.Count >= 2 ? "high" : "medium",
+                    $"Final exported partitions dropped source plugin BOD2/BODT slot signal(s): {string.Join(", ", missingPluginSlots)}."));
+            }
+
+            if (partitionSignals.UnknownFinalPartitions is { Count: > 0 } unknownFinalPartitions)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "unknown-export-partitions",
+                    "low",
+                    $"Final exported partitions included nonstandard labels that need manual review: {string.Join(", ", unknownFinalPartitions.Take(6))}."));
             }
         }
 
@@ -12476,7 +12580,7 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, originalPath);
+            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, originalPath, sourceMeshPath);
             sourceMeshMap[originalPath] = sourceMeshPath;
         }
 
@@ -12511,7 +12615,7 @@ internal sealed class LocalExportService(
         var candidates = sourceMeshPaths
             .Where(path =>
                 Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase) &&
-                Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                IsPluginMeshFileNameMatch(fileName, Path.GetFileName(path)))
             .Select(path => new
             {
                 Path = path,
@@ -12544,6 +12648,8 @@ internal sealed class LocalExportService(
     {
         var normalizedPluginPath = NormalizePluginMeshPath(pluginMeshPath);
         var comparableSourcePath = NormalizeComparablePath(sourceMeshPath);
+        var pluginStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(normalizedPluginPath));
+        var sourceStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(comparableSourcePath));
         var pluginVariants = new[]
         {
             normalizedPluginPath,
@@ -12555,15 +12661,17 @@ internal sealed class LocalExportService(
         foreach (var variant in pluginVariants)
         {
             var trailingSegmentMatches = CountMatchingTrailingSegments(comparableSourcePath, variant);
-            if (trailingSegmentMatches <= 0)
-            {
-                continue;
-            }
-
             var score = trailingSegmentMatches * 100;
             if (HasPathSuffix(comparableSourcePath, variant))
             {
                 score += 10_000;
+            }
+
+            score += CountSharedPathTokens(comparableSourcePath, variant) * 15;
+            if (!string.IsNullOrWhiteSpace(pluginStem) &&
+                pluginStem.Equals(sourceStem, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 75;
             }
 
             bestScore = Math.Max(bestScore, score);
@@ -12615,11 +12723,80 @@ internal sealed class LocalExportService(
             : normalized;
     }
 
-    private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath)
+    private static bool IsPluginMeshFileNameMatch(string pluginFileName, string? sourceFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(sourceFileName))
+        {
+            return false;
+        }
+
+        if (pluginFileName.Equals(sourceFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return NormalizeMeshStemForPluginMatch(pluginFileName)
+            .Equals(NormalizeMeshStemForPluginMatch(sourceFileName), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int CountSharedPathTokens(string leftPath, string rightPath)
+    {
+        var leftTokens = ExtractComparablePathTokens(leftPath);
+        var rightTokens = ExtractComparablePathTokens(rightPath);
+        return leftTokens.Intersect(rightTokens, StringComparer.OrdinalIgnoreCase).Count();
+    }
+
+    private static IReadOnlyList<string> ExtractComparablePathTokens(string path)
+    {
+        return NormalizeComparablePath(path)
+            .Split(['/', '\\', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static token => token.Length > 1 && !IsGenericPluginPathToken(token))
+            .ToArray();
+    }
+
+    private static bool IsGenericPluginPathToken(string token) =>
+        token.Equals("meshes", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("mesh", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("armor", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("clothes", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("clothing", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("female", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("male", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("item", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeMeshStemForPluginMatch(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return string.Empty;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName) ?? fileName;
+        stem = stem.Replace("1stperson", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("firstperson", string.Empty, StringComparison.OrdinalIgnoreCase);
+        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            stem = stem[..^2];
+        }
+
+        return new string(stem
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+    }
+
+    private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath, string? sourceMeshPath = null)
     {
         var safeBodyToken = BuildSafeBodyToken(targetBody);
         var relativePluginPath = TrimMeshesPrefix(originalPath);
         var fileName = Path.GetFileName(relativePluginPath);
+        var matchedFileName = Path.GetFileName(sourceMeshPath);
+        if (!string.IsNullOrWhiteSpace(matchedFileName))
+        {
+            fileName = matchedFileName;
+        }
+
         var directory = Path.GetDirectoryName(relativePluginPath)?
             .Replace('\\', '/')
             .Trim('/')
@@ -12748,6 +12925,134 @@ internal sealed class LocalExportService(
             MissingStagedMeshes: BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes),
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
             Warnings: warnings);
+    }
+
+    private static PartitionSignalReport? BuildPartitionSignalReport(IReadOnlyList<string> steps)
+    {
+        if (steps.Count == 0)
+        {
+            return null;
+        }
+
+        var sourceNifSlots = ExtractNumericStepPayload(steps, "nif-skin-partitions:");
+        var pluginSlots = ExtractNumericStepPayload(steps, "biped-slots-passthrough:");
+        var finalPartitions = ExtractStepValue(steps, "partitions:");
+        var finalSlotLabels = finalPartitions is null || finalPartitions.Equals("unchanged", StringComparison.OrdinalIgnoreCase)
+            ? []
+            : finalPartitions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var finalSlots = finalSlotLabels
+            .Select(static label => ParsePartitionSlot(label))
+            .Where(static slot => slot.HasValue)
+            .Select(static slot => slot!.Value)
+            .Distinct()
+            .OrderBy(static slot => slot)
+            .ToList();
+        var unknownFinalPartitions = finalSlotLabels
+            .Where(label => ParsePartitionSlot(label) is null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var regions = ExtractRegions(steps);
+        var regionBindingMethod = ExtractStepValue(steps, "region-binding:") ?? "unknown";
+
+        if (sourceNifSlots.Count == 0 &&
+            pluginSlots.Count == 0 &&
+            finalSlots.Count == 0 &&
+            unknownFinalPartitions.Count == 0 &&
+            regions.Count == 0)
+        {
+            return null;
+        }
+
+        var missingSourceSlots = sourceNifSlots.Except(finalSlots).OrderBy(static slot => slot).ToList();
+        var missingPluginSlots = pluginSlots.Except(finalSlots).OrderBy(static slot => slot).ToList();
+        var warnings = new List<string>();
+        if (missingSourceSlots.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions dropped source NIF slots {string.Join(", ", missingSourceSlots)}");
+        }
+
+        if (missingPluginSlots.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions dropped plugin slots {string.Join(", ", missingPluginSlots)}");
+        }
+
+        if (unknownFinalPartitions.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions contain nonstandard labels {string.Join(", ", unknownFinalPartitions)}");
+        }
+
+        return new PartitionSignalReport(
+            SourceNifSlots: sourceNifSlots,
+            PluginSlots: pluginSlots,
+            FinalSlots: finalSlots,
+            Regions: regions,
+            RegionBindingMethod: regionBindingMethod,
+            MissingSourceSlots: missingSourceSlots,
+            MissingPluginSlots: missingPluginSlots,
+            UnknownFinalPartitions: unknownFinalPartitions,
+            Warnings: warnings);
+    }
+
+    private static IReadOnlyList<int> ExtractNumericStepPayload(IReadOnlyList<string> steps, string prefix)
+    {
+        var value = ExtractStepValue(steps, prefix);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static token => int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : (int?)null)
+            .Where(static slot => slot.HasValue)
+            .Select(static slot => slot!.Value)
+            .Distinct()
+            .OrderBy(static slot => slot)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractRegions(IReadOnlyList<string> steps)
+    {
+        var value = ExtractStepValue(steps, "regions:");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ExtractStepValue(IReadOnlyList<string> steps, string prefix)
+    {
+        for (var i = steps.Count - 1; i >= 0; i--)
+        {
+            var step = steps[i];
+            if (step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return step[prefix.Length..].Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static int? ParsePartitionSlot(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return null;
+        }
+
+        var separator = label.IndexOf(':');
+        var token = separator >= 0 ? label[..separator] : label;
+        return int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
     }
 
     private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(

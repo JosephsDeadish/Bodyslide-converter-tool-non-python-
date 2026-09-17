@@ -5105,6 +5105,43 @@ public sealed class PluginPatchGuidanceTests
         }
     }
 
+    [Fact]
+    public async Task PluginPatches_UsesMatchedSourceFileName_ForNonstandardPluginLayout()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "outfits", "nordic", "world"));
+
+        var espPath = Path.Combine(workingDirectory, "NonstandardPaths.esp");
+        var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("meshes/world/variant/nordic/nordic_cuirass.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "outfits", "nordic", "world", "nordic_cuirass_0.nif"),
+            "nonstandard-mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var content = await File.ReadAllTextAsync(patchPath);
+            Assert.Contains("meshes/world/variant/nordic/nordic_cuirass.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/world/variant/nordic/nordic_cuirass_0.nif", content, StringComparison.OrdinalIgnoreCase);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "world", "variant", "nordic", "nordic_cuirass_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
     {
         var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
@@ -6111,6 +6148,40 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_boots_0.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithNonstandardPluginLayout_StagesTngMeshes()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        var sourceMeshPath = Path.Combine(workingDirectory, "meshes", "variants", "nordic", "world", "nordic_cuirass_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceMeshPath)!);
+        File.Copy(
+            Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_0.nif"),
+            sourceMeshPath,
+            overwrite: true);
+
+        var pluginPath = Path.Combine(workingDirectory, "NordicVariant.esp");
+        await File.WriteAllBytesAsync(pluginPath, BuildFixtureArmaPlugin("meshes/world/variant/nordic/nordic_cuirass.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "TNG", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/tng/world/variant/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "world", "variant", "nordic", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "nordic_cuirass_1.nif")));
         }
         finally
         {
@@ -13208,6 +13279,9 @@ public async Task ConvertAsync_WithSkinPartitionNif_SurfacesParsedPartitionMetad
         var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
         Assert.Contains("\"SkinInstanceType\": \"BSDismemberSkinInstance\"", qualityJson, StringComparison.Ordinal);
         Assert.Contains("\"PartitionSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"PartitionSignals\":", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"SourceNifSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"FinalSlots\": [", qualityJson, StringComparison.Ordinal);
     }
     finally
     {
