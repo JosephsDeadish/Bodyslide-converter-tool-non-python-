@@ -2209,7 +2209,7 @@ public sealed class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var effectiveTarget = ResolveProfileTargetName();
+        var effectiveTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
         if (string.IsNullOrWhiteSpace(effectiveTarget))
         {
             MessageBox.Show(this, "Select or type a target body before saving a profile.", "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -2220,7 +2220,7 @@ public sealed class MainForm : Form
         var effectiveProfile = ResolveEffectiveDeformationProfile();
         var baseField = CreateBaseTransformationField(effectiveTarget);
         var transformedField = ApplyDeformationProfile(baseField, effectiveProfile);
-        var bodyInfo = BodyTypeCatalog.All.FirstOrDefault(body => string.Equals(body.Name, effectiveTarget, StringComparison.OrdinalIgnoreCase));
+        BodyTypeCatalog.TryResolve(effectiveTarget, out var bodyInfo);
         var gender = IsMaleBody(effectiveTarget) ? "male" : "female";
         var payload = new
         {

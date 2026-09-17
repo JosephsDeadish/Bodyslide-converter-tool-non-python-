@@ -522,8 +522,7 @@ static void WriteBodyReference(string bodyName)
         return;
     }
 
-    var body = BodyTypeCatalog.All.FirstOrDefault(b => string.Equals(b.Name, requested, StringComparison.OrdinalIgnoreCase));
-    if (body is null)
+    if (!BodyTypeCatalog.TryResolve(requested, out var body))
     {
         Console.WriteLine($"Unknown body '{bodyName}'. Use --list-bodies to view valid names.");
         var suggestions = BodyTypeCatalog.All

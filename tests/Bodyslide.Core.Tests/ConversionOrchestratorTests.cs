@@ -5164,6 +5164,30 @@ public sealed class BodyTypeCatalogTests
         }
     }
 
+    [Theory]
+    [InlineData("3BBB", "3BA")]
+    [InlineData("CBBE 3BBB", "3BA")]
+    [InlineData("UNPB", "UNP")]
+    [InlineData("SAM Light", "SAM")]
+    [InlineData("Schlongs of Skyrim", "SOS")]
+    [InlineData("Ultimate Body Enhancer", "UBE")]
+    public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
+    {
+        Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));
+        Assert.True(BodyTypeCatalog.TryResolve(requested, out var body));
+        Assert.Equal(expected, body.Name);
+    }
+
+    [Theory]
+    [InlineData("3BBB", "3BA")]
+    [InlineData("Touched By Dibella", "TBD")]
+    [InlineData("Vanilla Body", "Vanilla")]
+    public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
+    {
+        Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
+        Assert.Equal(expected, profile.Name);
+    }
+
     [Fact]
     public void PhysicsProfileCatalog_All_ContainsCanonicalProfilesOnly()
     {
@@ -5199,6 +5223,20 @@ public sealed class BodyTypeCatalogTests
             Assert.True(PhysicsProfileCatalog.Descriptions.ContainsKey(profile),
                 $"Missing description for physics profile '{profile}'");
         }
+    }
+}
+
+public sealed class RuntimeReadinessReporterTests
+{
+    [Fact]
+    public void CreateCliReport_IncludesCatalogDataHealthCheck()
+    {
+        var checks = RuntimeReadinessReporter.CreateCliReport(Environment.ProcessPath);
+
+        var catalogCheck = Assert.Single(checks.Where(check => check.Area == "Catalog data"));
+        Assert.Equal("OK", catalogCheck.Status);
+        Assert.Contains("body aliases", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skeleton frameworks", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
 

@@ -53,6 +53,7 @@ public static class RuntimeReadinessReporter
                 $"{PresetCatalog.All.Count} presets, {BodyTypeCatalog.All.Count} body types, {DeformationProfileModifier.All.Count} deformation profiles, {PhysicsProfileCatalog.All.Count} physics profiles"),
         };
 
+        checks.Add(CreateCatalogDataCheck());
         checks.Add(CreateExecutableCheck(currentExePath));
         checks.Add(CreatePipelineCheck());
         checks.Add(CreateCacheCheck());
@@ -70,6 +71,31 @@ public static class RuntimeReadinessReporter
         }
 
         return checks;
+    }
+
+    private static RuntimeReadinessCheck CreateCatalogDataCheck()
+    {
+        try
+        {
+            var builtInBodies = BuiltInBodyMetadataCatalog.All;
+            var aliasCount = builtInBodies
+                .SelectMany(static body => body.Aliases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var skeletonFrameworkCount = SkeletonFrameworkCatalog.All.Count;
+            var skeletonCommonBoneCount = SkeletonMappingCatalog.CommonBones.Count;
+            _ = BodyDetectionTuningCatalog.Current;
+            _ = MeshBehaviorCatalog.Get("cloth");
+
+            return new(
+                "Catalog data",
+                "OK",
+                $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones");
+        }
+        catch (Exception ex)
+        {
+            return new("Catalog data", "Error", $"Embedded application data catalogs failed to load: {ex.Message}");
+        }
     }
 
     private static RuntimeReadinessCheck CreateExecutableCheck(string? currentExePath)

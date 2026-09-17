@@ -1,6 +1,11 @@
 [
   {
     "name": "CBBE",
+    "aliases": [
+      "Caliente's Beautiful Bodies Enhancer",
+      "CBBE Curvy",
+      "CBBE Slim"
+    ],
     "gender": "female",
     "defaultPhysics": "none",
     "skeletonFoundation": "XPMSSE",
@@ -69,6 +74,12 @@
   },
   {
     "name": "3BA",
+    "aliases": [
+      "3BBB",
+      "3BBB Amazing",
+      "CBBE 3BA",
+      "CBBE 3BBB"
+    ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -155,6 +166,11 @@
   },
   {
     "name": "BHUNP",
+    "aliases": [
+      "BHUNP 3BBB",
+      "UNP Special",
+      "UUNP Special"
+    ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -235,6 +251,10 @@
   },
   {
     "name": "UNP",
+    "aliases": [
+      "UNPB",
+      "UNP Blessed"
+    ],
     "gender": "female",
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -301,6 +321,11 @@
   },
   {
     "name": "UUNP",
+    "aliases": [
+      "Unified UNP",
+      "7Base",
+      "UN7B"
+    ],
     "gender": "female",
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -376,6 +401,11 @@
   },
   {
     "name": "COCO CBBE",
+    "aliases": [
+      "COCOBody CBBE",
+      "COCO Body CBBE",
+      "COCO CBBE 3BBB"
+    ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + COCO weighting",
@@ -462,6 +492,11 @@
   },
   {
     "name": "COCO UUNP",
+    "aliases": [
+      "COCOBody UUNP",
+      "COCO Body UUNP",
+      "COCO 7Base"
+    ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + COCO weighting",
@@ -550,6 +585,10 @@
   },
   {
     "name": "TBD",
+    "aliases": [
+      "Touched By Dibella",
+      "The Body Deluxe"
+    ],
     "gender": "female",
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
@@ -611,6 +650,10 @@
   },
   {
     "name": "HIMBO",
+    "aliases": [
+      "Highly Improved Male Body Overhaul",
+      "HIMBO Body"
+    ],
     "gender": "male",
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
@@ -672,6 +715,11 @@
   },
   {
     "name": "SAM",
+    "aliases": [
+      "Shape Atlas for Men",
+      "SAM Light",
+      "SAMLight"
+    ],
     "gender": "male",
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
@@ -732,6 +780,10 @@
   },
   {
     "name": "SOS",
+    "aliases": [
+      "Schlongs of Skyrim",
+      "SOS Light"
+    ],
     "gender": "male",
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
@@ -795,6 +847,10 @@
   },
   {
     "name": "UBE",
+    "aliases": [
+      "Ultimate Body Enhancer",
+      "UBE Body"
+    ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + custom UBE bones",
@@ -884,6 +940,10 @@
   },
   {
     "name": "Vanilla",
+    "aliases": [
+      "Vanilla Body",
+      "Skyrim Vanilla"
+    ],
     "gender": "female",
     "defaultPhysics": "none",
     "skeletonFoundation": "Vanilla Skyrim skeleton",

@@ -764,7 +764,7 @@ public static class RequestNormalizer
 
     private static IEnumerable<string> ExpandTargetSelection(string targetBody)
     {
-        var normalized = targetBody.Trim();
+        var normalized = BodyTypeCatalog.ResolveName(targetBody);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return [];
@@ -828,6 +828,35 @@ public static class BodyTypeCatalog
             .ToList());
 
     public static IReadOnlyList<BodyTypeInfo> All => _all.Value;
+
+    public static string ResolveName(string? requestedName)
+    {
+        if (BuiltInBodyMetadataCatalog.TryResolveCanonicalName(requestedName, out var canonicalName))
+        {
+            return canonicalName;
+        }
+
+        return requestedName?.Trim() ?? string.Empty;
+    }
+
+    public static bool TryResolve(string? requestedName, out BodyTypeInfo body)
+    {
+        body = default!;
+        var resolvedName = ResolveName(requestedName);
+        if (string.IsNullOrWhiteSpace(resolvedName))
+        {
+            return false;
+        }
+
+        var match = All.FirstOrDefault(candidate => string.Equals(candidate.Name, resolvedName, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            return false;
+        }
+
+        body = match;
+        return true;
+    }
 }
 
 /// <summary>

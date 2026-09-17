@@ -5,6 +5,7 @@ namespace Bodyslide.Core;
 
 internal sealed record BuiltInBodyMetadata(
     string Name,
+    IReadOnlyList<string> Aliases,
     string Gender,
     string DefaultPhysics,
     string SkeletonFoundation,
@@ -84,11 +85,34 @@ internal static class BuiltInBodyMetadataCatalog
         };
 
     private static readonly Lazy<IReadOnlyDictionary<string, BuiltInBodyMetadata>> Bodies = new(LoadBodies);
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> AliasMap = new(LoadAliasMap);
 
     public static IReadOnlyCollection<BuiltInBodyMetadata> All => Bodies.Value.Values.ToArray();
 
-    public static bool TryGet(string bodyName, out BuiltInBodyMetadata metadata) =>
-        Bodies.Value.TryGetValue(bodyName, out metadata!);
+    public static bool TryGet(string bodyName, out BuiltInBodyMetadata metadata)
+    {
+        metadata = default!;
+        return TryResolveCanonicalName(bodyName, out var canonicalName) &&
+               Bodies.Value.TryGetValue(canonicalName, out metadata!);
+    }
+
+    public static bool TryResolveCanonicalName(string? bodyName, out string canonicalName)
+    {
+        canonicalName = string.Empty;
+        if (string.IsNullOrWhiteSpace(bodyName))
+        {
+            return false;
+        }
+
+        var normalized = bodyName.Trim();
+        if (Bodies.Value.ContainsKey(normalized))
+        {
+            canonicalName = normalized;
+            return true;
+        }
+
+        return AliasMap.Value.TryGetValue(normalized, out canonicalName!);
+    }
 
     public static IReadOnlyDictionary<string, double> CreateFallbackTransformationField() =>
         new Dictionary<string, double>(FallbackTransformationField, StringComparer.OrdinalIgnoreCase);
@@ -107,6 +131,20 @@ internal static class BuiltInBodyMetadataCatalog
             .ToDictionary(static body => body.Name, StringComparer.OrdinalIgnoreCase);
     }
 
+    private static IReadOnlyDictionary<string, string> LoadAliasMap()
+    {
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var body in Bodies.Value.Values)
+        {
+            foreach (var alias in body.Aliases)
+            {
+                aliases[alias] = body.Name;
+            }
+        }
+
+        return aliases;
+    }
+
     private static BuiltInBodyMetadata Normalize(BuiltInBodyMetadataDto dto)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
@@ -120,6 +158,7 @@ internal static class BuiltInBodyMetadataCatalog
 
         return new BuiltInBodyMetadata(
             name,
+            NormalizeStringList(dto.Aliases),
             gender,
             physics,
             string.IsNullOrWhiteSpace(dto.SkeletonFoundation) ? "XPMSSE" : dto.SkeletonFoundation.Trim(),
@@ -177,6 +216,7 @@ internal static class BuiltInBodyMetadataCatalog
     private sealed class BuiltInBodyMetadataDto
     {
         public string? Name { get; init; }
+        public string[]? Aliases { get; init; }
         public string? Gender { get; init; }
         public string? DefaultPhysics { get; init; }
         public string? SkeletonFoundation { get; init; }
