@@ -2,6 +2,7 @@ using Bodyslide.Core;
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using SharpCompress.Common;
 using SharpCompress.Writers.SevenZip;
 
@@ -5651,6 +5652,138 @@ public sealed class BatchReportTests
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+}
+
+public sealed class RealisticModPackFixtureTests
+{
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_PreservesModReadyOutputs()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass_n.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "hdtSMP64", "nordic_cuirass.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "femalebody_0.nif")));
+            var sliderSetsDirectory = Path.Combine(cuirassOutput.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "dependency-map.json")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "fomod", "ModuleConfig.xml")));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(Path.Combine(bootsOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_boots_0.nif")));
+            Assert.True(File.Exists(Path.Combine(bootsOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_boots_1.nif")));
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "batch-report.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackZip_WritesBatchReadinessArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var archivePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.zip");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            ZipFile.CreateFromDirectory(workingDirectory, archivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(archivePath, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var validationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json"));
+            Assert.Contains("\"TotalCount\": 2", validationJson, StringComparison.Ordinal);
+            Assert.Contains("\"PackReadinessStatus\"", validationJson, StringComparison.Ordinal);
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_boots.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "skeleton_female.nif")));
+        }
+        finally
+        {
+            if (Directory.Exists(workingDirectory))
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+
+            if (File.Exists(archivePath))
+            {
+                File.Delete(archivePath);
+            }
+
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    private static string CopyFixtureToTemporaryWorkspace()
+    {
+        var sourceDirectory = GetFixtureDirectory();
+        var destinationDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        CopyDirectory(sourceDirectory, destinationDirectory);
+        return destinationDirectory;
+    }
+
+    private static string GetFixtureDirectory([CallerFilePath] string currentFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(currentFilePath)!,
+            "Fixtures",
+            "RealisticModPack");
+    }
+
+    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        Directory.CreateDirectory(destinationDirectory);
+
+        foreach (var directory in Directory.GetDirectories(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, directory);
+            Directory.CreateDirectory(Path.Combine(destinationDirectory, relative));
+        }
+
+        foreach (var file in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, file);
+            var destinationPath = Path.Combine(destinationDirectory, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(file, destinationPath, overwrite: true);
         }
     }
 }
