@@ -1729,6 +1729,28 @@ public sealed class ConversionOrchestratorTests
         Assert.NotEmpty(report.Warnings);
     }
 
+    [Theory]
+    [InlineData("UUNP")]
+    [InlineData("COCO CBBE")]
+    [InlineData("COCO UUNP")]
+    public async Task BasicRaceCompatibilityService_WarnsForKhajiitRaceWithNewHumanoidOnlyBodies(string targetBody)
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "KhajiitArmor01", [30], RaceFormId: 0x00023FE9u), // KhajiitRace
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, targetBody, CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("KhajiitRace", report.IncompatibleRaces);
+        Assert.NotEmpty(report.Warnings);
+    }
+
     [Fact]
     public async Task BasicRaceCompatibilityService_WarnsForArgonianRaceWithHumanoidBody()
     {

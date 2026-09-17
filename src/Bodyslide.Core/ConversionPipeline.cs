@@ -3818,7 +3818,7 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
     private static readonly HashSet<string> HumanoidOnlyBodies =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "CBBE", "3BA", "BHUNP", "UNP", "TBD", "UBE", "SAM", "SOS", "HIMBO"
+            "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "UBE", "SAM", "SOS", "HIMBO"
         };
 
     public Task<RaceCompatibilityReport> CheckAsync(
