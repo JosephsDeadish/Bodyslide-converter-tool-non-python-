@@ -4573,6 +4573,17 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public void SignatureBodyDetectionService_GroupsUnpbIntoUnpFamily()
+    {
+        var method = typeof(SignatureBodyDetectionService).GetMethod("GetBodyFamily", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var family = Assert.IsType<string>(method!.Invoke(null, ["UNPB"]));
+
+        Assert.Equal("unp-family", family);
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_PrefersDirectReferenceSpecificityAndAddsConfidenceBand()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

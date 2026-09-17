@@ -5244,7 +5244,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         {
             "COCO CBBE" or "COCO UUNP" => "coco-family",
             "CBBE" or "3BA" => "cbbe-family",
-            "UNP" or "UUNP" or "BHUNP" or "TBD" => "unp-family",
+            "UNP" or "UNPB" or "UUNP" or "BHUNP" or "TBD" => "unp-family",
             "HIMBO" or "SAM" or "SOS" => "male-family",
             "UBE" => "ube-family",
             _ => bodyName
