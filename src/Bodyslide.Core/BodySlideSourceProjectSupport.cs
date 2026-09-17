@@ -156,8 +156,7 @@ internal static class BodySlideSourceProjectSupport
                 path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
 
         var discoveredFiles = EnumerateLikelyBodySlideRoots(sourceRoot, armor)
-            .SelectMany(static location => EnumerateBodySlideSupportFiles(location.Root, location.SearchOption))
-            .Where(path => IsAssociatedWithArmor(path, meshTokens));
+            .SelectMany(location => EnumerateBodySlideSupportFiles(location.Root, location.SearchOption, meshTokens));
 
         return explicitFiles
             .Concat(discoveredFiles)
@@ -209,16 +208,67 @@ internal static class BodySlideSourceProjectSupport
         return roots.Select(static pair => new SearchLocation(pair.Key, pair.Value));
     }
 
-    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root, SearchOption searchOption)
+    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root, SearchOption searchOption, IReadOnlyList<string> meshTokens)
     {
         if (!Directory.Exists(root))
         {
             return [];
         }
 
-        return Directory.EnumerateFiles(root, "*.osp", searchOption)
-            .Concat(Directory.EnumerateFiles(root, "*.bsd", searchOption))
-            .Concat(Directory.EnumerateFiles(root, "*.tri", searchOption));
+        if (searchOption == SearchOption.TopDirectoryOnly)
+        {
+            return EnumerateSupportedFiles(root)
+                .Where(path => IsAssociatedWithArmor(path, meshTokens));
+        }
+
+        var discovered = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            discovered.AddRange(EnumerateSupportedFiles(current)
+                .Where(path => IsAssociatedWithArmor(path, meshTokens)));
+
+            foreach (var directory in Directory.EnumerateDirectories(current))
+            {
+                if (ShouldTraverseBodySlideDirectory(root, directory, meshTokens))
+                {
+                    pending.Push(directory);
+                }
+            }
+        }
+
+        return discovered;
+    }
+
+    private static IEnumerable<string> EnumerateSupportedFiles(string root) =>
+        Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly));
+
+    private static bool ShouldTraverseBodySlideDirectory(string searchRoot, string directoryPath, IReadOnlyList<string> meshTokens)
+    {
+        if (IsAssociatedWithArmor(directoryPath, meshTokens))
+        {
+            return true;
+        }
+
+        if (string.Equals(directoryPath, searchRoot, PathComparison))
+        {
+            return true;
+        }
+
+        var directoryName = Path.GetFileName(directoryPath);
+        return directoryName.Equals("BodySlide", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("CalienteTools", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("ShapeData", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("SliderSets", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("SliderGroups", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Presets", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Project", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Projects", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveSourceRoot(string sourcePath)

@@ -5161,19 +5161,23 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
         }
 
-        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? tuning.PhysicsExpectationBoostValue : 0;
-        var referenceBoost = referenceHitRatio >= 0.5 ? tuning.BodyReferenceBoostValue : 0;
+        var effectivePhysicsSignal = template.PhysicsTokens.Count == 0
+            ? 1d
+            : physicsHitRatio > 0
+                ? Math.Clamp(physicsHitRatio + ((1d - physicsHitRatio) * tuning.PhysicsExpectationBoostValue), 0d, 1d)
+                : 0d;
+        var effectiveReferenceSignal = referenceHitRatio >= 0.5
+            ? Math.Clamp(referenceHitRatio + ((1d - referenceHitRatio) * tuning.BodyReferenceBoostValue), 0d, 1d)
+            : referenceHitRatio;
         var score = Math.Clamp(
             (meshHitRatio * tuning.MeshTokenWeight) +
             (textureHitRatio * tuning.TextureTokenWeight) +
-            (physicsHitRatio * tuning.PhysicsTokenWeight) +
-            (referenceHitRatio * tuning.BodyReferenceTokenWeight) +
+            (effectivePhysicsSignal * tuning.PhysicsTokenWeight) +
+            (effectiveReferenceSignal * tuning.BodyReferenceTokenWeight) +
             (boneSignatureScore * tuning.BoneSignatureWeight) +
             (vertexSignatureScore * tuning.VertexCountWeight) +
             (boundingRatioScore * tuning.BoundingRatioWeight) +
-            (uvSignatureScore * tuning.UvSignatureWeight) +
-            physicsExpectationBoost +
-            referenceBoost,
+            (uvSignatureScore * tuning.UvSignatureWeight),
             0,
             1);
 
@@ -6311,7 +6315,16 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             return "xpmsse-vanilla";
         }
 
-        return $"{ResolveTargetSkeletonPrefix(targetBody, armor)}-{SlugifySkeletonTarget(targetBody)}-physics";
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata) &&
+            !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation))
+        {
+            return $"{SlugifySkeletonTarget(builtInMetadata.SkeletonFoundation)}-physics";
+        }
+
+        var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
+        return IsAmbiguousSkeletonFoundation(prefix)
+            ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}-physics"
+            : $"{prefix}-physics";
     }
 
     private static string ResolveTargetSkeletonPrefix(string targetBody, ImportedArmor armor)
@@ -6358,6 +6371,12 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
         return builder.ToString().Trim('-') is { Length: > 0 } slug ? slug : "target";
     }
+
+    private static bool IsAmbiguousSkeletonFoundation(string foundationSlug) =>
+        foundationSlug.Equals("xpmsse", StringComparison.OrdinalIgnoreCase) ||
+        foundationSlug.Equals("xpmse", StringComparison.OrdinalIgnoreCase) ||
+        foundationSlug.Equals("vanilla", StringComparison.OrdinalIgnoreCase) ||
+        foundationSlug.Equals("unknown", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

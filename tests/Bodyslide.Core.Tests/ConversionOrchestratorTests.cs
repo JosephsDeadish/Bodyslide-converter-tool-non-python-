@@ -11496,7 +11496,7 @@ public sealed class CustomBodyProfileSupportTests
 
         var result = await service.MapAsync(armor, "COCO CBBE", CancellationToken.None);
 
-        Assert.Equal("xpmsse-coco-weighting-coco-cbbe-physics", result.TargetSkeleton);
+        Assert.Equal("xpmsse-coco-weighting-physics", result.TargetSkeleton);
     }
 
     [Fact]
