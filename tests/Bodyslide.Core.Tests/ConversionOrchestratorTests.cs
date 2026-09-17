@@ -11446,6 +11446,17 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_SlugifiesBodyNamesWithSpaces()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor("input", [], [], [], []);
+
+        var result = await service.MapAsync(armor, "COCO CBBE", CancellationToken.None);
+
+        Assert.Equal("xpmsse-coco-cbbe-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
     {
         var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);

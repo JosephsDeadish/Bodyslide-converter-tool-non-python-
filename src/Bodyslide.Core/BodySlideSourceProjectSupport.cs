@@ -150,23 +150,69 @@ internal static class BodySlideSourceProjectSupport
                 path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
 
-        var discoveredFiles = Directory.Exists(sourceRoot)
-            ? Directory.EnumerateFiles(sourceRoot, "*.*", SearchOption.AllDirectories)
-                .Where(path =>
-                {
-                    var extension = Path.GetExtension(path);
-                    return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
-                           extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
-                           extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
-                })
-                .Where(path => IsAssociatedWithArmor(path, meshTokens))
-            : [];
+        var discoveredFiles = EnumerateLikelyBodySlideRoots(sourceRoot, armor)
+            .SelectMany(EnumerateBodySlideSupportFiles)
+            .Where(path => IsAssociatedWithArmor(path, meshTokens));
 
         return explicitFiles
             .Concat(discoveredFiles)
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (Directory.Exists(sourceRoot))
+        {
+            roots.Add(sourceRoot);
+
+            var bodySlideRoot = Path.Combine(sourceRoot, "BodySlide");
+            if (Directory.Exists(bodySlideRoot))
+            {
+                roots.Add(bodySlideRoot);
+            }
+
+            var calienteRoot = Path.Combine(sourceRoot, "CalienteTools", "BodySlide");
+            if (Directory.Exists(calienteRoot))
+            {
+                roots.Add(calienteRoot);
+            }
+        }
+
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            var directory = Path.GetDirectoryName(meshFile);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                roots.Add(directory);
+            }
+        }
+
+        foreach (var bodyReferenceFile in armor.BodyReferenceFiles)
+        {
+            var directory = Path.GetDirectoryName(bodyReferenceFile);
+            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            {
+                roots.Add(directory);
+            }
+        }
+
+        return roots;
+    }
+
+    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root)
+    {
+        if (!Directory.Exists(root))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(root, "*.osp", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.AllDirectories));
     }
 
     private static string ResolveSourceRoot(string sourcePath)

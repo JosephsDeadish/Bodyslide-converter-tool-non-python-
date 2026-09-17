@@ -6325,7 +6325,35 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             return "xpmsse-vanilla";
         }
 
-        return $"xpmsse-{targetBody.ToLowerInvariant()}-physics";
+        return $"xpmsse-{SlugifySkeletonTarget(targetBody)}-physics";
+    }
+
+    private static string SlugifySkeletonTarget(string targetBody)
+    {
+        if (string.IsNullOrWhiteSpace(targetBody))
+        {
+            return "target";
+        }
+
+        var builder = new System.Text.StringBuilder(targetBody.Length);
+        var lastWasSeparator = false;
+        foreach (var character in targetBody.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-') is { Length: > 0 } slug ? slug : "target";
     }
 }
 
