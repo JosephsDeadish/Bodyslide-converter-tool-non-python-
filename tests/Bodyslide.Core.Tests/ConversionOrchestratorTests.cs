@@ -4123,6 +4123,102 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_UsesNestedOspMetadataToDiscoverShapeDataAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "nordic");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets", "Packs");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "FancySupport");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "nordic_cuirass_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "body_pack.osp");
+        var triPath = Path.Combine(shapeDataDirectory, "shared_source.tri");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="FancySupport" set="3BA">
+                <OutputPath>meshes\armor\nordic\</OutputPath>
+                <OutputFile gender="f" use="true">nordic_cuirass_0.nif</OutputFile>
+                <OutputFile gender="f" use="true" morphfile="1">nordic_cuirass_1.nif</OutputFile>
+                <Slider name="NordicWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(1, ("NordicWaist", [(0.125f, 0f, 0f)])));
+        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+
+        var unrelatedShapeData = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "UnrelatedSupport");
+        Directory.CreateDirectory(unrelatedShapeData);
+        await File.WriteAllTextAsync(
+            Path.Combine(sliderSetDirectory, "unrelated.osp"),
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="UnrelatedSupport" set="3BA">
+                <OutputPath>meshes\armor\other\</OutputPath>
+                <OutputFile gender="f" use="true">other_armor_0.nif</OutputFile>
+                <Slider name="WrongSlider" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(Path.Combine(unrelatedShapeData, "wrong.tri"), BuildInlineTriPayload(1, ("WrongSlider", [(0.25f, 0f, 0f)])));
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("NordicWaist", resolved.Sliders);
+            Assert.DoesNotContain("WrongSlider", resolved.Sliders);
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.True(resolved.SourceAssetSupport!.HasOsp);
+            Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+            Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+            Assert.DoesNotContain("reference-assets", resolved.SourceAssetSupport.MissingAssets ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+
+            foreach (var morph in morphs)
+            {
+                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+                writer.Write((ushort)nameBytes.Length);
+                writer.Write(nameBytes);
+                writer.Write((uint)morph.Deltas.Count);
+            }
+
+            foreach (var morph in morphs)
+            {
+                foreach (var (x, y, z) in morph.Deltas)
+                {
+                    writer.Write((short)Math.Round(x * 2048f));
+                    writer.Write((short)Math.Round(y * 2048f));
+                    writer.Write((short)Math.Round(z * 2048f));
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
