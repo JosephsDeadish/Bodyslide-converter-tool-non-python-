@@ -805,8 +805,6 @@
       "NPC R Lat"
     ],
     "referenceTokens": [
-      "samlight",
-      "sam-light",
       "shapeatlasformen"
     ],
     "sliderNames": [
@@ -832,8 +830,7 @@
       "calves": 1.04
     },
     "detectionTokens": [
-      "sam",
-      "samlight"
+      "sam"
     ],
     "textureTokens": [
       "malebody"

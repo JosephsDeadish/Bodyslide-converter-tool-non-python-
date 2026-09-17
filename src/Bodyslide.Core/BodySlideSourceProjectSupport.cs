@@ -814,7 +814,7 @@ internal static class BodySlideSourceProjectSupport
     {
         var profileTokens = new (string Profile, string[] Tokens)[]
         {
-            ("zeroed", ["zeroed", "zero"]),
+            ("zeroed", ["zeroed"]),
             ("muscular", ["muscular", "muscle", "buff"]),
             ("athletic", ["athletic", "sport"]),
             ("curvy", ["curvy", "curves", "thicc"]),
