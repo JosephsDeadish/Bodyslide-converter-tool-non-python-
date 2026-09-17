@@ -252,7 +252,6 @@
   {
     "name": "UNP",
     "aliases": [
-      "UNPB",
       "UNP Blessed"
     ],
     "gender": "female",
@@ -316,6 +315,84 @@
       "NPC Belly",
       "NPC L Butt",
       "NPC R Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc"
+  },
+  {
+    "name": "UNPB",
+    "aliases": [
+      "UNP Blessed"
+    ],
+    "gender": "female",
+    "defaultPhysics": "cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "UNP Blessed variant with fuller UNP-family proportions and broader regional slider support. CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "unpb",
+      "unp blessed"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.95,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.0,
+      "breasts": 1.07,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "unpb",
+      "unp blessed"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "unpb"
+    ],
+    "physicsTokens": [
+      "cbpc",
+      "unpb"
+    ],
+    "vertexCountMin": 6200,
+    "vertexCountMax": 6800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.29,
+    "depthToWidthRatioMax": 0.78,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
     ],
     "skeletonFramework": "xpmsse-female-cbpc"
   },
@@ -716,9 +793,7 @@
   {
     "name": "SAM",
     "aliases": [
-      "Shape Atlas for Men",
-      "SAM Light",
-      "SAMLight"
+      "Shape Atlas for Men"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -775,6 +850,70 @@
       "SOS GenitalsBase",
       "SAM Genitals",
       "NPC L Breast01"
+    ],
+    "skeletonFramework": "sam-light"
+  },
+  {
+    "name": "SAM Light",
+    "aliases": [
+      "SAMLight"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Lightweight SAM-family male body with leaner proportions and the same custom skeleton ecosystem. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "SAM Genitals"
+    ],
+    "referenceTokens": [
+      "sam light",
+      "samlight"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt"
+    ],
+    "transformationField": {
+      "chest": 1.05,
+      "waist": 1.0,
+      "pelvis": 1.02,
+      "legs": 1.04,
+      "shoulders": 1.07,
+      "breasts": 1.03,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 1.05,
+      "thighs": 1.04,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "sam light",
+      "samlight"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [
+      "smp"
+    ],
+    "vertexCountMin": 5400,
+    "vertexCountMax": 5900,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "SAM Genitals",
+      "NPC L Pec",
+      "NPC R Pec"
     ],
     "skeletonFramework": "sam-light"
   },
@@ -1071,5 +1210,72 @@
     "depthToWidthRatioMax": 0.9,
     "physicsBoneSignatures": [],
     "skeletonFramework": "vanilla-skyrim"
+  },
+  {
+    "name": "Vanilla Beast",
+    "aliases": [
+      "Beast Vanilla",
+      "Khajiit Vanilla",
+      "Argonian Vanilla"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Beast-humanoid vanilla skeleton",
+    "notes": "Vanilla-aligned beast-race body target for Khajiit and Argonian armor paths, with tail-friendly skeleton expectations. No built-in physics by default.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Tail1",
+      "Tail2"
+    ],
+    "referenceTokens": [
+      "beast",
+      "khajiit",
+      "argonian",
+      "tail"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "TailBase"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 1.0,
+      "pelvis": 1.01,
+      "legs": 1.0,
+      "shoulders": 1.0,
+      "breasts": 1.0,
+      "butt": 1.01,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.01,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "beast",
+      "khajiit",
+      "argonian",
+      "tail"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "malebody",
+      "tail"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 4000,
+    "vertexCountMax": 6400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "Tail1",
+      "Tail2"
+    ],
+    "skeletonFramework": "beast-humanoid"
   }
 ]

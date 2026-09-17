@@ -105,13 +105,16 @@ public sealed record SourceAssetSupportMetrics(
     IReadOnlyList<string>? MissingAssets = null,
     int ReusablePayloadSliderCount = 0,
     string? InferredSourceBody = null,
-    IReadOnlyList<string>? InferenceSignals = null);
+    IReadOnlyList<string>? InferenceSignals = null,
+    string? InferredDeformationProfile = null);
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,
     int FallbackVariantCount,
+    int RetargetedVariantCount = 0,
     IReadOnlyList<string>? ReusedVariants = null,
-    IReadOnlyList<string>? FallbackVariants = null);
+    IReadOnlyList<string>? FallbackVariants = null,
+    IReadOnlyList<string>? RetargetedVariants = null);
 public sealed record MorphSet(
     string LowMorph,
     string HighMorph,
@@ -527,6 +530,10 @@ public static class PresetCatalog
         ["UNP Curvy"]         = new("UNP Curvy",          "UNP",   "curvy",    "cbpc"),
         ["UNP Slim"]          = new("UNP Slim",           "UNP",   "slim",     "cbpc"),
         ["UNP Zeroed"]        = new("UNP Zeroed",         "UNP",   "zeroed",   "cbpc"),
+        ["UNPB Curvy"]        = new("UNPB Curvy",         "UNPB",  "curvy",    "cbpc"),
+        ["UNPB Slim"]         = new("UNPB Slim",          "UNPB",  "slim",     "cbpc"),
+        ["UNPB Athletic"]     = new("UNPB Athletic",      "UNPB",  "athletic", "cbpc"),
+        ["UNPB Zeroed"]       = new("UNPB Zeroed",        "UNPB",  "zeroed",   "cbpc"),
         // ── UUNP ────────────────────────────────────────────────────────────
         ["UUNP Curvy"]        = new("UUNP Curvy",         "UUNP",  "curvy",    "cbpc"),
         ["UUNP Slim"]         = new("UUNP Slim",          "UUNP",  "slim",     "cbpc"),
@@ -551,6 +558,10 @@ public static class PresetCatalog
         ["SAM Lean"]          = new("SAM Lean",           "SAM",   "lean",     "smp"),
         ["SAM Muscular"]      = new("SAM Muscular",       "SAM",   "muscular", "smp"),
         ["SAM Zeroed"]        = new("SAM Zeroed",         "SAM",   "zeroed",   "smp"),
+        ["SAM Light Lean"]    = new("SAM Light Lean",     "SAM Light", "lean",     "smp"),
+        ["SAM Light Athletic"] = new("SAM Light Athletic","SAM Light", "athletic", "smp"),
+        ["SAM Light Muscular"] = new("SAM Light Muscular","SAM Light", "muscular", "smp"),
+        ["SAM Light Zeroed"]  = new("SAM Light Zeroed",   "SAM Light", "zeroed",   "smp"),
         // ── SOS ─────────────────────────────────────────────────────────────
         ["SOS Lean"]          = new("SOS Lean",           "SOS",   "lean",     "smp"),
         ["SOS Athletic"]      = new("SOS Athletic",       "SOS",   "athletic", "smp"),
@@ -567,10 +578,13 @@ public static class PresetCatalog
         // ── Vanilla ─────────────────────────────────────────────────────────
         ["Vanilla Balanced"]  = new("Vanilla Balanced",   "Vanilla", "balanced", "none"),
         ["Vanilla Zeroed"]    = new("Vanilla Zeroed",     "Vanilla", "zeroed",   "none"),
+        ["Vanilla Beast Balanced"] = new("Vanilla Beast Balanced", "Vanilla Beast", "balanced", "none"),
+        ["Vanilla Beast Zeroed"] = new("Vanilla Beast Zeroed", "Vanilla Beast", "zeroed", "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
         ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
         ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
         ["Vanilla to UNP"]    = new("Vanilla to UNP",     "UNP",     "balanced", "cbpc"),
+        ["Vanilla to UNPB"]   = new("Vanilla to UNPB",    "UNPB",    "balanced", "cbpc"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
@@ -2736,6 +2750,21 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"vanilla-profile:{deformationProfile}");
             }
 
+            if (string.IsNullOrWhiteSpace(deformationProfile))
+            {
+                var fallbackInference = BodySlideSourceProjectSupport.InferFallbackSupport(armor, normalized.Request.TargetBody, vanillaEntry);
+                if (!string.IsNullOrWhiteSpace(fallbackInference?.DeformationProfile))
+                {
+                    deformationProfile = fallbackInference.DeformationProfile;
+                    steps.Add($"fallback-profile:{deformationProfile}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(fallbackInference?.BodyName))
+                {
+                    steps.Add($"fallback-body:{fallbackInference.BodyName}");
+                }
+            }
+
             var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
             if (textureSummary.MissingNormals.Count > 0)
             {
@@ -3734,22 +3763,11 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             [0x00013BB9] = "ArgonianRace",
         };
 
-    // Races whose body shapes differ significantly from the standard humanoid skeleton.
-    // Standard body replacers (CBBE, 3BA, BHUNP, UNP, SAM, HIMBO, …) target only
-    // humanoid races and do NOT replace Khajiit or Argonian body meshes.
-    private static readonly HashSet<string> SpecialRaces =
+    private static readonly HashSet<string> BeastRaces =
         new(StringComparer.OrdinalIgnoreCase)
         {
             "KhajiitRace",
             "ArgonianRace",
-        };
-
-    // Body types that only replace the standard humanoid form and cannot be used
-    // directly for Khajiit/Argonian armor without additional race-specific patches.
-    private static readonly HashSet<string> HumanoidOnlyBodies =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "UBE", "SAM", "SOS", "HIMBO", "TNG"
         };
 
     public Task<RaceCompatibilityReport> CheckAsync(
@@ -3757,12 +3775,6 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         string targetBody,
         CancellationToken cancellationToken)
     {
-        // Only emit warnings for body types known to be humanoid-only.
-        if (!HumanoidOnlyBodies.Contains(targetBody))
-        {
-            return Task.FromResult(new RaceCompatibilityReport(true, [], []));
-        }
-
         // Collect all race FormIDs referenced by ARMA or ARMO records.
         var referencedFormIds = pluginAnalysis.ArmorAddons
             .Where(a => a.RaceFormId is not null)
@@ -3781,6 +3793,7 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
 
         var incompatible = new List<string>();
         var warnings = new List<string>();
+        var targetProfile = ResolveTargetBodyProfile(targetBody);
 
         foreach (var formId in referencedFormIds)
         {
@@ -3789,11 +3802,15 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
                 continue;
             }
 
-            if (SpecialRaces.Contains(raceName))
+            if (BeastRaces.Contains(raceName) && !targetProfile.SupportsBeastRaces)
             {
                 incompatible.Add(raceName);
                 warnings.Add(
-                    $"{raceName} is not covered by {targetBody}; a race-specific body patch may be required.");
+                    $"{raceName} is not covered by {targetProfile.DisplayName}; a race-specific body patch may be required.");
+            }
+            else if (BeastRaces.Contains(raceName) && targetProfile.BeastSupportWarning is not null)
+            {
+                warnings.Add($"{raceName} uses {targetProfile.DisplayName} beast compatibility: {targetProfile.BeastSupportWarning}");
             }
         }
 
@@ -3802,6 +3819,29 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             Warnings: warnings,
             IncompatibleRaces: incompatible));
     }
+
+    private static BodyRaceCompatibilityProfile ResolveTargetBodyProfile(string targetBody)
+    {
+        var canonicalBody = BodyTypeCatalog.ResolveName(targetBody);
+        if (!BodyTechnicalProfileCatalog.TryGet(canonicalBody, out var profile))
+        {
+            return new BodyRaceCompatibilityProfile(targetBody, SupportsBeastRaces: true, BeastSupportWarning: null);
+        }
+
+        if (canonicalBody.Equals("Vanilla", StringComparison.OrdinalIgnoreCase) ||
+            canonicalBody.Equals("Vanilla Beast", StringComparison.OrdinalIgnoreCase) ||
+            profile.SkeletonFoundation.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+            profile.Notes.Contains("Khajiit", StringComparison.OrdinalIgnoreCase) ||
+            profile.Notes.Contains("Argonian", StringComparison.OrdinalIgnoreCase) ||
+            profile.Notes.Contains("beast", StringComparison.OrdinalIgnoreCase))
+        {
+            return new BodyRaceCompatibilityProfile(canonicalBody, SupportsBeastRaces: true, BeastSupportWarning: "tail and paw/foot rigging should still be verified in-game.");
+        }
+
+        return new BodyRaceCompatibilityProfile(canonicalBody, SupportsBeastRaces: false, BeastSupportWarning: null);
+    }
+
+    private sealed record BodyRaceCompatibilityProfile(string DisplayName, bool SupportsBeastRaces, string? BeastSupportWarning);
 }
 
 /// <summary>
@@ -5967,7 +6007,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         var tuning = BuildSolverTuning(mesh);
 
         var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning) : null;
-        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning) : null;
+        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
@@ -6052,45 +6092,60 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return sb.ToString();
     }
 
-    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning)
+    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
+        var emittedBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
         if (isMale)
         {
-            sb.AppendLine($"  <bone name=\"NPC L Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-8 * tuning.OffsetMultiplier)}\" max=\"{F(8 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
+            AppendBone("NPC L Pec", 2.5, 0.85, 0.60, 15, 0.15);
+            AppendBone("NPC R Pec", 2.5, 0.85, 0.60, 15, 0.15);
+            AppendBone("NPC Belly", 1.5, 0.90, 0.65, 8, 0.10);
         }
         else
         {
-            sb.AppendLine($"  <bone name=\"NPC L Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-10 * tuning.OffsetMultiplier)}\" max=\"{F(10 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC L Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
+            AppendBone("NPC L Breast01", 2.0, 0.80, 0.50, 20, 0.20);
+            AppendBone("NPC R Breast01", 2.0, 0.80, 0.50, 20, 0.20);
+            AppendBone("NPC Belly", 1.5, 0.90, 0.60, 10, 0.10);
+            AppendBone("NPC L Butt", 1.8, 0.75, 0.55, 15, 0.20);
+            AppendBone("NPC R Butt", 1.8, 0.75, 0.55, 15, 0.20);
+        }
+
+        foreach (var extraBone in targetPhysicsBones ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(extraBone) || emittedBones.Contains(extraBone))
+            {
+                continue;
+            }
+
+            var lowered = extraBone.ToLowerInvariant();
+            if (lowered.Contains("genital", StringComparison.Ordinal) || lowered.Contains("balls", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 1.25, 0.72, 0.62, 12, 0.12);
+            }
+            else if (lowered.Contains("thigh", StringComparison.Ordinal) || lowered.Contains("butt", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 1.85, 0.74, 0.58, 14, 0.18);
+            }
+            else if (lowered.Contains("breast", StringComparison.Ordinal) || lowered.Contains("pec", StringComparison.Ordinal) || lowered.Contains("lat", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 2.1, 0.78, 0.56, 16, 0.16);
+            }
         }
 
         sb.AppendLine("</system>");
         return sb.ToString();
+
+        void AppendBone(string boneName, double mass, double stiffness, double damping, double angleLimit, double restitution)
+        {
+            emittedBones.Add(boneName);
+            sb.AppendLine($"  <bone name=\"{boneName}\" mass=\"{F(mass * tuning.MassMultiplier)}\" stiffness=\"{F(stiffness * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-angleLimit * tuning.OffsetMultiplier)}\" max=\"{F(angleLimit * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(restitution * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
+            sb.AppendLine("  </bone>");
+        }
     }
 }
 
@@ -9770,7 +9825,7 @@ internal sealed class LocalExportService(
                 bodySlideProject.Sliders,
                 morphs.ReusableSourceMorphPayloads,
                 EstimateMorphVertexCount(writtenNifs, request.TargetBody))
-            : new MorphPayloadReuseSummary(0, 0, 0, [], []);
+            : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
 
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
@@ -11476,15 +11531,18 @@ internal sealed class LocalExportService(
             var inferredBodyDetail = !string.IsNullOrWhiteSpace(sourceAssetSupport.InferredSourceBody)
                 ? $" Inferred source body: {sourceAssetSupport.InferredSourceBody}."
                 : string.Empty;
+            var inferredProfileDetail = !string.IsNullOrWhiteSpace(sourceAssetSupport.InferredDeformationProfile)
+                ? $" Inferred fallback profile: {sourceAssetSupport.InferredDeformationProfile}."
+                : string.Empty;
             issues.Add(new ConversionValidationIssue(
                 "incomplete-source-fallback",
                 "medium",
-                $"Source BodySlide assets were incomplete, so fallback slider reconstruction was used{detail}.{inferredBodyDetail}"));
+                $"Source BodySlide assets were incomplete, so fallback slider reconstruction was used{detail}.{inferredBodyDetail}{inferredProfileDetail}"));
         }
 
         if (payloadReuse.RequestedVariantCount > 0 && payloadReuse.FallbackVariantCount > 0)
         {
-            var severity = payloadReuse.ReusedVariantCount == 0 ? "medium" : "low";
+            var severity = (payloadReuse.ReusedVariantCount + payloadReuse.RetargetedVariantCount) == 0 ? "medium" : "low";
             var detail = payloadReuse.FallbackVariants is { Count: > 0 }
                 ? $": {string.Join(", ", payloadReuse.FallbackVariants.Take(6))}"
                 : string.Empty;
@@ -11492,6 +11550,17 @@ internal sealed class LocalExportService(
                 "synthetic-morph-fallback",
                 severity,
                 $"{payloadReuse.FallbackVariantCount} morph variant(s) used synthesized deltas instead of source TRI/BSD payload reuse{detail}."));
+        }
+
+        if (payloadReuse.RetargetedVariantCount > 0)
+        {
+            var detail = payloadReuse.RetargetedVariants is { Count: > 0 }
+                ? $": {string.Join(", ", payloadReuse.RetargetedVariants.Take(6))}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "retargeted-morph-reuse",
+                "low",
+                $"{payloadReuse.RetargetedVariantCount} morph variant(s) reused source TRI/BSD deltas through conservative topology retargeting{detail}."));
         }
 
         if (topologyMismatchRisk)
@@ -12215,11 +12284,12 @@ internal sealed class LocalExportService(
         {
             if (sliders.Count == 0 || reusableSourceMorphPayloads is null || reusableSourceMorphPayloads.Count == 0)
             {
-                return new MorphPayloadReuseSummary(0, 0, 0, [], []);
+                return new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
             }
 
             var reusedVariants = new List<string>();
             var fallbackVariants = new List<string>();
+            var retargetedVariants = new List<string>();
             foreach (var slider in sliders)
             {
                 if (!reusableSourceMorphPayloads.TryGetValue(slider, out var variants))
@@ -12232,17 +12302,26 @@ internal sealed class LocalExportService(
             }
 
             return new MorphPayloadReuseSummary(
-                reusedVariants.Count + fallbackVariants.Count,
+                reusedVariants.Count + fallbackVariants.Count + retargetedVariants.Count,
                 reusedVariants.Count,
                 fallbackVariants.Count,
+                retargetedVariants.Count,
                 reusedVariants,
-                fallbackVariants);
+                fallbackVariants,
+                retargetedVariants);
 
             void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
             {
-                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, out _))
+                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, out _, out var wasRetargeted))
                 {
-                    reusedVariants.Add(variantName);
+                    if (wasRetargeted)
+                    {
+                        retargetedVariants.Add(variantName);
+                    }
+                    else
+                    {
+                        reusedVariants.Add(variantName);
+                    }
                 }
                 else
                 {
@@ -12258,7 +12337,7 @@ internal sealed class LocalExportService(
             IReadOnlyDictionary<string, double> regionalMorphing,
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads)
         {
-            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, out var sourcePayload))
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, out var sourcePayload, out _))
             {
                 return sourcePayload.Deltas;
             }
@@ -12277,9 +12356,11 @@ internal sealed class LocalExportService(
             string sliderName,
             bool isHighWeight,
             int vertexCount,
-            out SourceMorphPayload payload)
+            out SourceMorphPayload payload,
+            out bool wasRetargeted)
         {
             payload = default!;
+            wasRetargeted = false;
             if (reusableSourceMorphPayloads is null ||
                 !reusableSourceMorphPayloads.TryGetValue(sliderName, out var variants))
             {
@@ -12287,13 +12368,66 @@ internal sealed class LocalExportService(
             }
 
             var candidate = isHighWeight ? variants.HighWeight : variants.LowWeight;
-            if (candidate is null || candidate.VertexCount != vertexCount)
+            if (candidate is null)
             {
                 return false;
             }
 
-            payload = candidate;
+            if (candidate.VertexCount == vertexCount)
+            {
+                payload = candidate;
+                return true;
+            }
+
+            if (candidate.Deltas.Count == 0 || vertexCount <= 0)
+            {
+                return false;
+            }
+
+            payload = candidate with
+            {
+                VertexCount = vertexCount,
+                PayloadKind = $"{candidate.PayloadKind}-retargeted",
+                Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount)
+            };
+            wasRetargeted = true;
             return true;
+        }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            int targetVertexCount)
+        {
+            if (targetVertexCount == sourceDeltas.Count)
+            {
+                return sourceDeltas;
+            }
+
+            var retargeted = new (float X, float Y, float Z)[targetVertexCount];
+            if (sourceDeltas.Count == 1)
+            {
+                Array.Fill(retargeted, sourceDeltas[0]);
+                return retargeted;
+            }
+
+            for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
+            {
+                var normalizedPosition = targetVertexCount == 1
+                    ? 0d
+                    : (double)targetIndex / (targetVertexCount - 1);
+                var sourcePosition = normalizedPosition * (sourceDeltas.Count - 1);
+                var lowerIndex = (int)Math.Floor(sourcePosition);
+                var upperIndex = Math.Min(sourceDeltas.Count - 1, lowerIndex + 1);
+                var blend = (float)(sourcePosition - lowerIndex);
+                var lower = sourceDeltas[lowerIndex];
+                var upper = sourceDeltas[upperIndex];
+                retargeted[targetIndex] = (
+                    lower.X + ((upper.X - lower.X) * blend),
+                    lower.Y + ((upper.Y - lower.Y) * blend),
+                    lower.Z + ((upper.Z - lower.Z) * blend));
+            }
+
+            return retargeted;
         }
 
         private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)

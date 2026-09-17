@@ -914,10 +914,13 @@ public sealed class ConversionOrchestratorTests
     [InlineData("COCO UUNP")]
     [InlineData("TBD")]
     [InlineData("SAM")]
+    [InlineData("SAM Light")]
     [InlineData("SOS")]
     [InlineData("TNG")]
     [InlineData("UBE")]
     [InlineData("Vanilla")]
+    [InlineData("Vanilla Beast")]
+    [InlineData("UNPB")]
     public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
     {
         var inputFile = Path.GetTempFileName();
@@ -942,9 +945,12 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("TNG Athletic", presets);
         Assert.Contains("3BA Slim", presets);
         Assert.Contains("UNP Athletic", presets);
+        Assert.Contains("UNPB Curvy", presets);
         Assert.Contains("UUNP Curvy", presets);
         Assert.Contains("COCO CBBE Curvy", presets);
         Assert.Contains("COCO UUNP Athletic", presets);
+        Assert.Contains("SAM Light Lean", presets);
+        Assert.Contains("Vanilla Beast Balanced", presets);
     }
 
     [Fact]
@@ -987,6 +993,31 @@ public sealed class ConversionOrchestratorTests
         finally
         {
             File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutExplicitProfile_InfersFallbackProfileFromMeshName()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "travel_curvy_outfit_0.nif");
+        await File.WriteAllBytesAsync(inputFile, new byte[128]);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(new TestExporter());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "UNPB", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, step => step.Equals("fallback-profile:curvy", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(inputDirectory, recursive: true);
             Directory.Delete(outputDirectory, recursive: true);
         }
     }
@@ -1807,6 +1838,25 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_AllowsBeastCompatibleTargetBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["argonian-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "ArgonianArmor01", [30], RaceFormId: 0x00013BB9u),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+        Assert.NotEmpty(report.Warnings);
     }
 
     // ── Gap 3: Parallel batch conversion ─────────────────────────────────────
@@ -3693,6 +3743,19 @@ public sealed class PhysicsXmlTests
     }
 
     [Fact]
+    public async Task BuildAsync_TargetSpecificPhysicsBones_GeneratesAdditionalSmpNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("mixed", "default", true, TargetPhysicsBones: ["NPC L Pec", "NPC R Pec", "NPC Belly", "TNG Genitals", "TNG Balls"]);
+
+        var config = await service.BuildAsync(mesh, "TNG", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("TNG Genitals", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("TNG Balls", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BuildAsync_CbpcOnlyProfile_NoSmpXml()
     {
         var service = new BasicPhysicsSupportService();
@@ -5081,7 +5144,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SOS", "TNG", "UBE", "Vanilla" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast" })
         {
             Assert.Contains(expected, names);
         }
@@ -5099,7 +5162,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SOS", "TNG", "UBE", "Vanilla" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -5145,12 +5208,14 @@ public sealed class BodyTypeCatalogTests
             ("3BA",     "smp+cbpc"),
             ("BHUNP",   "smp+cbpc"),
             ("UNP",     "cbpc"),
+            ("UNPB",    "cbpc"),
             ("UUNP",    "cbpc"),
             ("COCO CBBE", "smp+cbpc"),
             ("COCO UUNP", "smp+cbpc"),
             ("TBD",     "cbpc"),
             ("HIMBO",   "smp"),
             ("SAM",     "smp"),
+            ("SAM Light", "smp"),
             ("SOS",     "smp"),
             ("TNG",     "smp"),
             ("UBE",     "smp+cbpc"),
@@ -5164,7 +5229,7 @@ public sealed class BodyTypeCatalogTests
         }
 
         // Bodies without built-in physics must report DefaultPhysics = "none".
-        foreach (var bodyName in new[] { "CBBE", "Vanilla" })
+        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
                 $"No profile for {bodyName}");
@@ -5177,8 +5242,8 @@ public sealed class BodyTypeCatalogTests
     [Theory]
     [InlineData("3BBB", "3BA")]
     [InlineData("CBBE 3BBB", "3BA")]
-    [InlineData("UNPB", "UNP")]
-    [InlineData("SAM Light", "SAM")]
+    [InlineData("UNP Blessed", "UNPB")]
+    [InlineData("SAMLight", "SAM Light")]
     [InlineData("Schlongs of Skyrim", "SOS")]
     [InlineData("The New Gentleman", "TNG")]
     [InlineData("Ultimate Body Enhancer", "UBE")]
@@ -10171,7 +10236,7 @@ public sealed class OutputCompletenessTests
                         new SourceMorphPayload("Belly", false, "bsd", 2, lowDeltas),
                         new SourceMorphPayload("Belly", true, "bsd", 2, highDeltas))
                 },
-                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1));
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1, null, null, null));
             var physics = new PhysicsConfig("none");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -10254,7 +10319,8 @@ public sealed class OutputCompletenessTests
                     ["osp", "morph-payloads", "reference-assets"],
                     0,
                     "3BA",
-                    ["reference:3bbb"]));
+                    ["reference:3bbb"],
+                    "curvy"));
             var physics = new PhysicsConfig("none");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -10281,6 +10347,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"reference-assets\"", qualityJson);
             Assert.Contains("\"InferredSourceBody\": \"3BA\"", qualityJson);
             Assert.Contains("\"reference:3bbb\"", qualityJson);
+            Assert.Contains("\"InferredDeformationProfile\": \"curvy\"", qualityJson);
             Assert.Contains("\"RequestedVariantCount\": 0", qualityJson);
             Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
         }
@@ -10318,7 +10385,7 @@ public sealed class OutputCompletenessTests
                         new SourceMorphPayload("Belly", false, "bsd", 1, [(0.125f, -0.25f, 0.375f)]),
                         null)
                 },
-                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1));
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1, null, null, null));
             var physics = new PhysicsConfig("none");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -10337,11 +10404,20 @@ public sealed class OutputCompletenessTests
                 detected, skel, voxel,
                 CancellationToken.None);
 
+            var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(lowBsdPath), out var lowBsdPayload));
+            Assert.NotNull(lowBsdPayload);
+            Assert.Equal(2, lowBsdPayload!.Deltas.Count);
+            Assert.Equal(0.125f, lowBsdPayload.Deltas[0].X, 3);
+            Assert.Equal(0.125f, lowBsdPayload.Deltas[1].X, 3);
+
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
             Assert.Contains("\"RequestedVariantCount\": 2", qualityJson);
             Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
-            Assert.Contains("\"FallbackVariantCount\": 2", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
+            Assert.Contains("\"RetargetedVariantCount\": 1", qualityJson);
+            Assert.Contains("\"Code\": \"retargeted-morph-reuse\"", qualityJson);
         }
         finally
         {
@@ -10537,6 +10613,7 @@ public sealed class BasicWeightTransferServicePhysicsTests
     [Theory]
     [InlineData("HIMBO")]
     [InlineData("SAM")]
+    [InlineData("SAM Light")]
     [InlineData("TNG")]
     public async Task TransferAsync_MalePhysicsTarget_PopulatesMaleSmpBones(string targetBody)
     {

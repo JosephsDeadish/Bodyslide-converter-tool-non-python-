@@ -3,8 +3,8 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, TNG, UBE + CUSTOM fallback); bone-name scoring from physics XML
-- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `UNPB` → `UNP`, `SAM Light` → `SAM`, `TNG Extended` → `TNG`, and `Touched By Dibella` → `TBD`
+- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast + CUSTOM fallback); bone-name scoring from physics XML
+- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `TNG Extended` → `TNG`, `Touched By Dibella` → `TBD`, `Shape Atlas for Men` → `SAM`, and `Beast Vanilla` → `Vanilla Beast`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -13,13 +13,14 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
-- physics profile generation (CBPC + SMP XML config file output)
+- physics profile generation (CBPC + SMP XML config file output, including extra target-specific secondary/genital bones when the target ecosystem exposes them)
 - physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (`soft-body` is accepted as an alias for `smp+cbpc`)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
-- incomplete-source BodySlide fallback recovery that can infer likely source-body slider families from nearby reference/body asset names when OSP/TRI/BSD support files are missing
+- incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
+- topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
 - **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
 - export package + manifest/log output

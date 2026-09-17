@@ -10,6 +10,11 @@ internal sealed record ResolvedBodySlideSliders(
     IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableMorphPayloads = null,
     SourceAssetSupportMetrics? SourceAssetSupport = null);
 
+internal sealed record FallbackBodySlideInference(
+    string? BodyName,
+    string? DeformationProfile,
+    IReadOnlyList<string> Signals);
+
 internal static class BodySlideSourceProjectSupport
 {
     private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
@@ -47,13 +52,13 @@ internal static class BodySlideSourceProjectSupport
                 ? metadata.SliderNames
                 : DefaultSliders;
         var sourceSupport = await ExtractSourceSupportAsync(armor, cancellationToken);
-        var inferredSourceBody = sourceSupport.Sliders.Count == 0
-            ? InferFallbackSourceBody(armor, targetBody)
+        var fallbackInference = sourceSupport.Sliders.Count == 0
+            ? InferFallbackSupport(armor, targetBody)
             : null;
         var mergedSliders = MergeSliderLists(baseSliders, sourceSupport.Sliders);
         if (sourceSupport.Sliders.Count == 0 &&
-            inferredSourceBody is not null &&
-            BuiltInBodyMetadataCatalog.TryGet(inferredSourceBody.BodyName, out var inferredMetadata) &&
+            !string.IsNullOrWhiteSpace(fallbackInference?.BodyName) &&
+            BuiltInBodyMetadataCatalog.TryGet(fallbackInference.BodyName, out var inferredMetadata) &&
             inferredMetadata.SliderNames.Count > 0)
         {
             mergedSliders = MergeSliderLists(mergedSliders, inferredMetadata.SliderNames);
@@ -95,7 +100,42 @@ internal static class BodySlideSourceProjectSupport
             sourceSupport.BuildAssetSupport(
                 baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0,
                 armor.BodyReferenceFiles.Count > 0,
-                inferredSourceBody));
+                fallbackInference));
+    }
+
+    public static FallbackBodySlideInference? InferFallbackSupport(
+        ImportedArmor armor,
+        string targetBody,
+        VanillaArmorEntry? vanillaEntry = null)
+    {
+        var evidence = armor.MeshFiles
+            .Concat(armor.TextureFiles)
+            .Concat(armor.PhysicsFiles)
+            .Concat(armor.BodyReferenceFiles)
+            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        if (evidence.Length == 0)
+        {
+            return vanillaEntry is null
+                ? null
+                : new FallbackBodySlideInference(null, vanillaEntry.RecommendedProfile, [$"vanilla:{vanillaEntry.RecommendedProfile}"]);
+        }
+
+        var inferredSourceBody = InferFallbackSourceBody(evidence, targetBody);
+        var profileSignals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var inferredProfile = InferDeformationProfile(evidence, vanillaEntry, profileSignals);
+        if (inferredSourceBody is null && string.IsNullOrWhiteSpace(inferredProfile))
+        {
+            return null;
+        }
+
+        var signals = new HashSet<string>(inferredSourceBody?.Signals ?? [], StringComparer.OrdinalIgnoreCase);
+        signals.UnionWith(profileSignals);
+        return new FallbackBodySlideInference(
+            inferredSourceBody?.BodyName,
+            inferredProfile,
+            signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
@@ -425,22 +465,11 @@ internal static class BodySlideSourceProjectSupport
         return merged;
     }
 
-    private static InferredSourceBodySupport? InferFallbackSourceBody(ImportedArmor armor, string targetBody)
+    private static InferredSourceBodySupport? InferFallbackSourceBody(IReadOnlyList<string> evidence, string targetBody)
     {
         var targetCanonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalTargetBody)
             ? canonicalTargetBody
             : targetBody;
-        var evidence = armor.MeshFiles
-            .Concat(armor.TextureFiles)
-            .Concat(armor.PhysicsFiles)
-            .Concat(armor.BodyReferenceFiles)
-            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .ToArray();
-        if (evidence.Length == 0)
-        {
-            return null;
-        }
 
         var best = default(InferredSourceBodySupport?);
         foreach (var body in BuiltInBodyMetadataCatalog.All)
@@ -498,6 +527,45 @@ internal static class BodySlideSourceProjectSupport
 
             return score;
         }
+    }
+
+    private static string? InferDeformationProfile(
+        IReadOnlyList<string> evidence,
+        VanillaArmorEntry? vanillaEntry,
+        ISet<string> signals)
+    {
+        var profileTokens = new (string Profile, string[] Tokens)[]
+        {
+            ("zeroed", ["zeroed", "zero"]),
+            ("muscular", ["muscular", "muscle", "buff"]),
+            ("athletic", ["athletic", "sport"]),
+            ("curvy", ["curvy", "curves", "thicc"]),
+            ("slim", ["slim", "slender", "thin"]),
+            ("petite", ["petite", "smallframe"]),
+            ("lean", ["lean"]),
+            ("anime", ["anime"]),
+            ("balanced", ["balanced", "vanilla"])
+        };
+
+        foreach (var (profile, tokens) in profileTokens)
+        {
+            foreach (var token in tokens)
+            {
+                if (evidence.Any(fileToken => fileToken.Contains(token, StringComparison.OrdinalIgnoreCase)))
+                {
+                    signals.Add($"profile:{token}");
+                    return profile;
+                }
+            }
+        }
+
+        if (vanillaEntry is not null)
+        {
+            signals.Add($"vanilla:{vanillaEntry.RecommendedProfile}");
+            return vanillaEntry.RecommendedProfile;
+        }
+
+        return null;
     }
 
     private static string NormalizeSliderFileName(string? fileName)
@@ -712,7 +780,7 @@ internal static class BodySlideSourceProjectSupport
         public SourceAssetSupportMetrics BuildAssetSupport(
             bool usedFallbackSliders,
             bool hasReferenceAssets,
-            InferredSourceBodySupport? inferredSourceBody)
+            FallbackBodySlideInference? fallbackInference)
         {
             var effectiveHasReferenceAssets = hasReferenceAssets || HasOsp || HasTriPayloads || HasBsdPayloads;
             var missingAssets = new List<string>();
@@ -739,8 +807,9 @@ internal static class BodySlideSourceProjectSupport
                 usedFallbackSliders,
                 missingAssets,
                 ReusableMorphPayloads.Count,
-                inferredSourceBody?.BodyName,
-                inferredSourceBody?.Signals);
+                fallbackInference?.BodyName,
+                fallbackInference?.Signals,
+                fallbackInference?.DeformationProfile);
         }
     }
 
