@@ -6311,13 +6311,21 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             return "xpmsse-vanilla";
         }
 
+        var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
+        {
+            return IsAmbiguousSkeletonFoundation(prefix)
+                ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}-physics"
+                : $"{prefix}-physics";
+        }
+
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata) &&
             !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation))
         {
             return $"{SlugifySkeletonTarget(builtInMetadata.SkeletonFoundation)}-physics";
         }
 
-        var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
         return IsAmbiguousSkeletonFoundation(prefix)
             ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}-physics"
             : $"{prefix}-physics";

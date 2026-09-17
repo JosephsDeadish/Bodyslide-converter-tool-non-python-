@@ -11500,6 +11500,39 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PrefersCustomSkeletonFoundation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "MyFollower",
+                    DetectionTokens: ["myfollower"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.05 },
+                    SliderNames: ["Waist"],
+                    PhysicsBones: ["NPC L Breast01", "NPC R Breast01"],
+                    PhysicsProfile: "smp",
+                    BodyOutputPath: @"meshes\actors\character\character assets\",
+                    Gender: "female",
+                    SkeletonFoundation: "TNG Extended")
+            ]);
+
+        var result = await service.MapAsync(armor, "MyFollower", CancellationToken.None);
+
+        Assert.Equal("tng-extended-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
     {
         var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);
