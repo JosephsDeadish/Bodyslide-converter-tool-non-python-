@@ -9772,6 +9772,7 @@ internal sealed class LocalExportService(
         Directory.CreateDirectory(outputDirectory);
 
         var outputFiles = new List<string>();
+        MorphTransferContext? morphTransferContext = null;
 
         var manifest = new
         {
@@ -9918,7 +9919,8 @@ internal sealed class LocalExportService(
             ? BuildPayloadReuseSummary(
                 bodySlideProject.Sliders,
                 morphs.ReusableSourceMorphPayloads,
-                EstimateMorphVertexCount(writtenNifs, request.TargetBody))
+                EstimateMorphVertexCount(writtenNifs, request.TargetBody),
+                morphTransferContext)
             : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
 
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
@@ -10036,7 +10038,7 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
-            var morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs);
+            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs);
 
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
@@ -12379,7 +12381,8 @@ internal sealed class LocalExportService(
         private static MorphPayloadReuseSummary BuildPayloadReuseSummary(
             IReadOnlyList<string> sliders,
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
-            int vertexCount)
+            int vertexCount,
+            MorphTransferContext? morphTransferContext)
         {
             if (sliders.Count == 0 || reusableSourceMorphPayloads is null || reusableSourceMorphPayloads.Count == 0)
             {
