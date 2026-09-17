@@ -7,6 +7,7 @@ internal sealed record ResolvedBodySlideSliders(IReadOnlyList<string> Sliders, I
 internal static class BodySlideSourceProjectSupport
 {
     private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
+    private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
 
     private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -22,7 +23,10 @@ internal static class BodySlideSourceProjectSupport
             ["mask"] = "HideMask"
         };
 
-    public static ResolvedBodySlideSliders Resolve(ImportedArmor armor, string targetBody)
+    public static async Task<ResolvedBodySlideSliders> ResolveAsync(
+        ImportedArmor armor,
+        string targetBody,
+        CancellationToken cancellationToken)
     {
         var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
         var baseSliders = customProfileFound
@@ -30,7 +34,7 @@ internal static class BodySlideSourceProjectSupport
             : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) && metadata.SliderNames.Count > 0
                 ? metadata.SliderNames
                 : DefaultSliders;
-        var sourceSupport = ExtractSourceSupport(armor.BodyReferenceFiles);
+        var sourceSupport = await ExtractSourceSupportAsync(armor, cancellationToken);
         var mergedSliders = MergeSliderLists(baseSliders, sourceSupport.Sliders);
 
         var zapSliders = new HashSet<string>(customProfile?.ZapSliderNames ?? [], StringComparer.OrdinalIgnoreCase);
@@ -66,19 +70,19 @@ internal static class BodySlideSourceProjectSupport
             gender);
     }
 
-    private static BodySlideSourceSupport ExtractSourceSupport(IReadOnlyList<string> bodyReferenceFiles)
+    private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
+        ImportedArmor armor,
+        CancellationToken cancellationToken)
     {
         var sliders = new List<string>();
         var zapSliders = new List<string>();
 
-        foreach (var filePath in bodyReferenceFiles
-                     .Where(static path => !string.IsNullOrWhiteSpace(path))
-                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var filePath in EnumerateAssociatedBodySlideFiles(armor))
         {
             var extension = Path.GetExtension(filePath);
             if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
             {
-                var fromOsp = TryReadOsp(filePath);
+                var fromOsp = await TryReadOspAsync(filePath, cancellationToken);
                 sliders.AddRange(fromOsp.Sliders);
                 zapSliders.AddRange(fromOsp.ZapSliders);
             }
@@ -97,11 +101,71 @@ internal static class BodySlideSourceProjectSupport
             zapSliders.Where(IsLikelySliderName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
-    private static BodySlideSourceSupport TryReadOsp(string filePath)
+    private static IEnumerable<string> EnumerateAssociatedBodySlideFiles(ImportedArmor armor)
+    {
+        var sourceRoot = ResolveSourceRoot(armor.SourcePath);
+        var meshTokens = armor.MeshFiles
+            .Select(NormalizeMeshToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var explicitFiles = armor.BodyReferenceFiles
+            .Where(static path =>
+                path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase));
+
+        var discoveredFiles = Directory.Exists(sourceRoot)
+            ? Directory.EnumerateFiles(sourceRoot, "*.*", SearchOption.AllDirectories)
+                .Where(path =>
+                {
+                    var extension = Path.GetExtension(path);
+                    return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                           extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
+                })
+                .Where(path => IsAssociatedWithArmor(path, meshTokens))
+            : [];
+
+        return explicitFiles
+            .Concat(discoveredFiles)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveSourceRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return sourcePath;
+        }
+
+        return Path.GetDirectoryName(sourcePath) ?? sourcePath;
+    }
+
+    private static bool IsAssociatedWithArmor(string filePath, IReadOnlyList<string> meshTokens)
+    {
+        if (meshTokens.Count == 0)
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(filePath) ?? string.Empty;
+        if (meshTokens.Any(token => fileName.Contains(token, PathComparison)))
+        {
+            return true;
+        }
+
+        var directoryPath = Path.GetDirectoryName(filePath) ?? string.Empty;
+        return meshTokens.Any(token => directoryPath.Contains(token, PathComparison));
+    }
+
+    private static async Task<BodySlideSourceSupport> TryReadOspAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
-            var document = XDocument.Load(filePath, LoadOptions.None);
+            await using var stream = File.OpenRead(filePath);
+            var document = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
             var sliders = new List<string>();
             var zapSliders = new List<string>();
 
@@ -132,6 +196,14 @@ internal static class BodySlideSourceProjectSupport
         {
             return new BodySlideSourceSupport([], []);
         }
+    }
+
+    private static string NormalizeMeshToken(string meshFilePath)
+    {
+        var token = Path.GetFileNameWithoutExtension(meshFilePath) ?? meshFilePath;
+        return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+            ? token[..^2]
+            : token;
     }
 
     private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<string> secondary)

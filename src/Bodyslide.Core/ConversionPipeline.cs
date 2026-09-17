@@ -4681,16 +4681,9 @@ internal sealed class LocalArmorImportService : IArmorImportService
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
         var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
         var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"], excludedDirectories);
-        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".bsd", ".nif"], excludedDirectories)
+        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"], excludedDirectories)
             .Where(path =>
             {
-                var extension = Path.GetExtension(path);
-                if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
-                    extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
                 var fileName = Path.GetFileNameWithoutExtension(path);
                 return !string.IsNullOrWhiteSpace(fileName) &&
                     (fileName.Contains("body", StringComparison.OrdinalIgnoreCase) ||
@@ -4974,6 +4967,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double MediumConfidenceThreshold = 0.35;
     private const double HighConfidenceThreshold = 0.75;
     private const double ReferencePriorityMargin = 0.34;
+    private const double SharedReferenceConfidenceFloor = 0.50;
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> SemanticBoneAliases =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
@@ -5227,28 +5221,39 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var top = scoredCandidates[0];
         var runnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
-        var sharedReferenceAmbiguity = runnerUp is { } candidate &&
-            top.ReferenceHitRatio >= 0.5 &&
-            candidate.ReferenceHitRatio >= 0.5;
-        if (runnerUp is null ||
-            top.Score < AmbiguityScoreFloor ||
-            runnerUp.Value.Score < (sharedReferenceAmbiguity ? AmbiguityScoreFloor : MediumConfidenceThreshold) ||
-            top.Score >= HighConfidenceThreshold ||
-            HasReferencePriority(top, runnerUp.Value) ||
-            Math.Abs(top.Score - runnerUp.Value.Score) > AmbiguityMargin)
+        if (runnerUp is not { } familyRunnerUp)
         {
             return false;
         }
 
-        var ambiguityConfidence = Math.Round((top.Score + runnerUp.Value.Score) / 2d, 4);
+        var hasMinimumTopScore = top.Score >= AmbiguityScoreFloor;
+        var hasStrongSharedReference =
+            top.ReferenceHitRatio >= SharedReferenceConfidenceFloor &&
+            familyRunnerUp.ReferenceHitRatio >= SharedReferenceConfidenceFloor;
+        var runnerUpScoreFloor = hasStrongSharedReference ? AmbiguityScoreFloor : MediumConfidenceThreshold;
+        var runnerUpClearsFloor = familyRunnerUp.Score >= runnerUpScoreFloor;
+        var topIsNotDefinitive = top.Score < HighConfidenceThreshold;
+        var lacksReferencePriority = !HasReferencePriority(top, familyRunnerUp);
+        var withinAmbiguityMargin = Math.Abs(top.Score - familyRunnerUp.Score) <= AmbiguityMargin;
+
+        if (!hasMinimumTopScore ||
+            !runnerUpClearsFloor ||
+            !topIsNotDefinitive ||
+            !lacksReferencePriority ||
+            !withinAmbiguityMargin)
+        {
+            return false;
+        }
+
+        var ambiguityConfidence = Math.Round((top.Score + familyRunnerUp.Score) / 2d, 4);
         result = new BodyDetectionReport(
             "UNKNOWN",
             ambiguityConfidence,
             top.Evidence
-                .Concat(runnerUp.Value.Evidence)
+                .Concat(familyRunnerUp.Evidence)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Append("confidence-band:ambiguous")
-                .Append($"ambiguous:{top.Template.Body}|{runnerUp.Value.Template.Body}")
+                .Append($"ambiguous:{top.Template.Body}|{familyRunnerUp.Template.Body}")
                 .ToArray());
         return true;
     }
@@ -5987,9 +5992,9 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
 /// </summary>
 internal sealed class BasicMorphGenerationService : IMorphGenerationService
 {
-    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    public async Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
-        var sliderCount = BodySlideSourceProjectSupport.Resolve(armor, targetBody).Sliders.Count;
+        var sliderCount = (await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken)).Sliders.Count;
 
         // Source-body match ratio: how closely the mesh weight profile matches expected
         // vertex weighting for the target body.  Physics-enabled meshes with transferred
@@ -6007,7 +6012,7 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
 
         var lowLabel  = $"low-weight:{sliderCount}-sliders";
         var highLabel = $"high-weight:{sliderCount}-sliders";
-        return Task.FromResult(new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio));
+        return new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio);
     }
 }
 
@@ -7005,16 +7010,16 @@ public static class DeformationProfileModifier
 /// </summary>
 internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 {
-    public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
+    public async Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
         var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
-        var resolved = BodySlideSourceProjectSupport.Resolve(armor, targetBody);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken);
         var sliders = resolved.Sliders;
         var zapSliders = resolved.ZapSliders;
         var gender = resolved.Gender;
         var ospXml = BuildOspXml(sliders, zapSliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
 
-        return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders));
+        return new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders);
     }
 
     private static string BuildOspXml(
