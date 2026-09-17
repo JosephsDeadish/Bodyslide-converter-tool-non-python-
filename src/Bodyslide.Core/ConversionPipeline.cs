@@ -12187,8 +12187,8 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
-                TrackPayloadReuseVariant(slider, isHighWeight: false, variants.LowWeight);
-                TrackPayloadReuseVariant($"{slider}_1", isHighWeight: true, variants.HighWeight);
+                TrackPayloadReuseVariant(slider, slider, isHighWeight: false, variants.LowWeight);
+                TrackPayloadReuseVariant(slider, $"{slider}_1", isHighWeight: true, variants.HighWeight);
             }
 
             return new MorphPayloadReuseSummary(
@@ -12198,14 +12198,14 @@ internal sealed class LocalExportService(
                 reusedVariants,
                 fallbackVariants);
 
-            void TrackPayloadReuseVariant(string variantName, bool isHighWeight, SourceMorphPayload? candidate)
+            void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight, SourceMorphPayload? candidate)
             {
                 if (candidate is null)
                 {
                     return;
                 }
 
-                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName: isHighWeight ? variantName[..^2] : variantName, isHighWeight, vertexCount, out _))
+                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, out _))
                 {
                     reusedVariants.Add(variantName);
                 }
