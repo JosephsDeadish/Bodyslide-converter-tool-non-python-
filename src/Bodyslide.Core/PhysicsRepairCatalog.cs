@@ -75,7 +75,7 @@ internal static class PhysicsRepairCatalog
             .Where(static bone => !string.IsNullOrWhiteSpace(bone))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var targetGroups = DetectGroups(repaired);
+        var targetGroups = new HashSet<string>(DetectGroups(repaired), StringComparer.OrdinalIgnoreCase);
         targetGroups.UnionWith(DetectGroups(supported));
 
         if (sourceBones is not null)

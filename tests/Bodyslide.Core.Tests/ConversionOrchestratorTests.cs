@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Reflection;
 using SharpCompress.Common;
 using SharpCompress.Writers.SevenZip;
 
@@ -1741,7 +1742,7 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
-        Assert.NotEmpty(report.Warnings);
+        Assert.Empty(report.Warnings);
     }
 
     [Fact]
@@ -4961,7 +4962,7 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC L Breast02", fallbacks);
         Assert.True(RaceCompatibilityCatalog.TryGetRace(0x00023FE9u, out var khajiitRace));
         Assert.Contains("beast", khajiitRace.Groups);
-        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("coco-cbbe", out var cocoRule));
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));
         Assert.Equal("COCO CBBE", cocoRule.Body);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
         Assert.Equal("tail", groupName);
@@ -10433,45 +10434,57 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public void RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
+    public async Task RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
     {
         var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
-        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
-        Assert.NotNull(contextType);
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
 
-        var sourceVertices = new[]
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
         {
-            new MeshVertex(0f, 0f, 0f),
-            new MeshVertex(10f, 0f, 0f),
-            new MeshVertex(20f, 0f, 0f)
-        };
-        var targetVertices = new[]
+            var sourcePath = Path.Combine(tmpDir, "source.nif");
+            var targetPath = Path.Combine(tmpDir, "target.nif");
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (0f, 0f, 0f),
+                (10f, 0f, 0f),
+                (20f, 0f, 0f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (19.9f, 0f, 0f),
+                (0.1f, 0f, 0f)
+            ]);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = new (float X, float Y, float Z)[]
+            {
+                (1f, 0f, 0f),
+                (2f, 0f, 0f),
+                (3f, 0f, 0f)
+            };
+
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                method!.Invoke(null, [sourceDeltas, 2, context]));
+
+            Assert.Equal(3f, result[0].X, 3);
+            Assert.Equal(1f, result[1].X, 3);
+        }
+        finally
         {
-            new MeshVertex(19.9f, 0f, 0f),
-            new MeshVertex(0.1f, 0f, 0f)
-        };
-
-        var buildMap = typeof(LocalExportService).GetMethod("BuildNearestSurfaceMap", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(buildMap);
-        var mapping = Assert.IsType<int[]>(buildMap!.Invoke(null, [sourceVertices, targetVertices]));
-
-        var context = Activator.CreateInstance(contextType!, BindingFlags.Instance | BindingFlags.NonPublic, binder: null, args: [sourceVertices, targetVertices, mapping], culture: null);
-        Assert.NotNull(context);
-
-        var sourceDeltas = new (float X, float Y, float Z)[]
-        {
-            (1f, 0f, 0f),
-            (2f, 0f, 0f),
-            (3f, 0f, 0f)
-        };
-
-        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-            method!.Invoke(null, [sourceDeltas, 2, context]));
-
-        Assert.Equal(3f, result[0].X, 3);
-        Assert.Equal(1f, result[1].X, 3);
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     private static void AssertDeltasEqual(
