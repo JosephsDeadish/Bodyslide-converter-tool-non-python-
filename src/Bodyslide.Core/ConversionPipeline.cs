@@ -1496,8 +1496,8 @@ internal static class ReferenceBodySignatureDatabase
             ["COCO UUNP"] = ["coco", "cocobody", "uunp", "7base"],
             ["TBD"] = ["tbd", "touched by dibella"],
             ["UBE"] = ["ube", "ubebody", "ultimatebodyenhancer"],
-            ["HIMBO"] = ["himbo", "malebody"],
-            ["SAM"] = ["sam", "samlight", "malebody"],
+            ["HIMBO"] = ["himbo"],
+            ["SAM"] = ["sam", "samlight"],
             ["SOS"] = ["sos", "schlongs"],
             ["Vanilla"] = ["vanillafemale", "vanillamale", "vanilla"]
         };
@@ -5170,7 +5170,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return false;
         }
 
-        var ambiguityConfidence = Math.Round(Math.Abs(top.Score - runnerUp.Score), 4);
+        var ambiguityConfidence = Math.Round((top.Score + runnerUp.Score) / 2d, 4);
         result = new BodyDetectionReport(
             "UNKNOWN",
             ambiguityConfidence,
