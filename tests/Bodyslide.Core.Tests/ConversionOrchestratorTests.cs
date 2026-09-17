@@ -4385,6 +4385,34 @@ public sealed class BodySignatureVertexCountTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_PrefersDirectReferenceSpecificityAndAddsConfidenceBand()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "coco_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "coco_uunp_7base_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("COCO UUNP", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.Equals("reference-priority:direct-source", StringComparison.Ordinal));
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("confidence-band:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
 
 public sealed class PreviewMetadataTests
@@ -10768,6 +10796,48 @@ public sealed class VanillaBodyOspSliderTests
         Assert.Contains("HideSleeves", project.ZapSliders ?? []);
         Assert.Contains("zap=\"true\"", project.OspXml, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GenerateAsync_MergesSourceOspAndBsdSliders()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var ospPath = Path.Combine(tmpDir, "source_sliders.osp");
+        var bsdPath = Path.Combine(tmpDir, "WaistMagic_1.bsd");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <SliderSetInfo version="1">
+              <SliderSet name="SourceSet" baseShape="Base Shape" bsversion="20">
+                <Slider name="SourceBust" invert="false" zap="false" uv="false">
+                  <Low value="0" />
+                  <High value="100" />
+                </Slider>
+                <Slider name="HideAmulet" invert="false" zap="true" uv="false">
+                  <Low value="0" />
+                  <High value="100" />
+                </Slider>
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(bsdPath, [1, 2, 3, 4]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [ospPath, bsdPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("SourceBust", project.Sliders);
+        Assert.Contains("WaistMagic", project.Sliders);
+        Assert.Contains("HideAmulet", project.ZapSliders ?? []);
+        Assert.Contains("name=\"SourceBust\"", project.OspXml, StringComparison.Ordinal);
+        Assert.Contains("name=\"HideAmulet\"", project.OspXml, StringComparison.Ordinal);
+    }
 }
 
 public sealed class CustomBodyProfileSupportTests
@@ -10994,6 +11064,47 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LeftBreastUpper", StringComparison.OrdinalIgnoreCase)
                                                       && m.TargetBone.Equals("LeftBreastLift", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("LeftBreastUpper", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_RecognizesDotSuffixSideNotation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"BreastUpper.L\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["BreastSupport.L", "BreastSupport.R", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("BreastUpper.L", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("BreastSupport.L", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("BreastUpper.L", result.UnsupportedBones);
         }
         finally
         {
