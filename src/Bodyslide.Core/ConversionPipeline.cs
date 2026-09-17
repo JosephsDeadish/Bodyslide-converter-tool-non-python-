@@ -5161,23 +5161,19 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
         }
 
-        var effectivePhysicsSignal = template.PhysicsTokens.Count == 0
-            ? 1d
-            : physicsHitRatio > 0
-                ? Math.Clamp(physicsHitRatio + ((1d - physicsHitRatio) * tuning.PhysicsExpectationBoostValue), 0d, 1d)
-                : 0d;
-        var effectiveReferenceSignal = referenceHitRatio >= 0.5
-            ? Math.Clamp(referenceHitRatio + ((1d - referenceHitRatio) * tuning.BodyReferenceBoostValue), 0d, 1d)
-            : referenceHitRatio;
+        var physicsExpectationSignal = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 1d : 0d;
+        var referenceBoostSignal = referenceHitRatio >= 0.5 ? 1d : 0d;
         var score = Math.Clamp(
             (meshHitRatio * tuning.MeshTokenWeight) +
             (textureHitRatio * tuning.TextureTokenWeight) +
-            (effectivePhysicsSignal * tuning.PhysicsTokenWeight) +
-            (effectiveReferenceSignal * tuning.BodyReferenceTokenWeight) +
+            (physicsHitRatio * tuning.PhysicsTokenWeight) +
+            (referenceHitRatio * tuning.BodyReferenceTokenWeight) +
             (boneSignatureScore * tuning.BoneSignatureWeight) +
             (vertexSignatureScore * tuning.VertexCountWeight) +
             (boundingRatioScore * tuning.BoundingRatioWeight) +
-            (uvSignatureScore * tuning.UvSignatureWeight),
+            (uvSignatureScore * tuning.UvSignatureWeight) +
+            (physicsExpectationSignal * tuning.PhysicsExpectationBoostValue) +
+            (referenceBoostSignal * tuning.BodyReferenceBoostValue),
             0,
             1);
 
