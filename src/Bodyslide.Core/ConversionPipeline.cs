@@ -777,7 +777,8 @@ public sealed record CustomBodyProfile(
     string? BodyOutputPath = null,
     string Gender = "female",
     IReadOnlyList<string>? ReferenceTokens = null,
-    IReadOnlyList<string>? ZapSliderNames = null);
+    IReadOnlyList<string>? ZapSliderNames = null,
+    string? SkeletonFoundation = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -2219,7 +2220,8 @@ internal static class CustomBodyProfileSupport
             string.IsNullOrWhiteSpace(dto.BodyOutputPath) ? null : dto.BodyOutputPath.Trim(),
             gender,
             NormalizeNullableStringList(dto.ReferenceTokens),
-            NormalizeNullableStringList(dto.ZapSliderNames));
+            NormalizeNullableStringList(dto.ZapSliderNames),
+            string.IsNullOrWhiteSpace(dto.SkeletonFoundation) ? null : dto.SkeletonFoundation.Trim());
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -2275,6 +2277,7 @@ internal static class CustomBodyProfileSupport
         public string? Gender { get; init; }
         public string[]? ReferenceTokens { get; init; }
         public string[]? ZapSliderNames { get; init; }
+        public string? SkeletonFoundation { get; init; }
     }
 }
 
@@ -6145,7 +6148,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         var sourceSkeleton = parsedSkeletonLabel;
-        var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, targetPhysicsBones.Count > 0);
+        var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, armor, targetPhysicsBones.Count > 0);
 
         return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
     }
@@ -6318,14 +6321,31 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         BuiltInBodyMetadataCatalog.All.Any(body =>
             body.AvailablePhysicsBones.Contains(bone, StringComparer.OrdinalIgnoreCase));
 
-    private static string ResolveTargetSkeletonLabel(string targetBody, bool hasPhysicsBones)
+    private static string ResolveTargetSkeletonLabel(string targetBody, ImportedArmor armor, bool hasPhysicsBones)
     {
         if (!hasPhysicsBones)
         {
             return "xpmsse-vanilla";
         }
 
-        return $"xpmsse-{SlugifySkeletonTarget(targetBody)}-physics";
+        return $"{ResolveTargetSkeletonPrefix(targetBody, armor)}-{SlugifySkeletonTarget(targetBody)}-physics";
+    }
+
+    private static string ResolveTargetSkeletonPrefix(string targetBody, ImportedArmor armor)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
+        {
+            return SlugifySkeletonTarget(customProfile.SkeletonFoundation);
+        }
+
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation))
+        {
+            return SlugifySkeletonTarget(metadata.SkeletonFoundation);
+        }
+
+        return "xpmsse";
     }
 
     private static string SlugifySkeletonTarget(string targetBody)

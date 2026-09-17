@@ -64,7 +64,7 @@ internal static class SkeletonFrameworkCatalog
 
             var matches = signatures.Count(signature =>
                 boneNames.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
-                                      signature.Contains(bone, StringComparison.OrdinalIgnoreCase)));
+                                      bone.Equals(signature, StringComparison.OrdinalIgnoreCase)));
             if (matches >= Math.Min(Math.Max(framework.MinimumSignatureMatches, 1), signatures.Length))
             {
                 return framework.Label;

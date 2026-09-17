@@ -151,7 +151,7 @@ internal static class BodySlideSourceProjectSupport
                 path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
 
         var discoveredFiles = EnumerateLikelyBodySlideRoots(sourceRoot, armor)
-            .SelectMany(EnumerateBodySlideSupportFiles)
+            .SelectMany(static location => EnumerateBodySlideSupportFiles(location.Root, location.SearchOption))
             .Where(path => IsAssociatedWithArmor(path, meshTokens));
 
         return explicitFiles
@@ -161,58 +161,59 @@ internal static class BodySlideSourceProjectSupport
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static IEnumerable<string> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
+    private static IEnumerable<SearchLocation> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
     {
-        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new Dictionary<string, SearchOption>(StringComparer.OrdinalIgnoreCase);
+
+        static void AddRoot(IDictionary<string, SearchOption> map, string? root, SearchOption searchOption)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                return;
+            }
+
+            if (map.TryGetValue(root, out var existing) && existing == SearchOption.AllDirectories)
+            {
+                return;
+            }
+
+            map[root] = searchOption;
+        }
 
         if (Directory.Exists(sourceRoot))
         {
-            roots.Add(sourceRoot);
-
             var bodySlideRoot = Path.Combine(sourceRoot, "BodySlide");
-            if (Directory.Exists(bodySlideRoot))
-            {
-                roots.Add(bodySlideRoot);
-            }
+            AddRoot(roots, bodySlideRoot, SearchOption.AllDirectories);
 
             var calienteRoot = Path.Combine(sourceRoot, "CalienteTools", "BodySlide");
-            if (Directory.Exists(calienteRoot))
-            {
-                roots.Add(calienteRoot);
-            }
+            AddRoot(roots, calienteRoot, SearchOption.AllDirectories);
         }
 
         foreach (var meshFile in armor.MeshFiles)
         {
             var directory = Path.GetDirectoryName(meshFile);
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                roots.Add(directory);
-            }
+            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
         }
 
         foreach (var bodyReferenceFile in armor.BodyReferenceFiles)
         {
             var directory = Path.GetDirectoryName(bodyReferenceFile);
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                roots.Add(directory);
-            }
+            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
         }
 
-        return roots;
+        return roots.Select(static pair => new SearchLocation(pair.Key, pair.Value));
     }
 
-    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root)
+    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root, SearchOption searchOption)
     {
         if (!Directory.Exists(root))
         {
             return [];
         }
 
-        return Directory.EnumerateFiles(root, "*.osp", SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.AllDirectories))
-            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.AllDirectories));
+        return Directory.EnumerateFiles(root, "*.osp", searchOption)
+            .Concat(Directory.EnumerateFiles(root, "*.bsd", searchOption))
+            .Concat(Directory.EnumerateFiles(root, "*.tri", searchOption));
     }
 
     private static string ResolveSourceRoot(string sourcePath)
@@ -468,6 +469,7 @@ internal static class BodySlideSourceProjectSupport
 
     private sealed record BodySlideSourceSupport(IReadOnlyList<SourceSliderCandidate> Sliders, IReadOnlyList<SourceSliderCandidate> ZapSliders);
     private sealed record SourceSliderCandidate(string Name, int Priority, bool IsZap = false);
+    private sealed record SearchLocation(string Root, SearchOption SearchOption);
 
     private static class SourcePriority
     {
