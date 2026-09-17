@@ -1083,31 +1083,10 @@ public sealed record BodyTechnicalProfileInfo(
 
 public static class BodyTechnicalProfileCatalog
 {
-    private static readonly IReadOnlyDictionary<string, BodyTechnicalProfileInfo> Profiles =
-        new Dictionary<string, BodyTechnicalProfileInfo>(StringComparer.OrdinalIgnoreCase)
-        {
-            // DefaultPhysics mirrors PhysicsProfileCatalog.BuiltInDefaults.
-            // AvailablePhysicsBones lists all bones that become active when a soft-body physics
-            // profile is applied — even for bodies whose default is "none".
-            ["CBBE"]    = new("CBBE",    "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                      "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.", "none"),
-            ["3BA"]     = new("3BA",     "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",                                                                                            "smp+cbpc"),
-            ["BHUNP"]   = new("BHUNP",   "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",                                                                       "smp+cbpc"),
-            ["UNP"]     = new("UNP",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",                                                                                       "cbpc"),
-            ["UUNP"]    = new("UUNP",    "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Unified UNP BodySlide ecosystem with broader slider coverage than classic UNP while keeping XPMSSE-compatible weighting. CBPC enabled by default.",                               "cbpc"),
-            ["COCO CBBE"] = new("COCO CBBE", "XPMSSE + COCO weighting", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                         "COCO variant built on a CBBE-style body family with custom topology and heavier physics weighting. SMP+CBPC enabled by default.",                                                   "smp+cbpc"),
-            ["COCO UUNP"] = new("COCO UUNP", "XPMSSE + COCO weighting", ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                         "COCO variant built on a UUNP-style body family with custom topology and broader regional weight painting. SMP+CBPC enabled by default.",                                           "smp+cbpc"),
-            ["TBD"]     = new("TBD",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",                                                                                               "cbpc"),
-            ["HIMBO"]   = new("HIMBO",   "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Modern male body with pec-driven physics. SMP enabled by default.",                                                                                                                "smp"),
-            ["SAM"]     = new("SAM",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",                                                                                            "smp"),
-            ["SOS"]     = new("SOS",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],                                                                                                                                "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",                                                                                             "smp"),
-            ["UBE"]     = new("UBE",     "XPMSSE + custom UBE bones",["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",                                                          "smp+cbpc"),
-            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton",  ["NPC Belly"],                                                                                                                                                                                                                  "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",                                           "none"),
-        };
-
     public static bool TryGet(string bodyName, out BodyTechnicalProfileInfo profile) =>
         BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata)
             ? ReturnBuiltIn(metadata, out profile)
-            : Profiles.TryGetValue(bodyName, out profile!);
+            : ReturnMissing(out profile);
 
     private static bool ReturnBuiltIn(BuiltInBodyMetadata metadata, out BodyTechnicalProfileInfo profile)
     {
@@ -1118,6 +1097,12 @@ public static class BodyTechnicalProfileCatalog
             metadata.Notes,
             metadata.DefaultPhysics);
         return true;
+    }
+
+    private static bool ReturnMissing(out BodyTechnicalProfileInfo profile)
+    {
+        profile = default!;
+        return false;
     }
 }
 
@@ -1348,6 +1333,9 @@ internal static class SkeletonNifBoneParser
 
         if (hasBip01)
             return "fo4-biped";
+        var extendedFramework = DetectExtendedFramework(boneNames);
+        if (!string.IsNullOrWhiteSpace(extendedFramework))
+            return extendedFramework;
         if (hasFemaleSmpBones || hasMaleSmpBones)
             return "xpmsse-physics";
         return "xpmsse-vanilla";
@@ -1365,6 +1353,57 @@ internal static class SkeletonNifBoneParser
          s.StartsWith("Camera",   StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("HDT",      StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase));
+
+    private static string? DetectExtendedFramework(IReadOnlyList<string> boneNames)
+    {
+        var normalizedBones = boneNames
+            .Where(static bone => !string.IsNullOrWhiteSpace(bone))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (normalizedBones.Length == 0)
+        {
+            return null;
+        }
+
+        var candidates = BuiltInBodyMetadataCatalog.All
+            .Where(static metadata =>
+                !metadata.SkeletonFramework.StartsWith("xpmsse", StringComparison.OrdinalIgnoreCase) &&
+                !metadata.SkeletonFramework.Equals("vanilla-skyrim", StringComparison.OrdinalIgnoreCase))
+            .Select(metadata => new
+            {
+                metadata.SkeletonFramework,
+                Signatures = (metadata.PhysicsBoneSignatures.Count > 0 ? metadata.PhysicsBoneSignatures : metadata.AvailablePhysicsBones)
+                    .Where(static signature => !signature.StartsWith("NPC ", StringComparison.OrdinalIgnoreCase))
+                    .ToArray()
+            })
+            .GroupBy(static candidate => candidate.SkeletonFramework, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                SkeletonFramework = group.Key,
+                Signatures = group.SelectMany(static entry => entry.Signatures)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            });
+
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Signatures.Length == 0)
+            {
+                continue;
+            }
+
+            var matches = candidate.Signatures.Count(signature =>
+                normalizedBones.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
+                                            signature.Contains(bone, StringComparison.OrdinalIgnoreCase)));
+            if (matches >= 1)
+            {
+                return candidate.SkeletonFramework;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Locates and reads the NIF header string table.

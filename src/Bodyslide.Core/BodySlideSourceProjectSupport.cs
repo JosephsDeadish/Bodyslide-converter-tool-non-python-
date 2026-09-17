@@ -23,6 +23,11 @@ internal static class BodySlideSourceProjectSupport
             ["mask"] = "HideMask"
         };
 
+    private static readonly string[] ZapNamePrefixes =
+    [
+        "hide", "remove", "toggle", "strip", "delete"
+    ];
+
     public static async Task<ResolvedBodySlideSliders> ResolveAsync(
         ImportedArmor armor,
         string targetBody,
@@ -88,17 +93,40 @@ internal static class BodySlideSourceProjectSupport
             }
             else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
             {
-                var sliderName = TryReadBsdSliderName(filePath);
-                if (!string.IsNullOrWhiteSpace(sliderName))
+                if (TryReadBsdSlider(filePath, out var sliderName, out var isZap) &&
+                    !string.IsNullOrWhiteSpace(sliderName))
                 {
-                    sliders.Add(sliderName);
+                    if (isZap)
+                    {
+                        zapSliders.Add(sliderName);
+                    }
+                    else
+                    {
+                        sliders.Add(sliderName);
+                    }
                 }
             }
             else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
                      TriMorphReader.TryRead(filePath, out var triPayload) &&
                      triPayload is not null)
             {
-                sliders.AddRange(triPayload.Morphs.Select(morph => NormalizeSliderFileName(morph.Name)));
+                foreach (var morph in triPayload.Morphs)
+                {
+                    var sliderName = NormalizeSliderFileName(morph.Name);
+                    if (!ShouldIncludePayloadSlider(sliderName, morph.Deltas, out var isZap))
+                    {
+                        continue;
+                    }
+
+                    if (isZap)
+                    {
+                        zapSliders.Add(sliderName);
+                    }
+                    else
+                    {
+                        sliders.Add(sliderName);
+                    }
+                }
             }
         }
 
@@ -249,15 +277,35 @@ internal static class BodySlideSourceProjectSupport
         return normalized;
     }
 
-    private static string TryReadBsdSliderName(string filePath)
+    private static bool TryReadBsdSlider(string filePath, out string sliderName, out bool isZap)
     {
         if (BsdMorphReader.TryRead(filePath, out var payload) && payload is not null)
         {
-            return NormalizeSliderFileName(payload.SliderName);
+            sliderName = NormalizeSliderFileName(payload.SliderName);
+            return ShouldIncludePayloadSlider(sliderName, payload.Deltas, out isZap);
         }
 
-        return NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
+        sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
+        isZap = IsLikelyZapSliderName(sliderName);
+        return !string.IsNullOrWhiteSpace(sliderName);
     }
+
+    private static bool ShouldIncludePayloadSlider(
+        string sliderName,
+        IReadOnlyList<(float X, float Y, float Z)> deltas,
+        out bool isZap)
+    {
+        isZap = IsLikelyZapSliderName(sliderName);
+        if (string.IsNullOrWhiteSpace(sliderName))
+        {
+            return false;
+        }
+
+        return isZap || MorphPayloadAnalysis.HasMeaningfulDeltas(deltas);
+    }
+
+    private static bool IsLikelyZapSliderName(string sliderName) =>
+        ZapNamePrefixes.Any(prefix => sliderName.Contains(prefix, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsTruthy(string? value) =>
         value is not null &&

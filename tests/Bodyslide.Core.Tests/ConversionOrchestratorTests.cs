@@ -10969,6 +10969,7 @@ public sealed class VanillaBodyOspSliderTests
         await File.WriteAllBytesAsync(triPath, BuildTriPayload(
             1,
             ("TravelerLift", [(0.125f, 0.25f, 0.375f)]),
+            ("UnusedMorph", [(0f, 0f, 0f)]),
             ("TravelerHideCape_1", [(0f, 0f, 0f)])));
 
         var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath, bsdPath]);
@@ -10979,7 +10980,8 @@ public sealed class VanillaBodyOspSliderTests
 
         Assert.Contains("PayloadBust", project.Sliders);
         Assert.Contains("TravelerLift", project.Sliders);
-        Assert.Contains("TravelerHideCape", project.Sliders);
+        Assert.Contains("TravelerHideCape", project.ZapSliders ?? []);
+        Assert.DoesNotContain("UnusedMorph", project.Sliders);
     }
 
     private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
@@ -11429,6 +11431,20 @@ public sealed class CustomBodyProfileSupportTests
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Bip01 Spine", "Bip01 L Arm"]);
         Assert.Equal("fo4-biped", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_SamLightBonesYieldSamLightLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["SAM Genitals", "SOS GenitalsBase", "NPC Belly"]);
+        Assert.Equal("sam-light", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_UbeBonesYieldExtendedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["BreastUpper", "BreastOuter", "NPC Belly"]);
+        Assert.Equal("ube-extended", label);
     }
 
     [Fact]

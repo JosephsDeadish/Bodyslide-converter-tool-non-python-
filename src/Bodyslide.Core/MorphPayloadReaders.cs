@@ -6,6 +6,26 @@ internal sealed record BsdMorphPayload(string SliderName, bool IsHighWeight, int
 internal sealed record TriMorphEntry(string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas);
 internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs);
 
+internal static class MorphPayloadAnalysis
+{
+    private const float MeaningfulDeltaThreshold = 0.0001f;
+
+    public static bool HasMeaningfulDeltas(IReadOnlyList<(float X, float Y, float Z)> deltas)
+    {
+        foreach (var (x, y, z) in deltas)
+        {
+            if (MathF.Abs(x) > MeaningfulDeltaThreshold ||
+                MathF.Abs(y) > MeaningfulDeltaThreshold ||
+                MathF.Abs(z) > MeaningfulDeltaThreshold)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 internal static class BsdMorphReader
 {
     private static ReadOnlySpan<byte> Magic => "BSD\0"u8;
