@@ -6494,14 +6494,12 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
     private static string ResolveTargetSkeletonLabel(string targetBody, bool hasPhysicsBones)
     {
-        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        if (!hasPhysicsBones)
         {
-            return hasPhysicsBones
-                ? metadata.SkeletonFramework
-                : $"{metadata.SkeletonFramework}-static";
+            return "xpmsse-vanilla";
         }
 
-        return hasPhysicsBones ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
+        return $"xpmsse-{targetBody.ToLowerInvariant()}-physics";
     }
 }
 

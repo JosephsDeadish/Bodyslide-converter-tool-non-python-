@@ -304,8 +304,45 @@ internal static class BodySlideSourceProjectSupport
         return isZap || MorphPayloadAnalysis.HasMeaningfulDeltas(deltas);
     }
 
-    private static bool IsLikelyZapSliderName(string sliderName) =>
-        ZapNamePrefixes.Any(prefix => sliderName.Contains(prefix, StringComparison.OrdinalIgnoreCase));
+    private static bool IsLikelyZapSliderName(string sliderName)
+    {
+        if (string.IsNullOrWhiteSpace(sliderName))
+        {
+            return false;
+        }
+
+        foreach (var prefix in ZapNamePrefixes)
+        {
+            if (sliderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            for (var i = 1; i < sliderName.Length; i++)
+            {
+                if (!IsTokenBoundary(sliderName, i))
+                {
+                    continue;
+                }
+
+                if (sliderName.AsSpan(i).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsTokenBoundary(string value, int index)
+    {
+        var current = value[index];
+        var previous = value[index - 1];
+        return current is '_' or '-' or ' ' ||
+               previous is '_' or '-' or ' ' ||
+               char.IsUpper(current) && !char.IsUpper(previous);
+    }
 
     private static bool IsTruthy(string? value) =>
         value is not null &&
