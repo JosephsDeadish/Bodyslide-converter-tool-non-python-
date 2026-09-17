@@ -3,7 +3,7 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- body signature detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -275,7 +275,7 @@ When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each
 Implemented from issue scope:
 - import scan across single mesh, folder, and archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`)
 - batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
-- body detection (CBBE, UNP, UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
+- body detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs

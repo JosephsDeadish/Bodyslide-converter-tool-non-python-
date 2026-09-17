@@ -904,13 +904,19 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Theory]
+    [InlineData("CBBE")]
+    [InlineData("3BA")]
     [InlineData("HIMBO")]
     [InlineData("UNP")]
+    [InlineData("UUNP")]
     [InlineData("BHUNP")]
+    [InlineData("COCO CBBE")]
+    [InlineData("COCO UUNP")]
     [InlineData("TBD")]
     [InlineData("SAM")]
     [InlineData("SOS")]
     [InlineData("UBE")]
+    [InlineData("Vanilla")]
     public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
     {
         var inputFile = Path.GetTempFileName();
@@ -935,6 +941,8 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("3BA Slim", presets);
         Assert.Contains("UNP Athletic", presets);
         Assert.Contains("UUNP Curvy", presets);
+        Assert.Contains("COCO CBBE Curvy", presets);
+        Assert.Contains("COCO UUNP Athletic", presets);
     }
 
     [Fact]
@@ -4162,9 +4170,17 @@ public sealed class BodySignatureVertexCountTests
     [Theory]
     [InlineData("CBBE",  6942)] // within 6800-7100
     [InlineData("UNP",   6032)] // within 5900-6200
+    [InlineData("UUNP",  9000)] // within 8200-9800
+    [InlineData("COCO CBBE", 9800)] // within 9000-10400
+    [InlineData("COCO UUNP", 10032)] // within 9400-10800
     [InlineData("HIMBO", 6820)] // within 6600-7100
     [InlineData("BHUNP", 10080)] // within 9800-10400
     [InlineData("3BA",   10032)] // within 9800-10400
+    [InlineData("TBD",   7680)] // within 7400-7900
+    [InlineData("SAM",   5984)] // within 5800-6200
+    [InlineData("SOS",   6274)] // within 6100-6500
+    [InlineData("UBE",   7000)] // within 6800-7200
+    [InlineData("Vanilla", 5000)] // within 4000-6100
     public void BodySignatureTemplate_VertexCountRanges_IncludeTypicalCounts(string bodyName, int typicalCount)
     {
         var template = VanillaBodySignatureDatabase.Templates
@@ -4820,7 +4836,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "HIMBO", "SAM", "SOS", "UBE" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
         {
             Assert.Contains(expected, names);
         }
@@ -4838,7 +4854,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -4885,6 +4901,8 @@ public sealed class BodyTypeCatalogTests
             ("BHUNP",   "smp+cbpc"),
             ("UNP",     "cbpc"),
             ("UUNP",    "cbpc"),
+            ("COCO CBBE", "smp+cbpc"),
+            ("COCO UUNP", "smp+cbpc"),
             ("TBD",     "cbpc"),
             ("HIMBO",   "smp"),
             ("SAM",     "smp"),
