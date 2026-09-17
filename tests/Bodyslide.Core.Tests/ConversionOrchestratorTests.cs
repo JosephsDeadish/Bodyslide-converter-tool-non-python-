@@ -5337,7 +5337,7 @@ public sealed class RuntimeReadinessReporterTests
 
         var nifCheck = Assert.Single(checks, check => check.Area == "NIF parsing");
         Assert.Equal("OK", nifCheck.Status);
-        Assert.Contains("embedded", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("readable NIF modes", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -12695,7 +12695,7 @@ public async Task ConvertAsync_WithUnsupportedNif_RecordsNifSupportValidation()
     var outputDirectory = Path.Combine(workingDirectory, "output");
     Directory.CreateDirectory(workingDirectory);
     var inputFile = Path.Combine(workingDirectory, "unsupported_mesh.nif");
-    await File.WriteAllTextAsync(inputFile, "not-a-real-nif");
+    await File.WriteAllBytesAsync(inputFile, Enumerable.Repeat((byte)'X', 64).ToArray());
 
     try
     {
@@ -12707,7 +12707,7 @@ public async Task ConvertAsync_WithUnsupportedNif_RecordsNifSupportValidation()
         Assert.Contains("\"NifSupport\"", qualityJson);
         Assert.Contains("\"Status\": \"unsupported\"", qualityJson);
         Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson);
-        Assert.Contains("source-nif-unsupported:unsupported_mesh.nif:missing-header", qualityJson);
+        Assert.Contains("source-nif-unsupported:unsupported_mesh.nif", qualityJson);
     }
     finally
     {

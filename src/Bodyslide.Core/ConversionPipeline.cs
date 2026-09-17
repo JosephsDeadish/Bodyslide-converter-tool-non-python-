@@ -2176,7 +2176,7 @@ internal static class NifGeometrySignatureReader
         var maxX = vertices.Max(static vertex => vertex.X);
         var maxY = vertices.Max(static vertex => vertex.Y);
         var maxZ = vertices.Max(static vertex => vertex.Z);
-        return new MeshGeometrySignature(vertexCount, new BoundingBox(minX, minY, minZ, maxX, maxY, maxZ), sampleVertices, null);
+        return new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ, null);
     }
 
     private static byte[] CreateEmbeddedProbeBytes()
@@ -2189,7 +2189,7 @@ internal static class NifGeometrySignatureReader
         writer.Write(3);
         writer.Write(0f); writer.Write(0f); writer.Write(0f);
         writer.Write(1f); writer.Write(0f); writer.Write(0f);
-        writer.Write(0f); writer.Write(1f); writer.Write(0f);
+        writer.Write(0f); writer.Write(1f); writer.Write(1f);
         writer.Flush();
         return stream.ToArray();
     }
