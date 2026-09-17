@@ -6545,16 +6545,24 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
             !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
         {
-            return SlugifySkeletonTarget(customProfile.SkeletonFoundation);
+            return ResolveConfiguredSkeletonFoundationLabel(customProfile.SkeletonFoundation);
         }
 
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
             !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation))
         {
-            return SlugifySkeletonTarget(metadata.SkeletonFoundation);
+            return ResolveConfiguredSkeletonFoundationLabel(metadata.SkeletonFoundation);
         }
 
         return "xpmsse";
+    }
+
+    private static string ResolveConfiguredSkeletonFoundationLabel(string skeletonFoundation)
+    {
+        var slug = SlugifySkeletonTarget(skeletonFoundation);
+        return IsGenericXpmsseFoundation(slug)
+            ? "xpmsse"
+            : slug;
     }
 
     private static string SlugifySkeletonTarget(string targetBody)
@@ -6585,6 +6593,9 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         return builder.ToString().Trim('-') is { Length: > 0 } slug ? slug : "target";
     }
 
+    private static bool IsGenericXpmsseFoundation(string foundationSlug) =>
+        foundationSlug.Equals("xpmsse", StringComparison.OrdinalIgnoreCase) ||
+        foundationSlug.Equals("xpmse", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

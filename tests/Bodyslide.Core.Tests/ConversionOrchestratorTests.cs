@@ -12095,6 +12095,17 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_KeepsGenericXpmsseForStandardBuiltIns()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor("input", [], [], [], []);
+
+        var result = await service.MapAsync(armor, "3BA", CancellationToken.None);
+
+        Assert.Equal("xpmsse-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
     public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PrefersCustomSkeletonFoundation()
     {
         var service = new BasicSkeletonMappingService();
