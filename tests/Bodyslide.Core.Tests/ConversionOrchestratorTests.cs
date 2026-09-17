@@ -10239,7 +10239,9 @@ public sealed class OutputCompletenessTests
                     false,
                     true,
                     ["osp", "morph-payloads", "reference-assets"],
-                    0));
+                    0,
+                    "3BA",
+                    ["reference:3bbb"]));
             var physics = new PhysicsConfig("none");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
@@ -10264,6 +10266,8 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"osp\"", qualityJson);
             Assert.Contains("\"morph-payloads\"", qualityJson);
             Assert.Contains("\"reference-assets\"", qualityJson);
+            Assert.Contains("\"InferredSourceBody\": \"3BA\"", qualityJson);
+            Assert.Contains("\"reference:3bbb\"", qualityJson);
             Assert.Contains("\"RequestedVariantCount\": 0", qualityJson);
             Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
         }
@@ -11265,6 +11269,28 @@ public sealed class VanillaBodyOspSliderTests
         Assert.Contains("HideAmulet", project.ZapSliders ?? []);
         Assert.Contains("name=\"SourceBust\"", project.OspXml, StringComparison.Ordinal);
         Assert.Contains("name=\"HideAmulet\"", project.OspXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_InfersBuiltInSourceBodySliders_WhenSourceAssetsAreMissing()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var bodyReferencePath = Path.Combine(tmpDir, "3bbb_reference_body.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bodyReferencePath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bodyReferencePath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("BreastsPhysics", project.Sliders);
+        Assert.Contains("ButtPhysics", project.Sliders);
+        Assert.Contains("name=\"BreastsPhysics\"", project.OspXml, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -103,7 +103,9 @@ public sealed record SourceAssetSupportMetrics(
     bool HasReferenceAssets,
     bool UsedFallbackSliders,
     IReadOnlyList<string>? MissingAssets = null,
-    int ReusablePayloadSliderCount = 0);
+    int ReusablePayloadSliderCount = 0,
+    string? InferredSourceBody = null,
+    IReadOnlyList<string>? InferenceSignals = null);
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,
@@ -11465,10 +11467,13 @@ internal sealed class LocalExportService(
             var detail = sourceAssetSupport.MissingAssets is { Count: > 0 }
                 ? $": {string.Join(", ", sourceAssetSupport.MissingAssets)}"
                 : string.Empty;
+            var inferredBodyDetail = !string.IsNullOrWhiteSpace(sourceAssetSupport.InferredSourceBody)
+                ? $" Inferred source body: {sourceAssetSupport.InferredSourceBody}."
+                : string.Empty;
             issues.Add(new ConversionValidationIssue(
                 "incomplete-source-fallback",
                 "medium",
-                $"Source BodySlide assets were incomplete, so fallback target-body sliders were used{detail}."));
+                $"Source BodySlide assets were incomplete, so fallback slider reconstruction was used{detail}.{inferredBodyDetail}"));
         }
 
         if (payloadReuse.RequestedVariantCount > 0 && payloadReuse.FallbackVariantCount > 0)

@@ -47,7 +47,17 @@ internal static class BodySlideSourceProjectSupport
                 ? metadata.SliderNames
                 : DefaultSliders;
         var sourceSupport = await ExtractSourceSupportAsync(armor, cancellationToken);
+        var inferredSourceBody = sourceSupport.Sliders.Count == 0
+            ? InferFallbackSourceBody(armor, targetBody)
+            : null;
         var mergedSliders = MergeSliderLists(baseSliders, sourceSupport.Sliders);
+        if (sourceSupport.Sliders.Count == 0 &&
+            inferredSourceBody is not null &&
+            BuiltInBodyMetadataCatalog.TryGet(inferredSourceBody.BodyName, out var inferredMetadata) &&
+            inferredMetadata.SliderNames.Count > 0)
+        {
+            mergedSliders = MergeSliderLists(mergedSliders, inferredMetadata.SliderNames);
+        }
 
         var zapSliders = new HashSet<string>(customProfile?.ZapSliderNames ?? [], StringComparer.OrdinalIgnoreCase);
         foreach (var slider in sourceSupport.ZapSliders.Select(static candidate => candidate.Name))
@@ -82,7 +92,10 @@ internal static class BodySlideSourceProjectSupport
             gender,
             sourceSupport.SourceMorphQuality,
             sourceSupport.ReusableMorphPayloads,
-            sourceSupport.BuildAssetSupport(baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0, armor.BodyReferenceFiles.Count > 0));
+            sourceSupport.BuildAssetSupport(
+                baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0,
+                armor.BodyReferenceFiles.Count > 0,
+                inferredSourceBody));
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
@@ -394,6 +407,99 @@ internal static class BodySlideSourceProjectSupport
         return merged;
     }
 
+    private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<string> secondary)
+    {
+        var merged = new List<string>(primary.Count + secondary.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var slider in primary.Concat(secondary))
+        {
+            if (!IsLikelySliderName(slider) || !seen.Add(slider))
+            {
+                continue;
+            }
+
+            merged.Add(slider);
+        }
+
+        return merged;
+    }
+
+    private static InferredSourceBodySupport? InferFallbackSourceBody(ImportedArmor armor, string targetBody)
+    {
+        var targetCanonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalTargetBody)
+            ? canonicalTargetBody
+            : targetBody;
+        var evidence = armor.MeshFiles
+            .Concat(armor.TextureFiles)
+            .Concat(armor.PhysicsFiles)
+            .Concat(armor.BodyReferenceFiles)
+            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        if (evidence.Length == 0)
+        {
+            return null;
+        }
+
+        var best = default(InferredSourceBodySupport?);
+        foreach (var body in BuiltInBodyMetadataCatalog.All)
+        {
+            if (body.Name.Equals(targetCanonicalBody, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var signals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var score = 0;
+            score += ScoreTokens(body.ReferenceTokens, "reference");
+            score += ScoreTokens(body.DetectionTokens, "detection");
+            score += ScoreTokens(body.TextureTokens, "texture");
+            score += ScoreTokens(body.Aliases, "alias");
+
+            if (score < 4 || signals.Count == 0)
+            {
+                continue;
+            }
+
+            var candidate = new InferredSourceBodySupport(body.Name, score, signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            if (best is null || candidate.Score > best.Score)
+            {
+                best = candidate;
+            }
+        }
+
+        return best;
+
+        int ScoreTokens(IEnumerable<string> tokens, string category)
+        {
+            var score = 0;
+            foreach (var token in tokens.Where(static token => !string.IsNullOrWhiteSpace(token)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var fileToken in evidence)
+                {
+                    if (!fileToken.Contains(token, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    score += category switch
+                    {
+                        "reference" => 5,
+                        "alias" => 4,
+                        "detection" => 3,
+                        "texture" => 2,
+                        _ => 1
+                    };
+                    signals.Add($"{category}:{token}");
+                    break;
+                }
+            }
+
+            return score;
+        }
+    }
+
     private static string NormalizeSliderFileName(string? fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))
@@ -603,7 +709,10 @@ internal static class BodySlideSourceProjectSupport
         public IReadOnlyDictionary<string, SourceMorphPayloadVariants> ReusableMorphPayloads =>
             BuildReusableMorphPayloads(Sliders, ZapSliders);
 
-        public SourceAssetSupportMetrics BuildAssetSupport(bool usedFallbackSliders, bool hasReferenceAssets)
+        public SourceAssetSupportMetrics BuildAssetSupport(
+            bool usedFallbackSliders,
+            bool hasReferenceAssets,
+            InferredSourceBodySupport? inferredSourceBody)
         {
             var missingAssets = new List<string>();
             if (!HasOsp)
@@ -628,7 +737,9 @@ internal static class BodySlideSourceProjectSupport
                 hasReferenceAssets,
                 usedFallbackSliders,
                 missingAssets,
-                ReusableMorphPayloads.Count);
+                ReusableMorphPayloads.Count,
+                inferredSourceBody?.BodyName,
+                inferredSourceBody?.Signals);
         }
     }
 
@@ -666,6 +777,7 @@ internal static class BodySlideSourceProjectSupport
         bool IsZap = false,
         MorphDeltaStats? PayloadStats = null,
         SourceMorphPayload? ReusablePayload = null);
+    private sealed record InferredSourceBodySupport(string BodyName, int Score, IReadOnlyList<string> Signals);
     private sealed record SearchLocation(string Root, SearchOption SearchOption);
 
     private static class SourcePriority
