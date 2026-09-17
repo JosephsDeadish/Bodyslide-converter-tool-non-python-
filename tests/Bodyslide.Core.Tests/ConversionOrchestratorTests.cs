@@ -10985,6 +10985,33 @@ public sealed class VanillaBodyOspSliderTests
     }
 
     [Fact]
+    public async Task GenerateAsync_PrioritizesStrongerPayloadSlidersAheadOfWeakerOnes()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "priority_outfit_0.nif");
+        var triPath = Path.Combine(tmpDir, "priority_outfit.tri");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(triPath, BuildTriPayload(
+            3,
+            ("SoftLift", [(0.001f, 0f, 0f), (0f, 0f, 0f), (0f, 0f, 0f)]),
+            ("StrongLift", [(0.35f, 0.25f, 0.15f), (0.30f, 0.20f, 0.10f), (0.25f, 0.15f, 0.05f)])));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+        var strongIndex = project.Sliders.ToList().IndexOf("StrongLift");
+        var weakIndex = project.Sliders.ToList().IndexOf("SoftLift");
+
+        Assert.True(strongIndex >= 0);
+        Assert.True(weakIndex >= 0);
+        Assert.True(strongIndex < weakIndex);
+    }
+
+    [Fact]
     public async Task GenerateAsync_SkipsUnreadableBsdSliderNamesUnlessTheyLookLikeZaps()
     {
         var service = new BodySlideOspProjectService();
@@ -11441,6 +11468,19 @@ public sealed class CustomBodyProfileSupportTests
         Assert.Contains("CME Spine",        bones);
         Assert.Contains("HDTBone",          bones);
         Assert.Contains("Tail1",            bones);
+        Assert.DoesNotContain("randomstring", bones);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_ExtractBoneNames_IncludesFrameworkCatalogBones()
+    {
+        var nifBytes = BuildMinimalNifWithStrings(
+            ["SAM Genitals", "SOS GenitalsBase", "BreastUpper", "randomstring"]);
+        var bones = SkeletonNifBoneParser.ExtractBoneNames(nifBytes);
+
+        Assert.Contains("SAM Genitals", bones);
+        Assert.Contains("SOS GenitalsBase", bones);
+        Assert.Contains("BreastUpper", bones);
         Assert.DoesNotContain("randomstring", bones);
     }
 

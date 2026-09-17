@@ -5,6 +5,10 @@ namespace Bodyslide.Core;
 internal sealed record BsdMorphPayload(string SliderName, bool IsHighWeight, int VertexCount, IReadOnlyList<(float X, float Y, float Z)> Deltas);
 internal sealed record TriMorphEntry(string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas);
 internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs);
+internal readonly record struct MorphDeltaStats(int TotalCount, int MeaningfulCount, float TotalMagnitude, float MaxMagnitude)
+{
+    public float MeaningfulRatio => TotalCount <= 0 ? 0f : MeaningfulCount / (float)TotalCount;
+}
 
 internal static class MorphPayloadAnalysis
 {
@@ -23,6 +27,28 @@ internal static class MorphPayloadAnalysis
         }
 
         return false;
+    }
+
+    public static MorphDeltaStats Analyze(IReadOnlyList<(float X, float Y, float Z)> deltas)
+    {
+        var meaningfulCount = 0;
+        var totalMagnitude = 0f;
+        var maxMagnitude = 0f;
+
+        foreach (var (x, y, z) in deltas)
+        {
+            var magnitude = MathF.Sqrt((x * x) + (y * y) + (z * z));
+            if (magnitude <= MeaningfulDeltaThreshold)
+            {
+                continue;
+            }
+
+            meaningfulCount++;
+            totalMagnitude += magnitude;
+            maxMagnitude = Math.Max(maxMagnitude, magnitude);
+        }
+
+        return new MorphDeltaStats(deltas.Count, meaningfulCount, totalMagnitude, maxMagnitude);
     }
 }
 

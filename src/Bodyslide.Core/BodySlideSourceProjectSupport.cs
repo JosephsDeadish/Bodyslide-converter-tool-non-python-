@@ -8,6 +8,7 @@ internal static class BodySlideSourceProjectSupport
 {
     private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
     private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
+    private static readonly SourceSliderCandidate EmptyCandidate = new(string.Empty, 0);
 
     private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -43,7 +44,7 @@ internal static class BodySlideSourceProjectSupport
         var mergedSliders = MergeSliderLists(baseSliders, sourceSupport.Sliders);
 
         var zapSliders = new HashSet<string>(customProfile?.ZapSliderNames ?? [], StringComparer.OrdinalIgnoreCase);
-        foreach (var slider in sourceSupport.ZapSliders)
+        foreach (var slider in sourceSupport.ZapSliders.Select(static candidate => candidate.Name))
         {
             zapSliders.Add(slider);
         }
@@ -79,8 +80,8 @@ internal static class BodySlideSourceProjectSupport
         ImportedArmor armor,
         CancellationToken cancellationToken)
     {
-        var sliders = new List<string>();
-        var zapSliders = new List<string>();
+        var sliders = new List<SourceSliderCandidate>();
+        var zapSliders = new List<SourceSliderCandidate>();
 
         foreach (var filePath in EnumerateAssociatedBodySlideFiles(armor))
         {
@@ -93,16 +94,15 @@ internal static class BodySlideSourceProjectSupport
             }
             else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
             {
-                if (TryReadBsdSlider(filePath, out var sliderName, out var isZap) &&
-                    !string.IsNullOrWhiteSpace(sliderName))
+                if (TryReadBsdSlider(filePath, out var candidate))
                 {
-                    if (isZap)
+                    if (candidate.IsZap)
                     {
-                        zapSliders.Add(sliderName);
+                        zapSliders.Add(candidate);
                     }
                     else
                     {
-                        sliders.Add(sliderName);
+                        sliders.Add(candidate);
                     }
                 }
             }
@@ -113,26 +113,26 @@ internal static class BodySlideSourceProjectSupport
                 foreach (var morph in triPayload.Morphs)
                 {
                     var sliderName = NormalizeSliderFileName(morph.Name);
-                    if (!ShouldIncludePayloadSlider(sliderName, morph.Deltas, out var isZap))
+                    if (!TryCreatePayloadCandidate(sliderName, morph.Deltas, SourcePriority.TriPayloadBase, out var candidate))
                     {
                         continue;
                     }
 
-                    if (isZap)
+                    if (candidate.IsZap)
                     {
-                        zapSliders.Add(sliderName);
+                        zapSliders.Add(candidate);
                     }
                     else
                     {
-                        sliders.Add(sliderName);
+                        sliders.Add(candidate);
                     }
                 }
             }
         }
 
         return new BodySlideSourceSupport(
-            sliders.Where(IsLikelySliderName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            zapSliders.Where(IsLikelySliderName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+            CollapseCandidates(sliders),
+            CollapseCandidates(zapSliders));
     }
 
     private static IEnumerable<string> EnumerateAssociatedBodySlideFiles(ImportedArmor armor)
@@ -202,8 +202,8 @@ internal static class BodySlideSourceProjectSupport
         {
             await using var stream = File.OpenRead(filePath);
             var document = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
-            var sliders = new List<string>();
-            var zapSliders = new List<string>();
+            var sliders = new List<SourceSliderCandidate>();
+            var zapSliders = new List<SourceSliderCandidate>();
 
             foreach (var sliderElement in document.Descendants("Slider"))
             {
@@ -216,17 +216,17 @@ internal static class BodySlideSourceProjectSupport
                 var isZap = IsTruthy(sliderElement.Attribute("zap")?.Value);
                 if (isZap)
                 {
-                    zapSliders.Add(name!);
+                    zapSliders.Add(new SourceSliderCandidate(name!, SourcePriority.OspZap));
                 }
                 else
                 {
-                    sliders.Add(name!);
+                    sliders.Add(new SourceSliderCandidate(name!, SourcePriority.OspSlider));
                 }
             }
 
             return new BodySlideSourceSupport(
-                sliders.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                zapSliders.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+                CollapseCandidates(sliders),
+                CollapseCandidates(zapSliders));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -242,12 +242,22 @@ internal static class BodySlideSourceProjectSupport
             : token;
     }
 
-    private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<string> secondary)
+    private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<SourceSliderCandidate> secondary)
     {
         var merged = new List<string>(primary.Count + secondary.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var slider in primary.Concat(secondary))
+        foreach (var slider in primary)
+        {
+            if (!IsLikelySliderName(slider) || !seen.Add(slider))
+            {
+                continue;
+            }
+
+            merged.Add(slider);
+        }
+
+        foreach (var slider in secondary.Select(static candidate => candidate.Name))
         {
             if (!IsLikelySliderName(slider) || !seen.Add(slider))
             {
@@ -277,31 +287,80 @@ internal static class BodySlideSourceProjectSupport
         return normalized;
     }
 
-    private static bool TryReadBsdSlider(string filePath, out string sliderName, out bool isZap)
+    private static bool TryReadBsdSlider(string filePath, out SourceSliderCandidate candidate)
     {
         if (BsdMorphReader.TryRead(filePath, out var payload) && payload is not null)
         {
-            sliderName = NormalizeSliderFileName(payload.SliderName);
-            return ShouldIncludePayloadSlider(sliderName, payload.Deltas, out isZap);
+            return TryCreatePayloadCandidate(
+                NormalizeSliderFileName(payload.SliderName),
+                payload.Deltas,
+                payload.IsHighWeight ? SourcePriority.BsdHighWeightBase : SourcePriority.BsdLowWeightBase,
+                out candidate);
         }
 
-        sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
-        isZap = IsLikelyZapSliderName(sliderName);
-        return isZap && !string.IsNullOrWhiteSpace(sliderName);
+        var sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
+        if (IsLikelyZapSliderName(sliderName) && !string.IsNullOrWhiteSpace(sliderName))
+        {
+            candidate = new SourceSliderCandidate(sliderName, SourcePriority.UnreadablePayloadZapFallback, IsZap: true);
+            return true;
+        }
+
+        candidate = EmptyCandidate;
+        return false;
     }
 
-    private static bool ShouldIncludePayloadSlider(
+    private static bool TryCreatePayloadCandidate(
         string sliderName,
         IReadOnlyList<(float X, float Y, float Z)> deltas,
-        out bool isZap)
+        int basePriority,
+        out SourceSliderCandidate candidate)
     {
-        isZap = IsLikelyZapSliderName(sliderName);
+        var isZap = IsLikelyZapSliderName(sliderName);
         if (string.IsNullOrWhiteSpace(sliderName))
         {
+            candidate = EmptyCandidate;
             return false;
         }
 
-        return isZap || MorphPayloadAnalysis.HasMeaningfulDeltas(deltas);
+        var stats = MorphPayloadAnalysis.Analyze(deltas);
+        if (!isZap && stats.MeaningfulCount == 0)
+        {
+            candidate = EmptyCandidate;
+            return false;
+        }
+
+        candidate = new SourceSliderCandidate(
+            sliderName,
+            basePriority + ComputePayloadPriorityOffset(stats),
+            isZap);
+        return true;
+    }
+
+    private static int ComputePayloadPriorityOffset(MorphDeltaStats stats)
+    {
+        if (stats.TotalCount <= 0)
+        {
+            return 0;
+        }
+
+        var densityScore = (int)Math.Round(Math.Clamp(stats.MeaningfulRatio, 0f, 1f) * 100);
+        var magnitudeScore = (int)Math.Round(Math.Clamp(stats.TotalMagnitude * 10f, 0f, 100f));
+        var peakScore = (int)Math.Round(Math.Clamp(stats.MaxMagnitude * 80f, 0f, 80f));
+        return densityScore + magnitudeScore + peakScore;
+    }
+
+    private static IReadOnlyList<SourceSliderCandidate> CollapseCandidates(IEnumerable<SourceSliderCandidate> candidates)
+    {
+        return candidates
+            .Where(static candidate => IsLikelySliderName(candidate.Name))
+            .GroupBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group
+                .OrderByDescending(static candidate => candidate.Priority)
+                .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderByDescending(static candidate => candidate.Priority)
+            .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static bool IsLikelyZapSliderName(string sliderName)
@@ -361,5 +420,16 @@ internal static class BodySlideSourceProjectSupport
         return candidate.Length >= 2 && candidate.Any(char.IsLetter);
     }
 
-    private sealed record BodySlideSourceSupport(IReadOnlyList<string> Sliders, IReadOnlyList<string> ZapSliders);
+    private sealed record BodySlideSourceSupport(IReadOnlyList<SourceSliderCandidate> Sliders, IReadOnlyList<SourceSliderCandidate> ZapSliders);
+    private sealed record SourceSliderCandidate(string Name, int Priority, bool IsZap = false);
+
+    private static class SourcePriority
+    {
+        public const int OspSlider = 100;
+        public const int OspZap = 100;
+        public const int TriPayloadBase = 220;
+        public const int BsdLowWeightBase = 260;
+        public const int BsdHighWeightBase = 300;
+        public const int UnreadablePayloadZapFallback = 40;
+    }
 }

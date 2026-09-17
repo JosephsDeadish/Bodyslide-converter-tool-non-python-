@@ -1,0 +1,16 @@
+[
+  {
+    "label": "sam-light",
+    "bonePrefixes": ["SAM ", "SOS "],
+    "boneTokens": ["Genitals", "Schlong", "Scrotum"],
+    "distinctiveSignatures": ["SAM Genitals", "SOS GenitalsBase"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "ube-extended",
+    "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
+    "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower"],
+    "distinctiveSignatures": ["BreastUpper", "BreastOuter"],
+    "minimumSignatureMatches": 2
+  }
+]

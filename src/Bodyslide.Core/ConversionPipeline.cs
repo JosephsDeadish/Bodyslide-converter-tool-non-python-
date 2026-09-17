@@ -545,24 +545,6 @@ public static class PresetCatalog
 
 public static class PhysicsProfileCatalog
 {
-    private static readonly IReadOnlyDictionary<string, string> BuiltInDefaults =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"] = "smp+cbpc",
-            ["BHUNP"] = "smp+cbpc",
-            ["UNP"] = "cbpc",
-            ["UUNP"] = "cbpc",
-            ["COCO CBBE"] = "smp+cbpc",
-            ["COCO UUNP"] = "smp+cbpc",
-            ["TBD"] = "cbpc",
-            ["HIMBO"] = "smp",
-            ["SAM"] = "smp",
-            ["SOS"] = "smp",
-            ["CBBE"] = "none",
-            ["UBE"] = "smp+cbpc",
-            ["Vanilla"] = "none",
-        };
-
     /// <summary>
     /// Canonical physics engine profile identifiers.
     /// Any profile can be applied to any body via the Physics override option.
@@ -618,10 +600,6 @@ public static class PhysicsProfileCatalog
         !string.IsNullOrWhiteSpace(targetBody) &&
         BuiltInBodyMetadataCatalog.TryGet(targetBody.Trim(), out var metadata)
             ? metadata.DefaultPhysics
-            :
-        !string.IsNullOrWhiteSpace(targetBody) &&
-        BuiltInDefaults.TryGetValue(targetBody.Trim(), out var profile)
-            ? profile
             : "none";
 }
 
@@ -1352,7 +1330,8 @@ internal static class SkeletonNifBoneParser
          s.StartsWith("Equip",    StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("Camera",   StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("HDT",      StringComparison.OrdinalIgnoreCase) ||
-         s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase));
+         s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase) ||
+         SkeletonFrameworkCatalog.MatchesKnownBonePattern(s));
 
     private static string? DetectExtendedFramework(IReadOnlyList<string> boneNames)
     {
@@ -1361,48 +1340,7 @@ internal static class SkeletonNifBoneParser
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        if (normalizedBones.Length == 0)
-        {
-            return null;
-        }
-
-        var candidates = BuiltInBodyMetadataCatalog.All
-            .Where(static metadata =>
-                !metadata.SkeletonFramework.StartsWith("xpmsse", StringComparison.OrdinalIgnoreCase) &&
-                !metadata.SkeletonFramework.Equals("vanilla-skyrim", StringComparison.OrdinalIgnoreCase))
-            .Select(metadata => new
-            {
-                metadata.SkeletonFramework,
-                Signatures = (metadata.PhysicsBoneSignatures.Count > 0 ? metadata.PhysicsBoneSignatures : metadata.AvailablePhysicsBones)
-                    .Where(static signature => !signature.StartsWith("NPC ", StringComparison.OrdinalIgnoreCase))
-                    .ToArray()
-            })
-            .GroupBy(static candidate => candidate.SkeletonFramework, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new
-            {
-                SkeletonFramework = group.Key,
-                Signatures = group.SelectMany(static entry => entry.Signatures)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray()
-            });
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate.Signatures.Length == 0)
-            {
-                continue;
-            }
-
-            var matches = candidate.Signatures.Count(signature =>
-                normalizedBones.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
-                                            signature.Contains(bone, StringComparison.OrdinalIgnoreCase)));
-            if (matches >= Math.Min(2, candidate.Signatures.Length))
-            {
-                return candidate.SkeletonFramework;
-            }
-        }
-
-        return null;
+        return SkeletonFrameworkCatalog.DetectFramework(normalizedBones);
     }
 
     /// <summary>
@@ -2110,113 +2048,6 @@ internal static class NifGeometrySignatureReader
 
 internal static class BodyTransformationFieldCatalog
 {
-    private static readonly IReadOnlyDictionary<string, double> FallbackField =
-        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["chest"]     = 1.02,  ["waist"]    = 0.99,  ["pelvis"]   = 1.02,
-            ["legs"]      = 1.01,  ["shoulders"] = 1.00,
-            ["breasts"]   = 1.02,  ["butt"]     = 1.01,  ["belly"]    = 1.01,
-            ["arms"]      = 1.00,  ["thighs"]   = 1.01,  ["calves"]   = 1.01
-        };
-
-    // Regions match the BodySlide slider taxonomy: 5 structural + 6 shape-specific.
-    // Values are expansion multipliers relative to the vanilla body (1.0 = no change).
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> Fields =
-        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,  ["waist"]    = 0.96,  ["pelvis"]   = 1.05,
-                ["legs"]      = 1.03,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.09,  ["butt"]     = 1.06,  ["belly"]    = 1.02,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.04,  ["calves"]   = 1.02
-            },
-            ["3BA"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.12,  ["waist"]    = 0.95,  ["pelvis"]   = 1.06,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.13,  ["butt"]     = 1.08,  ["belly"]    = 1.03,
-                ["arms"]      = 1.02,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["BHUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,  ["waist"]    = 0.94,  ["pelvis"]   = 1.07,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.11,  ["butt"]     = 1.07,  ["belly"]    = 1.03,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["UNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.04,  ["waist"]    = 0.97,  ["pelvis"]   = 1.02,
-                ["legs"]      = 1.01,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.04,  ["butt"]     = 1.02,  ["belly"]    = 1.01,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.02,  ["calves"]   = 1.01
-            },
-            ["UUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,  ["waist"]    = 0.95,  ["pelvis"]   = 1.05,
-                ["legs"]      = 1.03,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.09,  ["butt"]     = 1.06,  ["belly"]    = 1.02,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.04,  ["calves"]   = 1.02
-            },
-            ["COCO CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.11,  ["waist"]    = 0.94,  ["pelvis"]   = 1.07,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.02,
-                ["breasts"]   = 1.12,  ["butt"]     = 1.09,  ["belly"]    = 1.03,
-                ["arms"]      = 1.02,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["COCO UUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,  ["waist"]    = 0.94,  ["pelvis"]   = 1.08,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.02,
-                ["breasts"]   = 1.11,  ["butt"]     = 1.08,  ["belly"]    = 1.03,
-                ["arms"]      = 1.02,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["TBD"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.06,  ["waist"]    = 0.96,  ["pelvis"]   = 1.04,
-                ["legs"]      = 1.02,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.07,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
-            },
-            ["UBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.06,  ["waist"]    = 0.97,  ["pelvis"]   = 1.03,
-                ["legs"]      = 1.02,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.06,  ["butt"]     = 1.03,  ["belly"]    = 1.02,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
-            },
-            ["HIMBO"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,  ["waist"]    = 1.02,  ["pelvis"]   = 1.04,
-                ["legs"]      = 1.06,  ["shoulders"] = 1.12,
-                ["breasts"]   = 1.08,  ["butt"]     = 1.05,  ["belly"]    = 1.03,
-                ["arms"]      = 1.10,  ["thighs"]   = 1.07,  ["calves"]   = 1.05
-            },
-            ["SAM"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,  ["waist"]    = 1.01,  ["pelvis"]   = 1.03,
-                ["legs"]      = 1.05,  ["shoulders"] = 1.10,
-                ["breasts"]   = 1.05,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
-                ["arms"]      = 1.08,  ["thighs"]   = 1.06,  ["calves"]   = 1.04
-            },
-            ["SOS"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.05,  ["waist"]    = 1.00,  ["pelvis"]   = 1.02,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.06,
-                ["breasts"]   = 1.03,  ["butt"]     = 1.03,  ["belly"]    = 1.01,
-                ["arms"]      = 1.05,  ["thighs"]   = 1.04,  ["calves"]   = 1.03
-            },
-            ["Vanilla"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.00,  ["waist"]    = 1.00,  ["pelvis"]   = 1.00,
-                ["legs"]      = 1.00,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.00,  ["butt"]     = 1.00,  ["belly"]    = 1.00,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.00,  ["calves"]   = 1.00
-            }
-        };
-
     public static IReadOnlyDictionary<string, double> Resolve(string targetBody) => Resolve(targetBody, armor: null);
 
     public static IReadOnlyDictionary<string, double> Resolve(string targetBody, ImportedArmor? armor)
@@ -2231,12 +2062,7 @@ internal static class BodyTransformationFieldCatalog
             return metadata.TransformationField;
         }
 
-        if (Fields.TryGetValue(targetBody, out var profile))
-        {
-            return profile;
-        }
-
-        return FallbackField;
+        return BuiltInBodyMetadataCatalog.CreateFallbackTransformationField();
     }
 
     internal static IReadOnlyDictionary<string, double> CreateFallbackField() =>
