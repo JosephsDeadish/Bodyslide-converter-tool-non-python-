@@ -486,6 +486,11 @@ public static class PresetCatalog
         ["UNP Curvy"]         = new("UNP Curvy",          "UNP",   "curvy",    "cbpc"),
         ["UNP Slim"]          = new("UNP Slim",           "UNP",   "slim",     "cbpc"),
         ["UNP Zeroed"]        = new("UNP Zeroed",         "UNP",   "zeroed",   "cbpc"),
+        // ── UUNP ────────────────────────────────────────────────────────────
+        ["UUNP Curvy"]        = new("UUNP Curvy",         "UUNP",  "curvy",    "cbpc"),
+        ["UUNP Slim"]         = new("UUNP Slim",          "UUNP",  "slim",     "cbpc"),
+        ["UUNP Athletic"]     = new("UUNP Athletic",      "UUNP",  "athletic", "cbpc"),
+        ["UUNP Zeroed"]       = new("UUNP Zeroed",        "UUNP",  "zeroed",   "cbpc"),
         // ── TBD ─────────────────────────────────────────────────────────────
         ["TBD Lean"]          = new("TBD Lean",           "TBD",   "lean",     "cbpc"),
         ["TBD Curvy"]         = new("TBD Curvy",          "TBD",   "curvy",    "cbpc"),
@@ -537,6 +542,7 @@ public static class PhysicsProfileCatalog
             ["3BA"] = "smp+cbpc",
             ["BHUNP"] = "smp+cbpc",
             ["UNP"] = "cbpc",
+            ["UUNP"] = "cbpc",
             ["TBD"] = "cbpc",
             ["HIMBO"] = "smp",
             ["SAM"] = "smp",
@@ -1070,6 +1076,7 @@ public static class BodyTechnicalProfileCatalog
             ["3BA"]     = new("3BA",     "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",                                                                                            "smp+cbpc"),
             ["BHUNP"]   = new("BHUNP",   "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",                                                                       "smp+cbpc"),
             ["UNP"]     = new("UNP",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",                                                                                       "cbpc"),
+            ["UUNP"]    = new("UUNP",    "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Unified UNP BodySlide ecosystem with broader slider coverage than classic UNP while keeping XPMSSE-compatible weighting. CBPC enabled by default.",                               "cbpc"),
             ["TBD"]     = new("TBD",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",                                                                                               "cbpc"),
             ["HIMBO"]   = new("HIMBO",   "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Modern male body with pec-driven physics. SMP enabled by default.",                                                                                                                "smp"),
             ["SAM"]     = new("SAM",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",                                                                                            "smp"),
@@ -1438,12 +1445,13 @@ internal static class VanillaBodySignatureDatabase
 {
     // Typical vertex counts per body type are well-known in the modding community.
     // These ranges are used as additional scoring hints when NIF data is available.
-    // CBBE:  ~6942 vertices (standard), UNP: ~6032, HIMBO: ~6820, BHUNP: ~10080,
+    // CBBE:  ~6942 vertices (standard), UNP: ~6032, UUNP: ~8.5k-9.5k, HIMBO: ~6820, BHUNP: ~10080,
     // 3BA:   ~10032 (CBBE base with physics), TBD: ~7680, SAM: ~5984, SOS: ~6274, UBE: ~7000
     public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
     [
         new("CBBE",    ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
         new("UNP",     ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
+        new("UUNP",    ["uunp", "unp", "7base", "dreamgirl"], ["femalebody", "uunp"], ["uunp", "7base", "dreamgirl"], 8200, 9800, 4.1, 7.3, 0.30, 0.82),
         new("HIMBO",   ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
         new("BHUNP",   ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
         new("3BA",     ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc", "3bbb"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
@@ -2111,6 +2119,13 @@ internal static class BodyTransformationFieldCatalog
                 ["legs"]      = 1.01,  ["shoulders"] = 1.00,
                 ["breasts"]   = 1.04,  ["butt"]     = 1.02,  ["belly"]    = 1.01,
                 ["arms"]      = 1.00,  ["thighs"]   = 1.02,  ["calves"]   = 1.01
+            },
+            ["UUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"]     = 1.08,  ["waist"]    = 0.95,  ["pelvis"]   = 1.05,
+                ["legs"]      = 1.03,  ["shoulders"] = 1.01,
+                ["breasts"]   = 1.09,  ["butt"]     = 1.06,  ["belly"]    = 1.02,
+                ["arms"]      = 1.01,  ["thighs"]   = 1.04,  ["calves"]   = 1.02
             },
             ["TBD"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
@@ -4867,6 +4882,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         {
             ["3BA"]   = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC Belly01", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
             ["BHUNP"] = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC LBreast01", "NPC RBreast01", "NPC L Thigh", "NPC R Thigh"],
+            ["UUNP"]  = ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
             ["HIMBO"] = ["NPC L Pec", "NPC R Pec", "NPC LPec", "NPC RPec"],
             ["SOS"]   = ["NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],
             ["SAM"]   = ["SOS GenitalsBase", "SAM Genitals", "NPC L Breast01"],
@@ -5515,6 +5531,7 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
             ["3BA"]   = FemaleSmpBones,
             ["BHUNP"] = FemaleSmpBones,
             ["UNP"]   = FemaleCbpcBones,
+            ["UUNP"]  = FemaleCbpcBones,
             ["TBD"]   = FemaleCbpcBones,
             ["HIMBO"] = MaleSmpBones,
             ["SAM"]   = MaleSmpBones,
@@ -5604,6 +5621,7 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
             ["3BA"]           = 15,
             ["BHUNP"]         = 14,
             ["UNP"]           = 12,
+            ["UUNP"]          = 12,
             ["HIMBO"]         = 8,
             ["SAM"]           = 7,
             ["SOS"]           = 7,
@@ -6002,6 +6020,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             ["SAM"]   = MalePhysicsBones,
             ["CBBE"]  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             ["UNP"]   = CbpcPhysicsBones,
+            ["UUNP"]  = CbpcPhysicsBones,
             ["UBE"]   = UbePhysicsBones,
             ["SOS"]   = MalePhysicsBones
         };
@@ -6527,6 +6546,7 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             ["3BA"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
             ["BHUNP"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
             ["UNP"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
+            ["UUNP"]    = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
             ["HIMBO"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
             ["SAM"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
             ["SOS"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],

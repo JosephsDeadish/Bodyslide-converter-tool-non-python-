@@ -934,6 +934,7 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("HIMBO Muscular", presets);
         Assert.Contains("3BA Slim", presets);
         Assert.Contains("UNP Athletic", presets);
+        Assert.Contains("UUNP Curvy", presets);
     }
 
     [Fact]
@@ -4819,7 +4820,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "HIMBO", "SAM", "SOS", "UBE" })
         {
             Assert.Contains(expected, names);
         }
@@ -4837,7 +4838,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -4883,6 +4884,7 @@ public sealed class BodyTypeCatalogTests
             ("3BA",     "smp+cbpc"),
             ("BHUNP",   "smp+cbpc"),
             ("UNP",     "cbpc"),
+            ("UUNP",    "cbpc"),
             ("TBD",     "cbpc"),
             ("HIMBO",   "smp"),
             ("SAM",     "smp"),
