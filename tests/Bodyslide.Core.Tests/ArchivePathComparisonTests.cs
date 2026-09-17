@@ -20,7 +20,7 @@ namespace Bodyslide.Core.Tests
             }
             else
             {
-                Assert.StartsWith(root, path, StringComparison.Ordinal);
+                Assert.False(path.StartsWith(root, StringComparison.Ordinal));
             }
         }
 
