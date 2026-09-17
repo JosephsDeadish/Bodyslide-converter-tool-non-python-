@@ -82,7 +82,18 @@ public sealed record ConvertedMesh(
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
 /// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
 /// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
-public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible, int SliderCount = 0, double SourceBodyMatchRatio = 0.0);
+public sealed record SourceMorphQualityMetrics(
+    int PayloadMorphCount,
+    int MeaningfulPayloadMorphCount,
+    double PayloadCoverageRatio,
+    double PayloadStrengthScore);
+public sealed record MorphSet(
+    string LowMorph,
+    string HighMorph,
+    bool BodySlideCompatible,
+    int SliderCount = 0,
+    double SourceBodyMatchRatio = 0.0,
+    SourceMorphQualityMetrics? SourceMorphQuality = null);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 /// <param name="CorrectedMorphing">
 /// Per-region morphing factors after applying local inflation and adaptive normal offset.
@@ -155,7 +166,8 @@ public sealed record ConversionQualityReport(
     int HighRiskPoseCount = 0,
     IReadOnlyList<string>? HighRiskPoseRegions = null,
     int MissingNormalCount = 0,
-    ConversionValidationSummary? ValidationSummary = null);
+    ConversionValidationSummary? ValidationSummary = null,
+    SourceMorphQualityMetrics? SourceMorphQuality = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -4751,25 +4763,9 @@ internal static class ArchiveExtractionHelper
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
-    private const double MeshTokenWeight = 0.35;
-    private const double TextureTokenWeight = 0.20;
-    private const double PhysicsTokenWeight = 0.10;
-    private const double PhysicsExpectationBoostValue = 0.10;
-    private const double BoneSignatureWeight = 0.10;
-    private const double VertexCountWeight = 0.15;
-    private const double BoundingRatioWeight = 0.05;
-    private const double UvSignatureWeight = 0.04;
-    private const double BodyReferenceTokenWeight = 0.08;
-    private const double BodyReferenceBoostValue = 0.22;
-    private const double AmbiguityMargin = 0.12;
-    private const double AmbiguityScoreFloor = 0.25;
-    private const double MediumConfidenceThreshold = 0.35;
-    private const double HighConfidenceThreshold = 0.75;
-    private const double ReferencePriorityMargin = 0.34;
-    private const double SharedReferenceConfidenceFloor = 0.50;
-
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
+        var tuning = BodyDetectionTuningCatalog.Current;
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
@@ -4789,7 +4785,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < 0.25)
+        if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < tuning.AmbiguityScoreFloor)
         {
             return new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold", "confidence-band:unknown"]);
         }
@@ -4801,9 +4797,9 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var top = scoredCandidates[0];
         var evidence = top.Evidence.ToList();
-        evidence.Add($"confidence-band:{GetConfidenceBand(top.Score)}");
+        evidence.Add($"confidence-band:{GetConfidenceBand(top.Score, tuning)}");
         var sameFamilyRunnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
-        if (sameFamilyRunnerUp is { } familyCandidate && HasReferencePriority(top, familyCandidate))
+        if (sameFamilyRunnerUp is { } familyCandidate && HasReferencePriority(top, familyCandidate, tuning))
         {
             evidence.Add("reference-priority:direct-source");
         }
@@ -4985,6 +4981,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
         out BodyDetectionReport result)
     {
+        var tuning = BodyDetectionTuningCatalog.Current;
         result = default!;
         if (scoredCandidates.Count < 2)
         {
@@ -4998,15 +4995,15 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return false;
         }
 
-        var hasMinimumTopScore = top.Score >= AmbiguityScoreFloor;
+        var hasMinimumTopScore = top.Score >= tuning.AmbiguityScoreFloor;
         var hasStrongSharedReference =
-            top.ReferenceHitRatio >= SharedReferenceConfidenceFloor &&
-            familyRunnerUp.ReferenceHitRatio >= SharedReferenceConfidenceFloor;
-        var runnerUpScoreFloor = hasStrongSharedReference ? AmbiguityScoreFloor : MediumConfidenceThreshold;
+            top.ReferenceHitRatio >= tuning.SharedReferenceConfidenceFloor &&
+            familyRunnerUp.ReferenceHitRatio >= tuning.SharedReferenceConfidenceFloor;
+        var runnerUpScoreFloor = hasStrongSharedReference ? tuning.AmbiguityScoreFloor : tuning.MediumConfidenceThreshold;
         var runnerUpClearsFloor = familyRunnerUp.Score >= runnerUpScoreFloor;
-        var topIsNotDefinitive = top.Score < HighConfidenceThreshold;
-        var lacksReferencePriority = !HasReferencePriority(top, familyRunnerUp);
-        var withinAmbiguityMargin = Math.Abs(top.Score - familyRunnerUp.Score) <= AmbiguityMargin;
+        var topIsNotDefinitive = top.Score < tuning.HighConfidenceThreshold;
+        var lacksReferencePriority = !HasReferencePriority(top, familyRunnerUp, tuning);
+        var withinAmbiguityMargin = Math.Abs(top.Score - familyRunnerUp.Score) <= tuning.AmbiguityMargin;
 
         if (!hasMinimumTopScore ||
             !runnerUpClearsFloor ||
@@ -5030,9 +5027,9 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return true;
     }
 
-    private static bool HasReferencePriority(ScoredBodyCandidate top, ScoredBodyCandidate runnerUp) =>
+    private static bool HasReferencePriority(ScoredBodyCandidate top, ScoredBodyCandidate runnerUp, BodyDetectionTuning tuning) =>
         top.ReferenceHitRatio > 0 &&
-        (top.ReferenceHitRatio - runnerUp.ReferenceHitRatio) >= ReferencePriorityMargin;
+        (top.ReferenceHitRatio - runnerUp.ReferenceHitRatio) >= tuning.ReferencePriorityMargin;
 
     private static ScoredBodyCandidate? FindSameFamilyRunnerUp(
         IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
@@ -5049,10 +5046,10 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return null;
     }
 
-    private static string GetConfidenceBand(double score) =>
-        score >= HighConfidenceThreshold ? "high"
-        : score >= MediumConfidenceThreshold ? "medium"
-        : score >= AmbiguityScoreFloor ? "low"
+    private static string GetConfidenceBand(double score, BodyDetectionTuning tuning) =>
+        score >= tuning.HighConfidenceThreshold ? "high"
+        : score >= tuning.MediumConfidenceThreshold ? "medium"
+        : score >= tuning.AmbiguityScoreFloor ? "low"
         : "unknown";
 
     private static string GetBodyFamily(string bodyName) =>
@@ -5076,6 +5073,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlySet<string> physicsBoneNames,
         MeshGeometrySignature? geometrySignature)
     {
+        var tuning = BodyDetectionTuningCatalog.Current;
         var evidence = new List<string>();
 
         var meshHitRatio = MatchRatio(meshNames, template.MeshTokens);
@@ -5163,17 +5161,17 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
         }
 
-        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
-        var referenceBoost = referenceHitRatio >= 0.5 ? BodyReferenceBoostValue : 0;
+        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? tuning.PhysicsExpectationBoostValue : 0;
+        var referenceBoost = referenceHitRatio >= 0.5 ? tuning.BodyReferenceBoostValue : 0;
         var score = Math.Clamp(
-            (meshHitRatio * MeshTokenWeight) +
-            (textureHitRatio * TextureTokenWeight) +
-            (physicsHitRatio * PhysicsTokenWeight) +
-            (referenceHitRatio * BodyReferenceTokenWeight) +
-            (boneSignatureScore * BoneSignatureWeight) +
-            (vertexSignatureScore * VertexCountWeight) +
-            (boundingRatioScore * BoundingRatioWeight) +
-            (uvSignatureScore * UvSignatureWeight) +
+            (meshHitRatio * tuning.MeshTokenWeight) +
+            (textureHitRatio * tuning.TextureTokenWeight) +
+            (physicsHitRatio * tuning.PhysicsTokenWeight) +
+            (referenceHitRatio * tuning.BodyReferenceTokenWeight) +
+            (boneSignatureScore * tuning.BoneSignatureWeight) +
+            (vertexSignatureScore * tuning.VertexCountWeight) +
+            (boundingRatioScore * tuning.BoundingRatioWeight) +
+            (uvSignatureScore * tuning.UvSignatureWeight) +
             physicsExpectationBoost +
             referenceBoost,
             0,
@@ -5713,7 +5711,8 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
 {
     public async Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
-        var sliderCount = (await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken)).Sliders.Count;
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken);
+        var sliderCount = resolved.Sliders.Count;
 
         // Source-body match ratio: how closely the mesh weight profile matches expected
         // vertex weighting for the target body.  Physics-enabled meshes with transferred
@@ -5729,9 +5728,23 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
             _                                                      => 0.75,
         };
 
+        if (resolved.SourceMorphQuality is { PayloadMorphCount: > 0 } sourceMorphQuality)
+        {
+            matchRatio = ApplySourceMorphQuality(matchRatio, sourceMorphQuality);
+        }
+
         var lowLabel  = $"low-weight:{sliderCount}-sliders";
         var highLabel = $"high-weight:{sliderCount}-sliders";
-        return new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio);
+        return new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio, resolved.SourceMorphQuality);
+    }
+
+    private static double ApplySourceMorphQuality(double baseMatchRatio, SourceMorphQualityMetrics sourceMorphQuality)
+    {
+        var payloadSignal =
+            (sourceMorphQuality.PayloadStrengthScore * 0.65d) +
+            (sourceMorphQuality.PayloadCoverageRatio * 0.35d);
+        var adjustment = (payloadSignal - 0.50d) * 0.10d;
+        return Math.Round(Math.Clamp(baseMatchRatio + adjustment, 0.35d, 0.99d), 4);
     }
 }
 
@@ -5739,16 +5752,7 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
 {
     public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
-        var threshold = mesh.MeshType switch
-        {
-            "physics-enabled" => 1.04,
-            "skin-tight" => 1.05,
-            "cloth" => 1.07,
-            "leather" => 1.09,
-            "mixed" => 1.08,
-            "plate" => 1.12,
-            _ => 1.10
-        };
+        var threshold = MeshBehaviorCatalog.Get(mesh.MeshType).ClippingThreshold;
 
         var regionScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (region, morphFactor) in mesh.RegionalMorphing)
@@ -5820,20 +5824,6 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
 /// </summary>
 internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 {
-    // Base inflation per mesh type applied to each clipping region's morph factor.
-    // The factor is added to the existing morphing value so that the BSD/TRI vertex
-    // deltas push the armor outward by an appropriate amount.
-    private static readonly IReadOnlyDictionary<string, double> BaseInflation =
-        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["plate"]           = 0.072,
-            ["leather"]         = 0.048,
-            ["mixed"]           = 0.055,
-            ["cloth"]           = 0.030,
-            ["skin-tight"]      = 0.022,
-            ["physics-enabled"] = 0.028,
-        };
-
     // Clipping regions whose correction has a secondary "spill" effect on neighbouring
     // regions (e.g. correcting the chest region also slightly inflates armpits).
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> InflationSpill =
@@ -5856,8 +5846,7 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 
         // Start from the current regional morphing values and build a corrected copy.
         var corrected = new Dictionary<string, double>(mesh.RegionalMorphing, StringComparer.OrdinalIgnoreCase);
-        BaseInflation.TryGetValue(mesh.MeshType, out var baseInflation);
-        if (baseInflation == 0) baseInflation = 0.040;
+        var baseInflation = MeshBehaviorCatalog.Get(mesh.MeshType).BaseInflation;
 
         foreach (var region in clipping.Regions)
         {
@@ -5888,11 +5877,6 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 
 internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 {
-    private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "HIMBO", "SAM", "SOS"
-    };
-
     private readonly record struct PhysicsSolverTuning(
         double StiffnessMultiplier,
         double OffsetMultiplier,
@@ -5905,7 +5889,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
-        var isMale  = MaleBodies.Contains(targetBody) ||
+        var isMale  = MeshBehaviorCatalog.MaleBodyTargets.Contains(targetBody, StringComparer.OrdinalIgnoreCase) ||
             (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
         var tuning = BuildSolverTuning(mesh);
@@ -5918,15 +5902,14 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 
     private static PhysicsSolverTuning BuildSolverTuning(WeightedMesh mesh)
     {
-        var tuning = mesh.MeshType switch
-        {
-            "cloth" => new PhysicsSolverTuning(0.85, 1.25, 0.90, 1.08, 0.95, 1.15),
-            "physics-enabled" => new PhysicsSolverTuning(1.00, 1.12, 0.82, 1.15, 1.10, 1.20),
-            "skin-tight" => new PhysicsSolverTuning(0.95, 0.90, 1.05, 0.95, 1.00, 0.90),
-            "leather" => new PhysicsSolverTuning(1.05, 0.85, 1.08, 0.92, 1.02, 0.88),
-            "plate" => new PhysicsSolverTuning(1.12, 0.70, 1.15, 0.85, 1.10, 0.75),
-            _ => new PhysicsSolverTuning(1.00, 1.00, 1.00, 1.00, 1.00, 1.00)
-        };
+        var profile = MeshBehaviorCatalog.Get(mesh.MeshType);
+        var tuning = new PhysicsSolverTuning(
+            profile.PhysicsSolver.StiffnessMultiplier,
+            profile.PhysicsSolver.OffsetMultiplier,
+            profile.PhysicsSolver.DampingMultiplier,
+            profile.PhysicsSolver.GravityMultiplier,
+            profile.PhysicsSolver.MassMultiplier,
+            profile.PhysicsSolver.RestitutionMultiplier);
 
         if (!mesh.PhysicsWeightsTransferred)
         {
@@ -9741,7 +9724,8 @@ internal sealed class LocalExportService(
             HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
             HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
             MissingNormalCount:        textureSummary.MissingNormals.Count,
-            ValidationSummary:         validationSummary);
+            ValidationSummary:         validationSummary,
+            SourceMorphQuality:        morphs.SourceMorphQuality);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,

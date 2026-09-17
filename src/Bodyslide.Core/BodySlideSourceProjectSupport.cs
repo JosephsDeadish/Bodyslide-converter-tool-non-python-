@@ -2,7 +2,11 @@ using System.Xml.Linq;
 
 namespace Bodyslide.Core;
 
-internal sealed record ResolvedBodySlideSliders(IReadOnlyList<string> Sliders, IReadOnlyList<string> ZapSliders, string Gender);
+internal sealed record ResolvedBodySlideSliders(
+    IReadOnlyList<string> Sliders,
+    IReadOnlyList<string> ZapSliders,
+    string Gender,
+    SourceMorphQualityMetrics? SourceMorphQuality = null);
 
 internal static class BodySlideSourceProjectSupport
 {
@@ -73,7 +77,8 @@ internal static class BodySlideSourceProjectSupport
         return new ResolvedBodySlideSliders(
             mergedSliders,
             zapSliders.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-            gender);
+            gender,
+            sourceSupport.SourceMorphQuality);
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
@@ -379,7 +384,8 @@ internal static class BodySlideSourceProjectSupport
         candidate = new SourceSliderCandidate(
             sliderName,
             basePriority + ComputePayloadPriorityOffset(stats),
-            isZap);
+            isZap,
+            stats);
         return true;
     }
 
@@ -467,8 +473,47 @@ internal static class BodySlideSourceProjectSupport
         return candidate.Length >= 2 && candidate.Any(char.IsLetter);
     }
 
-    private sealed record BodySlideSourceSupport(IReadOnlyList<SourceSliderCandidate> Sliders, IReadOnlyList<SourceSliderCandidate> ZapSliders);
-    private sealed record SourceSliderCandidate(string Name, int Priority, bool IsZap = false);
+    private static SourceMorphQualityMetrics? BuildSourceMorphQuality(IEnumerable<SourceSliderCandidate> sliderCandidates, IEnumerable<SourceSliderCandidate> zapCandidates)
+    {
+        var payloadCandidates = sliderCandidates
+            .Concat(zapCandidates)
+            .Where(static candidate => candidate.PayloadStats is not null)
+            .ToArray();
+        if (payloadCandidates.Length == 0)
+        {
+            return null;
+        }
+
+        var meaningfulPayloadMorphCount = payloadCandidates.Count(static candidate => candidate.PayloadStats!.MeaningfulCount > 0);
+        var payloadStrengthScore = payloadCandidates
+            .Select(static candidate => ComputePayloadStrengthScore(candidate.PayloadStats!))
+            .DefaultIfEmpty(0d)
+            .Average();
+        var payloadCoverageRatio = payloadCandidates.Length == 0
+            ? 0d
+            : (double)meaningfulPayloadMorphCount / payloadCandidates.Length;
+
+        return new SourceMorphQualityMetrics(
+            PayloadMorphCount: payloadCandidates.Length,
+            MeaningfulPayloadMorphCount: meaningfulPayloadMorphCount,
+            PayloadCoverageRatio: Math.Round(Math.Clamp(payloadCoverageRatio, 0d, 1d), 4),
+            PayloadStrengthScore: Math.Round(Math.Clamp(payloadStrengthScore, 0d, 1d), 4));
+    }
+
+    private static double ComputePayloadStrengthScore(MorphDeltaStats stats)
+    {
+        var density = Math.Clamp(stats.MeaningfulRatio, 0f, 1f);
+        var magnitude = Math.Clamp(stats.TotalMagnitude / 2f, 0f, 1f);
+        var peak = Math.Clamp(stats.MaxMagnitude / 0.06f, 0f, 1f);
+        return density * 0.5d + magnitude * 0.35d + peak * 0.15d;
+    }
+
+    private sealed record BodySlideSourceSupport(IReadOnlyList<SourceSliderCandidate> Sliders, IReadOnlyList<SourceSliderCandidate> ZapSliders)
+    {
+        public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
+    }
+
+    private sealed record SourceSliderCandidate(string Name, int Priority, bool IsZap = false, MorphDeltaStats? PayloadStats = null);
     private sealed record SearchLocation(string Root, SearchOption SearchOption);
 
     private static class SourcePriority

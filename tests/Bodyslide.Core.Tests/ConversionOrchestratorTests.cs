@@ -4877,6 +4877,18 @@ public sealed class PhysicsMeshTypeTuningTests
             Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public void DataDrivenCatalogs_LoadCurrentDetectionAndMeshBehaviorTuning()
+    {
+        Assert.Equal(0.35d, BodyDetectionTuningCatalog.Current.MeshTokenWeight);
+        Assert.Equal(0.12d, BodyDetectionTuningCatalog.Current.AmbiguityMargin);
+
+        var plate = MeshBehaviorCatalog.Get("plate");
+        Assert.Equal(1.12d, plate.ClippingThreshold);
+        Assert.Equal(0.072d, plate.BaseInflation);
+        Assert.Contains("SAM", MeshBehaviorCatalog.MaleBodyTargets);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -9963,7 +9975,7 @@ public sealed class OutputCompletenessTests
             var armor        = new ImportedArmor(nifPath, [nifPath], [], [], []);
             var analysis     = new MeshAnalysis("plate", false, 1);
             var mesh         = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
-            var morphs       = new MorphSet("low", "high", true);
+            var morphs       = new MorphSet("low", "high", true, SourceMorphQuality: new SourceMorphQualityMetrics(3, 2, 0.6667d, 0.58d));
             var physics      = new PhysicsConfig("none");
             var clipping     = new ClippingReport(false, [], []);
             var correction   = new CorrectionResult(false, "not-required");
@@ -10056,6 +10068,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("ValidationSummary", json);
             Assert.Contains("HighRiskPoseCount", json);
             Assert.Contains("MissingNormalCount", json);
+            Assert.Contains("SourceMorphQuality", json);
         }
         finally
         {
@@ -10716,6 +10729,36 @@ public sealed class MorphGenerationServiceTests
 
         Assert.True(physResult.SourceBodyMatchRatio > plainResult.SourceBodyMatchRatio,
             "Physics mesh with transferred weights should score higher match ratio.");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PayloadBackedSliders_SurfaceSourceMorphQualityAndImproveMatchRatio()
+    {
+        var service = new BasicMorphGenerationService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var bsdPath = Path.Combine(tmpDir, "WaistMagic_0.bsd");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("WaistMagic", isHighWeight: false, [(0.12f, 0.01f, 0f)]));
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bsdPath]);
+            var mesh = new WeightedMesh("cloth", "heat-map", false);
+
+            var result = await service.GenerateAsync(mesh, armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(result.SourceMorphQuality);
+            Assert.Equal(1, result.SourceMorphQuality!.PayloadMorphCount);
+            Assert.Equal(1, result.SourceMorphQuality.MeaningfulPayloadMorphCount);
+            Assert.True(result.SourceMorphQuality.PayloadStrengthScore > 0d);
+            Assert.True(result.SourceBodyMatchRatio > 0.82d);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     [Fact]
