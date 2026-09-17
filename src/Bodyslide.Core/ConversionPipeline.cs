@@ -6348,29 +6348,13 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
     private static string ResolveTargetSkeletonLabel(string targetBody, ImportedArmor armor, bool hasPhysicsBones)
     {
-        if (!hasPhysicsBones)
-        {
-            return "xpmsse-vanilla";
-        }
-
         var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
-        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
-            !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
-        {
-            return IsAmbiguousSkeletonFoundation(prefix)
-                ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}-physics"
-                : $"{prefix}-physics";
-        }
-
-        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata) &&
-            !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation))
-        {
-            return $"{SlugifySkeletonTarget(builtInMetadata.SkeletonFoundation)}-physics";
-        }
-
-        return IsAmbiguousSkeletonFoundation(prefix)
-            ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}-physics"
-            : $"{prefix}-physics";
+        var label = IsAmbiguousSkeletonFoundation(prefix)
+            ? $"{prefix}-{SlugifySkeletonTarget(targetBody)}"
+            : prefix;
+        return hasPhysicsBones
+            ? $"{label}-physics"
+            : label;
     }
 
     private static string ResolveTargetSkeletonPrefix(string targetBody, ImportedArmor armor)
@@ -12189,7 +12173,7 @@ internal sealed class LocalExportService(
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
             int vertexCount)
         {
-            if (sliders.Count == 0)
+            if (sliders.Count == 0 || reusableSourceMorphPayloads is null || reusableSourceMorphPayloads.Count == 0)
             {
                 return new MorphPayloadReuseSummary(0, 0, 0, [], []);
             }
@@ -12198,8 +12182,13 @@ internal sealed class LocalExportService(
             var fallbackVariants = new List<string>();
             foreach (var slider in sliders)
             {
-                TrackPayloadReuseVariant(slider, isHighWeight: false);
-                TrackPayloadReuseVariant($"{slider}_1", isHighWeight: true);
+                if (!reusableSourceMorphPayloads.TryGetValue(slider, out var variants))
+                {
+                    continue;
+                }
+
+                TrackPayloadReuseVariant(slider, isHighWeight: false, variants.LowWeight);
+                TrackPayloadReuseVariant($"{slider}_1", isHighWeight: true, variants.HighWeight);
             }
 
             return new MorphPayloadReuseSummary(
@@ -12209,8 +12198,13 @@ internal sealed class LocalExportService(
                 reusedVariants,
                 fallbackVariants);
 
-            void TrackPayloadReuseVariant(string variantName, bool isHighWeight)
+            void TrackPayloadReuseVariant(string variantName, bool isHighWeight, SourceMorphPayload? candidate)
             {
+                if (candidate is null)
+                {
+                    return;
+                }
+
                 if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName: isHighWeight ? variantName[..^2] : variantName, isHighWeight, vertexCount, out _))
                 {
                     reusedVariants.Add(variantName);

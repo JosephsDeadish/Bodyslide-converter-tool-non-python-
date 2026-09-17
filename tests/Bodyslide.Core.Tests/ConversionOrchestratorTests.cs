@@ -10222,11 +10222,71 @@ public sealed class OutputCompletenessTests
 
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"incomplete-source-fallback\"", qualityJson);
-            Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
             Assert.Contains("\"MissingAssets\": [", qualityJson);
             Assert.Contains("\"osp\"", qualityJson);
             Assert.Contains("\"morph-payloads\"", qualityJson);
             Assert.Contains("\"reference-assets\"", qualityJson);
+            Assert.Contains("\"RequestedVariantCount\": 0", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_SourcePayloadVertexMismatch_SurfacesSyntheticFallback()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(2));
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Belly"] = new(
+                        new SourceMorphPayload("Belly", false, "bsd", 1, [(0.125f, -0.25f, 0.375f)]),
+                        null)
+                },
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
+            Assert.Contains("\"RequestedVariantCount\": 1", qualityJson);
+            Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
         }
         finally
         {
@@ -11701,6 +11761,39 @@ public sealed class CustomBodyProfileSupportTests
         var result = await service.MapAsync(armor, "MyFollower", CancellationToken.None);
 
         Assert.Equal("tng-extended-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PreservesFoundationWithoutPhysicsSuffix()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "MyFollower",
+                    DetectionTokens: ["myfollower"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.05 },
+                    SliderNames: ["Waist"],
+                    PhysicsBones: [],
+                    PhysicsProfile: "none",
+                    BodyOutputPath: @"meshes\actors\character\character assets\",
+                    Gender: "female",
+                    SkeletonFoundation: "TNG Extended")
+            ]);
+
+        var result = await service.MapAsync(armor, "MyFollower", CancellationToken.None);
+
+        Assert.Equal("tng-extended", result.TargetSkeleton);
     }
 
     [Fact]
