@@ -347,11 +347,14 @@ internal static class BodySlideSourceProjectSupport
 
             return new BodySlideSourceSupport(
                 CollapseCandidates(sliders),
-                CollapseCandidates(zapSliders));
+                CollapseCandidates(zapSliders),
+                HasOsp: true,
+                HasTriPayloads: false,
+                HasBsdPayloads: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
-            return new BodySlideSourceSupport([], []);
+            return new BodySlideSourceSupport([], [], HasOsp: true, HasTriPayloads: false, HasBsdPayloads: false);
         }
     }
 
