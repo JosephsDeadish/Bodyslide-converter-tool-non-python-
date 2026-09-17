@@ -12579,7 +12579,7 @@ internal sealed class LocalExportService(
         var rightSegments = NormalizeComparablePath(rightPath)
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var matches = 0;
-        for (var leftIndex = leftSegments.Length - 1, rightIndex = rightSegments.Length - 1;
+        for (int leftIndex = leftSegments.Length - 1, rightIndex = rightSegments.Length - 1;
              leftIndex >= 0 && rightIndex >= 0;
              leftIndex--, rightIndex--)
         {

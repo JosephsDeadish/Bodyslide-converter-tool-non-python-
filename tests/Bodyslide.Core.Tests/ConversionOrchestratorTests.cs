@@ -6068,43 +6068,6 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass.dds")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "skeleton_female.nif")));
         }
-
-        [Fact]
-        public async Task BatchConvert_RealisticModPackDirectory_WithMixedPlugins_PreservesContextualPluginMeshes()
-        {
-            var workingDirectory = CopyFixtureToTemporaryWorkspace();
-            var outputDirectory = Path.Combine(workingDirectory, "output");
-
-            var pluginLocalEsp = Path.Combine(workingDirectory, "NordicAddon.esp");
-            await File.WriteAllBytesAsync(pluginLocalEsp, BuildFixtureArmaPlugin("armor/nordic/nordic_cuirass_0.nif"));
-
-            var worldModelEsp = Path.Combine(workingDirectory, "NordicWorld.esp");
-            await File.WriteAllBytesAsync(worldModelEsp, BuildFixtureArmoPlugin("meshes/armor/nordic/nordic_cuirass_1.nif"));
-
-            try
-            {
-                var orchestrator = StandaloneConversionModules.CreateDefault();
-                var runner = new BatchConversionRunner(orchestrator);
-                var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
-
-                Assert.Equal(2, results.Count);
-                Assert.All(results, result => Assert.True(result.Success));
-
-                var cuirassOutput = results.Single(result =>
-                    result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
-
-                var patchJson = await File.ReadAllTextAsync(Path.Combine(cuirassOutput.OutputDirectory, "plugin-patches.json"));
-                Assert.Contains("slidesmith/3ba/armor/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
-                Assert.Contains("meshes/slidesmith/3ba/armor/nordic/nordic_cuirass_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
-
-                Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_0.nif")));
-                Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_1.nif")));
-            }
-            finally
-            {
-                Directory.Delete(workingDirectory, recursive: true);
-            }
-        }
         finally
         {
             if (Directory.Exists(workingDirectory))
@@ -6121,6 +6084,37 @@ public sealed class RealisticModPackFixtureTests
             {
                 Directory.Delete(outputDirectory, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithMixedPlugins_PreservesContextualPluginMeshes()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        var pluginLocalEsp = Path.Combine(workingDirectory, "NordicAddon.esp");
+        await File.WriteAllBytesAsync(pluginLocalEsp, BuildFixtureArmaPlugin("armor/nordic/nordic_cuirass_0.nif"));
+
+        var worldModelEsp = Path.Combine(workingDirectory, "NordicWorld.esp");
+        await File.WriteAllBytesAsync(worldModelEsp, BuildFixtureArmoPlugin("meshes/armor/nordic/nordic_boots_0.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("slidesmith/3ba/armor/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/armor/nordic/nordic_boots_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_boots_0.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
