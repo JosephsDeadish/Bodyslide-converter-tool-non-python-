@@ -59,7 +59,7 @@ internal static class BuiltInBodyMetadataCatalog
 
     private static readonly Lazy<IReadOnlyDictionary<string, BuiltInBodyMetadata>> Bodies = new(LoadBodies);
 
-    public static IReadOnlyCollection<BuiltInBodyMetadata> All => Bodies.Value.Values;
+    public static IReadOnlyCollection<BuiltInBodyMetadata> All => Bodies.Value.Values.ToArray();
 
     public static bool TryGet(string bodyName, out BuiltInBodyMetadata metadata) =>
         Bodies.Value.TryGetValue(bodyName, out metadata!);

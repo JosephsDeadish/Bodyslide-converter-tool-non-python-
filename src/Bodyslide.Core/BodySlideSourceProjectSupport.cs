@@ -54,7 +54,7 @@ internal static class BodySlideSourceProjectSupport
 
         zapSliders.ExceptWith(sliderSet);
 
-        var gender = customProfileFound
+        var gender = customProfileFound && customProfile is not null
             ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female"
             : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata)
                 ? builtInMetadata.Gender

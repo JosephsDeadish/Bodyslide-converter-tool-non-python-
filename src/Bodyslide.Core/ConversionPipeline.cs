@@ -4969,9 +4969,9 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double UvSignatureWeight = 0.04;
     private const double BodyReferenceTokenWeight = 0.08;
     private const double BodyReferenceBoostValue = 0.22;
-    private const double AmbiguityMargin = 0.08;
+    private const double AmbiguityMargin = 0.12;
     private const double AmbiguityScoreFloor = 0.25;
-    private const double MediumConfidenceThreshold = 0.40;
+    private const double MediumConfidenceThreshold = 0.35;
     private const double HighConfidenceThreshold = 0.75;
     private const double ReferencePriorityMargin = 0.34;
 
@@ -5036,7 +5036,8 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var top = scoredCandidates[0];
         var evidence = top.Evidence.ToList();
         evidence.Add($"confidence-band:{GetConfidenceBand(top.Score)}");
-        if (scoredCandidates.Count > 1 && HasReferencePriority(top, scoredCandidates[1]))
+        var sameFamilyRunnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
+        if (sameFamilyRunnerUp is { } familyCandidate && HasReferencePriority(top, familyCandidate))
         {
             evidence.Add("reference-priority:direct-source");
         }
@@ -5213,26 +5214,26 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         }
 
         var top = scoredCandidates[0];
-        var runnerUp = scoredCandidates[1];
-        if (!GetBodyFamily(top.Template.Body).Equals(GetBodyFamily(runnerUp.Template.Body), StringComparison.OrdinalIgnoreCase) ||
+        var runnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
+        if (runnerUp is null ||
             top.Score < AmbiguityScoreFloor ||
-            runnerUp.Score < MediumConfidenceThreshold ||
+            runnerUp.Value.Score < MediumConfidenceThreshold ||
             top.Score >= HighConfidenceThreshold ||
-            HasReferencePriority(top, runnerUp) ||
-            Math.Abs(top.Score - runnerUp.Score) > AmbiguityMargin)
+            HasReferencePriority(top, runnerUp.Value) ||
+            Math.Abs(top.Score - runnerUp.Value.Score) > AmbiguityMargin)
         {
             return false;
         }
 
-        var ambiguityConfidence = Math.Round((top.Score + runnerUp.Score) / 2d, 4);
+        var ambiguityConfidence = Math.Round((top.Score + runnerUp.Value.Score) / 2d, 4);
         result = new BodyDetectionReport(
             "UNKNOWN",
             ambiguityConfidence,
             top.Evidence
-                .Concat(runnerUp.Evidence)
+                .Concat(runnerUp.Value.Evidence)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Append("confidence-band:ambiguous")
-                .Append($"ambiguous:{top.Template.Body}|{runnerUp.Template.Body}")
+                .Append($"ambiguous:{top.Template.Body}|{runnerUp.Value.Template.Body}")
                 .ToArray());
         return true;
     }
@@ -5240,6 +5241,21 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private static bool HasReferencePriority(ScoredBodyCandidate top, ScoredBodyCandidate runnerUp) =>
         top.ReferenceHitRatio > 0 &&
         (top.ReferenceHitRatio - runnerUp.ReferenceHitRatio) >= ReferencePriorityMargin;
+
+    private static ScoredBodyCandidate? FindSameFamilyRunnerUp(
+        IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
+        string topBody)
+    {
+        foreach (var candidate in scoredCandidates.Skip(1))
+        {
+            if (GetBodyFamily(candidate.Template.Body).Equals(GetBodyFamily(topBody), StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 
     private static string GetConfidenceBand(double score) =>
         score >= HighConfidenceThreshold ? "high"
