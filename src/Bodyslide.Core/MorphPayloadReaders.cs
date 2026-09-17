@@ -122,6 +122,11 @@ internal static class BsdMorphReader
             deltas[i] = (x, y, z);
         }
 
+        if (offset != bytes.Length)
+        {
+            return false;
+        }
+
         payload = new BsdMorphPayload(sliderName, isHighWeight, vertexCount, deltas);
         return true;
     }
@@ -216,6 +221,11 @@ internal static class TriMorphReader
             }
 
             morphs.Add(new TriMorphEntry(names[i], deltas));
+        }
+
+        if (offset != bytes.Length)
+        {
+            return false;
         }
 
         payload = new TriMorphPayload(vertexCount, morphs);

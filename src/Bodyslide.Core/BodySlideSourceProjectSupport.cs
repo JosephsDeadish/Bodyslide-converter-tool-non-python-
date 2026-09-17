@@ -99,7 +99,7 @@ internal static class BodySlideSourceProjectSupport
             sourceSupport.ReusableMorphPayloads,
             sourceSupport.BuildAssetSupport(
                 baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0,
-                armor.BodyReferenceFiles.Count > 0,
+                HasReferenceBodyAssets(armor.BodyReferenceFiles),
                 fallbackInference));
     }
 
@@ -236,6 +236,15 @@ internal static class BodySlideSourceProjectSupport
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase);
     }
+
+    private static bool HasReferenceBodyAssets(IReadOnlyList<string> bodyReferenceFiles) =>
+        bodyReferenceFiles.Any(static path =>
+        {
+            var extension = Path.GetExtension(path);
+            return !extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) &&
+                   !extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) &&
+                   !extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
+        });
 
     private static IEnumerable<SearchLocation> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
     {
@@ -782,7 +791,6 @@ internal static class BodySlideSourceProjectSupport
             bool hasReferenceAssets,
             FallbackBodySlideInference? fallbackInference)
         {
-            var effectiveHasReferenceAssets = hasReferenceAssets || HasOsp || HasTriPayloads || HasBsdPayloads;
             var missingAssets = new List<string>();
             if (!HasOsp)
             {
@@ -794,7 +802,7 @@ internal static class BodySlideSourceProjectSupport
                 missingAssets.Add("morph-payloads");
             }
 
-            if (!effectiveHasReferenceAssets)
+            if (!hasReferenceAssets)
             {
                 missingAssets.Add("reference-assets");
             }
@@ -803,7 +811,7 @@ internal static class BodySlideSourceProjectSupport
                 HasOsp,
                 HasTriPayloads,
                 HasBsdPayloads,
-                effectiveHasReferenceAssets,
+                hasReferenceAssets,
                 usedFallbackSliders,
                 missingAssets,
                 ReusableMorphPayloads.Count,

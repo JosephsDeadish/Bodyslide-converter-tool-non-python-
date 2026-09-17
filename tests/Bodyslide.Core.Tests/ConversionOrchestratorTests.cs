@@ -4053,6 +4053,76 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void BsdMorphReader_WithTrailingBytes_IsRejected()
+    {
+        byte[] bytes = [.. BuildBsdPayload("PayloadWaist", isHighWeight: false, [(0.125f, -0.25f, 0.375f)]), (byte)0x01, 0x02, 0x03];
+
+        Assert.False(BsdMorphReader.TryRead(bytes, out _));
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithOnlySliderFiles_StillMarksReferenceAssetsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "armor_0.nif");
+        var ospPath = Path.Combine(workingDirectory, "armor.osp");
+        var triPath = Path.Combine(workingDirectory, "armor.tri");
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(ospPath, "<SliderSet><Slider name=\"Belly\" /></SliderSet>");
+        await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(1, ("Belly", [(0.125f, 0f, 0f)])));
+
+        try
+        {
+            var armor = new ImportedArmor(
+                meshPath,
+                [meshPath],
+                [],
+                [],
+                [ospPath, triPath]);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.False(resolved.SourceAssetSupport!.HasReferenceAssets);
+            Assert.Contains("reference-assets", resolved.SourceAssetSupport.MissingAssets!);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+
+            foreach (var morph in morphs)
+            {
+                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+                writer.Write((ushort)nameBytes.Length);
+                writer.Write(nameBytes);
+                writer.Write((uint)morph.Deltas.Count);
+            }
+
+            foreach (var morph in morphs)
+            {
+                foreach (var (x, y, z) in morph.Deltas)
+                {
+                    writer.Write((short)Math.Round(x * 2048f));
+                    writer.Write((short)Math.Round(y * 2048f));
+                    writer.Write((short)Math.Round(z * 2048f));
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4203,6 +4273,16 @@ public sealed class BsdSliderDataTests
             Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
             Assert.Equal("HideCape_1", payload.Morphs[1].Name);
             Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+        }
+
+        [Fact]
+        public void TriMorphReader_WithTrailingBytes_IsRejected()
+        {
+            byte[] bytes = [.. BuildTriPayload(
+                    vertexCount: 1,
+                    ("BreastLift", [(0.125f, 0f, -0.25f)])), (byte)0x01, 0x02, 0x03];
+
+            Assert.False(TriMorphReader.TryRead(bytes, out _));
         }
 
         [Fact]
