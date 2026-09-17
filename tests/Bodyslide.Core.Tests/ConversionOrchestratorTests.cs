@@ -10805,7 +10805,7 @@ public sealed class VanillaBodyOspSliderTests
         Directory.CreateDirectory(tmpDir);
         var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
         var ospPath = Path.Combine(tmpDir, "source_sliders.osp");
-        var bsdPath = Path.Combine(tmpDir, "WaistMagic_1.bsd");
+        var bsdPath = Path.Combine(tmpDir, "WaistMagic_0.bsd");
         await File.WriteAllBytesAsync(nifPath, new byte[64]);
         await File.WriteAllTextAsync(
             ospPath,
@@ -11105,6 +11105,47 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("BreastUpper.L", StringComparison.OrdinalIgnoreCase)
                                                       && m.TargetBone.Equals("BreastSupport.L", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("BreastUpper.L", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_RecognizesCompactPrefixSideNotation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LBreastUpper\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LBreastSupport", "RBreastSupport", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LBreastUpper", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("LBreastSupport", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("LBreastUpper", result.UnsupportedBones);
         }
         finally
         {

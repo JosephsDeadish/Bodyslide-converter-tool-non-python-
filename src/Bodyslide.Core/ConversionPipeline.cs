@@ -5178,6 +5178,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             lowerBoneName.Contains("_left", StringComparison.Ordinal) ||
             lowerBoneName.Contains(".l", StringComparison.Ordinal) ||
             lowerBoneName.Contains("-l", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "l") ||
             lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
             lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
             lowerBoneName.EndsWith(" l", StringComparison.Ordinal) ||
@@ -5191,6 +5192,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             lowerBoneName.Contains("_right", StringComparison.Ordinal) ||
             lowerBoneName.Contains(".r", StringComparison.Ordinal) ||
             lowerBoneName.Contains("-r", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "r") ||
             lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
             lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
             lowerBoneName.EndsWith(" r", StringComparison.Ordinal) ||
@@ -5202,6 +5204,16 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         return null;
     }
+
+    private static bool StartsWithCompactSidePrefix(string lowerBoneName, string sidePrefix) =>
+        lowerBoneName.StartsWith($"{sidePrefix}breast", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}pec", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}butt", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}glute", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}rear", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}thigh", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}boob", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}nipple", StringComparison.Ordinal);
 
     private static bool TryCreateAmbiguousResult(
         IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
@@ -6553,6 +6565,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             lowerBoneName.Contains("_left", StringComparison.Ordinal) ||
             lowerBoneName.Contains(".l", StringComparison.Ordinal) ||
             lowerBoneName.Contains("-l", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "l") ||
             lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
             lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
             lowerBoneName.EndsWith(" l", StringComparison.Ordinal) ||
@@ -6566,6 +6579,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             lowerBoneName.Contains("_right", StringComparison.Ordinal) ||
             lowerBoneName.Contains(".r", StringComparison.Ordinal) ||
             lowerBoneName.Contains("-r", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "r") ||
             lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
             lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
             lowerBoneName.EndsWith(" r", StringComparison.Ordinal) ||
@@ -6577,6 +6591,16 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
         return null;
     }
+
+    private static bool StartsWithCompactSidePrefix(string lowerBoneName, string sidePrefix) =>
+        lowerBoneName.StartsWith($"{sidePrefix}breast", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}pec", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}butt", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}glute", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}rear", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}thigh", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}boob", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}nipple", StringComparison.Ordinal);
 
     private static async Task<IReadOnlySet<string>> ExtractPhysicsBonesAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {

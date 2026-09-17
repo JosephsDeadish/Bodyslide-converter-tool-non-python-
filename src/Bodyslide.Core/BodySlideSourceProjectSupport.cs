@@ -160,7 +160,8 @@ internal static class BodySlideSourceProjectSupport
         }
 
         var normalized = fileName.Trim();
-        if (normalized.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        if (normalized.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
         {
             normalized = normalized[..^2];
         }
