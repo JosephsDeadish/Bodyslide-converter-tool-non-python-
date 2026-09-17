@@ -8106,6 +8106,28 @@ public sealed class BinaryArmaParserTests
     }
 
     [Fact]
+    public void ExtractArmoRecords_ExtractsBipedSlotsAndLinkedArmorAddons()
+    {
+        using var bod2Ms = new MemoryStream();
+        WriteUInt32Le(bod2Ms, 0x2001u); // slots 30 and 43
+        WriteUInt32Le(bod2Ms, 0u);
+
+        byte[] bod2 = BuildSubrecord("BOD2", bod2Ms.ToArray());
+        byte[] armaA = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u));
+        byte[] armaB = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000803u));
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_w.nif\0"));
+        byte[] data = [..bod2, ..armaA, ..armaB, ..mod2];
+
+        var plugin = BuildMinimalPlugin_SseWithArmo(data);
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin);
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal([30, 43], descriptor.BipedSlots);
+        Assert.Equal([0x00000802u, 0x00000803u], descriptor.LinkedArmorAddonFormIds);
+    }
+
+    [Fact]
     public void ExtractArmoRecords_EmptyInput_ReturnsEmpty()
     {
         var result = BinaryArmaParser.ExtractArmoRecords([]);
@@ -9423,10 +9445,14 @@ public sealed class ConversionReadmeGeneratorTests
     {
         IReadOnlyList<uint> kwIds = [0x111u, 0x222u];
         const uint raceId = 0x019u;
-        var record = new PluginArmorRecord("test.esp", [], 0xBEEFu, "TestArmo", kwIds, raceId);
+        IReadOnlyList<int> slots = [32, 45];
+        IReadOnlyList<uint> linkedArmorAddons = [0x0802u, 0x0803u];
+        var record = new PluginArmorRecord("test.esp", [], 0xBEEFu, "TestArmo", kwIds, raceId, slots, linkedArmorAddons);
 
         Assert.Equal(kwIds, record.KeywordFormIds);
         Assert.Equal(raceId, record.RaceFormId);
+        Assert.Equal(slots, record.BipedSlots);
+        Assert.Equal(linkedArmorAddons, record.LinkedArmorAddonFormIds);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -10282,20 +10308,24 @@ public sealed class BipedSlotPassthroughTests
             => Task.FromResult(new PartitionRebuildingResult(true, ["32:Body"], []));
     }
 
-    // Fake plugin analysis that injects biped slots into returned armor addons.
-    private sealed class FakePluginAnalysisService(IReadOnlyList<int> slots) : IPluginAnalysisService
+    // Fake plugin analysis that injects biped slots into returned armor addon and armor records.
+    private sealed class FakePluginAnalysisService(IReadOnlyList<int> addonSlots, IReadOnlyList<int>? armorRecordSlots = null) : IPluginAnalysisService
     {
         public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken ct)
         {
-            var addon = new PluginArmorAddon("ARMA", [], FormId: 1, EditorId: "FakeARMA", BipedSlots: slots);
+            var addon = new PluginArmorAddon("ARMA", [], FormId: 1, EditorId: "FakeARMA", BipedSlots: addonSlots);
+            var armorRecord = armorRecordSlots is { Count: > 0 }
+                ? new PluginArmorRecord("ARMO", [], FormId: 2, EditorId: "FakeARMO", BipedSlots: armorRecordSlots)
+                : null;
             return Task.FromResult(new PluginAnalysisResult(
                 ScannedPlugins: ["FakePlugin.esp"],
                 ArmorAddons: [addon],
-                PatchGuidance: string.Empty));
+                PatchGuidance: string.Empty,
+                ArmorRecords: armorRecord is null ? null : [armorRecord]));
         }
     }
 
-    private static ConversionOrchestrator BuildOrchestrator(IReadOnlyList<int> pluginBipedSlots)
+    private static ConversionOrchestrator BuildOrchestrator(IReadOnlyList<int> pluginBipedSlots, IReadOnlyList<int>? armorRecordSlots = null)
     {
         return new ConversionOrchestrator(
             new LocalArmorImportService(),
@@ -10312,7 +10342,7 @@ public sealed class BipedSlotPassthroughTests
             new BasicPhysicsSupportService(),
             new BodySlideOspProjectService(),
             new BasicTextureAnalysisService(),
-            new FakePluginAnalysisService(pluginBipedSlots),
+            new FakePluginAnalysisService(pluginBipedSlots, armorRecordSlots),
             new VanillaArmorLookupService(),
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
@@ -10398,6 +10428,33 @@ public sealed class BipedSlotPassthroughTests
             var passthroughStep = result.Steps.FirstOrDefault(s =>
                 s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
             Assert.Null(passthroughStep);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WhenArmoDefinesExtraSlots_StepContainsArmorRecordBipedSlots()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var orchestrator = BuildOrchestrator([], [45, 49]);
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: tmpDir);
+            var result = await orchestrator.ConvertAsync(request);
+
+            var passthroughStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
+
+            Assert.NotNull(passthroughStep);
+            Assert.Contains("45", passthroughStep);
+            Assert.Contains("49", passthroughStep);
         }
         finally
         {

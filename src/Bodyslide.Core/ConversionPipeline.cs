@@ -353,7 +353,9 @@ public sealed record PluginArmorRecord(
     uint FormId = 0,
     string? EditorId = null,
     IReadOnlyList<uint>? KeywordFormIds = null,
-    uint? RaceFormId = null);
+    uint? RaceFormId = null,
+    IReadOnlyList<int>? BipedSlots = null,
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null);
 
 /// <summary>
 /// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
@@ -498,7 +500,9 @@ internal sealed record ArmoRecordDescriptor(
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
     byte[] OriginalDataBytes,           // The record data payload (not including header)
     IReadOnlyList<uint>? KeywordFormIds = null,  // KWDA — keyword FormIDs
-    uint? RaceFormId = null);                    // RNAM — race FormID
+    uint? RaceFormId = null,                    // RNAM — race FormID
+    IReadOnlyList<int>? BipedSlots = null,      // BOD2/BODT — decoded equipment slots
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null); // ARMA — linked ArmorAddon FormIDs
 
 public sealed record MeshDependencyMapEntry(
     string Mesh,
@@ -3463,6 +3467,9 @@ public sealed class ConversionOrchestrator(
             var pluginBipedSlots = pluginAnalysis.ArmorAddons
                 .Where(a => a.BipedSlots is not null)
                 .SelectMany(a => a.BipedSlots!)
+                .Concat((pluginAnalysis.ArmorRecords ?? [])
+                    .Where(r => r.BipedSlots is not null)
+                    .SelectMany(r => r.BipedSlots!))
                 .Distinct()
                 .Order()
                 .ToList();
@@ -8029,7 +8036,9 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.FormId,
                     d.EditorId,
                     d.KeywordFormIds,
-                    d.RaceFormId))
+                    d.RaceFormId,
+                    d.BipedSlots,
+                    d.LinkedArmorAddonFormIds))
                 .ToList();
 
             return (pluginLabel, pluginName, pluginKind.Type, addons, records);
@@ -9298,6 +9307,8 @@ internal static class BinaryArmaParser
         string? editorId = null;
         var meshPaths    = new List<string>();
         var keywords     = new List<uint>();
+        var bipedSlots   = new List<int>();
+        var linkedArmorAddonFormIds = new List<uint>();
         uint? raceFormId = null;
 
         int pos = 0;
@@ -9340,12 +9351,25 @@ internal static class BinaryArmaParser
                 if (!string.IsNullOrEmpty(path))
                     meshPaths.Add(path);
             }
+            else if (BipedSubrecords.Contains(subTag) && effectiveSubSize >= 4)
+            {
+                var slotFlags = ReadUInt32Le(dataBytes, dataStart);
+                for (int i = 0; i < 32; i++)
+                {
+                    if (((slotFlags >> i) & 1u) != 0)
+                        bipedSlots.Add(30 + i);
+                }
+            }
             else if (string.Equals(subTag, "KWDA", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
                 // KWDA: array of 4-byte FormIDs, one per keyword
                 int count = effectiveSubSize / 4;
                 for (int ki = 0; ki < count; ki++)
                     keywords.Add(ReadUInt32Le(dataBytes, dataStart + ki * 4));
+            }
+            else if (string.Equals(subTag, "ARMA", StringComparison.Ordinal) && effectiveSubSize >= 4)
+            {
+                linkedArmorAddonFormIds.Add(ReadUInt32Le(dataBytes, dataStart));
             }
             else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
@@ -9365,7 +9389,9 @@ internal static class BinaryArmaParser
             headerBytes,
             dataBytes,     // decompressed (or raw) data
             keywords.Count > 0 ? keywords : null,
-            raceFormId);
+            raceFormId,
+            bipedSlots.Count > 0 ? bipedSlots : null,
+            linkedArmorAddonFormIds.Count > 0 ? linkedArmorAddonFormIds : null);
     }
 
     // ── Binary helpers ────────────────────────────────────────────────────────
