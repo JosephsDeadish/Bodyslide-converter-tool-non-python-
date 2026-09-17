@@ -37,6 +37,76 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task PluginPatches_ReportsAmbiguousConvertedFilenameCollisions_ForManualReview()
+    {
+        static void WriteUInt32Le(byte[] bytes, int offset, uint value)
+        {
+            bytes[offset] = (byte)(value & 0xFF);
+            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
+            bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
+            bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+
+        static byte[] BuildSubrecord(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static byte[] BuildMinimalPluginWithArmaMod2Path(string meshPath)
+        {
+            var mod2 = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+            var tes4 = new byte[24];
+            var arma = new byte[24 + mod2.Length];
+            System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(tes4, 0);
+            System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(arma, 0);
+            WriteUInt32Le(arma, 4, (uint)mod2.Length);
+            WriteUInt32Le(arma, 12, 0x00001234u);
+            mod2.CopyTo(arma, 24);
+            return [.. tes4, .. arma];
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "AmbiguousPaths.esp");
+        var pluginBytes = BuildMinimalPluginWithArmaMod2Path("meshes/armor/iron/shared_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        var firstMeshDirectory = Path.Combine(workingDirectory, "set-a");
+        var secondMeshDirectory = Path.Combine(workingDirectory, "set-b");
+        Directory.CreateDirectory(firstMeshDirectory);
+        Directory.CreateDirectory(secondMeshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(firstMeshDirectory, "shared_0.nif"), "mesh-a");
+        await File.WriteAllTextAsync(Path.Combine(secondMeshDirectory, "shared_0.nif"), "mesh-b");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"AmbiguousConvertedMatches\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/iron/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_ThrowsWhenInputDoesNotExist()
     {
         var orchestrator = BuildTestOrchestrator();
@@ -5923,7 +5993,7 @@ public sealed class RealisticModPackFixtureTests
 
             var cuirassOutput = results.Single(result =>
                 result.OutputDirectory.EndsWith(Path.Combine("nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
-            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_boots.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass.dds")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "skeleton_female.nif")));
         }
         finally
@@ -7808,6 +7878,20 @@ public sealed class BinaryArmaParserTests
 
         Assert.Single(descriptors);
         Assert.Contains("meshes/armor/comp/comp_w.nif", descriptors[0].MeshPaths);
+    }
+
+    [Fact]
+    public void ExtractArmaRecords_PartiallyDecompressedCompressedRecord_IsRejected()
+    {
+        byte[] mod2    = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/comp/bad_0.nif\0"));
+        byte[] armaRec = BuildCompressedRecord(mod2, tag: "ARMA", headerSize: 24);
+        WriteUInt32Le(armaRec, 24, (uint)(mod2.Length + 8));
+        byte[] plugin  = [..BuildMinimalPlugin_SseNoArma(), ..armaRec];
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Empty(descriptors);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

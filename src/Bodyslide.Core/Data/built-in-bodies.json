@@ -805,8 +805,9 @@
       "NPC R Lat"
     ],
     "referenceTokens": [
-      "sam",
-      "samlight"
+      "samlight",
+      "sam-light",
+      "shapeatlasformen"
     ],
     "sliderNames": [
       "Body",
@@ -934,8 +935,8 @@
       "NPC Genitals02"
     ],
     "referenceTokens": [
-      "sos",
-      "schlongs"
+      "schlongs",
+      "schlongsofskyrim"
     ],
     "sliderNames": [
       "Body",

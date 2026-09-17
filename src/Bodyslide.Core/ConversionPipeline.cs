@@ -175,6 +175,17 @@ public sealed record ConversionValidationSummary(
     int LowSeverityCount,
     IReadOnlyList<ConversionValidationIssue> Issues);
 
+public sealed record PluginRewriteVerificationReport(
+    int DetectedMeshPathCount,
+    int RewriteReadyCount,
+    int VerifiedPluginPathCount,
+    int StagedMeshCount,
+    IReadOnlyList<string>? MissingConvertedMatches = null,
+    IReadOnlyList<string>? AmbiguousConvertedMatches = null,
+    IReadOnlyList<string>? MissingStagedMeshes = null,
+    IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
+    IReadOnlyList<string>? Warnings = null);
+
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
     double BodyDetectionConfidence,
@@ -208,7 +219,8 @@ public sealed record ConversionQualityReport(
     SourceMorphQualityMetrics? SourceMorphQuality = null,
     SourceAssetSupportMetrics? SourceAssetSupport = null,
     MorphPayloadReuseSummary? PayloadReuse = null,
-    IReadOnlyList<NifSupportReport>? NifSupport = null);
+    IReadOnlyList<NifSupportReport>? NifSupport = null,
+    PluginRewriteVerificationReport? PluginRewriteVerification = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -418,6 +430,12 @@ public sealed record PluginRewriteResult(
     IReadOnlyList<string> PatchedPluginPaths,
     IReadOnlyList<string> Warnings,
     int ArmoRecordsPatched = 0);
+
+internal sealed record PluginRewritePlan(
+    IReadOnlyDictionary<string, string> RewriteMap,
+    IReadOnlyList<string> MissingConvertedMatches,
+    IReadOnlyList<string> AmbiguousConvertedMatches,
+    int DetectedMeshPathCount);
 
 /// <summary>
 /// Outcome of generating a minimal Bethesda override patch ESP that lists the original
@@ -8621,7 +8639,13 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 totalRead += n;
             }
 
-            return totalRead > 0 ? result : null;
+            if (totalRead == uncompressedSize)
+            {
+                return result;
+            }
+
+            warnings.Add($"Could not fully decompress {recordTag} record at offset {offset}: expected {uncompressedSize} bytes, read {totalRead}.");
+            return null;
         }
         catch (Exception ex)
         {
@@ -8934,7 +8958,7 @@ internal static class BinaryArmaParser
                     if (n == 0) break;
                     totalRead += n;
                 }
-                return totalRead > 0 ? result : [];
+                return totalRead == uncompressedSize ? result : [];
             }
             catch
             {
@@ -10059,13 +10083,15 @@ internal sealed class LocalExportService(
         var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
         outputFiles.AddRange(writtenNifs);
 
-        var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
+        var pluginRewritePlan = BuildPluginRewritePlan(pluginAnalysis, request.TargetBody, writtenNifs);
+        var pluginRewriteMap = pluginRewritePlan.RewriteMap;
         var stagedPluginMeshes = await StageConvertedMeshesForPluginRewriteAsync(
             outputDirectory,
             writtenNifs,
             pluginRewriteMap,
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
+        var stagedPluginMeshSet = stagedPluginMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var scratchPluginMeshes = pluginAnalysis.ScannedPlugins.Count == 0
             ? await StageScratchPluginMeshesAsync(outputDirectory, writtenNifs, request.TargetBody, cancellationToken)
@@ -10170,60 +10196,9 @@ internal sealed class LocalExportService(
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
             AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
-        var validationSummary = BuildValidationSummary(
-            detectedBody,
-            morphs,
-            payloadReuse,
-            clipping,
-            correction,
-            voxelResult,
-            skeletonMapping,
-            textureSummary,
-            poseSimulation,
-            topologyMismatchRisk,
-            nifSupport,
-            qualityWarnings,
-            steps);
-        var qualityReport = new ConversionQualityReport(
-            DetectedSourceBody:        detectedBody.Body,
-            BodyDetectionConfidence:   detectedBody.Confidence,
-            BodyDetectionEvidence:     detectedBody.Evidence,
-            TargetBody:                request.TargetBody,
-            MeshType:                  analysis.MeshType,
-            Strategy:                  mesh.Strategy,
-            RegionalMorphing:          mesh.RegionalMorphing,
-            ClippingDetected:          clipping.HasClipping,
-            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
-            CorrectionApplied:         correction.Applied,
-            CorrectionMethod:          correction.Method,
-            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
-            VoxelAffectedRegions:      voxelResult.AffectedRegions,
-            SourceSkeleton:            skeletonMapping.SourceSkeleton,
-            TargetSkeleton:            skeletonMapping.TargetSkeleton,
-            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
-            UnsupportedBones:          skeletonMapping.UnsupportedBones,
-            GeneratedAt:               DateTimeOffset.UtcNow,
-            TopologyMismatchRisk:      topologyMismatchRisk,
-            VertexCountDeltaRatio:     vertexCountDeltaRatio,
-            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
-            UvAspectRatioDelta:        uvAspectRatioDelta,
-            QualityWarnings:           qualityWarnings,
-            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
-            BodySlideCompatible:       morphs.BodySlideCompatible,
-            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
-            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
-            MissingNormalCount:        textureSummary.MissingNormals.Count,
-            ValidationSummary:         validationSummary,
-            SourceMorphQuality:        morphs.SourceMorphQuality,
-            SourceAssetSupport:        morphs.SourceAssetSupport,
-            PayloadReuse:              payloadReuse,
-            NifSupport:                nifSupport);
-        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
-        await File.WriteAllTextAsync(
-            qualityPath,
-            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-        outputFiles.Add(qualityPath);
+        var pluginPatchWarnings = new List<string>();
+        var patchVerificationPaths = new List<string>();
+        PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
         await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(morphs, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
@@ -10311,27 +10286,6 @@ internal sealed class LocalExportService(
         bool patchEspGenerated = false;
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
-            var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
-            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
-            var patchOutput = new
-            {
-                pluginAnalysis.ScannedPlugins,
-                pluginAnalysis.ArmorAddons,
-                pluginAnalysis.PatchGuidance,
-                // Plugins flagged AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
-                // These are listed here so downstream tooling can flag them for manual recheck.
-                // The automated rewrite is intentionally skipped for these plugins.
-                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
-                RewriteMappings = pluginRewriteMap
-                    .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
-                    .ToList(),
-                ProposedPatchSteps = proposedSteps
-            };
-            await File.WriteAllTextAsync(pluginPatchPath,
-                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
-                cancellationToken);
-            outputFiles.Add(pluginPatchPath);
-
             // Also write a runnable xEdit Pascal automation script so users can apply
             // the ARMA record patches directly from SSEEdit / TES5Edit without manual edits.
             var xEditScriptPath = Path.Combine(outputDirectory, "patch-armor.pas");
@@ -10376,6 +10330,8 @@ internal sealed class LocalExportService(
                     var rewriteResult = await rewriter.RewriteAsync(
                         safeSourcePluginPaths, pluginRewriteMap, espDestDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
+                    pluginPatchWarnings.AddRange(rewriteResult.Warnings);
+                    patchVerificationPaths.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
                     // This patch contains ONLY the touched ARMA/ARMO records and lists the
@@ -10403,16 +10359,110 @@ internal sealed class LocalExportService(
                                 await File.WriteAllBytesAsync(patchPath, patchBytes, cancellationToken);
                                 outputFiles.Add(patchPath);
                                 patchEspGenerated = true;
+                                patchVerificationPaths.Add(patchPath);
                             }
                         }
                         catch (Exception ex) when (ex is IOException or InvalidDataException)
                         {
                             // Non-fatal — patch generation skipped for this plugin.
+                            pluginPatchWarnings.Add($"{Path.GetFileName(pluginPath)} patch generation skipped: {ex.Message}");
                         }
                     }
+
                 }
             }
+
+            pluginRewriteVerification = BuildPluginRewriteVerificationReport(
+                pluginRewritePlan,
+                outputDirectory,
+                stagedPluginMeshSet,
+                patchVerificationPaths,
+                pluginPatchWarnings);
+
+            var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
+            var patchOutput = new
+            {
+                pluginAnalysis.ScannedPlugins,
+                pluginAnalysis.ArmorAddons,
+                pluginAnalysis.PatchGuidance,
+                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
+                RewriteMappings = pluginRewriteMap
+                    .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
+                    .ToList(),
+                ProposedPatchSteps = proposedSteps,
+                RewriteVerification = pluginRewriteVerification
+            };
+            await File.WriteAllTextAsync(pluginPatchPath,
+                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(pluginPatchPath);
         }
+
+        pluginRewriteVerification ??= BuildPluginRewriteVerificationReport(
+            pluginRewritePlan,
+            outputDirectory,
+            stagedPluginMeshSet,
+            patchVerificationPaths,
+            pluginPatchWarnings);
+
+        var validationSummary = BuildValidationSummary(
+            detectedBody,
+            morphs,
+            payloadReuse,
+            clipping,
+            correction,
+            voxelResult,
+            skeletonMapping,
+            textureSummary,
+            poseSimulation,
+            topologyMismatchRisk,
+            nifSupport,
+            pluginRewriteVerification,
+            qualityWarnings,
+            steps);
+
+        var qualityReport = new ConversionQualityReport(
+            DetectedSourceBody:        detectedBody.Body,
+            BodyDetectionConfidence:   detectedBody.Confidence,
+            BodyDetectionEvidence:     detectedBody.Evidence,
+            TargetBody:                request.TargetBody,
+            MeshType:                  analysis.MeshType,
+            Strategy:                  mesh.Strategy,
+            RegionalMorphing:          mesh.RegionalMorphing,
+            ClippingDetected:          clipping.HasClipping,
+            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
+            CorrectionApplied:         correction.Applied,
+            CorrectionMethod:          correction.Method,
+            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
+            VoxelAffectedRegions:      voxelResult.AffectedRegions,
+            SourceSkeleton:            skeletonMapping.SourceSkeleton,
+            TargetSkeleton:            skeletonMapping.TargetSkeleton,
+            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
+            UnsupportedBones:          skeletonMapping.UnsupportedBones,
+            GeneratedAt:               DateTimeOffset.UtcNow,
+            TopologyMismatchRisk:      topologyMismatchRisk,
+            VertexCountDeltaRatio:     vertexCountDeltaRatio,
+            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
+            UvAspectRatioDelta:        uvAspectRatioDelta,
+            QualityWarnings:           qualityWarnings,
+            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
+            BodySlideCompatible:       morphs.BodySlideCompatible,
+            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
+            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
+            MissingNormalCount:        textureSummary.MissingNormals.Count,
+            ValidationSummary:         validationSummary,
+            SourceMorphQuality:        morphs.SourceMorphQuality,
+            SourceAssetSupport:        morphs.SourceAssetSupport,
+            PayloadReuse:              payloadReuse,
+            NifSupport:                nifSupport,
+            PluginRewriteVerification: pluginRewriteVerification);
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        await File.WriteAllTextAsync(
+            qualityPath,
+            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(qualityPath);
 
         // Generate a scratch ESP when no source plugin exists for this armor.
         // This enables the converted meshes to be installed as a new standalone mod without
@@ -11831,6 +11881,7 @@ internal sealed class LocalExportService(
         PoseSimulationResult poseSimulation,
         bool topologyMismatchRisk,
         IReadOnlyList<NifSupportReport>? nifSupport,
+        PluginRewriteVerificationReport? pluginRewriteVerification,
         IReadOnlyList<string> qualityWarnings,
         IReadOnlyList<string> steps)
     {
@@ -12004,6 +12055,41 @@ internal sealed class LocalExportService(
                 $"Plugin race compatibility needs review for: {string.Join(", ", raceWarnings)}."));
         }
 
+        if (pluginRewriteVerification is not null)
+        {
+            if (pluginRewriteVerification.AmbiguousConvertedMatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-ambiguous-filename",
+                    "high",
+                    $"Some plugin mesh paths matched multiple converted NIF candidates and were left for manual review: {string.Join(", ", pluginRewriteVerification.AmbiguousConvertedMatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingConvertedMatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-missing-converted-match",
+                    "medium",
+                    $"Some plugin mesh paths had no converted NIF filename match: {string.Join(", ", pluginRewriteVerification.MissingConvertedMatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingStagedMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-missing-staged-mesh",
+                    "high",
+                    $"Some rewritten plugin mesh paths were not staged into the output package: {string.Join(", ", pluginRewriteVerification.MissingStagedMeshes.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.UnverifiedPatchedPlugins is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-verification-warning",
+                    "medium",
+                    $"Some generated plugin patches could not be re-verified for rewritten mesh paths: {string.Join(", ", pluginRewriteVerification.UnverifiedPatchedPlugins.Take(4))}."));
+            }
+        }
+
         var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
         var mediumSeverityCount = issues.Count(issue => issue.Severity.Equals("medium", StringComparison.OrdinalIgnoreCase));
         var lowSeverityCount = issues.Count(issue => issue.Severity.Equals("low", StringComparison.OrdinalIgnoreCase));
@@ -12175,36 +12261,58 @@ internal sealed class LocalExportService(
 
     // ── Plugin guidance helpers ───────────────────────────────────────────────
 
-    private static IReadOnlyDictionary<string, string> BuildPluginRewriteMap(
+    private static PluginRewritePlan BuildPluginRewritePlan(
         PluginAnalysisResult pluginAnalysis,
         string targetBody,
         IReadOnlyList<string> writtenNifPaths)
     {
         var convertedByFileName = writtenNifPaths
             .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
+            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
 
         var rewrites = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
         var allPaths = pluginAnalysis.ArmorAddons
             .SelectMany(a => a.DetectedMeshPaths)
-            .Concat((pluginAnalysis.ArmorRecords ?? []).SelectMany(r => r.DetectedMeshPaths));
+            .Concat((pluginAnalysis.ArmorRecords ?? []).SelectMany(r => r.DetectedMeshPaths))
+            .Select(NormalizePluginMeshPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         foreach (var originalPath in allPaths)
         {
-            var normalisedOriginal = originalPath.Replace('\\', '/');
-            var fileName = Path.GetFileName(normalisedOriginal);
-            if (string.IsNullOrWhiteSpace(fileName) || !convertedByFileName.ContainsKey(fileName))
+            var fileName = Path.GetFileName(originalPath);
+            if (string.IsNullOrWhiteSpace(fileName) || !convertedByFileName.TryGetValue(fileName, out var convertedMatches))
             {
+                missing.Add(originalPath);
                 continue;
             }
 
-            rewrites[normalisedOriginal] = BuildPluginConvertedMeshPath(targetBody, fileName, normalisedOriginal);
+            if (convertedMatches.Count != 1)
+            {
+                ambiguous.Add($"{originalPath} => {string.Join(" | ", convertedMatches.Select(Path.GetFileName))}");
+                continue;
+            }
+
+            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, fileName, originalPath);
         }
 
-        return rewrites;
+        return new PluginRewritePlan(
+            rewrites,
+            missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            allPaths.Count);
     }
+
+    private static string NormalizePluginMeshPath(string pluginPath) =>
+        string.IsNullOrWhiteSpace(pluginPath)
+            ? string.Empty
+            : pluginPath.Replace('\\', '/').Trim().TrimStart('/');
 
     private static string BuildPluginConvertedMeshPath(string targetBody, string fileName, string originalPath)
     {
@@ -12234,7 +12342,7 @@ internal sealed class LocalExportService(
             return false;
         }
 
-        var normalised = pluginPath.Replace('\\', '/').TrimStart('/');
+        var normalised = NormalizePluginMeshPath(pluginPath);
         return normalised.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -12245,10 +12353,92 @@ internal sealed class LocalExportService(
             return string.Empty;
         }
 
-        var normalised = pluginMeshPath.Replace('\\', '/').TrimStart('/');
+        var normalised = NormalizePluginMeshPath(pluginMeshPath);
         return HasPluginMeshesPrefix(normalised)
             ? normalised
             : $"meshes/{normalised}";
+    }
+
+    private static IReadOnlyList<string> BuildMissingStagedPluginMeshes(
+        string outputDirectory,
+        IReadOnlyDictionary<string, string> pluginRewriteMap,
+        IReadOnlySet<string> stagedPluginMeshes)
+    {
+        var missing = new List<string>();
+        foreach (var rewrittenPath in pluginRewriteMap.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var outputMeshPath = ResolveOutputMeshPath(rewrittenPath);
+            if (string.IsNullOrWhiteSpace(outputMeshPath))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.Combine(
+                outputDirectory,
+                outputMeshPath.Replace('/', Path.DirectorySeparatorChar));
+            if (!stagedPluginMeshes.Contains(destinationPath) && !File.Exists(destinationPath))
+            {
+                missing.Add(outputMeshPath);
+            }
+        }
+
+        return missing;
+    }
+
+    private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
+        PluginRewritePlan pluginRewritePlan,
+        string outputDirectory,
+        IReadOnlySet<string> stagedPluginMeshes,
+        IReadOnlyList<string> patchedPluginPaths,
+        IReadOnlyList<string> warnings)
+    {
+        var rewrittenPaths = pluginRewritePlan.RewriteMap.Values
+            .Select(NormalizePluginMeshPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var verifiedPluginPathCount = 0;
+        var unverifiedPatchedPlugins = new List<string>();
+
+        foreach (var pluginPath in patchedPluginPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var pluginBytes = File.ReadAllBytes(pluginPath);
+                var detectedPaths = BinaryArmaParser.ExtractArmaRecords(pluginBytes, Path.GetFileName(pluginPath) ?? string.Empty)
+                    .SelectMany(record => record.MeshPaths)
+                    .Concat(BinaryArmaParser.ExtractArmoRecords(pluginBytes, Path.GetFileName(pluginPath) ?? string.Empty)
+                        .SelectMany(record => record.MeshPaths))
+                    .Select(NormalizePluginMeshPath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var verifiedCount = detectedPaths.Count(rewrittenPaths.Contains);
+                if (verifiedCount > 0)
+                {
+                    verifiedPluginPathCount += verifiedCount;
+                }
+                else
+                {
+                    unverifiedPatchedPlugins.Add(Path.GetFileName(pluginPath) ?? pluginPath);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException)
+            {
+                unverifiedPatchedPlugins.Add($"{Path.GetFileName(pluginPath) ?? pluginPath}: {ex.Message}");
+            }
+        }
+
+        return new PluginRewriteVerificationReport(
+            DetectedMeshPathCount: pluginRewritePlan.DetectedMeshPathCount,
+            RewriteReadyCount: pluginRewritePlan.RewriteMap.Count,
+            VerifiedPluginPathCount: verifiedPluginPathCount,
+            StagedMeshCount: stagedPluginMeshes.Count,
+            MissingConvertedMatches: pluginRewritePlan.MissingConvertedMatches,
+            AmbiguousConvertedMatches: pluginRewritePlan.AmbiguousConvertedMatches,
+            MissingStagedMeshes: BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes),
+            UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
+            Warnings: warnings);
     }
 
     private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
@@ -12427,7 +12617,7 @@ internal sealed class LocalExportService(
         {
             foreach (var meshPath in addon.DetectedMeshPaths)
             {
-                var normalised = meshPath.Replace('\\', '/');
+                var normalised = NormalizePluginMeshPath(meshPath);
                 var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
                 steps.Add(new
                 {
@@ -12451,7 +12641,7 @@ internal sealed class LocalExportService(
         {
             foreach (var meshPath in record.DetectedMeshPaths)
             {
-                var normalised = meshPath.Replace('\\', '/');
+                var normalised = NormalizePluginMeshPath(meshPath);
                 var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
                 steps.Add(new
                 {
