@@ -160,7 +160,10 @@ public sealed record NifSupportReport(
     string Status,
     string ParseMode,
     int? VertexCount,
-    IReadOnlyList<string> Messages);
+    IReadOnlyList<string> Messages,
+    string? SkinInstanceType = null,
+    IReadOnlyList<int>? PartitionSlots = null,
+    int? BoneCount = null);
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -433,9 +436,15 @@ public sealed record PluginRewriteResult(
 
 internal sealed record PluginRewritePlan(
     IReadOnlyDictionary<string, string> RewriteMap,
+    IReadOnlyDictionary<string, string> SourceMeshMap,
     IReadOnlyList<string> MissingConvertedMatches,
     IReadOnlyList<string> AmbiguousConvertedMatches,
     int DetectedMeshPathCount);
+
+internal sealed record ConvertedNifWriteResult(
+    IReadOnlyList<string> WrittenPaths,
+    IReadOnlyDictionary<string, string> WrittenPathBySourceMesh,
+    int SynthesizedCount);
 
 /// <summary>
 /// Outcome of generating a minimal Bethesda override patch ESP that lists the original
@@ -1563,6 +1572,15 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
     private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+    private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
+    {
+        30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56
+    };
+
+    internal sealed record NifMeshMetadata(
+        string? SkinInstanceType,
+        IReadOnlyList<int> PartitionSlots,
+        IReadOnlyList<string> BoneNames);
 
     public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
     {
@@ -1668,6 +1686,27 @@ internal static class NifGeometrySignatureReader
         "supported" or "degraded" => TryReadWithMode(bytes).Signature,
         _ => null
     };
+
+    public static IReadOnlyList<int> ExtractPartitionSlots(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        try
+        {
+            return ExtractMetadata(File.ReadAllBytes(meshFile)).PartitionSlots;
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 
     public static IReadOnlyList<MeshVertex>? TryReadFullVertices(string meshFile)
     {
@@ -2106,14 +2145,25 @@ internal static class NifGeometrySignatureReader
             return new NifSupportReport(path, "unsupported", "missing-header", null, ["missing-nif-header"]);
         }
 
+        var metadata = ExtractMetadata(bytes);
         var result = TryReadWithMode(bytes);
         if (result.Signature is not null)
         {
             var status = result.Mode == "heuristic-float" ? "degraded" : "supported";
-            var messages = status == "degraded"
-                ? new[] { "heuristic-geometry-read", "manual-review-recommended" }
-                : Array.Empty<string>();
-            return new NifSupportReport(path, status, result.Mode, result.Signature.VertexCount, messages);
+            var messages = BuildMetadataMessages(
+                status == "degraded"
+                    ? ["heuristic-geometry-read", "manual-review-recommended"]
+                    : [],
+                metadata);
+            return new NifSupportReport(
+                path,
+                status,
+                result.Mode,
+                result.Signature.VertexCount,
+                messages,
+                metadata.SkinInstanceType,
+                metadata.PartitionSlots,
+                metadata.BoneNames.Count);
         }
 
         var unsupportedMessages = new List<string>();
@@ -2137,7 +2187,100 @@ internal static class NifGeometrySignatureReader
         }
 
         unsupportedMessages.Add("manual-review-required");
-        return new NifSupportReport(path, "unsupported", "unreadable-geometry", null, unsupportedMessages);
+        return new NifSupportReport(
+            path,
+            "unsupported",
+            "unreadable-geometry",
+            null,
+            BuildMetadataMessages(unsupportedMessages, metadata),
+            metadata.SkinInstanceType,
+            metadata.PartitionSlots,
+            metadata.BoneNames.Count);
+    }
+
+    private static IReadOnlyList<string> BuildMetadataMessages(
+        IReadOnlyList<string> baseMessages,
+        NifMeshMetadata metadata)
+    {
+        var messages = new List<string>(baseMessages);
+        if (!string.IsNullOrWhiteSpace(metadata.SkinInstanceType))
+        {
+            messages.Add($"skin-instance:{metadata.SkinInstanceType}");
+        }
+
+        if (metadata.PartitionSlots.Count > 0)
+        {
+            messages.Add($"partition-slots:{string.Join('+', metadata.PartitionSlots)}");
+        }
+
+        if (metadata.BoneNames.Count > 0)
+        {
+            messages.Add($"bone-count:{metadata.BoneNames.Count}");
+        }
+
+        return messages;
+    }
+
+    private static NifMeshMetadata ExtractMetadata(byte[] bytes)
+    {
+        var boneNames = SkeletonNifBoneParser.ExtractBoneNames(bytes);
+        var partitionSlots = new HashSet<int>();
+        string? skinInstanceType = null;
+
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        {
+            var skinNodes = graph.Nodes
+                .Where(static node =>
+                    node.TypeName.Contains("Skin", StringComparison.Ordinal) ||
+                    node.TypeName.Contains("Dismember", StringComparison.Ordinal))
+                .ToList();
+
+            skinInstanceType = skinNodes
+                .Select(static node => node.TypeName)
+                .FirstOrDefault(static typeName => typeName.Contains("BSDismemberSkinInstance", StringComparison.Ordinal))
+                ?? skinNodes
+                    .Select(static node => node.TypeName)
+                    .FirstOrDefault(static typeName => typeName.Contains("NiSkinInstance", StringComparison.Ordinal))
+                ?? skinNodes
+                    .Select(static node => node.TypeName)
+                    .FirstOrDefault();
+
+            foreach (var node in skinNodes)
+            {
+                CollectLikelyPartitionSlots(bytes, node.StartOffset, node.EndOffset, partitionSlots);
+                foreach (var referenceIndex in node.ReferencedBlockIndices)
+                {
+                    if (referenceIndex >= 0 && referenceIndex < graph.Nodes.Count)
+                    {
+                        var referenced = graph.Nodes[referenceIndex];
+                        CollectLikelyPartitionSlots(bytes, referenced.StartOffset, referenced.EndOffset, partitionSlots);
+                    }
+                }
+            }
+        }
+
+        return new NifMeshMetadata(
+            skinInstanceType,
+            partitionSlots.OrderBy(static slot => slot).ToList(),
+            boneNames);
+    }
+
+    private static void CollectLikelyPartitionSlots(
+        byte[] bytes,
+        int startOffset,
+        int endOffset,
+        ISet<int> slots)
+    {
+        var scanStart = Math.Max(0, startOffset);
+        var scanEnd = Math.Min(bytes.Length - sizeof(int), endOffset);
+        for (var offset = scanStart; offset <= scanEnd; offset++)
+        {
+            var candidate = BitConverter.ToInt32(bytes, offset);
+            if (SupportedPartitionSlots.Contains(candidate))
+            {
+                slots.Add(candidate);
+            }
+        }
     }
 
     private static (MeshGeometrySignature? Signature, string Mode) TryReadWithMode(byte[] bytes)
@@ -3287,6 +3430,19 @@ public sealed class ConversionOrchestrator(
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
+
+            var nifPartitionSlots = armor.MeshFiles
+                .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (nifPartitionSlots.Count > 0)
+            {
+                partitions = AugmentPartitionsWithSlots(partitions, nifPartitionSlots);
+                steps.Add($"nif-skin-partitions:{string.Join(',', nifPartitionSlots)}");
+            }
+
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
             // Biped slot passthrough — supplement the mesh-analysis-driven partition list with any
@@ -3301,28 +3457,7 @@ public sealed class ConversionOrchestrator(
                 .ToList();
             if (pluginBipedSlots.Count > 0)
             {
-                var existingSlotNumbers = new HashSet<int>(
-                    partitions.Partitions.Select(label =>
-                    {
-                        var colon = label.IndexOf(':');
-                        return colon > 0 && int.TryParse(label[..colon], out var n) ? n : -1;
-                    }).Where(n => n >= 0));
-
-                var augmented = partitions.Partitions.ToList();
-                foreach (var slot in pluginBipedSlots)
-                {
-                    if (!existingSlotNumbers.Contains(slot) &&
-                        KnownPartitionSlotNames.TryGetValue(slot, out var slotName))
-                    {
-                        augmented.Add($"{slot}:{slotName}");
-                    }
-                }
-
-                if (augmented.Count > partitions.Partitions.Count)
-                {
-                    partitions = new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions);
-                }
-
+                partitions = AugmentPartitionsWithSlots(partitions, pluginBipedSlots);
                 steps.Add($"biped-slots-passthrough:{string.Join(',', pluginBipedSlots)}");
             }
 
@@ -3430,6 +3565,37 @@ public sealed class ConversionOrchestrator(
             [48] = "Dragon Tail", [49] = "Dragon Leg", [50] = "Dragon Claws",
             [54] = "DecapHead",  [55] = "Decap",     [56] = "Genitals"
         };
+
+    private static PartitionRebuildingResult AugmentPartitionsWithSlots(
+        PartitionRebuildingResult partitions,
+        IReadOnlyList<int> slots)
+    {
+        if (slots.Count == 0)
+        {
+            return partitions;
+        }
+
+        var existingSlotNumbers = new HashSet<int>(
+            partitions.Partitions.Select(label =>
+            {
+                var colon = label.IndexOf(':');
+                return colon > 0 && int.TryParse(label[..colon], out var n) ? n : -1;
+            }).Where(n => n >= 0));
+
+        var augmented = partitions.Partitions.ToList();
+        foreach (var slot in slots)
+        {
+            if (!existingSlotNumbers.Contains(slot) &&
+                KnownPartitionSlotNames.TryGetValue(slot, out var slotName))
+            {
+                augmented.Add($"{slot}:{slotName}");
+            }
+        }
+
+        return augmented.Count > partitions.Partitions.Count
+            ? new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions)
+            : partitions;
+    }
 
     private static string ResolvePhysicsProfile(ConversionRequest request, ImportedArmor armor, ConversionPreset? preset)
     {
@@ -10080,15 +10246,17 @@ internal sealed class LocalExportService(
         // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
         // detected; otherwise the source bytes are copied through unchanged.
         var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
-        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
+        var nifWriteResult = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
+        var writtenNifs = nifWriteResult.WrittenPaths;
+        var synthesizedVariantCount = nifWriteResult.SynthesizedCount;
         outputFiles.AddRange(writtenNifs);
 
-        var pluginRewritePlan = BuildPluginRewritePlan(pluginAnalysis, request.TargetBody, writtenNifs);
+        var pluginRewritePlan = BuildPluginRewritePlan(pluginAnalysis, armor.MeshFiles, request.TargetBody);
         var pluginRewriteMap = pluginRewritePlan.RewriteMap;
         var stagedPluginMeshes = await StageConvertedMeshesForPluginRewriteAsync(
             outputDirectory,
-            writtenNifs,
-            pluginRewriteMap,
+            nifWriteResult.WrittenPathBySourceMesh,
+            pluginRewritePlan,
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
         var stagedPluginMeshSet = stagedPluginMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -10683,7 +10851,7 @@ internal sealed class LocalExportService(
     /// <returns>
     /// A tuple of the written file paths and the count of synthesised weight variants.
     /// </returns>
-    private static async Task<(IReadOnlyList<string> Written, int SynthesizedCount)> WriteConvertedNifsAsync(
+    private static async Task<ConvertedNifWriteResult> WriteConvertedNifsAsync(
         ImportedArmor armor,
         ConvertedMesh mesh,
         string outputDirectory,
@@ -10691,6 +10859,7 @@ internal sealed class LocalExportService(
         CancellationToken cancellationToken)
     {
         var written = new List<string>();
+        var writtenBySourceMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var synthesizedCount = 0;
 
         // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
@@ -10718,6 +10887,8 @@ internal sealed class LocalExportService(
                     await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
                     written.Add(lowDest);
                     written.Add(highDest);
+                    writtenBySourceMesh[pair.LowWeightMesh] = lowDest;
+                    writtenBySourceMesh[pair.HighWeightMesh] = highDest;
                 }
                 else
                 {
@@ -10745,6 +10916,7 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(sourceMesh);
                     written.Add(destSource);
                     written.Add(destSynth);
+                    writtenBySourceMesh[sourceMesh] = destSource;
                     synthesizedCount++;
                 }
             }
@@ -10758,9 +10930,10 @@ internal sealed class LocalExportService(
             var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
+            writtenBySourceMesh[meshFile] = dest;
         }
 
-        return (written, synthesizedCount);
+        return new ConvertedNifWriteResult(written, writtenBySourceMesh, synthesizedCount);
     }
 
     /// <summary>
@@ -12263,15 +12436,11 @@ internal sealed class LocalExportService(
 
     private static PluginRewritePlan BuildPluginRewritePlan(
         PluginAnalysisResult pluginAnalysis,
-        string targetBody,
-        IReadOnlyList<string> writtenNifPaths)
+        IReadOnlyList<string> sourceMeshPaths,
+        string targetBody)
     {
-        var convertedByFileName = writtenNifPaths
-            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(), StringComparer.OrdinalIgnoreCase);
-
         var rewrites = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sourceMeshMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -12287,23 +12456,33 @@ internal sealed class LocalExportService(
         foreach (var originalPath in allPaths)
         {
             var fileName = Path.GetFileName(originalPath);
-            if (string.IsNullOrWhiteSpace(fileName) || !convertedByFileName.TryGetValue(fileName, out var convertedMatches))
+            if (string.IsNullOrWhiteSpace(fileName))
             {
                 missing.Add(originalPath);
                 continue;
             }
 
-            if (convertedMatches.Count != 1)
+            if (!TryResolveSourceMeshForPluginPath(originalPath, sourceMeshPaths, out var sourceMeshPath, out var ambiguousMatches))
             {
-                ambiguous.Add($"{originalPath} => {string.Join(" | ", convertedMatches.Select(Path.GetFileName))}");
+                if (ambiguousMatches.Count > 0)
+                {
+                    ambiguous.Add($"{originalPath} => {string.Join(" | ", ambiguousMatches.Select(Path.GetFileName))}");
+                }
+                else
+                {
+                    missing.Add(originalPath);
+                }
+
                 continue;
             }
 
-            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, fileName, originalPath);
+            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, originalPath);
+            sourceMeshMap[originalPath] = sourceMeshPath;
         }
 
         return new PluginRewritePlan(
             rewrites,
+            sourceMeshMap,
             missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             allPaths.Count);
@@ -12314,10 +12493,140 @@ internal sealed class LocalExportService(
             ? string.Empty
             : pluginPath.Replace('\\', '/').Trim().TrimStart('/');
 
-    private static string BuildPluginConvertedMeshPath(string targetBody, string fileName, string originalPath)
+    private static bool TryResolveSourceMeshForPluginPath(
+        string pluginMeshPath,
+        IReadOnlyList<string> sourceMeshPaths,
+        out string sourceMeshPath,
+        out IReadOnlyList<string> ambiguousMatches)
+    {
+        sourceMeshPath = string.Empty;
+        ambiguousMatches = [];
+
+        var fileName = Path.GetFileName(pluginMeshPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        var candidates = sourceMeshPaths
+            .Where(path =>
+                Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase) &&
+                Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase))
+            .Select(path => new
+            {
+                Path = path,
+                Score = ScoreSourceMeshCandidate(pluginMeshPath, path)
+            })
+            .Where(candidate => candidate.Score > 0)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestScore = candidates.Max(static candidate => candidate.Score);
+        var bestMatches = candidates
+            .Where(candidate => candidate.Score == bestScore)
+            .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (bestMatches.Count != 1)
+        {
+            ambiguousMatches = bestMatches.Select(static candidate => candidate.Path).ToList();
+            return false;
+        }
+
+        sourceMeshPath = bestMatches[0].Path;
+        return true;
+    }
+
+    private static int ScoreSourceMeshCandidate(string pluginMeshPath, string sourceMeshPath)
+    {
+        var normalizedPluginPath = NormalizePluginMeshPath(pluginMeshPath);
+        var comparableSourcePath = NormalizeComparablePath(sourceMeshPath);
+        var pluginVariants = new[]
+        {
+            normalizedPluginPath,
+            TrimMeshesPrefix(normalizedPluginPath)
+        }.Where(static value => !string.IsNullOrWhiteSpace(value))
+         .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        var bestScore = 0;
+        foreach (var variant in pluginVariants)
+        {
+            var trailingSegmentMatches = CountMatchingTrailingSegments(comparableSourcePath, variant);
+            if (trailingSegmentMatches <= 0)
+            {
+                continue;
+            }
+
+            var score = trailingSegmentMatches * 100;
+            if (HasPathSuffix(comparableSourcePath, variant))
+            {
+                score += 10_000;
+            }
+
+            bestScore = Math.Max(bestScore, score);
+        }
+
+        return bestScore;
+    }
+
+    private static int CountMatchingTrailingSegments(string leftPath, string rightPath)
+    {
+        var leftSegments = NormalizeComparablePath(leftPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rightSegments = NormalizeComparablePath(rightPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var matches = 0;
+        for (var leftIndex = leftSegments.Length - 1, rightIndex = rightSegments.Length - 1;
+             leftIndex >= 0 && rightIndex >= 0;
+             leftIndex--, rightIndex--)
+        {
+            if (!leftSegments[leftIndex].Equals(rightSegments[rightIndex], StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            matches++;
+        }
+
+        return matches;
+    }
+
+    private static bool HasPathSuffix(string path, string suffix)
+    {
+        var normalizedPath = NormalizeComparablePath(path);
+        var normalizedSuffix = NormalizeComparablePath(suffix);
+        return normalizedPath.Equals(normalizedSuffix, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.EndsWith($"/{normalizedSuffix}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeComparablePath(string path) =>
+        string.IsNullOrWhiteSpace(path)
+            ? string.Empty
+            : path.Replace('\\', '/').Trim().Trim('/');
+
+    private static string TrimMeshesPrefix(string pluginPath)
+    {
+        var normalized = NormalizePluginMeshPath(pluginPath);
+        return normalized.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)
+            ? normalized["meshes/".Length..]
+            : normalized;
+    }
+
+    private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath)
     {
         var safeBodyToken = BuildSafeBodyToken(targetBody);
-        var rewrittenRelative = $"slidesmith/{safeBodyToken}/{fileName}";
+        var relativePluginPath = TrimMeshesPrefix(originalPath);
+        var fileName = Path.GetFileName(relativePluginPath);
+        var directory = Path.GetDirectoryName(relativePluginPath)?
+            .Replace('\\', '/')
+            .Trim('/')
+            .Trim();
+        var rewrittenRelative = string.IsNullOrWhiteSpace(directory)
+            ? $"slidesmith/{safeBodyToken}/{fileName}"
+            : $"slidesmith/{safeBodyToken}/{directory}/{fileName}";
         return HasPluginMeshesPrefix(originalPath)
             ? $"meshes/{rewrittenRelative}"
             : rewrittenRelative;
@@ -12443,25 +12752,20 @@ internal sealed class LocalExportService(
 
     private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
         string outputDirectory,
-        IReadOnlyList<string> writtenNifPaths,
-        IReadOnlyDictionary<string, string> pluginRewriteMap,
+        IReadOnlyDictionary<string, string> writtenPathBySourceMesh,
+        PluginRewritePlan pluginRewritePlan,
         CancellationToken cancellationToken)
     {
-        if (pluginRewriteMap.Count == 0 || writtenNifPaths.Count == 0)
+        if (pluginRewritePlan.RewriteMap.Count == 0 || writtenPathBySourceMesh.Count == 0)
         {
             return [];
         }
 
-        var sourceByFileName = writtenNifPaths
-            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
         var staged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var rewrittenPath in pluginRewriteMap.Values)
+        foreach (var (originalPath, rewrittenPath) in pluginRewritePlan.RewriteMap)
         {
-            var fileName = Path.GetFileName(rewrittenPath);
-            if (string.IsNullOrWhiteSpace(fileName) || !sourceByFileName.TryGetValue(fileName, out var sourcePath))
+            if (!pluginRewritePlan.SourceMeshMap.TryGetValue(originalPath, out var sourceMeshPath) ||
+                !writtenPathBySourceMesh.TryGetValue(sourceMeshPath, out var sourcePath))
             {
                 continue;
             }
