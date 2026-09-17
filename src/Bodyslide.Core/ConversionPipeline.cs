@@ -87,13 +87,38 @@ public sealed record SourceMorphQualityMetrics(
     int MeaningfulPayloadMorphCount,
     double PayloadCoverageRatio,
     double PayloadStrengthScore);
+public sealed record SourceMorphPayload(
+    string SliderName,
+    bool IsHighWeight,
+    string PayloadKind,
+    int VertexCount,
+    IReadOnlyList<(float X, float Y, float Z)> Deltas);
+public sealed record SourceMorphPayloadVariants(
+    SourceMorphPayload? LowWeight = null,
+    SourceMorphPayload? HighWeight = null);
+public sealed record SourceAssetSupportMetrics(
+    bool HasOsp,
+    bool HasTriPayloads,
+    bool HasBsdPayloads,
+    bool HasReferenceAssets,
+    bool UsedFallbackSliders,
+    IReadOnlyList<string>? MissingAssets = null,
+    int ReusablePayloadSliderCount = 0);
+public sealed record MorphPayloadReuseSummary(
+    int RequestedVariantCount,
+    int ReusedVariantCount,
+    int FallbackVariantCount,
+    IReadOnlyList<string>? ReusedVariants = null,
+    IReadOnlyList<string>? FallbackVariants = null);
 public sealed record MorphSet(
     string LowMorph,
     string HighMorph,
     bool BodySlideCompatible,
     int SliderCount = 0,
     double SourceBodyMatchRatio = 0.0,
-    SourceMorphQualityMetrics? SourceMorphQuality = null);
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableSourceMorphPayloads = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 /// <param name="CorrectedMorphing">
 /// Per-region morphing factors after applying local inflation and adaptive normal offset.
@@ -167,7 +192,9 @@ public sealed record ConversionQualityReport(
     IReadOnlyList<string>? HighRiskPoseRegions = null,
     int MissingNormalCount = 0,
     ConversionValidationSummary? ValidationSummary = null,
-    SourceMorphQualityMetrics? SourceMorphQuality = null);
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null,
+    MorphPayloadReuseSummary? PayloadReuse = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -5735,7 +5762,15 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
 
         var lowLabel  = $"low-weight:{sliderCount}-sliders";
         var highLabel = $"high-weight:{sliderCount}-sliders";
-        return new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio, resolved.SourceMorphQuality);
+        return new MorphSet(
+            lowLabel,
+            highLabel,
+            true,
+            sliderCount,
+            matchRatio,
+            resolved.SourceMorphQuality,
+            resolved.ReusableMorphPayloads,
+            resolved.SourceAssetSupport);
     }
 
     private static double ApplySourceMorphQuality(double baseMatchRatio, SourceMorphQualityMetrics sourceMorphQuality)
@@ -9709,6 +9744,13 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
 
+        var payloadReuse = request.GenerateBodySlideFiles
+            ? BuildPayloadReuseSummary(
+                bodySlideProject.Sliders,
+                morphs.ReusableSourceMorphPayloads,
+                EstimateMorphVertexCount(writtenNifs, request.TargetBody))
+            : new MorphPayloadReuseSummary(0, 0, 0, [], []);
+
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
@@ -9716,6 +9758,7 @@ internal sealed class LocalExportService(
         var validationSummary = BuildValidationSummary(
             detectedBody,
             morphs,
+            payloadReuse,
             clipping,
             correction,
             voxelResult,
@@ -9755,7 +9798,9 @@ internal sealed class LocalExportService(
             HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
             MissingNormalCount:        textureSummary.MissingNormals.Count,
             ValidationSummary:         validationSummary,
-            SourceMorphQuality:        morphs.SourceMorphQuality);
+            SourceMorphQuality:        morphs.SourceMorphQuality,
+            SourceAssetSupport:        morphs.SourceAssetSupport,
+            PayloadReuse:              payloadReuse);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -9827,8 +9872,8 @@ internal sealed class LocalExportService(
             {
                 var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
                 var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
-                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads), cancellationToken);
+                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads),  cancellationToken);
                 outputFiles.Add(lowBsdPath);
                 outputFiles.Add(highBsdPath);
             }
@@ -9837,8 +9882,8 @@ internal sealed class LocalExportService(
             // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
             var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
             var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
-            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads), cancellationToken);
+            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads),  cancellationToken);
             outputFiles.Add(triLowPath);
             outputFiles.Add(triHighPath);
         }
@@ -11358,6 +11403,7 @@ internal sealed class LocalExportService(
     private static ConversionValidationSummary BuildValidationSummary(
         BodyDetectionReport detectedBody,
         MorphSet morphs,
+        MorphPayloadReuseSummary payloadReuse,
         ClippingReport clipping,
         CorrectionResult correction,
         VoxelCollisionResult voxelResult,
@@ -11399,6 +11445,29 @@ internal sealed class LocalExportService(
                 "bodyslide-incompatible",
                 "high",
                 "Generated morphs are not marked BodySlide-compatible."));
+        }
+
+        if (morphs.SourceAssetSupport is { UsedFallbackSliders: true } sourceAssetSupport)
+        {
+            var detail = sourceAssetSupport.MissingAssets is { Count: > 0 }
+                ? $": {string.Join(", ", sourceAssetSupport.MissingAssets)}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "incomplete-source-fallback",
+                "medium",
+                $"Source BodySlide assets were incomplete, so fallback target-body sliders were used{detail}."));
+        }
+
+        if (payloadReuse.RequestedVariantCount > 0 && payloadReuse.FallbackVariantCount > 0)
+        {
+            var severity = payloadReuse.ReusedVariantCount == 0 ? "medium" : "low";
+            var detail = payloadReuse.FallbackVariants is { Count: > 0 }
+                ? $": {string.Join(", ", payloadReuse.FallbackVariants.Take(6))}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "synthetic-morph-fallback",
+                severity,
+                $"{payloadReuse.FallbackVariantCount} morph variant(s) used synthesized deltas instead of source TRI/BSD payload reuse{detail}."));
         }
 
         if (topologyMismatchRisk)
@@ -12022,10 +12091,12 @@ internal sealed class LocalExportService(
         string sliderName,
         bool isHighWeight,
         int vertexCount,
-        IReadOnlyDictionary<string, double> regionalMorphing)
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
     {
         vertexCount = Math.Clamp(vertexCount, 1, 250_000);
         var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        var deltas = ResolveMorphDeltas(sliderName, isHighWeight, vertexCount, regionalMorphing, reusableSourceMorphPayloads);
         using var ms = new System.IO.MemoryStream();
         using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -12039,9 +12110,8 @@ internal sealed class LocalExportService(
         w.Write(nameBytes);
         w.Write((uint)vertexCount);
 
-        for (var index = 0; index < vertexCount; index++)
+        foreach (var (x, y, z) in deltas)
         {
-            var (x, y, z) = ComputeMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing);
             w.Write(x);
             w.Write(y);
             w.Write(z);
@@ -12074,7 +12144,8 @@ internal sealed class LocalExportService(
             IReadOnlyList<string> sliders,
             bool isHighWeight,
             int vertexCount,
-            IReadOnlyDictionary<string, double> regionalMorphing)
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
         {
             vertexCount = Math.Clamp(vertexCount, 1, 250_000);
             using var ms = new System.IO.MemoryStream();
@@ -12097,9 +12168,13 @@ internal sealed class LocalExportService(
 
             foreach (var slider in sliders)
             {
-                for (var index = 0; index < vertexCount; index++)
+                foreach (var (x, y, z) in ResolveMorphDeltas(
+                    slider,
+                    isHighWeight,
+                    vertexCount,
+                    regionalMorphing,
+                    reusableSourceMorphPayloads))
                 {
-                    var (x, y, z) = ComputeMorphDelta(slider, index, vertexCount, isHighWeight, regionalMorphing);
                     w.Write(QuantizeTriDelta(x));
                     w.Write(QuantizeTriDelta(y));
                     w.Write(QuantizeTriDelta(z));
@@ -12107,6 +12182,89 @@ internal sealed class LocalExportService(
             }
 
             return ms.ToArray();
+        }
+
+        private static MorphPayloadReuseSummary BuildPayloadReuseSummary(
+            IReadOnlyList<string> sliders,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            int vertexCount)
+        {
+            if (sliders.Count == 0)
+            {
+                return new MorphPayloadReuseSummary(0, 0, 0, [], []);
+            }
+
+            var reusedVariants = new List<string>();
+            var fallbackVariants = new List<string>();
+            foreach (var slider in sliders)
+            {
+                TrackPayloadReuseVariant(slider, isHighWeight: false);
+                TrackPayloadReuseVariant($"{slider}_1", isHighWeight: true);
+            }
+
+            return new MorphPayloadReuseSummary(
+                reusedVariants.Count + fallbackVariants.Count,
+                reusedVariants.Count,
+                fallbackVariants.Count,
+                reusedVariants,
+                fallbackVariants);
+
+            void TrackPayloadReuseVariant(string variantName, bool isHighWeight)
+            {
+                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName: isHighWeight ? variantName[..^2] : variantName, isHighWeight, vertexCount, out _))
+                {
+                    reusedVariants.Add(variantName);
+                }
+                else
+                {
+                    fallbackVariants.Add(variantName);
+                }
+            }
+        }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
+            string sliderName,
+            bool isHighWeight,
+            int vertexCount,
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads)
+        {
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, out var sourcePayload))
+            {
+                return sourcePayload.Deltas;
+            }
+
+            var deltas = new (float X, float Y, float Z)[vertexCount];
+            for (var index = 0; index < vertexCount; index++)
+            {
+                deltas[index] = ComputeMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing);
+            }
+
+            return deltas;
+        }
+
+        private static bool TryGetReusableMorphPayload(
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            string sliderName,
+            bool isHighWeight,
+            int vertexCount,
+            out SourceMorphPayload payload)
+        {
+            payload = default!;
+            if (reusableSourceMorphPayloads is null ||
+                !reusableSourceMorphPayloads.TryGetValue(sliderName, out var variants))
+            {
+                return false;
+            }
+
+            var candidate = isHighWeight ? variants.HighWeight : variants.LowWeight;
+            if (candidate is null || candidate.VertexCount != vertexCount)
+            {
+                return false;
+            }
+
+            payload = candidate;
+            return true;
         }
 
         private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)

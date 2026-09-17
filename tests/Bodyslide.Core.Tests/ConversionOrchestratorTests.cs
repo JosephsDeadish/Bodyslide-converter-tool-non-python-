@@ -10072,10 +10072,178 @@ public sealed class OutputCompletenessTests
             Assert.Contains("HighRiskPoseCount", json);
             Assert.Contains("MissingNormalCount", json);
             Assert.Contains("SourceMorphQuality", json);
+            Assert.Contains("SourceAssetSupport", json);
+            Assert.Contains("PayloadReuse", json);
         }
         finally
         {
             Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_ReusesSourceMorphPayloads_WhenVertexCountsMatch()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(2));
+
+        var lowDeltas = new (float X, float Y, float Z)[]
+        {
+            (0.125f, -0.25f, 0.375f),
+            (0.5f, 0.625f, -0.75f)
+        };
+        var highDeltas = new (float X, float Y, float Z)[]
+        {
+            (0.25f, -0.125f, 0.5f),
+            (0.75f, 0.125f, -0.25f)
+        };
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Belly"] = new(
+                        new SourceMorphPayload("Belly", false, "bsd", 2, lowDeltas),
+                        new SourceMorphPayload("Belly", true, "bsd", 2, highDeltas))
+                },
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
+            var highBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly_1.bsd", StringComparison.OrdinalIgnoreCase));
+            var lowTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.tri", StringComparison.OrdinalIgnoreCase));
+            var highTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject_1.tri", StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(lowBsdPath), out var lowBsdPayload));
+            Assert.NotNull(lowBsdPayload);
+            AssertDeltasEqual(lowDeltas, lowBsdPayload!.Deltas);
+
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(highBsdPath), out var highBsdPayload));
+            Assert.NotNull(highBsdPayload);
+            AssertDeltasEqual(highDeltas, highBsdPayload!.Deltas);
+
+            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(lowTriPath), out var lowTriPayload));
+            Assert.NotNull(lowTriPayload);
+            Assert.Equal("Belly", lowTriPayload!.Morphs.Single().Name);
+            AssertDeltasEqual(lowDeltas, lowTriPayload.Morphs.Single().Deltas);
+
+            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(highTriPath), out var highTriPayload));
+            Assert.NotNull(highTriPayload);
+            Assert.Equal("Belly_1", highTriPayload!.Morphs.Single().Name);
+            AssertDeltasEqual(highDeltas, highTriPayload.Morphs.Single().Deltas);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"ReusedVariantCount\": 2", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_IncompleteSourceFallback_SurfacesQualityIssues()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                SourceAssetSupport: new SourceAssetSupportMetrics(
+                    false,
+                    false,
+                    false,
+                    false,
+                    true,
+                    ["osp", "morph-payloads", "reference-assets"],
+                    0));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"incomplete-source-fallback\"", qualityJson);
+            Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
+            Assert.Contains("\"MissingAssets\": [", qualityJson);
+            Assert.Contains("\"osp\"", qualityJson);
+            Assert.Contains("\"morph-payloads\"", qualityJson);
+            Assert.Contains("\"reference-assets\"", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    private static void AssertDeltasEqual(
+        IReadOnlyList<(float X, float Y, float Z)> expected,
+        IReadOnlyList<(float X, float Y, float Z)> actual)
+    {
+        Assert.Equal(expected.Count, actual.Count);
+        for (var index = 0; index < expected.Count; index++)
+        {
+            Assert.Equal(expected[index].X, actual[index].X, 3);
+            Assert.Equal(expected[index].Y, actual[index].Y, 3);
+            Assert.Equal(expected[index].Z, actual[index].Z, 3);
         }
     }
 

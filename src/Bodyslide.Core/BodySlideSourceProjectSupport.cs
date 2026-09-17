@@ -6,7 +6,9 @@ internal sealed record ResolvedBodySlideSliders(
     IReadOnlyList<string> Sliders,
     IReadOnlyList<string> ZapSliders,
     string Gender,
-    SourceMorphQualityMetrics? SourceMorphQuality = null);
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableMorphPayloads = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null);
 
 internal static class BodySlideSourceProjectSupport
 {
@@ -78,7 +80,9 @@ internal static class BodySlideSourceProjectSupport
             mergedSliders,
             zapSliders.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
             gender,
-            sourceSupport.SourceMorphQuality);
+            sourceSupport.SourceMorphQuality,
+            sourceSupport.ReusableMorphPayloads,
+            sourceSupport.BuildAssetSupport(baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0, armor.BodyReferenceFiles.Count > 0));
     }
 
     private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
@@ -87,12 +91,16 @@ internal static class BodySlideSourceProjectSupport
     {
         var sliders = new List<SourceSliderCandidate>();
         var zapSliders = new List<SourceSliderCandidate>();
+        var hasOsp = false;
+        var hasTriPayloads = false;
+        var hasBsdPayloads = false;
 
         foreach (var filePath in EnumerateAssociatedBodySlideFiles(armor))
         {
             var extension = Path.GetExtension(filePath);
             if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
             {
+                hasOsp = true;
                 var fromOsp = await TryReadOspAsync(filePath, cancellationToken);
                 sliders.AddRange(fromOsp.Sliders);
                 zapSliders.AddRange(fromOsp.ZapSliders);
@@ -101,6 +109,7 @@ internal static class BodySlideSourceProjectSupport
             {
                 if (TryReadBsdSlider(filePath, out var candidate))
                 {
+                    hasBsdPayloads |= candidate.ReusablePayload is not null;
                     if (candidate.IsZap)
                     {
                         zapSliders.Add(candidate);
@@ -118,11 +127,18 @@ internal static class BodySlideSourceProjectSupport
                 foreach (var morph in triPayload.Morphs)
                 {
                     var sliderName = NormalizeSliderFileName(morph.Name);
-                    if (!TryCreatePayloadCandidate(sliderName, morph.Deltas, SourcePriority.TriPayloadBase, out var candidate))
+                    if (!TryCreatePayloadCandidate(
+                        sliderName,
+                        morph.Deltas,
+                        SourcePriority.TriPayloadBase,
+                        IsHighWeightVariant(morph.Name),
+                        "tri",
+                        out var candidate))
                     {
                         continue;
                     }
 
+                    hasTriPayloads |= candidate.ReusablePayload is not null;
                     if (candidate.IsZap)
                     {
                         zapSliders.Add(candidate);
@@ -137,7 +153,10 @@ internal static class BodySlideSourceProjectSupport
 
         return new BodySlideSourceSupport(
             CollapseCandidates(sliders),
-            CollapseCandidates(zapSliders));
+            CollapseCandidates(zapSliders),
+            hasOsp,
+            hasTriPayloads,
+            hasBsdPayloads);
     }
 
     private static IEnumerable<string> EnumerateAssociatedBodySlideFiles(ImportedArmor armor)
@@ -397,6 +416,8 @@ internal static class BodySlideSourceProjectSupport
                 NormalizeSliderFileName(payload.SliderName),
                 payload.Deltas,
                 payload.IsHighWeight ? SourcePriority.BsdHighWeightBase : SourcePriority.BsdLowWeightBase,
+                payload.IsHighWeight,
+                "bsd",
                 out candidate);
         }
 
@@ -415,6 +436,8 @@ internal static class BodySlideSourceProjectSupport
         string sliderName,
         IReadOnlyList<(float X, float Y, float Z)> deltas,
         int basePriority,
+        bool isHighWeight,
+        string payloadKind,
         out SourceSliderCandidate candidate)
     {
         var isZap = IsLikelyZapSliderName(sliderName);
@@ -435,9 +458,14 @@ internal static class BodySlideSourceProjectSupport
             sliderName,
             basePriority + ComputePayloadPriorityOffset(stats),
             isZap,
-            stats);
+            stats,
+            new SourceMorphPayload(sliderName, isHighWeight, payloadKind, deltas.Count, deltas));
         return true;
     }
+
+    private static bool IsHighWeightVariant(string morphName) =>
+        !string.IsNullOrWhiteSpace(morphName) &&
+        morphName.Trim().EndsWith("_1", StringComparison.OrdinalIgnoreCase);
 
     private static int ComputePayloadPriorityOffset(MorphDeltaStats stats)
     {
@@ -560,12 +588,81 @@ internal static class BodySlideSourceProjectSupport
         return density * 0.5d + magnitude * 0.35d + peak * 0.15d;
     }
 
-    private sealed record BodySlideSourceSupport(IReadOnlyList<SourceSliderCandidate> Sliders, IReadOnlyList<SourceSliderCandidate> ZapSliders)
+    private sealed record BodySlideSourceSupport(
+        IReadOnlyList<SourceSliderCandidate> Sliders,
+        IReadOnlyList<SourceSliderCandidate> ZapSliders,
+        bool HasOsp,
+        bool HasTriPayloads,
+        bool HasBsdPayloads)
     {
         public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
+
+        public IReadOnlyDictionary<string, SourceMorphPayloadVariants> ReusableMorphPayloads =>
+            BuildReusableMorphPayloads(Sliders, ZapSliders);
+
+        public SourceAssetSupportMetrics BuildAssetSupport(bool usedFallbackSliders, bool hasReferenceAssets)
+        {
+            var missingAssets = new List<string>();
+            if (!HasOsp)
+            {
+                missingAssets.Add("osp");
+            }
+
+            if (!HasTriPayloads && !HasBsdPayloads)
+            {
+                missingAssets.Add("morph-payloads");
+            }
+
+            if (!hasReferenceAssets)
+            {
+                missingAssets.Add("reference-assets");
+            }
+
+            return new SourceAssetSupportMetrics(
+                HasOsp,
+                HasTriPayloads,
+                HasBsdPayloads,
+                hasReferenceAssets,
+                usedFallbackSliders,
+                missingAssets,
+                ReusableMorphPayloads.Count);
+        }
     }
 
-    private sealed record SourceSliderCandidate(string Name, int Priority, bool IsZap = false, MorphDeltaStats? PayloadStats = null);
+    private static IReadOnlyDictionary<string, SourceMorphPayloadVariants> BuildReusableMorphPayloads(
+        IEnumerable<SourceSliderCandidate> sliders,
+        IEnumerable<SourceSliderCandidate> zapSliders)
+    {
+        return sliders
+            .Concat(zapSliders)
+            .Where(static candidate => candidate.ReusablePayload is not null)
+            .GroupBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group =>
+                {
+                    var lowWeight = group
+                        .Where(static candidate => candidate.ReusablePayload?.IsHighWeight is false)
+                        .OrderByDescending(static candidate => candidate.Priority)
+                        .Select(static candidate => candidate.ReusablePayload)
+                        .FirstOrDefault();
+                    var highWeight = group
+                        .Where(static candidate => candidate.ReusablePayload?.IsHighWeight is true)
+                        .OrderByDescending(static candidate => candidate.Priority)
+                        .Select(static candidate => candidate.ReusablePayload)
+                        .FirstOrDefault();
+
+                    return new SourceMorphPayloadVariants(lowWeight, highWeight);
+                },
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed record SourceSliderCandidate(
+        string Name,
+        int Priority,
+        bool IsZap = false,
+        MorphDeltaStats? PayloadStats = null,
+        SourceMorphPayload? ReusablePayload = null);
     private sealed record SearchLocation(string Root, SearchOption SearchOption);
 
     private static class SourcePriority
