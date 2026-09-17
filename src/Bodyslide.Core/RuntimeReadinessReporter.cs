@@ -84,13 +84,15 @@ public static class RuntimeReadinessReporter
                 .Count();
             var skeletonFrameworkCount = SkeletonFrameworkCatalog.All.Count;
             var skeletonCommonBoneCount = SkeletonMappingCatalog.CommonBones.Count;
+            var raceCompatibilityRuleCount = RaceCompatibilityCatalog.BodyRules.Count;
+            var physicsRepairGroupCount = PhysicsRepairCatalog.All.Count;
             _ = BodyDetectionTuningCatalog.Current;
             _ = MeshBehaviorCatalog.Get("cloth");
 
             return new(
                 "Catalog data",
                 "OK",
-                $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones");
+                $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups");
         }
         catch (Exception ex)
         {

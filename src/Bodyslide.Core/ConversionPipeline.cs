@@ -1610,6 +1610,66 @@ internal static class NifGeometrySignatureReader
         return TryReadHeuristicVertexBlock(bytes);
     }
 
+    public static IReadOnlyList<MeshVertex>? TryReadFullVertices(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            return TryReadFullVertices(File.ReadAllBytes(meshFile));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public static IReadOnlyList<MeshVertex>? TryReadFullVertices(byte[] bytes)
+    {
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return null;
+        }
+
+        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
+        if (embeddedMarkerOffset >= 0)
+        {
+            var countOffset = embeddedMarkerOffset + EmbeddedVertexMarker.Length;
+            if (countOffset + sizeof(int) <= bytes.Length)
+            {
+                var embeddedCount = BitConverter.ToInt32(bytes, countOffset);
+                var embeddedVertices = ReadFloatVertices(bytes, countOffset + sizeof(int), embeddedCount);
+                if (embeddedVertices is not null)
+                {
+                    return embeddedVertices;
+                }
+            }
+        }
+
+        if (TryLocateHalfFloatVertexBlock(bytes, out var halfDataOffset, out var halfVertexCount, out var vertexStride))
+        {
+            var halfVertices = ReadHalfFloatVertices(bytes, halfDataOffset, halfVertexCount, vertexStride);
+            if (halfVertices is not null)
+            {
+                return halfVertices;
+            }
+        }
+
+        if (TryLocateVertexBlock(bytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return ReadFloatVertices(bytes, vertexDataOffset, vertexCount);
+        }
+
+        return null;
+    }
+
     public static bool TryLocateVertexBlock(byte[] bytes, out int vertexDataOffset, out int vertexCount)
     {
         vertexDataOffset = 0;
@@ -2004,6 +2064,68 @@ internal static class NifGeometrySignatureReader
         }
 
         return new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ);
+    }
+
+    private static IReadOnlyList<MeshVertex>? ReadFloatVertices(byte[] bytes, int vertexDataOffset, int vertexCount)
+    {
+        if (vertexCount <= 0)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * 12;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * 12);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPlausibleCoordinate(x) || !IsPlausibleCoordinate(y) || !IsPlausibleCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
+    }
+
+    private static IReadOnlyList<MeshVertex>? ReadHalfFloatVertices(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = (float)BitConverter.ToHalf(bytes.AsSpan(offset));
+            var y = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 2));
+            var z = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 4));
+            if (!IsPlausibleHalfCoordinate(x) || !IsPlausibleHalfCoordinate(y) || !IsPlausibleHalfCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
     }
 
     private static bool IsPlausibleCoordinate(float value) =>
@@ -3745,31 +3867,6 @@ public static class StandaloneConversionModules
 /// </summary>
 internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
 {
-    // Standard Skyrim.esm race FormIDs for the common playable races.
-    // These base FormIDs are stable across load orders (no mod-index prefix applied).
-    private static readonly IReadOnlyDictionary<uint, string> KnownRaces =
-        new Dictionary<uint, string>
-        {
-            [0x00013741] = "DefaultRace",
-            [0x00013742] = "NordRace",
-            [0x00013744] = "ImperialRace",
-            [0x00013745] = "BretonRace",
-            [0x00013746] = "RedguardRace",
-            [0x00013747] = "AltmerRace",
-            [0x00013748] = "BosmerRace",
-            [0x00013749] = "DunmerRace",
-            [0x0001397A] = "OrcRace",
-            [0x00023FE9] = "KhajiitRace",
-            [0x00013BB9] = "ArgonianRace",
-        };
-
-    private static readonly HashSet<string> BeastRaces =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "KhajiitRace",
-            "ArgonianRace",
-        };
-
     public Task<RaceCompatibilityReport> CheckAsync(
         PluginAnalysisResult pluginAnalysis,
         string targetBody,
@@ -3793,24 +3890,33 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
 
         var incompatible = new List<string>();
         var warnings = new List<string>();
-        var targetProfile = ResolveTargetBodyProfile(targetBody);
+        var hasRule = RaceCompatibilityCatalog.TryGetBodyRule(targetBody, out var targetRule);
 
         foreach (var formId in referencedFormIds)
         {
-            if (!KnownRaces.TryGetValue(formId & 0x00FFFFFFu, out var raceName))
+            if (!RaceCompatibilityCatalog.TryGetRace(formId, out var race))
             {
                 continue;
             }
 
-            if (BeastRaces.Contains(raceName) && !targetProfile.SupportsBeastRaces)
+            if (!hasRule)
             {
-                incompatible.Add(raceName);
-                warnings.Add(
-                    $"{raceName} is not covered by {targetProfile.DisplayName}; a race-specific body patch may be required.");
+                continue;
             }
-            else if (BeastRaces.Contains(raceName) && targetProfile.BeastSupportWarning is not null)
+
+            var matchesCompatibleGroup = race.Groups.Any(group => targetRule.CompatibleGroups.Contains(group, StringComparer.OrdinalIgnoreCase));
+            if (!matchesCompatibleGroup)
             {
-                warnings.Add($"{raceName} uses {targetProfile.DisplayName} beast compatibility: {targetProfile.BeastSupportWarning}");
+                incompatible.Add(race.Name);
+                warnings.Add($"{race.Name} is not covered by {targetRule.Body}; a race-specific body patch may be required.");
+                continue;
+            }
+
+            var shouldWarn = !string.IsNullOrWhiteSpace(targetRule.WarningMessage) &&
+                race.Groups.Any(group => targetRule.WarningGroups.Contains(group, StringComparer.OrdinalIgnoreCase));
+            if (shouldWarn)
+            {
+                warnings.Add($"{race.Name} uses {targetRule.Body} compatibility: {targetRule.WarningMessage}");
             }
         }
 
@@ -3819,29 +3925,6 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             Warnings: warnings,
             IncompatibleRaces: incompatible));
     }
-
-    private static BodyRaceCompatibilityProfile ResolveTargetBodyProfile(string targetBody)
-    {
-        var canonicalBody = BodyTypeCatalog.ResolveName(targetBody);
-        if (!BodyTechnicalProfileCatalog.TryGet(canonicalBody, out var profile))
-        {
-            return new BodyRaceCompatibilityProfile(targetBody, SupportsBeastRaces: true, BeastSupportWarning: null);
-        }
-
-        if (canonicalBody.Equals("Vanilla", StringComparison.OrdinalIgnoreCase) ||
-            canonicalBody.Equals("Vanilla Beast", StringComparison.OrdinalIgnoreCase) ||
-            profile.SkeletonFoundation.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
-            profile.Notes.Contains("Khajiit", StringComparison.OrdinalIgnoreCase) ||
-            profile.Notes.Contains("Argonian", StringComparison.OrdinalIgnoreCase) ||
-            profile.Notes.Contains("beast", StringComparison.OrdinalIgnoreCase))
-        {
-            return new BodyRaceCompatibilityProfile(canonicalBody, SupportsBeastRaces: true, BeastSupportWarning: "tail and paw/foot rigging should still be verified in-game.");
-        }
-
-        return new BodyRaceCompatibilityProfile(canonicalBody, SupportsBeastRaces: false, BeastSupportWarning: null);
-    }
-
-    private sealed record BodyRaceCompatibilityProfile(string DisplayName, bool SupportsBeastRaces, string? BeastSupportWarning);
 }
 
 /// <summary>
@@ -5761,6 +5844,17 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
             : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInBody)
                 ? builtInBody.AvailablePhysicsBones
                 : null;
+
+        if (analysis.PhysicsEnabled && targetPhysBones is not null)
+        {
+            var supportedBones = hasCustomProfile
+                ? customProfile.PhysicsBones
+                : BodyTechnicalProfileCatalog.TryGet(targetBody, out var profileInfo)
+                    ? profileInfo.AvailablePhysicsBones
+                    : targetPhysBones;
+            targetPhysBones = PhysicsRepairCatalog.RepairTargetBones(targetPhysBones, supportedBones, smpBones);
+        }
+
         if (!analysis.PhysicsEnabled || analysis.HeadgearSubType is not null)
             targetPhysBones = null;
 
@@ -9942,14 +10036,16 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
+            var morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs);
+
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
             foreach (var slider in bodySlideProject.Sliders)
             {
                 var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
                 var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
-                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads), cancellationToken);
-                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads),  cancellationToken);
+                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
+                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
                 outputFiles.Add(lowBsdPath);
                 outputFiles.Add(highBsdPath);
             }
@@ -9958,8 +10054,8 @@ internal sealed class LocalExportService(
             // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
             var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
             var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
-            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads), cancellationToken);
-            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads),  cancellationToken);
+            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
+            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
             outputFiles.Add(triLowPath);
             outputFiles.Add(triHighPath);
         }
@@ -12185,11 +12281,12 @@ internal sealed class LocalExportService(
         bool isHighWeight,
         int vertexCount,
         IReadOnlyDictionary<string, double> regionalMorphing,
-        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
+        MorphTransferContext? morphTransferContext = null)
     {
         vertexCount = Math.Clamp(vertexCount, 1, 250_000);
         var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
-        var deltas = ResolveMorphDeltas(sliderName, isHighWeight, vertexCount, regionalMorphing, reusableSourceMorphPayloads);
+        var deltas = ResolveMorphDeltas(sliderName, isHighWeight, vertexCount, regionalMorphing, reusableSourceMorphPayloads, morphTransferContext);
         using var ms = new System.IO.MemoryStream();
         using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -12238,7 +12335,8 @@ internal sealed class LocalExportService(
             bool isHighWeight,
             int vertexCount,
             IReadOnlyDictionary<string, double> regionalMorphing,
-            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null)
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
+            MorphTransferContext? morphTransferContext = null)
         {
             vertexCount = Math.Clamp(vertexCount, 1, 250_000);
             using var ms = new System.IO.MemoryStream();
@@ -12266,7 +12364,8 @@ internal sealed class LocalExportService(
                     isHighWeight,
                     vertexCount,
                     regionalMorphing,
-                    reusableSourceMorphPayloads))
+                    reusableSourceMorphPayloads,
+                    morphTransferContext))
                 {
                     w.Write(QuantizeTriDelta(x));
                     w.Write(QuantizeTriDelta(y));
@@ -12330,14 +12429,42 @@ internal sealed class LocalExportService(
             }
         }
 
+        private sealed record MorphTransferContext(
+            IReadOnlyList<MeshVertex> SourceVertices,
+            IReadOnlyList<MeshVertex> TargetVertices,
+            int[] TargetToSourceIndexMap);
+
+        private static MorphTransferContext? CreateMorphTransferContext(
+            IReadOnlyList<string> sourceMeshFiles,
+            IReadOnlyList<string> writtenNifs)
+        {
+            var sourceVertices = sourceMeshFiles
+                .Select(NifGeometrySignatureReader.TryReadFullVertices)
+                .FirstOrDefault(vertices => vertices is { Count: > 0 });
+            var targetVertices = writtenNifs
+                .Select(NifGeometrySignatureReader.TryReadFullVertices)
+                .FirstOrDefault(vertices => vertices is { Count: > 0 });
+
+            if (sourceVertices is null || targetVertices is null || sourceVertices.Count == 0 || targetVertices.Count == 0)
+            {
+                return null;
+            }
+
+            return new MorphTransferContext(
+                sourceVertices,
+                targetVertices,
+                BuildNearestSurfaceMap(sourceVertices, targetVertices));
+        }
+
         private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
             string sliderName,
             bool isHighWeight,
             int vertexCount,
             IReadOnlyDictionary<string, double> regionalMorphing,
-            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads)
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            MorphTransferContext? morphTransferContext)
         {
-            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, out var sourcePayload, out _))
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out _))
             {
                 return sourcePayload.Deltas;
             }
@@ -12356,6 +12483,7 @@ internal sealed class LocalExportService(
             string sliderName,
             bool isHighWeight,
             int vertexCount,
+            MorphTransferContext? morphTransferContext,
             out SourceMorphPayload payload,
             out bool wasRetargeted)
         {
@@ -12388,7 +12516,7 @@ internal sealed class LocalExportService(
             {
                 VertexCount = vertexCount,
                 PayloadKind = $"{candidate.PayloadKind}-retargeted",
-                Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount)
+                Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount, morphTransferContext)
             };
             wasRetargeted = true;
             return true;
@@ -12396,11 +12524,26 @@ internal sealed class LocalExportService(
 
         private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
             IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
-            int targetVertexCount)
+            int targetVertexCount,
+            MorphTransferContext? morphTransferContext)
         {
             if (targetVertexCount == sourceDeltas.Count)
             {
                 return sourceDeltas;
+            }
+
+            if (morphTransferContext is not null &&
+                morphTransferContext.SourceVertices.Count == sourceDeltas.Count &&
+                morphTransferContext.TargetVertices.Count == targetVertexCount &&
+                morphTransferContext.TargetToSourceIndexMap.Length == targetVertexCount)
+            {
+                var nearestSurface = new (float X, float Y, float Z)[targetVertexCount];
+                for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
+                {
+                    nearestSurface[targetIndex] = sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
+                }
+
+                return nearestSurface;
             }
 
             var retargeted = new (float X, float Y, float Z)[targetVertexCount];
@@ -12428,6 +12571,45 @@ internal sealed class LocalExportService(
             }
 
             return retargeted;
+        }
+
+        private static int[] BuildNearestSurfaceMap(
+            IReadOnlyList<MeshVertex> sourceVertices,
+            IReadOnlyList<MeshVertex> targetVertices)
+        {
+            var mapping = new int[targetVertices.Count];
+            var searchRadius = Math.Clamp(sourceVertices.Count / 24, 32, 768);
+
+            for (var targetIndex = 0; targetIndex < targetVertices.Count; targetIndex++)
+            {
+                var approximateIndex = targetVertices.Count == 1
+                    ? 0
+                    : (int)Math.Round(((double)targetIndex / Math.Max(1, targetVertices.Count - 1)) * (sourceVertices.Count - 1));
+                var start = Math.Max(0, approximateIndex - searchRadius);
+                var end = Math.Min(sourceVertices.Count - 1, approximateIndex + searchRadius);
+
+                var targetVertex = targetVertices[targetIndex];
+                var bestIndex = approximateIndex;
+                var bestDistance = float.MaxValue;
+
+                for (var sourceIndex = start; sourceIndex <= end; sourceIndex++)
+                {
+                    var sourceVertex = sourceVertices[sourceIndex];
+                    var dx = targetVertex.X - sourceVertex.X;
+                    var dy = targetVertex.Y - sourceVertex.Y;
+                    var dz = targetVertex.Z - sourceVertex.Z;
+                    var distance = (dx * dx) + (dy * dy) + (dz * dz);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestIndex = sourceIndex;
+                    }
+                }
+
+                mapping[targetIndex] = bestIndex;
+            }
+
+            return mapping;
         }
 
         private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)

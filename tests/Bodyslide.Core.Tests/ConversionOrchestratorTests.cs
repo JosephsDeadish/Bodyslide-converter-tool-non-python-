@@ -1741,6 +1741,7 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
+        Assert.NotEmpty(report.Warnings);
     }
 
     [Fact]
@@ -4958,6 +4959,12 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
         Assert.Contains("NPC L Breast02", fallbacks);
+        Assert.True(RaceCompatibilityCatalog.TryGetRace(0x00023FE9u, out var khajiitRace));
+        Assert.Contains("beast", khajiitRace.Groups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("coco-cbbe", out var cocoRule));
+        Assert.Equal("COCO CBBE", cocoRule.Body);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
+        Assert.Equal("tail", groupName);
     }
 }
 
@@ -10425,6 +10432,48 @@ public sealed class OutputCompletenessTests
         }
     }
 
+    [Fact]
+    public void RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
+    {
+        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        Assert.NotNull(contextType);
+
+        var sourceVertices = new[]
+        {
+            new MeshVertex(0f, 0f, 0f),
+            new MeshVertex(10f, 0f, 0f),
+            new MeshVertex(20f, 0f, 0f)
+        };
+        var targetVertices = new[]
+        {
+            new MeshVertex(19.9f, 0f, 0f),
+            new MeshVertex(0.1f, 0f, 0f)
+        };
+
+        var buildMap = typeof(LocalExportService).GetMethod("BuildNearestSurfaceMap", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildMap);
+        var mapping = Assert.IsType<int[]>(buildMap!.Invoke(null, [sourceVertices, targetVertices]));
+
+        var context = Activator.CreateInstance(contextType!, BindingFlags.Instance | BindingFlags.NonPublic, binder: null, args: [sourceVertices, targetVertices, mapping], culture: null);
+        Assert.NotNull(context);
+
+        var sourceDeltas = new (float X, float Y, float Z)[]
+        {
+            (1f, 0f, 0f),
+            (2f, 0f, 0f),
+            (3f, 0f, 0f)
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            method!.Invoke(null, [sourceDeltas, 2, context]));
+
+        Assert.Equal(3f, result[0].X, 3);
+        Assert.Equal(1f, result[1].X, 3);
+    }
+
     private static void AssertDeltasEqual(
         IReadOnlyList<(float X, float Y, float Z)> expected,
         IReadOnlyList<(float X, float Y, float Z)> actual)
@@ -10638,7 +10687,6 @@ public sealed class BasicWeightTransferServicePhysicsTests
 
         var result = await svc.TransferAsync(mesh, analysis, "CBBE", null, CancellationToken.None);
 
-        // CBBE is not in the physics-bone map; target bones should be null.
         Assert.Null(result.TargetPhysicsBones);
     }
 
@@ -10667,6 +10715,20 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.NotNull(result.TargetPhysicsBones);
         Assert.Contains("BreastUpper", result.TargetPhysicsBones!);
         Assert.Contains("NPC L Breast01", result.TargetPhysicsBones!);
+    }
+
+    [Fact]
+    public void RepairTargetBones_PreservesMatchingCustomChains()
+    {
+        var repaired = PhysicsRepairCatalog.RepairTargetBones(
+            ["NPC L Breast01", "NPC R Breast01"],
+            ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
+            ["Custom Breast Swing L", "Custom Breast Swing R", "Custom Tail Chain"]);
+
+        Assert.Contains("NPC Belly", repaired);
+        Assert.Contains("Custom Breast Swing L", repaired);
+        Assert.Contains("Custom Breast Swing R", repaired);
+        Assert.DoesNotContain("Custom Tail Chain", repaired);
     }
 }
 

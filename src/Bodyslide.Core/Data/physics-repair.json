@@ -1,0 +1,12 @@
+{
+  "groups": [
+    { "name": "breast", "tokens": ["breast", "breast01", "breast02", "breastupper", "breastlower"] },
+    { "name": "butt", "tokens": ["butt", "glute"] },
+    { "name": "belly", "tokens": ["belly", "waist"] },
+    { "name": "pec", "tokens": ["pec", "chest"] },
+    { "name": "lat", "tokens": ["lat"] },
+    { "name": "genitals", "tokens": ["genital", "schlong", "balls", "scrot", "penis", "sos", "tng"] },
+    { "name": "tail", "tokens": ["tail"] },
+    { "name": "thigh", "tokens": ["thigh"] }
+  ]
+}
