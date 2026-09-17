@@ -5043,6 +5043,52 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return bones;
     }
 
+    private static int CountBoneSignatureMatches(
+        IReadOnlySet<string> sourceBones,
+        IReadOnlyList<string> expectedBones)
+    {
+        if (sourceBones.Count == 0 || expectedBones.Count == 0)
+        {
+            return 0;
+        }
+
+        var remainingSources = sourceBones.ToList();
+        var hits = 0;
+        var matchedExpectedIndexes = new HashSet<int>();
+
+        for (var i = 0; i < expectedBones.Count; i++)
+        {
+            var expectedBone = expectedBones[i];
+            var exactIndex = remainingSources.FindIndex(sourceBone =>
+                sourceBone.Equals(expectedBone, StringComparison.OrdinalIgnoreCase));
+            if (exactIndex >= 0)
+            {
+                remainingSources.RemoveAt(exactIndex);
+                matchedExpectedIndexes.Add(i);
+                hits++;
+            }
+        }
+
+        for (var i = 0; i < expectedBones.Count; i++)
+        {
+            if (matchedExpectedIndexes.Contains(i))
+            {
+                continue;
+            }
+
+            var expectedBone = expectedBones[i];
+            var semanticIndex = remainingSources.FindIndex(sourceBone =>
+                BonesSemanticallyMatch(sourceBone, expectedBone));
+            if (semanticIndex >= 0)
+            {
+                remainingSources.RemoveAt(semanticIndex);
+                hits++;
+            }
+        }
+
+        return hits;
+    }
+
     private static bool BonesSemanticallyMatch(string sourceBone, string expectedBone)
     {
         if (sourceBone.Equals(expectedBone, StringComparison.OrdinalIgnoreCase))
@@ -5062,7 +5108,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return sourceSlot.Side.Equals(expectedSlot.Side, StringComparison.OrdinalIgnoreCase);
         }
 
-        return sourceSlot.Side is null && expectedSlot.Side is null;
+        return true;
     }
 
     private static (string Key, string? Side) ClassifySemanticBone(string boneName)
@@ -5124,9 +5170,10 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return false;
         }
 
+        var ambiguityConfidence = Math.Round(Math.Abs(top.Score - runnerUp.Score), 4);
         result = new BodyDetectionReport(
             "UNKNOWN",
-            top.Score,
+            ambiguityConfidence,
             top.Evidence
                 .Concat(runnerUp.Evidence)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -5202,8 +5249,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         double boneSignatureScore = 0;
         if (physicsContents.Length > 0 && BodyBoneSignatures.TryGetValue(template.Body, out var boneNames))
         {
-            var hits = boneNames.Count(expectedBone =>
-                physicsBoneNames.Any(sourceBone => BonesSemanticallyMatch(sourceBone, expectedBone)));
+            var hits = CountBoneSignatureMatches(physicsBoneNames, boneNames);
             boneSignatureScore = (double)hits / boneNames.Count;
             if (boneSignatureScore > 0)
             {
