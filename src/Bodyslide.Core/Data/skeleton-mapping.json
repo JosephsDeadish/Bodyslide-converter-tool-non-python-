@@ -1,0 +1,159 @@
+{
+  "commonBones": [
+    "NPC Root",
+    "NPC COM",
+    "NPC Pelvis",
+    "NPC Spine",
+    "NPC Spine1",
+    "NPC Spine2",
+    "NPC Neck",
+    "NPC Head",
+    "NPC L Clavicle",
+    "NPC L UpperArm",
+    "NPC L ForeArm",
+    "NPC L Hand",
+    "NPC R Clavicle",
+    "NPC R UpperArm",
+    "NPC R ForeArm",
+    "NPC R Hand",
+    "NPC L Thigh",
+    "NPC L Calf",
+    "NPC L Foot",
+    "NPC R Thigh",
+    "NPC R Calf",
+    "NPC R Foot"
+  ],
+  "fallbackMappings": {
+    "NPC L Breast03": ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
+    "NPC R Breast03": ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"],
+    "NPC L Breast02": ["NPC L Breast01", "NPC L Breast"],
+    "NPC R Breast02": ["NPC R Breast01", "NPC R Breast"],
+    "NPC L Breast": ["NPC L Breast01"],
+    "NPC R Breast": ["NPC R Breast01"],
+    "NPC L Lat": ["NPC L Pec"],
+    "NPC R Lat": ["NPC R Pec"],
+    "BreastUpper": ["NPC L Breast02", "NPC R Breast02", "NPC L Breast01", "NPC R Breast01"],
+    "BreastLower": ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
+    "BreastOuter": ["NPC L Breast01", "NPC R Breast01", "NPC L Breast", "NPC R Breast"],
+    "BreastInner": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01"],
+    "ButtUpper": ["NPC L Butt", "NPC R Butt", "NPC Pelvis"],
+    "ButtLower": ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
+    "TailTip": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "TailEnd": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "WingOuter.L": ["Wing.L", "LeftWing"],
+    "WingOuter.R": ["Wing.R", "RightWing"]
+  },
+  "frameworks": [
+    {
+      "id": "xpmsse-female-cbbe",
+      "bones": [
+        "NPC L Breast",
+        "NPC R Breast",
+        "NPC Belly",
+        "NPC L Butt",
+        "NPC R Butt"
+      ]
+    },
+    {
+      "id": "xpmsse-female-cbpc",
+      "bones": [
+        "NPC L Breast01",
+        "NPC R Breast01",
+        "NPC Belly",
+        "NPC L Butt",
+        "NPC R Butt"
+      ]
+    },
+    {
+      "id": "xpmsse-female-advanced",
+      "bones": [
+        "NPC L Breast",
+        "NPC R Breast",
+        "NPC L Breast01",
+        "NPC R Breast01",
+        "NPC L Breast02",
+        "NPC R Breast02",
+        "NPC Belly",
+        "NPC Belly01",
+        "NPC L Butt",
+        "NPC R Butt",
+        "NPC L Thigh",
+        "NPC R Thigh"
+      ]
+    },
+    {
+      "id": "xpmsse-male-smp",
+      "bones": [
+        "NPC L Pec",
+        "NPC R Pec",
+        "NPC Belly",
+        "NPC L Butt",
+        "NPC R Butt",
+        "SOS GenitalsBase",
+        "SOS Scrotum"
+      ]
+    },
+    {
+      "id": "sam-light",
+      "bones": [
+        "NPC L Pec",
+        "NPC R Pec",
+        "NPC Belly",
+        "SAM Genitals",
+        "SOS GenitalsBase",
+        "SOS Scrotum"
+      ],
+      "fallbackMappings": {
+        "TNG Genitals": ["SAM Genitals", "SOS GenitalsBase"],
+        "TNG Balls": ["SOS Scrotum", "NPC Pelvis"]
+      }
+    },
+    {
+      "id": "ube-extended",
+      "bones": [
+        "BreastUpper",
+        "BreastLower",
+        "BreastOuter",
+        "BreastInner",
+        "ButtUpper",
+        "ButtLower",
+        "BellyLower",
+        "Vagina",
+        "Anus"
+      ]
+    },
+    {
+      "id": "tng-extended",
+      "bones": [
+        "NPC L Pec",
+        "NPC R Pec",
+        "NPC Belly",
+        "TNG Genitals",
+        "TNG Balls"
+      ],
+      "fallbackMappings": {
+        "NPC L Lat": ["NPC L Pec"],
+        "NPC R Lat": ["NPC R Pec"],
+        "SAM Genitals": ["TNG Genitals"],
+        "SOS Scrotum": ["TNG Balls", "NPC Pelvis"]
+      }
+    },
+    {
+      "id": "beast-humanoid",
+      "bones": [
+        "NPC Tail",
+        "Tail1",
+        "Tail2",
+        "Tail3",
+        "Wing.L",
+        "Wing.R",
+        "LeftWing",
+        "RightWing"
+      ]
+    },
+    {
+      "id": "vanilla-skyrim",
+      "bones": []
+    }
+  ]
+}

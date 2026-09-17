@@ -4888,6 +4888,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal(1.12d, plate.ClippingThreshold);
         Assert.Equal(0.072d, plate.BaseInflation);
         Assert.Contains("SAM", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
+        Assert.Contains("NPC L Breast02", fallbacks);
     }
 }
 
@@ -11533,6 +11536,88 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesCatalogFrameworkBonesForFollowerSkeletons()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC L Lat\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "FollowerTng",
+                        ["followertng"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        SkeletonFoundation: "TNG Extended")
+                ]);
+
+            var result = await service.MapAsync(armor, "FollowerTng", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("NPC L Lat", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("NPC L Pec", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("NPC L Lat", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesCatalogFallbacksForBeastTailBones()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"TailTip\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "BeastFollower",
+                        ["beastfollower"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        SkeletonFoundation: "Beast Humanoid")
+                ]);
+
+            var result = await service.MapAsync(armor, "BeastFollower", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("TailTip", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("Tail3", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("TailTip", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
     {
         var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);
@@ -11597,7 +11682,24 @@ public sealed class CustomBodyProfileSupportTests
     public void SkeletonNifBoneParser_DetectSkeletonLabel_UbeBonesYieldExtendedFrameworkLabel()
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["BreastUpper", "BreastOuter", "NPC Belly"]);
+
         Assert.Equal("ube-extended", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_TngBonesYieldExtendedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["TNG Genitals", "TNG Balls", "NPC Belly"]);
+
+        Assert.Equal("tng-extended", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_BeastBonesYieldBeastFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Tail1", "Tail2", "NPC Spine"]);
+
+        Assert.Equal("beast-humanoid", label);
     }
 
     [Fact]

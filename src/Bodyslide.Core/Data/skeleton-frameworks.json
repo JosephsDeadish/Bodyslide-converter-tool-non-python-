@@ -12,5 +12,19 @@
     "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower"],
     "distinctiveSignatures": ["BreastUpper", "BreastOuter"],
     "minimumSignatureMatches": 2
+  },
+  {
+    "label": "tng-extended",
+    "bonePrefixes": ["TNG "],
+    "boneTokens": ["Genitals", "Glans", "Shaft", "Balls"],
+    "distinctiveSignatures": ["TNG Genitals", "TNG Balls"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "beast-humanoid",
+    "bonePrefixes": ["Tail", "Wing"],
+    "boneTokens": ["NPC Tail", "LeftWing", "RightWing", "Khajiit", "Argonian"],
+    "distinctiveSignatures": ["Tail1", "Tail2"],
+    "minimumSignatureMatches": 2
   }
 ]

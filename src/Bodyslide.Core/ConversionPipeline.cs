@@ -6028,40 +6028,9 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 /// </summary>
 internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 {
-    // Standard vanilla + XPMSSE bones shared by most body types.
-    private static readonly IReadOnlyList<string> CommonBones =
-    [
-        "NPC Root", "NPC COM", "NPC Pelvis", "NPC Spine", "NPC Spine1", "NPC Spine2",
-        "NPC Neck", "NPC Head",
-        "NPC L Clavicle", "NPC L UpperArm", "NPC L ForeArm", "NPC L Hand",
-        "NPC R Clavicle", "NPC R UpperArm", "NPC R ForeArm", "NPC R Hand",
-        "NPC L Thigh", "NPC L Calf", "NPC L Foot",
-        "NPC R Thigh", "NPC R Calf", "NPC R Foot"
-    ];
-
-    // Fallback remaps for source physics bones that are missing on the target skeleton.
-    // Ordered by preference: the first candidate present on the target is selected.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneFallbacks =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["NPC L Breast03"] = ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
-            ["NPC R Breast03"] = ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"],
-            ["NPC L Breast02"] = ["NPC L Breast01", "NPC L Breast"],
-            ["NPC R Breast02"] = ["NPC R Breast01", "NPC R Breast"],
-            ["NPC L Breast"]   = ["NPC L Breast01"],
-            ["NPC R Breast"]   = ["NPC R Breast01"],
-            ["NPC L Lat"]      = ["NPC L Pec"],
-            ["NPC R Lat"]      = ["NPC R Pec"],
-            ["BreastUpper"]    = ["NPC L Breast02", "NPC R Breast02", "NPC L Breast01", "NPC R Breast01"],
-            ["BreastLower"]    = ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
-            ["BreastOuter"]    = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast", "NPC R Breast"],
-            ["BreastInner"]    = ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01"],
-            ["ButtUpper"]      = ["NPC L Butt", "NPC R Butt", "NPC Pelvis"],
-            ["ButtLower"]      = ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-        };
-
     public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
+        var commonBones = SkeletonMappingCatalog.CommonBones;
         IReadOnlySet<string> targetPhysicsBones;
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
             customProfile.PhysicsBones is { Count: > 0 } customPhysicsBones)
@@ -6073,7 +6042,11 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             targetPhysicsBones = GetBuiltInPhysicsBones(targetBody);
         }
 
-        var allTargetBones = CommonBones.Concat(targetPhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targetFrameworkId = ResolveTargetFrameworkId(targetBody, armor, targetPhysicsBones);
+        var allTargetBones = commonBones
+            .Concat(SkeletonMappingCatalog.GetFrameworkBones(targetFrameworkId))
+            .Concat(targetPhysicsBones)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Infer which source physics bones are present from the body reference / physics files.
         var sourcePhysicsBones = await ExtractPhysicsBonesAsync(armor, cancellationToken);
@@ -6105,7 +6078,11 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         if (parsedBones.Count > 0)
             allTargetBones.UnionWith(parsedBones);
 
-        var allSourceBones = CommonBones.Concat(sourcePhysicsBones).Concat(parsedBones).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var allSourceBones = commonBones
+            .Concat(sourcePhysicsBones)
+            .Concat(parsedBones)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var mappings = new List<SkeletonBoneMapping>(allSourceBones.Count);
         var unsupportedBones = new List<string>();
@@ -6118,7 +6095,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
             else
             {
-                var fallback = ResolveFallbackBone(bone, allTargetBones);
+                var fallback = ResolveFallbackBone(bone, allTargetBones, targetFrameworkId);
                 if (fallback is not null)
                 {
                     mappings.Add(new SkeletonBoneMapping(bone, fallback, IsPhysicsBone(bone)));
@@ -6136,9 +6113,9 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
     }
 
-    private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
+    private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones, string? frameworkId)
     {
-        if (!PhysicsBoneFallbacks.TryGetValue(sourceBone, out var fallbackCandidates))
+        if (!SkeletonMappingCatalog.TryGetFallbackCandidates(sourceBone, frameworkId, out var fallbackCandidates))
         {
             return ResolveSemanticFallbackBone(sourceBone, targetBones);
         }
@@ -6150,6 +6127,35 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         return ResolveSemanticFallbackBone(sourceBone, targetBones);
+    }
+
+    private static string? ResolveTargetFrameworkId(string targetBody, ImportedArmor armor, IReadOnlySet<string> targetPhysicsBones)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            var detectedCustomFramework = targetPhysicsBones.Count > 0
+                ? SkeletonFrameworkCatalog.DetectFramework(targetPhysicsBones.ToList())
+                : null;
+            if (!string.IsNullOrWhiteSpace(detectedCustomFramework))
+            {
+                return detectedCustomFramework;
+            }
+
+            if (!string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
+            {
+                return SlugifySkeletonTarget(customProfile.SkeletonFoundation);
+            }
+        }
+
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.SkeletonFramework))
+        {
+            return metadata.SkeletonFramework;
+        }
+
+        return targetPhysicsBones.Count > 0
+            ? SkeletonFrameworkCatalog.DetectFramework(targetPhysicsBones.ToList())
+            : null;
     }
 
     private static string? ResolveSemanticFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
@@ -6302,7 +6308,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
     private static bool IsPhysicsBone(string bone) =>
         BuiltInBodyMetadataCatalog.All.Any(body =>
-            body.AvailablePhysicsBones.Contains(bone, StringComparer.OrdinalIgnoreCase));
+            body.AvailablePhysicsBones.Contains(bone, StringComparer.OrdinalIgnoreCase)) ||
+        SkeletonMappingCatalog.ContainsFrameworkBone(bone);
 
     private static string ResolveTargetSkeletonLabel(string targetBody, ImportedArmor armor, bool hasPhysicsBones)
     {
