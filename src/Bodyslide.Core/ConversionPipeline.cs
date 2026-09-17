@@ -5057,9 +5057,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             return false;
         }
 
-        return sourceSlot.Side is null ||
-               expectedSlot.Side is null ||
-               sourceSlot.Side.Equals(expectedSlot.Side, StringComparison.OrdinalIgnoreCase);
+        if (sourceSlot.Side is not null && expectedSlot.Side is not null)
+        {
+            return sourceSlot.Side.Equals(expectedSlot.Side, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return sourceSlot.Side is null && expectedSlot.Side is null;
     }
 
     private static (string Key, string? Side) ClassifySemanticBone(string boneName)
@@ -6396,12 +6399,22 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
                 continue;
             }
 
-            if (source.Side is not null && source.Side.Equals(target.Side, StringComparison.OrdinalIgnoreCase))
+            if (source.Side is not null)
             {
-                return targetBone;
+                if (source.Side.Equals(target.Side, StringComparison.OrdinalIgnoreCase))
+                {
+                    return targetBone;
+                }
+
+                continue;
             }
 
             groupMatchWithoutSide ??= targetBone;
+        }
+
+        if (source.Side is not null)
+        {
+            return null;
         }
 
         return groupMatchWithoutSide;
