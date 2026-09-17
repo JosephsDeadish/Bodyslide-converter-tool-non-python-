@@ -1396,7 +1396,7 @@ internal static class SkeletonNifBoneParser
             var matches = candidate.Signatures.Count(signature =>
                 normalizedBones.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
                                             signature.Contains(bone, StringComparison.OrdinalIgnoreCase)));
-            if (matches >= 1)
+            if (matches >= Math.Min(2, candidate.Signatures.Length))
             {
                 return candidate.SkeletonFramework;
             }

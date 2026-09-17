@@ -287,7 +287,7 @@ internal static class BodySlideSourceProjectSupport
 
         sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
         isZap = IsLikelyZapSliderName(sliderName);
-        return !string.IsNullOrWhiteSpace(sliderName);
+        return isZap && !string.IsNullOrWhiteSpace(sliderName);
     }
 
     private static bool ShouldIncludePayloadSlider(

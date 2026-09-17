@@ -10940,7 +10940,7 @@ public sealed class VanillaBodyOspSliderTests
               </SliderSet>
             </SliderSetInfo>
             """);
-        await File.WriteAllBytesAsync(bsdPath, [1, 2, 3, 4]);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("WaistMagic", isHighWeight: false, [(0.1f, 0f, 0f)]));
 
         var armor = new ImportedArmor(nifPath, [nifPath], [], [], [ospPath, bsdPath]);
         var converted = new ConvertedMesh("cloth", "cage", 1,
@@ -10982,6 +10982,32 @@ public sealed class VanillaBodyOspSliderTests
         Assert.Contains("TravelerLift", project.Sliders);
         Assert.Contains("TravelerHideCape", project.ZapSliders ?? []);
         Assert.DoesNotContain("UnusedMorph", project.Sliders);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_SkipsUnreadableBsdSliderNamesUnlessTheyLookLikeZaps()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var meshPath = Path.Combine(tmpDir, "traveler_1.nif");
+        await File.WriteAllBytesAsync(meshPath, new byte[64]);
+
+        var unreadableSliderPath = Path.Combine(tmpDir, "TravelerWaistMagic_0.bsd");
+        Directory.CreateDirectory(Path.GetDirectoryName(unreadableSliderPath)!);
+        await File.WriteAllBytesAsync(unreadableSliderPath, [1, 2, 3, 4]);
+
+        var unreadableZapPath = Path.Combine(tmpDir, "TravelerHideSleeves_1.bsd");
+        await File.WriteAllBytesAsync(unreadableZapPath, [1, 2, 3, 4]);
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], [unreadableSliderPath, unreadableZapPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.DoesNotContain("TravelerWaistMagic", project.Sliders);
+        Assert.Contains("TravelerHideSleeves", project.ZapSliders ?? []);
     }
 
     private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
@@ -11445,6 +11471,13 @@ public sealed class CustomBodyProfileSupportTests
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["BreastUpper", "BreastOuter", "NPC Belly"]);
         Assert.Equal("ube-extended", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_SingleExtendedSignatureDoesNotOverrideXpmsse()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["NPC L Breast", "NPC Butt", "SAM Genitals"]);
+        Assert.Equal("xpmsse-physics", label);
     }
 
     [Fact]
