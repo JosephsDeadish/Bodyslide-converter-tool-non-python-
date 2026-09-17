@@ -5233,7 +5233,7 @@ public sealed class RuntimeReadinessReporterTests
     {
         var checks = RuntimeReadinessReporter.CreateCliReport(Environment.ProcessPath);
 
-        var catalogCheck = Assert.Single(checks.Where(check => check.Area == "Catalog data"));
+        var catalogCheck = Assert.Single(checks, check => check.Area == "Catalog data");
         Assert.Equal("OK", catalogCheck.Status);
         Assert.Contains("body aliases", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("skeleton frameworks", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
