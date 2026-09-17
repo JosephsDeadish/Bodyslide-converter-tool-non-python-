@@ -4734,7 +4734,7 @@ internal static class ArchiveExtractionHelper
     {
         if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ZipFile.ExtractToDirectory(archivePath, destinationDirectory);
+            ExtractZipArchive(archivePath, destinationDirectory);
             return;
         }
 
@@ -4760,6 +4760,50 @@ internal static class ArchiveExtractionHelper
         }
 
         throw new NotSupportedException($"Unsupported archive format: {archivePath}");
+    }
+
+    private static void ExtractZipArchive(string archivePath, string destinationDirectory)
+    {
+        var destinationRoot = Path.GetFullPath(destinationDirectory);
+        if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
+        {
+            destinationRoot += Path.DirectorySeparatorChar;
+        }
+
+        using var archive = ZipFile.OpenRead(archivePath);
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.FullName))
+            {
+                continue;
+            }
+
+            var normalizedKey = entry.FullName.Replace('\\', Path.DirectorySeparatorChar);
+            normalizedKey = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, normalizedKey));
+            if (!destinationPath.StartsWith(destinationRoot, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Archive entry escapes extraction root: {entry.FullName}");
+            }
+
+            var isDirectory = string.IsNullOrEmpty(entry.Name) ||
+                              entry.FullName.EndsWith('/') ||
+                              entry.FullName.EndsWith('\\');
+            if (isDirectory)
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            var destinationParent = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationParent))
+            {
+                Directory.CreateDirectory(destinationParent);
+            }
+
+            entry.ExtractToFile(destinationPath, overwrite: true);
+        }
     }
 
     private static void ExtractSevenZipArchive(string archivePath, string destinationDirectory)
