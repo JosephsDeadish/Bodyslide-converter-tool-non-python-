@@ -576,6 +576,12 @@ public static class PresetCatalog
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
         ["HIMBO Athletic"]    = new("HIMBO Athletic",     "HIMBO", "athletic", "smp"),
         ["HIMBO Zeroed"]      = new("HIMBO Zeroed",       "HIMBO", "zeroed",   "smp"),
+        // ── TNG ─────────────────────────────────────────────────────────────
+        ["TNG Lean"]          = new("TNG Lean",           "TNG",   "lean",     "smp"),
+        ["TNG Muscular"]      = new("TNG Muscular",       "TNG",   "muscular", "smp"),
+        ["TNG Athletic"]      = new("TNG Athletic",       "TNG",   "athletic", "smp"),
+        ["TNG Zeroed"]        = new("TNG Zeroed",         "TNG",   "zeroed",   "smp"),
+        ["Vanilla to TNG"]    = new("Vanilla to TNG",     "TNG",   "balanced", "smp"),
     };
 
     public static IReadOnlyCollection<ConversionPreset> All => Presets.Values;
@@ -3743,7 +3749,7 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
     private static readonly HashSet<string> HumanoidOnlyBodies =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "UBE", "SAM", "SOS", "HIMBO"
+            "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "UBE", "SAM", "SOS", "HIMBO", "TNG"
         };
 
     public Task<RaceCompatibilityReport> CheckAsync(

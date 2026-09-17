@@ -939,6 +939,83 @@
     "skeletonFramework": "ube-extended"
   },
   {
+    "name": "TNG",
+    "aliases": [
+      "The New Gentleman",
+      "TNG Extended",
+      "TNGExtended",
+      "New Gentleman"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "TNG Extended",
+    "notes": "Male body ecosystem with extended genital and scrotum bones layered on a broader XPMSSE-style male setup. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "TNG Genitals",
+      "TNG Balls"
+    ],
+    "referenceTokens": [
+      "tng",
+      "tngextended",
+      "newgentleman",
+      "the new gentleman",
+      "new gentleman"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Genitals"
+    ],
+    "transformationField": {
+      "chest": 1.09,
+      "waist": 1.01,
+      "pelvis": 1.04,
+      "legs": 1.05,
+      "shoulders": 1.11,
+      "breasts": 1.06,
+      "butt": 1.04,
+      "belly": 1.03,
+      "arms": 1.09,
+      "thighs": 1.06,
+      "calves": 1.04
+    },
+    "detectionTokens": [
+      "tng",
+      "tngextended",
+      "gentleman"
+    ],
+    "textureTokens": [
+      "malebody",
+      "tng"
+    ],
+    "physicsTokens": [
+      "tng",
+      "smp"
+    ],
+    "vertexCountMin": 6400,
+    "vertexCountMax": 6900,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.9,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "TNG Genitals",
+      "TNG Balls",
+      "NPC L Pec",
+      "NPC R Pec"
+    ],
+    "skeletonFramework": "tng-extended"
+  },
+  {
     "name": "Vanilla",
     "aliases": [
       "Vanilla Body",

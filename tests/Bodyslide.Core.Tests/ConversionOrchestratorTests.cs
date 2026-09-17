@@ -915,6 +915,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("TBD")]
     [InlineData("SAM")]
     [InlineData("SOS")]
+    [InlineData("TNG")]
     [InlineData("UBE")]
     [InlineData("Vanilla")]
     public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
@@ -938,6 +939,7 @@ public sealed class ConversionOrchestratorTests
         var presets = PresetCatalog.All.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("BHUNP Curvy", presets);
         Assert.Contains("HIMBO Muscular", presets);
+        Assert.Contains("TNG Athletic", presets);
         Assert.Contains("3BA Slim", presets);
         Assert.Contains("UNP Athletic", presets);
         Assert.Contains("UUNP Curvy", presets);
@@ -1733,6 +1735,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("UUNP")]
     [InlineData("COCO CBBE")]
     [InlineData("COCO UUNP")]
+    [InlineData("TNG")]
     public async Task BasicRaceCompatibilityService_WarnsForKhajiitRaceWithNewHumanoidOnlyBodies(string targetBody)
     {
         var service = new BasicRaceCompatibilityService();
@@ -4290,6 +4293,7 @@ public sealed class BodySignatureVertexCountTests
     [InlineData("TBD",   7680)] // within 7400-7900
     [InlineData("SAM",   5984)] // within 5800-6200
     [InlineData("SOS",   6274)] // within 6100-6500
+    [InlineData("TNG",   6640)] // within 6400-6900
     [InlineData("UBE",   7000)] // within 6800-7200
     [InlineData("Vanilla", 5000)] // within 4000-6100
     public void BodySignatureTemplate_VertexCountRanges_IncludeTypicalCounts(string bodyName, int typicalCount)
@@ -4910,6 +4914,8 @@ public sealed class ExpandedPresetTests
     [InlineData("SAM Muscular",  "SAM")]
     [InlineData("SOS Lean",      "SOS")]
     [InlineData("SOS Athletic",  "SOS")]
+    [InlineData("TNG Athletic",  "TNG")]
+    [InlineData("TNG Muscular",  "TNG")]
     [InlineData("UBE Petite",    "UBE")]
     [InlineData("UBE Curvy",     "UBE")]
     [InlineData("CBBE Zeroed",   "CBBE")]
@@ -4920,9 +4926,11 @@ public sealed class ExpandedPresetTests
     [InlineData("HIMBO Zeroed",  "HIMBO")]
     [InlineData("SAM Zeroed",    "SAM")]
     [InlineData("SOS Zeroed",    "SOS")]
+    [InlineData("TNG Zeroed",    "TNG")]
     [InlineData("UBE Zeroed",    "UBE")]
     [InlineData("Vanilla Zeroed","Vanilla")]
     [InlineData("Vanilla Balanced", "Vanilla")]
+    [InlineData("Vanilla to TNG","TNG")]
     [InlineData("HIMBO Athletic","HIMBO")]
     public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)
     {
@@ -4949,6 +4957,7 @@ public sealed class BodyTransformationFieldTests
     [InlineData("HIMBO")]
     [InlineData("SAM")]
     [InlineData("SOS")]
+    [InlineData("TNG")]
     [InlineData("Vanilla")]
     public void BodyTransformationFieldCatalog_AllBodyTypes_Have11Regions(string body)
     {
@@ -5072,7 +5081,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SOS", "TNG", "UBE", "Vanilla" })
         {
             Assert.Contains(expected, names);
         }
@@ -5090,7 +5099,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SOS", "TNG", "UBE", "Vanilla" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -5143,6 +5152,7 @@ public sealed class BodyTypeCatalogTests
             ("HIMBO",   "smp"),
             ("SAM",     "smp"),
             ("SOS",     "smp"),
+            ("TNG",     "smp"),
             ("UBE",     "smp+cbpc"),
         })
         {
@@ -5170,6 +5180,7 @@ public sealed class BodyTypeCatalogTests
     [InlineData("UNPB", "UNP")]
     [InlineData("SAM Light", "SAM")]
     [InlineData("Schlongs of Skyrim", "SOS")]
+    [InlineData("The New Gentleman", "TNG")]
     [InlineData("Ultimate Body Enhancer", "UBE")]
     public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
     {
@@ -5181,6 +5192,7 @@ public sealed class BodyTypeCatalogTests
     [Theory]
     [InlineData("3BBB", "3BA")]
     [InlineData("Touched By Dibella", "TBD")]
+    [InlineData("TNG Extended", "TNG")]
     [InlineData("Vanilla Body", "Vanilla")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
@@ -8439,6 +8451,7 @@ public sealed class ConversionReadmeGeneratorTests
     [InlineData("Vanilla to CBBE",  "CBBE",    "balanced")]
     [InlineData("Vanilla to 3BA",   "3BA",     "balanced")]
     [InlineData("Vanilla to HIMBO", "HIMBO",   "balanced")]
+    [InlineData("Vanilla to TNG",   "TNG",     "balanced")]
     [InlineData("Vanilla to UNP",   "UNP",     "balanced")]
     public void PresetCatalog_ContainsVanillaPreset(string presetName, string expectedBody, string expectedProfile)
     {
@@ -10524,6 +10537,7 @@ public sealed class BasicWeightTransferServicePhysicsTests
     [Theory]
     [InlineData("HIMBO")]
     [InlineData("SAM")]
+    [InlineData("TNG")]
     public async Task TransferAsync_MalePhysicsTarget_PopulatesMaleSmpBones(string targetBody)
     {
         var svc      = new BasicWeightTransferService();
@@ -10963,6 +10977,7 @@ public sealed class MorphGenerationServiceTests
     [InlineData("CBBE",  12)]
     [InlineData("BHUNP", 14)]
     [InlineData("HIMBO",  8)]
+    [InlineData("TNG",    9)]
     [InlineData("Vanilla", 5)]
     public async Task GenerateAsync_KnownBody_ReturnsCorrectSliderCount(string targetBody, int expectedSliders)
     {

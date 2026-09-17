@@ -3,8 +3,8 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
-- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `UNPB` → `UNP`, `SAM Light` → `SAM`, and `Touched By Dibella` → `TBD`
+- body signature detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, TNG, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `UNPB` → `UNP`, `SAM Light` → `SAM`, `TNG Extended` → `TNG`, and `Touched By Dibella` → `TBD`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
