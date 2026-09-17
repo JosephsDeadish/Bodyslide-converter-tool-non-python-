@@ -88,11 +88,17 @@ internal static class BodySlideSourceProjectSupport
             }
             else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
             {
-                var sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
+                var sliderName = TryReadBsdSliderName(filePath);
                 if (!string.IsNullOrWhiteSpace(sliderName))
                 {
                     sliders.Add(sliderName);
                 }
+            }
+            else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
+                     TriMorphReader.TryRead(filePath, out var triPayload) &&
+                     triPayload is not null)
+            {
+                sliders.AddRange(triPayload.Morphs.Select(morph => NormalizeSliderFileName(morph.Name)));
             }
         }
 
@@ -113,7 +119,8 @@ internal static class BodySlideSourceProjectSupport
         var explicitFiles = armor.BodyReferenceFiles
             .Where(static path =>
                 path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase));
+                path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
 
         var discoveredFiles = Directory.Exists(sourceRoot)
             ? Directory.EnumerateFiles(sourceRoot, "*.*", SearchOption.AllDirectories)
@@ -121,7 +128,8 @@ internal static class BodySlideSourceProjectSupport
                 {
                     var extension = Path.GetExtension(path);
                     return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
-                           extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
+                           extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                           extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
                 })
                 .Where(path => IsAssociatedWithArmor(path, meshTokens))
             : [];
@@ -239,6 +247,16 @@ internal static class BodySlideSourceProjectSupport
         }
 
         return normalized;
+    }
+
+    private static string TryReadBsdSliderName(string filePath)
+    {
+        if (BsdMorphReader.TryRead(filePath, out var payload) && payload is not null)
+        {
+            return NormalizeSliderFileName(payload.SliderName);
+        }
+
+        return NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
     }
 
     private static bool IsTruthy(string? value) =>

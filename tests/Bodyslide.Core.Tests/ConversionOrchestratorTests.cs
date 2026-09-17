@@ -3968,6 +3968,22 @@ internal sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
 public sealed class BsdSliderDataTests
 {
     [Fact]
+    public void BsdMorphReader_ReadsPayloadHeaderAndDeltas()
+    {
+        var bytes = BuildBsdPayload("PayloadWaist", isHighWeight: true, [(0.125f, -0.25f, 0.375f), (0.5f, 0.625f, -0.75f)]);
+
+        var ok = BsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal("PayloadWaist", payload!.SliderName);
+        Assert.True(payload.IsHighWeight);
+        Assert.Equal(2, payload.VertexCount);
+        Assert.Equal(0.125f, payload.Deltas[0].X, 3);
+        Assert.Equal(-0.75f, payload.Deltas[1].Z, 3);
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4074,11 +4090,55 @@ public sealed class BsdSliderDataTests
         }
     }
 
-public sealed class TriMorphFileTests
-{
-    [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+    private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
     {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write((byte)'B');
+        writer.Write((byte)'S');
+        writer.Write((byte)'D');
+        writer.Write((byte)0);
+        writer.Write((ushort)1);
+        writer.Write(isHighWeight ? (byte)1 : (byte)0);
+        writer.Write((ushort)nameBytes.Length);
+        writer.Write(nameBytes);
+        writer.Write((uint)deltas.Count);
+        foreach (var (x, y, z) in deltas)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        return ms.ToArray();
+    }
+
+    public sealed class TriMorphFileTests
+    {
+        [Fact]
+        public void TriMorphReader_ReadsMorphNamesAndDeltaPayloads()
+        {
+            var bytes = BuildTriPayload(
+                vertexCount: 2,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0.5f, 0.25f, 0.125f)]),
+                ("HideCape_1", [(0f, 0f, 0f), (0.25f, -0.25f, 0.5f)]));
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(2, payload!.VertexCount);
+            Assert.Equal(2, payload.Morphs.Count);
+            Assert.Equal("BreastLift", payload.Morphs[0].Name);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+            Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+        }
+
+        [Fact]
+        public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+        {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
         Directory.CreateDirectory(workingDirectory);
@@ -4184,6 +4244,35 @@ public sealed class TriMorphFileTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    private static byte[] BuildTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (x, y, z) in morph.Deltas)
+            {
+                writer.Write((short)Math.Round(x * 2048f));
+                writer.Write((short)Math.Round(y * 2048f));
+                writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
     }
 }
 
@@ -10865,6 +10954,86 @@ public sealed class VanillaBodyOspSliderTests
         Assert.Contains("name=\"SourceBust\"", project.OspXml, StringComparison.Ordinal);
         Assert.Contains("name=\"HideAmulet\"", project.OspXml, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GenerateAsync_UsesTriAndBsdPayloadNames()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "traveler_outfit_0.nif");
+        var bsdPath = Path.Combine(tmpDir, "unhelpful_name.bsd");
+        var triPath = Path.Combine(tmpDir, "traveler_outfit.tri");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("PayloadBust", isHighWeight: false, [(0.25f, 0f, 0f)]));
+        await File.WriteAllBytesAsync(triPath, BuildTriPayload(
+            1,
+            ("TravelerLift", [(0.125f, 0.25f, 0.375f)]),
+            ("TravelerHideCape_1", [(0f, 0f, 0f)])));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath, bsdPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("PayloadBust", project.Sliders);
+        Assert.Contains("TravelerLift", project.Sliders);
+        Assert.Contains("TravelerHideCape", project.Sliders);
+    }
+
+    private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
+    {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write((byte)'B');
+        writer.Write((byte)'S');
+        writer.Write((byte)'D');
+        writer.Write((byte)0);
+        writer.Write((ushort)1);
+        writer.Write(isHighWeight ? (byte)1 : (byte)0);
+        writer.Write((ushort)nameBytes.Length);
+        writer.Write(nameBytes);
+        writer.Write((uint)deltas.Count);
+        foreach (var (x, y, z) in deltas)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (x, y, z) in morph.Deltas)
+            {
+                writer.Write((short)Math.Round(x * 2048f));
+                writer.Write((short)Math.Round(y * 2048f));
+                writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
+    }
 }
 
 public sealed class CustomBodyProfileSupportTests
@@ -11173,6 +11342,47 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LBreastUpper", StringComparison.OrdinalIgnoreCase)
                                                       && m.TargetBone.Equals("LBreastSupport", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("LBreastUpper", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesFollowerCollisionAliases()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LeftBreastCollision\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "FollowerCustom",
+                        ["followercustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LeftBreastSupport", "RightBreastSupport", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "FollowerCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, mapping =>
+                mapping.SourceBone.Equals("LeftBreastCollision", StringComparison.OrdinalIgnoreCase) &&
+                mapping.TargetBone.Equals("LeftBreastSupport", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

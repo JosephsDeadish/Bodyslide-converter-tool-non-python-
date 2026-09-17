@@ -12,7 +12,33 @@ internal sealed record BuiltInBodyMetadata(
     IReadOnlyList<string> AvailablePhysicsBones,
     IReadOnlyList<string> ReferenceTokens,
     IReadOnlyList<string> SliderNames,
-    IReadOnlyDictionary<string, double> TransformationField);
+    IReadOnlyDictionary<string, double> TransformationField,
+    IReadOnlyList<string> DetectionTokens,
+    IReadOnlyList<string> TextureTokens,
+    IReadOnlyList<string> PhysicsTokens,
+    int VertexCountMin,
+    int VertexCountMax,
+    double HeightToWidthRatioMin,
+    double HeightToWidthRatioMax,
+    double DepthToWidthRatioMin,
+    double DepthToWidthRatioMax,
+    IReadOnlyList<string> PhysicsBoneSignatures,
+    string SkeletonFramework)
+{
+    public BodySignatureTemplate ToSignatureTemplate() =>
+        new(
+            Name,
+            DetectionTokens,
+            TextureTokens,
+            PhysicsTokens,
+            VertexCountMin,
+            VertexCountMax,
+            HeightToWidthRatioMin,
+            HeightToWidthRatioMax,
+            DepthToWidthRatioMin,
+            DepthToWidthRatioMax,
+            ReferenceTokens);
+}
 
 internal static class BuiltInBodyMetadataCatalog
 {
@@ -101,7 +127,18 @@ internal static class BuiltInBodyMetadataCatalog
             NormalizeStringList(dto.AvailablePhysicsBones),
             NormalizeStringList(dto.ReferenceTokens),
             NormalizeStringList(dto.SliderNames),
-            NormalizeTransformationField(dto.TransformationField));
+            NormalizeTransformationField(dto.TransformationField),
+            NormalizeStringList(dto.DetectionTokens),
+            NormalizeStringList(dto.TextureTokens),
+            NormalizeStringList(dto.PhysicsTokens),
+            Math.Max(0, dto.VertexCountMin),
+            Math.Max(dto.VertexCountMin, dto.VertexCountMax),
+            dto.HeightToWidthRatioMin,
+            dto.HeightToWidthRatioMax,
+            dto.DepthToWidthRatioMin,
+            dto.DepthToWidthRatioMax,
+            NormalizeStringList(dto.PhysicsBoneSignatures),
+            string.IsNullOrWhiteSpace(dto.SkeletonFramework) ? "xpmsse" : dto.SkeletonFramework.Trim());
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -148,5 +185,16 @@ internal static class BuiltInBodyMetadataCatalog
         public string[]? ReferenceTokens { get; init; }
         public string[]? SliderNames { get; init; }
         public Dictionary<string, double>? TransformationField { get; init; }
+        public string[]? DetectionTokens { get; init; }
+        public string[]? TextureTokens { get; init; }
+        public string[]? PhysicsTokens { get; init; }
+        public int VertexCountMin { get; init; }
+        public int VertexCountMax { get; init; }
+        public double HeightToWidthRatioMin { get; init; }
+        public double HeightToWidthRatioMax { get; init; }
+        public double DepthToWidthRatioMin { get; init; }
+        public double DepthToWidthRatioMax { get; init; }
+        public string[]? PhysicsBoneSignatures { get; init; }
+        public string? SkeletonFramework { get; init; }
     }
 }

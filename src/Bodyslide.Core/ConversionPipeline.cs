@@ -1121,24 +1121,6 @@ public static class BodyTechnicalProfileCatalog
     }
 }
 
-/// <summary>
-/// Defines token signatures used to match imported assets to known body families.
-/// Mesh, texture, and physics token hit ratios are combined with optional vertex count
-/// range hints into a confidence score.
-/// </summary>
-internal sealed record BodySignatureTemplate(
-    string Body,
-    IReadOnlyList<string> MeshTokens,
-    IReadOnlyList<string> TextureTokens,
-    IReadOnlyList<string> PhysicsTokens,
-    int VertexCountMin = 0,
-    int VertexCountMax = 0,
-    double HeightToWidthRatioMin = 0,
-    double HeightToWidthRatioMax = 0,
-    double DepthToWidthRatioMin = 0,
-    double DepthToWidthRatioMax = 0,
-    IReadOnlyList<string>? ReferenceTokens = null);
-
 internal readonly record struct MeshVertex(float X, float Y, float Z);
 
 internal sealed record MeshUvSignature(
@@ -1472,57 +1454,6 @@ internal static class SkeletonNifBoneParser
         strings = result;
         return result.Count > 0;
     }
-}
-
-internal static class VanillaBodySignatureDatabase
-{
-    // Typical vertex counts per body type are well-known in the modding community.
-    // These ranges are used as additional scoring hints when NIF data is available.
-    // CBBE:  ~6942 vertices (standard), UNP: ~6032, UUNP: ~8.5k-9.5k, COCO CBBE: ~9.0k-10.4k,
-    // COCO UUNP: ~9.4k-10.8k, HIMBO: ~6820, BHUNP: ~10080, 3BA: ~10032, TBD: ~7680, SAM: ~5984,
-    // SOS: ~6274, UBE: ~7000
-    public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
-    [
-        new("CBBE",    ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
-        new("UNP",     ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
-        new("UUNP",    ["uunp", "un7b", "7base"], ["femalebody", "uunp"], ["uunp", "7base"], 8200, 9800, 4.1, 7.3, 0.30, 0.82),
-        new("COCO CBBE", ["coco", "cbbe"],          ["coco", "cbbe"],                ["coco", "cbpc", "smp"], 9000, 10400, 4.1, 7.3, 0.31, 0.84),
-        new("COCO UUNP", ["coco", "uunp", "7base"], ["coco", "uunp"],                ["coco", "cbpc", "smp", "7base"], 9400, 10800, 4.1, 7.3, 0.31, 0.84),
-        new("HIMBO",   ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
-        new("BHUNP",   ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("3BA",     ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc", "3bbb"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("TBD",     ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
-        new("SAM",     ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
-        new("SOS",     ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
-        new("UBE",     ["ube", "ubebody", "ultimatebodyenhancer"], ["ube", "ubebody"], ["smp", "cbpc", "breastupper", "breastouter", "buttupper"], 6800, 7200, 4.3, 7.4, 0.30, 0.80),
-        new("Vanilla", ["vanilla", "femalebody", "malebody"], ["femalebody", "malebody"], [],        4000, 6100, 4.0, 7.5, 0.28, 0.90),
-    ];
-}
-
-internal static class ReferenceBodySignatureDatabase
-{
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> Tokens =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CBBE"] = ["femalebody_0", "femalebody_1"],
-            ["3BA"] = ["3ba", "3bbb"],
-            ["BHUNP"] = ["bhunp", "uunp special"],
-            ["UNP"] = ["unp", "unpb"],
-            ["UUNP"] = ["uunp", "7base", "un7b"],
-            ["COCO CBBE"] = ["coco", "cocobody", "cbbe"],
-            ["COCO UUNP"] = ["coco", "cocobody", "uunp", "7base"],
-            ["TBD"] = ["tbd", "touched by dibella"],
-            ["UBE"] = ["ube", "ubebody", "ultimatebodyenhancer"],
-            ["HIMBO"] = ["himbo"],
-            ["SAM"] = ["sam", "samlight"],
-            ["SOS"] = ["sos", "schlongs"],
-            ["Vanilla"] = ["vanillafemale", "vanillamale", "vanilla"]
-        };
-
-    public static IReadOnlyList<string> GetTokens(string bodyName) =>
-        BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata)
-            ? metadata.ReferenceTokens
-            : Tokens.TryGetValue(bodyName, out var tokens) ? tokens : [];
 }
 
 internal static class NifGeometrySignatureReader
@@ -4969,33 +4900,6 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double ReferencePriorityMargin = 0.34;
     private const double SharedReferenceConfidenceFloor = 0.50;
 
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> SemanticBoneAliases =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["breast"] = ["breast", "bust", "chest", "pec", "boob", "bosom", "nipple"],
-            ["butt"] = ["butt", "glute", "rear", "cheek", "rump", "hip"],
-            ["belly"] = ["belly", "abdomen", "stomach", "tummy", "gut", "navel"],
-            ["thigh"] = ["thigh", "leg", "upperleg"],
-            ["genitals"] = ["genital", "schlong", "penis", "vagina", "groin", "crotch", "pubic"],
-            ["hair"] = ["hair", "bang", "ponytail", "tail", "strand", "lock"]
-        };
-
-    // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC Belly01", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-            ["BHUNP"] = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC LBreast01", "NPC RBreast01", "NPC L Thigh", "NPC R Thigh"],
-            ["UUNP"]  = ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-            ["COCO CBBE"] = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-            ["COCO UUNP"] = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-            ["HIMBO"] = ["NPC L Pec", "NPC R Pec", "NPC LPec", "NPC RPec"],
-            ["SOS"]   = ["NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],
-            ["SAM"]   = ["SOS GenitalsBase", "SAM Genitals", "NPC L Breast01"],
-            ["TBD"]   = ["TBD Breast", "NPC Belly01", "NPC L Butt"],
-            ["UBE"]   = ["BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-        };
-
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
@@ -5155,7 +5059,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var lower = boneName.Trim().ToLowerInvariant();
         var side = DetectSemanticSide(lower);
 
-        foreach (var (key, aliases) in SemanticBoneAliases)
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
         {
             if (aliases.Any(lower.Contains))
             {
@@ -5348,10 +5252,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         // Bone signature: check if specific physics bone names appear in XML content.
         double boneSignatureScore = 0;
-        if (physicsContents.Length > 0 && BodyBoneSignatures.TryGetValue(template.Body, out var boneNames))
+        if (physicsContents.Length > 0 &&
+            BuiltInBodyMetadataCatalog.TryGet(template.Body, out var metadata) &&
+            metadata.PhysicsBoneSignatures.Count > 0)
         {
-            var hits = CountBoneSignatureMatches(physicsBoneNames, boneNames);
-            boneSignatureScore = (double)hits / boneNames.Count;
+            var hits = CountBoneSignatureMatches(physicsBoneNames, metadata.PhysicsBoneSignatures);
+            boneSignatureScore = (double)hits / metadata.PhysicsBoneSignatures.Count;
             if (boneSignatureScore > 0)
             {
                 evidence.Add($"bone-sig:{boneSignatureScore:P0}");
@@ -5862,63 +5768,6 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
 {
-    // Physics bones required on the TARGET body for SMP/CBPC simulation to work.
-    // When the converted mesh lacks these influences, the physics system skips the armor.
-    // Female SMP bodies (3BA / BHUNP / TBD) use the breast + butt + belly chain.
-    private static readonly IReadOnlyList<string> FemaleSmpBones =
-    [
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC L Breast03", "NPC R Breast03",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly",
-        "NPC L Thigh", "NPC R Thigh",
-    ];
-
-    // CBPC-only female bodies (UNP / TBD-lite) use a smaller set — just the leaf bones.
-    private static readonly IReadOnlyList<string> FemaleCbpcBones =
-    [
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly",
-    ];
-
-    // Male physics bodies (HIMBO / SAM / SOS) drive pec and belly simulation.
-    private static readonly IReadOnlyList<string> MaleSmpBones =
-    [
-        "NPC L Pec", "NPC R Pec",
-        "NPC Belly",
-    ];
-
-    private static readonly IReadOnlyList<string> UbeSoftBodyBones =
-    [
-        "NPC L Breast", "NPC R Breast",
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC Belly",
-        "NPC L Butt", "NPC R Butt",
-        "NPC L Thigh", "NPC R Thigh",
-        "BreastUpper", "BreastLower", "BreastOuter", "BreastInner",
-        "ButtUpper", "ButtLower",
-    ];
-
-    // Map each target body to the physics bones it requires in the converted mesh.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> TargetPhysicsBoneMap =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = FemaleSmpBones,
-            ["BHUNP"] = FemaleSmpBones,
-            ["UNP"]   = FemaleCbpcBones,
-            ["UUNP"]  = FemaleCbpcBones,
-            ["COCO CBBE"] = FemaleSmpBones,
-            ["COCO UUNP"] = FemaleSmpBones,
-            ["TBD"]   = FemaleCbpcBones,
-            ["HIMBO"] = MaleSmpBones,
-            ["SAM"]   = MaleSmpBones,
-            ["SOS"]   = MaleSmpBones,
-            ["UBE"]   = UbeSoftBodyBones,
-        };
-
     public Task<WeightedMesh> TransferAsync(
         ConvertedMesh mesh,
         MeshAnalysis analysis,
@@ -5939,8 +5788,10 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
         var hasCustomProfile = CustomBodyProfileSupport.TryGetProfile(sourceArmor, targetBody, out var customProfile);
         var targetPhysBones = hasCustomProfile
             ? customProfile.PhysicsBones
-            : TargetPhysicsBoneMap.TryGetValue(targetBody, out var builtInBones) ? builtInBones : null;
-        if (analysis.HeadgearSubType is not null)
+            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInBody)
+                ? builtInBody.AvailablePhysicsBones
+                : null;
+        if (!analysis.PhysicsEnabled || analysis.HeadgearSubType is not null)
             targetPhysBones = null;
 
         return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones, targetPhysBones));
@@ -6337,56 +6188,6 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         "NPC R Thigh", "NPC R Calf", "NPC R Foot"
     ];
 
-    // Physics bones added by SMP/3BA/BHUNP on female bodies.
-    private static readonly IReadOnlySet<string> FeaturePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01",
-        "NPC Belly", "NPC Butt", "NPC L Butt", "NPC R Butt",
-        "NPC L Breast02", "NPC R Breast02"
-    };
-
-    private static readonly IReadOnlySet<string> CbpcPhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly"
-    };
-
-    private static readonly IReadOnlySet<string> UbePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast", "NPC R Breast",
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC Belly", "NPC L Butt", "NPC R Butt",
-        "NPC L Thigh", "NPC R Thigh",
-        "BreastUpper", "BreastLower", "BreastOuter", "BreastInner",
-        "ButtUpper", "ButtLower"
-    };
-
-    // Physics bones specific to HIMBO/SAM male bodies.
-    private static readonly IReadOnlySet<string> MalePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"
-    };
-
-    // Map of which body types support which extra physics bone sets.
-    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> BodyPhysicsBoneSupport =
-        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = FeaturePhysicsBones,
-            ["BHUNP"] = FeaturePhysicsBones,
-            ["COCO CBBE"] = FeaturePhysicsBones,
-            ["COCO UUNP"] = FeaturePhysicsBones,
-            ["TBD"]   = CbpcPhysicsBones,
-            ["HIMBO"] = MalePhysicsBones,
-            ["SAM"]   = MalePhysicsBones,
-            ["CBBE"]  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            ["UNP"]   = CbpcPhysicsBones,
-            ["UUNP"]  = CbpcPhysicsBones,
-            ["UBE"]   = UbePhysicsBones,
-            ["SOS"]   = MalePhysicsBones
-        };
-
     // Fallback remaps for source physics bones that are missing on the target skeleton.
     // Ordered by preference: the first candidate present on the target is selected.
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneFallbacks =
@@ -6408,17 +6209,6 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             ["ButtLower"]      = ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
         };
 
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> SemanticBoneAliases =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["breast"] = ["breast", "bust", "chest", "pec", "boob", "bosom", "nipple"],
-            ["butt"] = ["butt", "glute", "rear", "cheek", "rump", "hip"],
-            ["belly"] = ["belly", "abdomen", "stomach", "tummy", "gut", "navel"],
-            ["thigh"] = ["thigh", "leg", "upperleg"],
-            ["genitals"] = ["genital", "schlong", "penis", "vagina", "groin", "crotch", "pubic"],
-            ["hair"] = ["hair", "bang", "ponytail", "tail", "strand", "lock"]
-        };
-
     public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
         IReadOnlySet<string> targetPhysicsBones;
@@ -6429,9 +6219,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
         else
         {
-            targetPhysicsBones = BodyPhysicsBoneSupport.TryGetValue(targetBody, out var builtInBones)
-                ? builtInBones
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            targetPhysicsBones = GetBuiltInPhysicsBones(targetBody);
         }
 
         var allTargetBones = CommonBones.Concat(targetPhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -6475,14 +6263,14 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         {
             if (allTargetBones.Contains(bone))
             {
-                mappings.Add(new SkeletonBoneMapping(bone, bone, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+                mappings.Add(new SkeletonBoneMapping(bone, bone, IsPhysicsBone(bone)));
             }
             else
             {
                 var fallback = ResolveFallbackBone(bone, allTargetBones);
                 if (fallback is not null)
                 {
-                    mappings.Add(new SkeletonBoneMapping(bone, fallback, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+                    mappings.Add(new SkeletonBoneMapping(bone, fallback, IsPhysicsBone(bone)));
                 }
                 else
                 {
@@ -6492,7 +6280,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         var sourceSkeleton = parsedSkeletonLabel;
-        var targetSkeleton = targetPhysicsBones.Count > 0 ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
+        var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, targetPhysicsBones.Count > 0);
 
         return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
     }
@@ -6556,7 +6344,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         var lower = boneName.Trim().ToLowerInvariant();
         var side = DetectSemanticSide(lower);
 
-        foreach (var (key, aliases) in SemanticBoneAliases)
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
         {
             if (aliases.Any(lower.Contains))
             {
@@ -6617,9 +6405,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var bones = FeaturePhysicsBones
-            .Concat(MalePhysicsBones)
-            .Concat(UbePhysicsBones)
+        var bones = BuiltInBodyMetadataCatalog.All
+            .SelectMany(static body => body.AvailablePhysicsBones)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in armor.PhysicsFiles)
@@ -6655,6 +6442,27 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         return bones;
+    }
+
+    private static IReadOnlySet<string> GetBuiltInPhysicsBones(string targetBody) =>
+        BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata)
+            ? metadata.AvailablePhysicsBones.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsPhysicsBone(string bone) =>
+        BuiltInBodyMetadataCatalog.All.Any(body =>
+            body.AvailablePhysicsBones.Contains(bone, StringComparer.OrdinalIgnoreCase));
+
+    private static string ResolveTargetSkeletonLabel(string targetBody, bool hasPhysicsBones)
+    {
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            return hasPhysicsBones
+                ? metadata.SkeletonFramework
+                : $"{metadata.SkeletonFramework}-static";
+        }
+
+        return hasPhysicsBones ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
     }
 }
 

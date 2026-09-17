@@ -5,10 +5,67 @@
     "defaultPhysics": "none",
     "skeletonFoundation": "XPMSSE",
     "notes": "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-    "referenceTokens": ["femalebody_0", "femalebody_1"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
-    "transformationField": { "chest": 1.08, "waist": 0.96, "pelvis": 1.05, "legs": 1.03, "shoulders": 1.01, "breasts": 1.09, "butt": 1.06, "belly": 1.02, "arms": 1.01, "thighs": 1.04, "calves": 1.02 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "femalebody_0",
+      "femalebody_1"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 0.96,
+      "pelvis": 1.05,
+      "legs": 1.03,
+      "shoulders": 1.01,
+      "breasts": 1.09,
+      "butt": 1.06,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.04,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "cbbe",
+      "caliente"
+    ],
+    "textureTokens": [
+      "femalebody_1",
+      "femalebody_0"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 6800,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.2,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.8,
+    "physicsBoneSignatures": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbbe"
   },
   {
     "name": "3BA",
@@ -16,10 +73,85 @@
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE",
     "notes": "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-    "referenceTokens": ["3ba", "3bbb"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-    "transformationField": { "chest": 1.12, "waist": 0.95, "pelvis": 1.06, "legs": 1.04, "shoulders": 1.01, "breasts": 1.13, "butt": 1.08, "belly": 1.03, "arms": 1.02, "thighs": 1.05, "calves": 1.03 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "3ba",
+      "3bbb"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.12,
+      "waist": 0.95,
+      "pelvis": 1.06,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 1.13,
+      "butt": 1.08,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "3ba",
+      "cbbe",
+      "bodyslide"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [
+      "smp",
+      "cbpc",
+      "3bbb"
+    ],
+    "vertexCountMin": 9800,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.0,
+    "depthToWidthRatioMin": 0.33,
+    "depthToWidthRatioMax": 0.85,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC Belly01",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced"
   },
   {
     "name": "BHUNP",
@@ -27,10 +159,79 @@
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE",
     "notes": "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-    "referenceTokens": ["bhunp", "uunp special"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
-    "transformationField": { "chest": 1.10, "waist": 0.94, "pelvis": 1.07, "legs": 1.04, "shoulders": 1.01, "breasts": 1.11, "butt": 1.07, "belly": 1.03, "arms": 1.01, "thighs": 1.05, "calves": 1.03 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "bhunp",
+      "uunp special"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 0.94,
+      "pelvis": 1.07,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 1.11,
+      "butt": 1.07,
+      "belly": 1.03,
+      "arms": 1.01,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "bhunp"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 9800,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.0,
+    "depthToWidthRatioMin": 0.33,
+    "depthToWidthRatioMax": 0.85,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC LBreast01",
+      "NPC RBreast01",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced"
   },
   {
     "name": "UNP",
@@ -38,10 +239,65 @@
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
     "notes": "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-    "referenceTokens": ["unp", "unpb"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
-    "transformationField": { "chest": 1.04, "waist": 0.97, "pelvis": 1.02, "legs": 1.01, "shoulders": 1.00, "breasts": 1.04, "butt": 1.02, "belly": 1.01, "arms": 1.00, "thighs": 1.02, "calves": 1.01 }
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "unp",
+      "unpb"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 1.04,
+      "waist": 0.97,
+      "pelvis": 1.02,
+      "legs": 1.01,
+      "shoulders": 1.0,
+      "breasts": 1.04,
+      "butt": 1.02,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.02,
+      "calves": 1.01
+    },
+    "detectionTokens": [
+      "unp",
+      "unpb"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 5900,
+    "vertexCountMax": 6200,
+    "heightToWidthRatioMin": 4.3,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.75,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc"
   },
   {
     "name": "UUNP",
@@ -49,10 +305,74 @@
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
     "notes": "Unified UNP BodySlide ecosystem with broader slider coverage than classic UNP while keeping XPMSSE-compatible weighting. CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-    "referenceTokens": ["uunp", "7base", "un7b"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
-    "transformationField": { "chest": 1.08, "waist": 0.95, "pelvis": 1.05, "legs": 1.03, "shoulders": 1.01, "breasts": 1.09, "butt": 1.06, "belly": 1.02, "arms": 1.01, "thighs": 1.04, "calves": 1.02 }
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "uunp",
+      "7base",
+      "un7b"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 0.95,
+      "pelvis": 1.05,
+      "legs": 1.03,
+      "shoulders": 1.01,
+      "breasts": 1.09,
+      "butt": 1.06,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.04,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "uunp",
+      "un7b",
+      "7base"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "uunp"
+    ],
+    "physicsTokens": [
+      "uunp",
+      "7base"
+    ],
+    "vertexCountMin": 8200,
+    "vertexCountMax": 9800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.82,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc"
   },
   {
     "name": "COCO CBBE",
@@ -60,10 +380,85 @@
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + COCO weighting",
     "notes": "COCO variant built on a CBBE-style body family with custom topology and heavier physics weighting. SMP+CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-    "referenceTokens": ["coco", "cocobody", "cbbe"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-    "transformationField": { "chest": 1.11, "waist": 0.94, "pelvis": 1.07, "legs": 1.04, "shoulders": 1.02, "breasts": 1.12, "butt": 1.09, "belly": 1.03, "arms": 1.02, "thighs": 1.05, "calves": 1.03 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "coco",
+      "cocobody",
+      "cbbe"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.11,
+      "waist": 0.94,
+      "pelvis": 1.07,
+      "legs": 1.04,
+      "shoulders": 1.02,
+      "breasts": 1.12,
+      "butt": 1.09,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "coco",
+      "cbbe"
+    ],
+    "textureTokens": [
+      "coco",
+      "cbbe"
+    ],
+    "physicsTokens": [
+      "coco",
+      "cbpc",
+      "smp"
+    ],
+    "vertexCountMin": 9000,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.84,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced"
   },
   {
     "name": "COCO UUNP",
@@ -71,10 +466,87 @@
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + COCO weighting",
     "notes": "COCO variant built on a UUNP-style body family with custom topology and broader regional weight painting. SMP+CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-    "referenceTokens": ["coco", "cocobody", "uunp", "7base"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
-    "transformationField": { "chest": 1.10, "waist": 0.94, "pelvis": 1.08, "legs": 1.04, "shoulders": 1.02, "breasts": 1.11, "butt": 1.08, "belly": 1.03, "arms": 1.02, "thighs": 1.05, "calves": 1.03 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "coco",
+      "cocobody",
+      "uunp",
+      "7base"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 0.94,
+      "pelvis": 1.08,
+      "legs": 1.04,
+      "shoulders": 1.02,
+      "breasts": 1.11,
+      "butt": 1.08,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "coco",
+      "uunp",
+      "7base"
+    ],
+    "textureTokens": [
+      "coco",
+      "uunp"
+    ],
+    "physicsTokens": [
+      "coco",
+      "cbpc",
+      "smp",
+      "7base"
+    ],
+    "vertexCountMin": 9400,
+    "vertexCountMax": 10800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.84,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced"
   },
   {
     "name": "TBD",
@@ -82,10 +554,60 @@
     "defaultPhysics": "cbpc",
     "skeletonFoundation": "XPMSSE",
     "notes": "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-    "referenceTokens": ["tbd", "touched by dibella"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
-    "transformationField": { "chest": 1.06, "waist": 0.96, "pelvis": 1.04, "legs": 1.02, "shoulders": 1.00, "breasts": 1.07, "butt": 1.04, "belly": 1.02, "arms": 1.00, "thighs": 1.03, "calves": 1.02 }
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "tbd",
+      "touched by dibella"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.96,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.0,
+      "breasts": 1.07,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "tbd"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 7400,
+    "vertexCountMax": 7900,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.82,
+    "physicsBoneSignatures": [
+      "TBD Breast",
+      "NPC Belly01",
+      "NPC L Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc"
   },
   {
     "name": "HIMBO",
@@ -93,10 +615,60 @@
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
     "notes": "Modern male body with pec-driven physics. SMP enabled by default.",
-    "availablePhysicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],
-    "referenceTokens": ["himbo"],
-    "sliderNames": ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
-    "transformationField": { "chest": 1.10, "waist": 1.02, "pelvis": 1.04, "legs": 1.06, "shoulders": 1.12, "breasts": 1.08, "butt": 1.05, "belly": 1.03, "arms": 1.10, "thighs": 1.07, "calves": 1.05 }
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "NPC L Lat",
+      "NPC R Lat"
+    ],
+    "referenceTokens": [
+      "himbo"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 1.02,
+      "pelvis": 1.04,
+      "legs": 1.06,
+      "shoulders": 1.12,
+      "breasts": 1.08,
+      "butt": 1.05,
+      "belly": 1.03,
+      "arms": 1.1,
+      "thighs": 1.07,
+      "calves": 1.05
+    },
+    "detectionTokens": [
+      "himbo",
+      "male"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 6600,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC LPec",
+      "NPC RPec"
+    ],
+    "skeletonFramework": "xpmsse-male-smp"
   },
   {
     "name": "SAM",
@@ -104,10 +676,59 @@
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
     "notes": "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",
-    "availablePhysicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],
-    "referenceTokens": ["sam", "samlight"],
-    "sliderNames": ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-    "transformationField": { "chest": 1.08, "waist": 1.01, "pelvis": 1.03, "legs": 1.05, "shoulders": 1.10, "breasts": 1.05, "butt": 1.04, "belly": 1.02, "arms": 1.08, "thighs": 1.06, "calves": 1.04 }
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "NPC L Lat",
+      "NPC R Lat"
+    ],
+    "referenceTokens": [
+      "sam",
+      "samlight"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 1.01,
+      "pelvis": 1.03,
+      "legs": 1.05,
+      "shoulders": 1.1,
+      "breasts": 1.05,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.08,
+      "thighs": 1.06,
+      "calves": 1.04
+    },
+    "detectionTokens": [
+      "sam",
+      "samlight"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 5800,
+    "vertexCountMax": 6200,
+    "heightToWidthRatioMin": 3.3,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "SOS GenitalsBase",
+      "SAM Genitals",
+      "NPC L Breast01"
+    ],
+    "skeletonFramework": "sam-light"
   },
   {
     "name": "SOS",
@@ -115,10 +736,62 @@
     "defaultPhysics": "smp",
     "skeletonFoundation": "XPMSSE",
     "notes": "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",
-    "availablePhysicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],
-    "referenceTokens": ["sos", "schlongs"],
-    "sliderNames": ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-    "transformationField": { "chest": 1.05, "waist": 1.00, "pelvis": 1.02, "legs": 1.04, "shoulders": 1.06, "breasts": 1.03, "butt": 1.03, "belly": 1.01, "arms": 1.05, "thighs": 1.04, "calves": 1.03 }
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "NPC GenitalsBase",
+      "NPC Genitals01",
+      "NPC Genitals02"
+    ],
+    "referenceTokens": [
+      "sos",
+      "schlongs"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt"
+    ],
+    "transformationField": {
+      "chest": 1.05,
+      "waist": 1.0,
+      "pelvis": 1.02,
+      "legs": 1.04,
+      "shoulders": 1.06,
+      "breasts": 1.03,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 1.05,
+      "thighs": 1.04,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "sos",
+      "soslight"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [
+      "smp"
+    ],
+    "vertexCountMin": 6100,
+    "vertexCountMax": 6500,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC GenitalsBase",
+      "NPC Genitals01",
+      "NPC Genitals02"
+    ],
+    "skeletonFramework": "xpmsse-male-smp"
   },
   {
     "name": "UBE",
@@ -126,10 +799,88 @@
     "defaultPhysics": "smp+cbpc",
     "skeletonFoundation": "XPMSSE + custom UBE bones",
     "notes": "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",
-    "availablePhysicsBones": ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"],
-    "referenceTokens": ["ube", "ubebody", "ultimatebodyenhancer"],
-    "sliderNames": ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-    "transformationField": { "chest": 1.06, "waist": 0.97, "pelvis": 1.03, "legs": 1.02, "shoulders": 1.01, "breasts": 1.06, "butt": 1.03, "belly": 1.02, "arms": 1.01, "thighs": 1.03, "calves": 1.02 }
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "BreastUpper",
+      "BreastLower",
+      "BreastOuter",
+      "BreastInner",
+      "ButtUpper",
+      "ButtLower"
+    ],
+    "referenceTokens": [
+      "ube",
+      "ubebody",
+      "ultimatebodyenhancer"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.97,
+      "pelvis": 1.03,
+      "legs": 1.02,
+      "shoulders": 1.01,
+      "breasts": 1.06,
+      "butt": 1.03,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "ube",
+      "ubebody",
+      "ultimatebodyenhancer"
+    ],
+    "textureTokens": [
+      "ube",
+      "ubebody"
+    ],
+    "physicsTokens": [
+      "smp",
+      "cbpc",
+      "breastupper",
+      "breastouter",
+      "buttupper"
+    ],
+    "vertexCountMin": 6800,
+    "vertexCountMax": 7200,
+    "heightToWidthRatioMin": 4.3,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.8,
+    "physicsBoneSignatures": [
+      "BreastUpper",
+      "BreastLower",
+      "BreastOuter",
+      "BreastInner",
+      "ButtUpper",
+      "ButtLower",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "ube-extended"
   },
   {
     "name": "Vanilla",
@@ -137,9 +888,51 @@
     "defaultPhysics": "none",
     "skeletonFoundation": "Vanilla Skyrim skeleton",
     "notes": "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",
-    "availablePhysicsBones": ["NPC Belly"],
-    "referenceTokens": ["vanillafemale", "vanillamale", "vanilla"],
-    "sliderNames": ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
-    "transformationField": { "chest": 1.00, "waist": 1.00, "pelvis": 1.00, "legs": 1.00, "shoulders": 1.00, "breasts": 1.00, "butt": 1.00, "belly": 1.00, "arms": 1.00, "thighs": 1.00, "calves": 1.00 }
+    "availablePhysicsBones": [
+      "NPC Belly"
+    ],
+    "referenceTokens": [
+      "vanillafemale",
+      "vanillamale",
+      "vanilla"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 1.0,
+      "pelvis": 1.0,
+      "legs": 1.0,
+      "shoulders": 1.0,
+      "breasts": 1.0,
+      "butt": 1.0,
+      "belly": 1.0,
+      "arms": 1.0,
+      "thighs": 1.0,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "vanilla",
+      "femalebody",
+      "malebody"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 4000,
+    "vertexCountMax": 6100,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.9,
+    "physicsBoneSignatures": [],
+    "skeletonFramework": "vanilla-skyrim"
   }
 ]
