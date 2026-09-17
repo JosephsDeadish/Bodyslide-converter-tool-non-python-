@@ -4289,6 +4289,33 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_UsesReferenceSignatureDatabaseFor3BBBReferenceAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mystery_armor.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "3bbb_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("3BA", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_UsesUvSignatureEvidence()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4329,6 +4356,34 @@ public sealed class BodySignatureVertexCountTests
         var result = await service.DetectAsync(armor, CancellationToken.None);
 
         Assert.Equal("CUSTOM", result.Body);
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_ReturnsUnknownForAmbiguousCocoFamilyMatch()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "coco_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "cocobody_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("UNKNOWN", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("ambiguous:COCO CBBE|COCO UUNP", StringComparison.Ordinal)
+                                                       || evidence.StartsWith("ambiguous:COCO UUNP|COCO CBBE", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 }
 
@@ -10693,6 +10748,26 @@ public sealed class VanillaBodyOspSliderTests
 
         Assert.Contains("<Slider", project.OspXml, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GenerateAsync_InfersZapSlidersFromMeshNames()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mage_cape_sleeves_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("HideCape", project.ZapSliders ?? []);
+        Assert.Contains("HideSleeves", project.ZapSliders ?? []);
+        Assert.Contains("zap=\"true\"", project.OspXml, StringComparison.Ordinal);
+    }
 }
 
 public sealed class CustomBodyProfileSupportTests
@@ -10709,7 +10784,9 @@ public sealed class CustomBodyProfileSupportTests
             {
               "name": "MyFollower",
               "detectionTokens": ["myfollower", "customshape"],
+              "referenceTokens": ["myfollowerbody", "myfollowertri"],
               "sliderNames": ["Waist", "Hips", "Bust"],
+              "zapSliderNames": ["HideCape", "HideSleeves"],
               "physicsProfile": "smp",
               "gender": "male",
               "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
@@ -10731,6 +10808,8 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Equal("smp", profile.PhysicsProfile);
             Assert.Contains("NPC L Pec", profile.PhysicsBones ?? []);
             Assert.Equal(3, profile.SliderNames?.Count);
+            Assert.Contains("myfollowerbody", profile.ReferenceTokens ?? []);
+            Assert.Contains("HideCape", profile.ZapSliderNames ?? []);
             Assert.Equal(1.14, profile.TransformationField["chest"]);
         }
         finally
@@ -10786,7 +10865,9 @@ public sealed class CustomBodyProfileSupportTests
             {
               "name": "MyFollower",
               "detectionTokens": ["myfollower"],
+              "referenceTokens": ["myfollowertri"],
               "sliderNames": ["Waist", "Hips", "Bust"],
+              "zapSliderNames": ["HideCape"],
               "physicsProfile": "smp",
               "gender": "male",
               "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
@@ -10814,6 +10895,8 @@ public sealed class CustomBodyProfileSupportTests
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
+            Assert.Contains("HideCape", ospXml, StringComparison.Ordinal);
+            Assert.Contains("zap=\"true\"", ospXml, StringComparison.Ordinal);
             Assert.Contains(@"CalienteTools\BodySlide\ShapeData\myfollower_armor\myfollower_armor_0.nif", ospXml, StringComparison.Ordinal);
             Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
@@ -10870,6 +10953,47 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("NPC Belly", StringComparison.OrdinalIgnoreCase)
                                                       && m.TargetBone.Equals("NPC Belly", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("NPC Belly", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesSemanticFallbackForExtendedBones()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LeftBreastUpper\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LeftBreastLift", "RightBreastLift", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LeftBreastUpper", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("LeftBreastLift", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("LeftBreastUpper", result.UnsupportedBones);
         }
         finally
         {

@@ -160,7 +160,7 @@ public sealed record ConversionQualityReport(
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
 
-public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml);
+public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml, IReadOnlyList<string>? ZapSliders = null);
 public sealed record TextureSummary(
     int TotalCount,
     IReadOnlyList<string> DiffuseFiles,
@@ -793,7 +793,9 @@ public sealed record CustomBodyProfile(
     IReadOnlyList<string>? PhysicsBones = null,
     string? PhysicsProfile = null,
     string? BodyOutputPath = null,
-    string Gender = "female");
+    string Gender = "female",
+    IReadOnlyList<string>? ReferenceTokens = null,
+    IReadOnlyList<string>? ZapSliderNames = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -1117,7 +1119,8 @@ internal sealed record BodySignatureTemplate(
     double HeightToWidthRatioMin = 0,
     double HeightToWidthRatioMax = 0,
     double DepthToWidthRatioMin = 0,
-    double DepthToWidthRatioMax = 0);
+    double DepthToWidthRatioMax = 0,
+    IReadOnlyList<string>? ReferenceTokens = null);
 
 internal readonly record struct MeshVertex(float X, float Y, float Z);
 
@@ -1477,6 +1480,30 @@ internal static class VanillaBodySignatureDatabase
         new("UBE",     ["ube", "ubebody", "ultimatebodyenhancer"], ["ube", "ubebody"], ["smp", "cbpc", "breastupper", "breastouter", "buttupper"], 6800, 7200, 4.3, 7.4, 0.30, 0.80),
         new("Vanilla", ["vanilla", "femalebody", "malebody"], ["femalebody", "malebody"], [],        4000, 6100, 4.0, 7.5, 0.28, 0.90),
     ];
+}
+
+internal static class ReferenceBodySignatureDatabase
+{
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> Tokens =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"] = ["femalebody_0", "femalebody_1"],
+            ["3BA"] = ["3ba", "3bbb"],
+            ["BHUNP"] = ["bhunp", "uunp special"],
+            ["UNP"] = ["unp", "unpb"],
+            ["UUNP"] = ["uunp", "7base", "un7b"],
+            ["COCO CBBE"] = ["coco", "cocobody", "cbbe"],
+            ["COCO UUNP"] = ["coco", "cocobody", "uunp", "7base"],
+            ["TBD"] = ["tbd", "touched by dibella"],
+            ["UBE"] = ["ube", "ubebody", "ultimatebodyenhancer"],
+            ["HIMBO"] = ["himbo", "malebody"],
+            ["SAM"] = ["sam", "samlight", "malebody"],
+            ["SOS"] = ["sos", "schlongs"],
+            ["Vanilla"] = ["vanillafemale", "vanillamale", "vanilla"]
+        };
+
+    public static IReadOnlyList<string> GetTokens(string bodyName) =>
+        Tokens.TryGetValue(bodyName, out var tokens) ? tokens : [];
 }
 
 internal static class NifGeometrySignatureReader
@@ -2323,7 +2350,8 @@ internal static class CustomBodyProfileSupport
             3.0,
             8.5,
             0.25,
-            1.20)) ?? [];
+            1.20,
+            profile.ReferenceTokens)) ?? [];
 
     private static CustomBodyProfile? TryLoadProfile(string filePath)
     {
@@ -2369,7 +2397,9 @@ internal static class CustomBodyProfileSupport
             NormalizeNullableStringList(dto.PhysicsBones),
             physicsProfile,
             string.IsNullOrWhiteSpace(dto.BodyOutputPath) ? null : dto.BodyOutputPath.Trim(),
-            gender);
+            gender,
+            NormalizeNullableStringList(dto.ReferenceTokens),
+            NormalizeNullableStringList(dto.ZapSliderNames));
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -2423,6 +2453,8 @@ internal static class CustomBodyProfileSupport
         public string? PhysicsProfile { get; init; }
         public string? BodyOutputPath { get; init; }
         public string? Gender { get; init; }
+        public string[]? ReferenceTokens { get; init; }
+        public string[]? ZapSliderNames { get; init; }
     }
 }
 
@@ -4905,6 +4937,20 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     private const double BoundingRatioWeight = 0.05;
     private const double UvSignatureWeight = 0.04;
     private const double BodyReferenceTokenWeight = 0.08;
+    private const double BodyReferenceBoostValue = 0.22;
+    private const double AmbiguityMargin = 0.08;
+    private const double AmbiguityScoreFloor = 0.25;
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> SemanticBoneAliases =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breast"] = ["breast", "bust", "chest", "pec"],
+            ["butt"] = ["butt", "glute", "rear"],
+            ["belly"] = ["belly", "abdomen", "stomach", "tummy"],
+            ["thigh"] = ["thigh", "leg"],
+            ["genitals"] = ["genital", "schlong", "penis", "vagina"],
+            ["hair"] = ["hair", "bang", "ponytail", "tail"]
+        };
 
     // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
@@ -4933,10 +4979,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         // Read physics file contents once for bone signature matching.
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
+        var physicsBoneNames = ExtractPhysicsBoneNames(physicsContents);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
             .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, physicsBoneNames, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -4944,6 +4991,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < 0.25)
         {
             return new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]);
+        }
+
+        if (TryCreateAmbiguousResult(scoredCandidates, out var ambiguousResult))
+        {
+            return ambiguousResult;
         }
 
         var top = scoredCandidates[0];
@@ -4968,6 +5020,129 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return sb.ToString();
     }
 
+    private static IReadOnlySet<string> ExtractPhysicsBoneNames(string physicsContents)
+    {
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(physicsContents))
+        {
+            return bones;
+        }
+
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                     physicsContents,
+                     "<bone[^>]*\\bname\\s*=\\s*\"([^\"]+)\"",
+                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            var value = match.Groups.Count > 1 ? match.Groups[1].Value : string.Empty;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                bones.Add(value.Trim());
+            }
+        }
+
+        return bones;
+    }
+
+    private static bool BonesSemanticallyMatch(string sourceBone, string expectedBone)
+    {
+        if (sourceBone.Equals(expectedBone, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var sourceSlot = ClassifySemanticBone(sourceBone);
+        var expectedSlot = ClassifySemanticBone(expectedBone);
+        if (!sourceSlot.Key.Equals(expectedSlot.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return sourceSlot.Side is null ||
+               expectedSlot.Side is null ||
+               sourceSlot.Side.Equals(expectedSlot.Side, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string Key, string? Side) ClassifySemanticBone(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        var side = DetectSemanticSide(lower);
+
+        foreach (var (key, aliases) in SemanticBoneAliases)
+        {
+            if (aliases.Any(lower.Contains))
+            {
+                return (key, side);
+            }
+        }
+
+        return (lower, side);
+    }
+
+    private static string? DetectSemanticSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains("left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l_", StringComparison.Ordinal))
+        {
+            return "left";
+        }
+
+        if (lowerBoneName.Contains("right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r_", StringComparison.Ordinal))
+        {
+            return "right";
+        }
+
+        return null;
+    }
+
+    private static bool TryCreateAmbiguousResult(
+        IReadOnlyList<(BodySignatureTemplate Template, double Score, IReadOnlyList<string> Evidence)> scoredCandidates,
+        out BodyDetectionReport result)
+    {
+        result = default!;
+        if (scoredCandidates.Count < 2)
+        {
+            return false;
+        }
+
+        var top = scoredCandidates[0];
+        var runnerUp = scoredCandidates[1];
+        if (!GetBodyFamily(top.Template.Body).Equals(GetBodyFamily(runnerUp.Template.Body), StringComparison.OrdinalIgnoreCase) ||
+            top.Score < AmbiguityScoreFloor ||
+            runnerUp.Score < AmbiguityScoreFloor ||
+            Math.Abs(top.Score - runnerUp.Score) > AmbiguityMargin)
+        {
+            return false;
+        }
+
+        result = new BodyDetectionReport(
+            "UNKNOWN",
+            top.Score,
+            top.Evidence
+                .Concat(runnerUp.Evidence)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Append($"ambiguous:{top.Template.Body}|{runnerUp.Template.Body}")
+                .ToArray());
+        return true;
+    }
+
+    private static string GetBodyFamily(string bodyName) =>
+        bodyName switch
+        {
+            "COCO CBBE" or "COCO UUNP" => "coco-family",
+            "CBBE" or "3BA" => "cbbe-family",
+            "UNP" or "UUNP" or "BHUNP" or "TBD" => "unp-family",
+            "HIMBO" or "SAM" or "SOS" => "male-family",
+            "UBE" => "ube-family",
+            _ => bodyName
+        };
+
     private static (BodySignatureTemplate Template, double Score, IReadOnlyList<string> Evidence) Score(
         BodySignatureTemplate template,
         IReadOnlyList<string> meshNames,
@@ -4975,6 +5150,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<string> physicsNames,
         IReadOnlyList<string> bodyReferenceNames,
         string physicsContents,
+        IReadOnlySet<string> physicsBoneNames,
         MeshGeometrySignature? geometrySignature)
     {
         var evidence = new List<string>();
@@ -4997,7 +5173,18 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             evidence.Add($"physics:{physicsHitRatio:P0}");
         }
 
-        var referenceHitRatio = MatchRatio(bodyReferenceNames, template.TextureTokens);
+        var referenceTokens = template.ReferenceTokens is { Count: > 0 }
+            ? template.ReferenceTokens
+            : ReferenceBodySignatureDatabase.GetTokens(template.Body);
+        if (referenceTokens.Count == 0)
+        {
+            referenceTokens = template.TextureTokens
+                .Concat(template.MeshTokens)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        var referenceHitRatio = MatchRatio(bodyReferenceNames, referenceTokens);
         if (referenceHitRatio > 0)
         {
             evidence.Add($"reference:{referenceHitRatio:P0}");
@@ -5012,7 +5199,8 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         double boneSignatureScore = 0;
         if (physicsContents.Length > 0 && BodyBoneSignatures.TryGetValue(template.Body, out var boneNames))
         {
-            var hits = boneNames.Count(bone => physicsContents.Contains(bone, StringComparison.OrdinalIgnoreCase));
+            var hits = boneNames.Count(expectedBone =>
+                physicsBoneNames.Any(sourceBone => BonesSemanticallyMatch(sourceBone, expectedBone)));
             boneSignatureScore = (double)hits / boneNames.Count;
             if (boneSignatureScore > 0)
             {
@@ -5052,6 +5240,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         }
 
         var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
+        var referenceBoost = referenceHitRatio >= 0.5 ? BodyReferenceBoostValue : 0;
         var score = Math.Clamp(
             (meshHitRatio * MeshTokenWeight) +
             (textureHitRatio * TextureTokenWeight) +
@@ -5061,7 +5250,8 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (vertexSignatureScore * VertexCountWeight) +
             (boundingRatioScore * BoundingRatioWeight) +
             (uvSignatureScore * UvSignatureWeight) +
-            physicsExpectationBoost,
+            physicsExpectationBoost +
+            referenceBoost,
             0,
             1);
 
@@ -6084,6 +6274,17 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             ["ButtLower"]      = ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
         };
 
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> SemanticBoneAliases =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breast"] = ["breast", "bust", "chest", "pec"],
+            ["butt"] = ["butt", "glute", "rear"],
+            ["belly"] = ["belly", "abdomen", "stomach", "tummy"],
+            ["thigh"] = ["thigh", "leg"],
+            ["genitals"] = ["genital", "schlong", "penis", "vagina"],
+            ["hair"] = ["hair", "bang", "ponytail", "tail"]
+        };
+
     public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
         IReadOnlySet<string> targetPhysicsBones;
@@ -6165,12 +6366,81 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
     private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
     {
         if (!PhysicsBoneFallbacks.TryGetValue(sourceBone, out var fallbackCandidates))
-            return null;
+        {
+            return ResolveSemanticFallbackBone(sourceBone, targetBones);
+        }
 
         foreach (var candidate in fallbackCandidates)
         {
             if (targetBones.Contains(candidate))
                 return candidate;
+        }
+
+        return ResolveSemanticFallbackBone(sourceBone, targetBones);
+    }
+
+    private static string? ResolveSemanticFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
+    {
+        var source = ClassifySemanticBone(sourceBone);
+        if (string.IsNullOrWhiteSpace(source.Key))
+        {
+            return null;
+        }
+
+        string? groupMatchWithoutSide = null;
+        foreach (var targetBone in targetBones)
+        {
+            var target = ClassifySemanticBone(targetBone);
+            if (!target.Key.Equals(source.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (source.Side is not null && source.Side.Equals(target.Side, StringComparison.OrdinalIgnoreCase))
+            {
+                return targetBone;
+            }
+
+            groupMatchWithoutSide ??= targetBone;
+        }
+
+        return groupMatchWithoutSide;
+    }
+
+    private static (string Key, string? Side) ClassifySemanticBone(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        var side = DetectSemanticSide(lower);
+
+        foreach (var (key, aliases) in SemanticBoneAliases)
+        {
+            if (aliases.Any(lower.Contains))
+            {
+                return (key, side);
+            }
+        }
+
+        return (lower, side);
+    }
+
+    private static string? DetectSemanticSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains("left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l_", StringComparison.Ordinal))
+        {
+            return "left";
+        }
+
+        if (lowerBoneName.Contains("right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r_", StringComparison.Ordinal))
+        {
+            return "right";
         }
 
         return null;
@@ -6600,6 +6870,20 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         "HIMBO", "SAM", "SOS"
     };
 
+    private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bra"] = "HideBra",
+            ["panty"] = "HidePanties",
+            ["panties"] = "HidePanties",
+            ["underwear"] = "HidePanties",
+            ["sleeve"] = "HideSleeves",
+            ["cape"] = "HideCape",
+            ["cloak"] = "HideCloak",
+            ["hood"] = "HideHood",
+            ["mask"] = "HideMask"
+        };
+
     public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
         var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
@@ -6610,18 +6894,20 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             : BodySliders.TryGetValue(targetBody, out var bodySliders)
                 ? bodySliders
                 : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
+        var zapSliders = BuildZapSliderList(armor, customProfileFound ? customProfile : null, sliders);
 
         var isMale = customProfileFound
             ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase)
             : MaleBodies.Contains(targetBody);
         var gender = isMale ? "male" : "female";
-        var ospXml = BuildOspXml(sliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
+        var ospXml = BuildOspXml(sliders, zapSliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
 
-        return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml));
+        return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders));
     }
 
     private static string BuildOspXml(
         IReadOnlyList<string> sliders,
+        IReadOnlyList<string> zapSliders,
         IReadOnlyList<BodySlideMeshTarget> targets,
         string gender)
     {
@@ -6648,10 +6934,42 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
                 sb.AppendLine("        </Slider>");
             }
 
+            foreach (var slider in zapSliders)
+            {
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"true\" uv=\"false\">");
+                sb.AppendLine("            <Low value=\"0\" />");
+                sb.AppendLine("            <High value=\"100\" />");
+                sb.AppendLine("        </Slider>");
+            }
+
             sb.AppendLine("    </SliderSet>");
         }
         sb.AppendLine("</SliderSetInfo>");
         return sb.ToString();
+    }
+
+    private static IReadOnlyList<string> BuildZapSliderList(
+        ImportedArmor armor,
+        CustomBodyProfile? customProfile,
+        IReadOnlyList<string> sliders)
+    {
+        var zapSliders = new HashSet<string>(customProfile?.ZapSliderNames ?? [], StringComparer.OrdinalIgnoreCase);
+        var sliderSet = sliders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty;
+            foreach (var (hint, zapName) in ZapSliderHints)
+            {
+                if (fileName.Contains(hint, StringComparison.OrdinalIgnoreCase) &&
+                    !sliderSet.Contains(zapName))
+                {
+                    zapSliders.Add(zapName);
+                }
+            }
+        }
+
+        return zapSliders.Order(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     // Minimal XML attribute/content escaping for values embedded in the OSP document.
