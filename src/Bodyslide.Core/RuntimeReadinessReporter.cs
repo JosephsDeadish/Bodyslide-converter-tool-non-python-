@@ -56,6 +56,7 @@ public static class RuntimeReadinessReporter
         checks.Add(CreateCatalogDataCheck());
         checks.Add(CreateExecutableCheck(currentExePath));
         checks.Add(CreatePipelineCheck());
+        checks.Add(CreateNifParsingCheck());
         checks.Add(CreateCacheCheck());
         checks.Add(CreateScratchWriteCheck());
         checks.Add(CreateStartupCrashLogWriteCheck());
@@ -136,6 +137,18 @@ public static class RuntimeReadinessReporter
         catch (Exception ex)
         {
             return new("Core pipeline", "Error", $"Failed to initialize conversion modules: {ex.Message}");
+        }
+    }
+
+    private static RuntimeReadinessCheck CreateNifParsingCheck()
+    {
+        try
+        {
+            return new("NIF parsing", "OK", NifGeometrySignatureReader.GetCapabilitySummary());
+        }
+        catch (Exception ex)
+        {
+            return new("NIF parsing", "Warning", $"Could not verify NIF parsing capabilities: {ex.Message}");
         }
     }
 

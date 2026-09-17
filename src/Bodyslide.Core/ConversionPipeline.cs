@@ -152,7 +152,15 @@ public sealed record ConversionInspectionResult(
     ImportedArmor Armor,
     BodyDetectionReport Detection,
     MeshAnalysis Analysis,
-    SkeletonMappingResult? SkeletonMapping);
+    SkeletonMappingResult? SkeletonMapping,
+    IReadOnlyList<NifSupportReport>? NifSupport = null);
+
+public sealed record NifSupportReport(
+    string MeshPath,
+    string Status,
+    string ParseMode,
+    int? VertexCount,
+    IReadOnlyList<string> Messages);
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -199,7 +207,8 @@ public sealed record ConversionQualityReport(
     ConversionValidationSummary? ValidationSummary = null,
     SourceMorphQualityMetrics? SourceMorphQuality = null,
     SourceAssetSupportMetrics? SourceAssetSupport = null,
-    MorphPayloadReuseSummary? PayloadReuse = null);
+    MorphPayloadReuseSummary? PayloadReuse = null,
+    IReadOnlyList<NifSupportReport>? NifSupport = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -1560,6 +1569,58 @@ internal static class NifGeometrySignatureReader
         return best;
     }
 
+    public static IReadOnlyList<NifSupportReport> Inspect(IEnumerable<string> meshFiles)
+    {
+        var reports = new List<NifSupportReport>();
+        foreach (var meshFile in meshFiles
+                     .Where(path => !string.IsNullOrWhiteSpace(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            reports.Add(Inspect(meshFile));
+        }
+
+        return reports;
+    }
+
+    public static NifSupportReport Inspect(string meshFile)
+    {
+        if (!File.Exists(meshFile))
+        {
+            return new NifSupportReport(
+                meshFile,
+                "unsupported",
+                "missing-file",
+                null,
+                ["file-not-found"]);
+        }
+
+        if (!Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return new NifSupportReport(
+                meshFile,
+                "unsupported",
+                "not-a-nif",
+                null,
+                ["unsupported-extension"]);
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(meshFile);
+        }
+        catch (IOException)
+        {
+            return new NifSupportReport(meshFile, "unsupported", "read-failed", null, ["io-read-failed"]);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new NifSupportReport(meshFile, "unsupported", "read-failed", null, ["access-denied"]);
+        }
+
+        return Inspect(bytes, meshFile);
+    }
+
     public static MeshGeometrySignature? TryRead(string meshFile)
     {
         if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
@@ -1581,34 +1642,14 @@ internal static class NifGeometrySignatureReader
             return null;
         }
 
-        if (bytes.Length < 32)
-        {
-            return null;
-        }
-
-        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
-        {
-            return null;
-        }
-
-        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
-        if (embeddedMarkerOffset >= 0)
-        {
-            var embeddedSignature = TryReadEmbeddedVertexBlock(bytes, embeddedMarkerOffset);
-            if (embeddedSignature is not null)
-            {
-                return embeddedSignature;
-            }
-        }
-
-        var graphSignature = TryReadBlockGraphVertexBlock(bytes);
-        if (graphSignature is not null)
-        {
-            return graphSignature;
-        }
-
-        return TryReadHeuristicVertexBlock(bytes);
+        return TryRead(bytes);
     }
+
+    public static MeshGeometrySignature? TryRead(byte[] bytes) => Inspect(bytes, null).Status switch
+    {
+        "supported" or "degraded" => TryReadWithMode(bytes).Signature,
+        _ => null
+    };
 
     public static IReadOnlyList<MeshVertex>? TryReadFullVertices(string meshFile)
     {
@@ -1668,6 +1709,29 @@ internal static class NifGeometrySignatureReader
         }
 
         return null;
+    }
+
+    internal static string GetCapabilitySummary()
+    {
+        var supportedModes = new List<string>();
+        if (Inspect(CreateEmbeddedProbeBytes(), "embedded-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("embedded");
+        }
+
+        if (Inspect(CreateBlockGraphProbeBytes(), "block-graph-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("block-graph");
+        }
+
+        if (Inspect(CreateBsTriShapeProbeBytes(), "bstri-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bstri-half-float");
+        }
+
+        return supportedModes.Count == 0
+            ? "no readable NIF parsing modes detected"
+            : $"readable NIF modes: {string.Join(", ", supportedModes)}";
     }
 
     public static bool TryLocateVertexBlock(byte[] bytes, out int vertexDataOffset, out int vertexCount)
@@ -2009,6 +2073,173 @@ internal static class NifGeometrySignatureReader
         }
 
         return best;
+    }
+
+    private static NifSupportReport Inspect(byte[] bytes, string? meshPath)
+    {
+        var path = string.IsNullOrWhiteSpace(meshPath) ? "(in-memory)" : meshPath;
+        if (bytes.Length < 32)
+        {
+            return new NifSupportReport(path, "unsupported", "too-small", null, ["file-too-small"]);
+        }
+
+        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return new NifSupportReport(path, "unsupported", "missing-header", null, ["missing-nif-header"]);
+        }
+
+        var result = TryReadWithMode(bytes);
+        if (result.Signature is not null)
+        {
+            var status = result.Mode == "heuristic-float" ? "degraded" : "supported";
+            var messages = status == "degraded"
+                ? new[] { "heuristic-geometry-read", "manual-review-recommended" }
+                : Array.Empty<string>();
+            return new NifSupportReport(path, status, result.Mode, result.Signature.VertexCount, messages);
+        }
+
+        var unsupportedMessages = new List<string>();
+        if (bytes.AsSpan().IndexOf(BsTriShapeToken) >= 0)
+        {
+            unsupportedMessages.Add("bstri-layout-unreadable");
+        }
+
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        {
+            unsupportedMessages.Add($"graph-blocks:{graph.Nodes.Count}");
+            if (graph.GeometryCandidates.Count == 0)
+            {
+                unsupportedMessages.Add("no-geometry-block-candidates");
+            }
+        }
+
+        if (unsupportedMessages.Count == 0)
+        {
+            unsupportedMessages.Add("unrecognized-geometry-layout");
+        }
+
+        unsupportedMessages.Add("manual-review-required");
+        return new NifSupportReport(path, "unsupported", "unreadable-geometry", null, unsupportedMessages);
+    }
+
+    private static (MeshGeometrySignature? Signature, string Mode) TryReadWithMode(byte[] bytes)
+    {
+        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
+        if (embeddedMarkerOffset >= 0)
+        {
+            var embeddedSignature = TryReadEmbeddedVertexBlock(bytes, embeddedMarkerOffset);
+            if (embeddedSignature is not null)
+            {
+                return (embeddedSignature, "embedded-float");
+            }
+        }
+
+        if (TryLocateHalfFloatVertexBlock(bytes, out var halfDataOffset, out var halfVertexCount, out var vertexStride))
+        {
+            var halfSignature = BuildHalfFloatSignature(bytes, halfDataOffset, halfVertexCount, vertexStride);
+            if (halfSignature is not null)
+            {
+                return (halfSignature, "bstri-half-float");
+            }
+        }
+
+        var graphSignature = TryReadBlockGraphVertexBlock(bytes);
+        if (graphSignature is not null)
+        {
+            return (graphSignature, "block-graph-float");
+        }
+
+        var heuristicSignature = TryReadHeuristicVertexBlock(bytes);
+        if (heuristicSignature is not null)
+        {
+            return (heuristicSignature, "heuristic-float");
+        }
+
+        return (null, "unreadable-geometry");
+    }
+
+    private static MeshGeometrySignature? BuildHalfFloatSignature(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        var vertices = ReadHalfFloatVertices(bytes, vertexDataOffset, vertexCount, vertexStride);
+        if (vertices is null || vertices.Count == 0)
+        {
+            return null;
+        }
+
+        var sampleVertices = vertices.Count > 256
+            ? vertices.Where((_, index) => index % Math.Max(1, vertices.Count / 256) == 0).Take(256).ToList()
+            : vertices.ToList();
+
+        var minX = vertices.Min(static vertex => vertex.X);
+        var minY = vertices.Min(static vertex => vertex.Y);
+        var minZ = vertices.Min(static vertex => vertex.Z);
+        var maxX = vertices.Max(static vertex => vertex.X);
+        var maxY = vertices.Max(static vertex => vertex.Y);
+        var maxZ = vertices.Max(static vertex => vertex.Z);
+        return new MeshGeometrySignature(vertexCount, new BoundingBox(minX, minY, minZ, maxX, maxY, maxZ), sampleVertices, null);
+    }
+
+    private static byte[] CreateEmbeddedProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[24]);
+        writer.Write(EmbeddedVertexMarker);
+        writer.Write(3);
+        writer.Write(0f); writer.Write(0f); writer.Write(0f);
+        writer.Write(1f); writer.Write(0f); writer.Write(0f);
+        writer.Write(0f); writer.Write(1f); writer.Write(0f);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateBlockGraphProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[4]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateBsTriShapeProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSTriShape"));
+        writer.Write(new byte[8]);
+        var strideDiv4 = 5UL;
+        var desc = strideDiv4 << 44;
+        writer.Write(desc);
+        writer.Write(0);
+        writer.Write((ushort)256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write((Half)(index / 32f));
+            writer.Write((Half)((index % 32) / 32f));
+            writer.Write((Half)(index / 64f));
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
     }
 
     private static MeshGeometrySignature? BuildSignature(byte[] bytes, int vertexDataOffset, int vertexCount)
@@ -3269,13 +3500,16 @@ public sealed class ConversionInspector(
             skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
         }
 
+        var nifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
+
         return new ConversionInspectionResult(
             inputPath,
             normalizedTargetBody,
             armor,
             detection,
             analysis,
-            skeletonMapping);
+            skeletonMapping,
+            nifSupport);
     }
 }
 
@@ -9925,11 +10159,17 @@ internal sealed class LocalExportService(
                 EstimateMorphVertexCount(writtenNifs, request.TargetBody),
                 morphTransferContext)
             : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
+        var sourceNifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
+        var convertedNifSupport = NifGeometrySignatureReader.Inspect(writtenNifs);
+        var nifSupport = sourceNifSupport
+            .Concat(convertedNifSupport)
+            .ToList();
 
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
             AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
+        qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var validationSummary = BuildValidationSummary(
             detectedBody,
             morphs,
@@ -9941,6 +10181,7 @@ internal sealed class LocalExportService(
             textureSummary,
             poseSimulation,
             topologyMismatchRisk,
+            nifSupport,
             qualityWarnings,
             steps);
         var qualityReport = new ConversionQualityReport(
@@ -9975,7 +10216,8 @@ internal sealed class LocalExportService(
             ValidationSummary:         validationSummary,
             SourceMorphQuality:        morphs.SourceMorphQuality,
             SourceAssetSupport:        morphs.SourceAssetSupport,
-            PayloadReuse:              payloadReuse);
+            PayloadReuse:              payloadReuse,
+            NifSupport:                nifSupport);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -11588,6 +11830,7 @@ internal sealed class LocalExportService(
         TextureSummary textureSummary,
         PoseSimulationResult poseSimulation,
         bool topologyMismatchRisk,
+        IReadOnlyList<NifSupportReport>? nifSupport,
         IReadOnlyList<string> qualityWarnings,
         IReadOnlyList<string> steps)
     {
@@ -11673,6 +11916,35 @@ internal sealed class LocalExportService(
                 "topology-mismatch-risk",
                 "high",
                 $"Converted mesh topology or UV layout drifted significantly from the source{detail}."));
+        }
+
+        if (nifSupport is { Count: > 0 })
+        {
+            var unsupported = nifSupport
+                .Where(report => report.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                .Select(report => Path.GetFileName(report.MeshPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (unsupported.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "unsupported-nif-layout",
+                    "high",
+                    $"Some NIF meshes could not be parsed with supported geometry readers and require manual review: {string.Join(", ", unsupported.Take(6))}."));
+            }
+
+            var degraded = nifSupport
+                .Where(report => report.Status.Equals("degraded", StringComparison.OrdinalIgnoreCase))
+                .Select(report => Path.GetFileName(report.MeshPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (degraded.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "heuristic-nif-read",
+                    "medium",
+                    $"Some NIF meshes were handled through heuristic geometry scanning instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
+            }
         }
 
         if (clipping.HasClipping)
@@ -11817,6 +12089,17 @@ internal sealed class LocalExportService(
         }
 
         return (topologyRisk, vertexDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, warnings);
+    }
+
+    private static IReadOnlyList<string> BuildNifSupportWarnings(
+        IReadOnlyList<NifSupportReport> reports,
+        string role)
+    {
+        return reports
+            .Where(report => !report.Status.Equals("supported", StringComparison.OrdinalIgnoreCase))
+            .Select(report => $"{role}-nif-{report.Status}:{Path.GetFileName(report.MeshPath)}:{report.ParseMode}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     // ── Preview helpers ──────────────────────────────────────────────────────

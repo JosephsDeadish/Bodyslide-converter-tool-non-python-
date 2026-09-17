@@ -5334,6 +5334,10 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Equal("OK", catalogCheck.Status);
         Assert.Contains("body aliases", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("skeleton frameworks", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
+
+        var nifCheck = Assert.Single(checks, check => check.Area == "NIF parsing");
+        Assert.Equal("OK", nifCheck.Status);
+        Assert.Contains("embedded", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -12674,10 +12678,40 @@ public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCu
         Assert.NotNull(inspection.SkeletonMapping);
         Assert.Equal("xpmsse-physics", inspection.SkeletonMapping!.TargetSkeleton);
         Assert.Contains("MyFollower", inspection.Armor.CustomBodyProfiles?.Select(profile => profile.Name) ?? []);
+        var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+        Assert.Equal("unsupported", nifSupport.Status);
+        Assert.Equal("missing-header", nifSupport.ParseMode);
     }
     finally
     {
         Directory.Delete(tmpDir, recursive: true);
+    }
+}
+
+[Fact]
+public async Task ConvertAsync_WithUnsupportedNif_RecordsNifSupportValidation()
+{
+    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    var outputDirectory = Path.Combine(workingDirectory, "output");
+    Directory.CreateDirectory(workingDirectory);
+    var inputFile = Path.Combine(workingDirectory, "unsupported_mesh.nif");
+    await File.WriteAllTextAsync(inputFile, "not-a-real-nif");
+
+    try
+    {
+        var orchestrator = StandaloneConversionModules.CreateDefault();
+        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+        Assert.True(result.Success);
+        var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+        Assert.Contains("\"NifSupport\"", qualityJson);
+        Assert.Contains("\"Status\": \"unsupported\"", qualityJson);
+        Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson);
+        Assert.Contains("source-nif-unsupported:unsupported_mesh.nif:missing-header", qualityJson);
+    }
+    finally
+    {
+        Directory.Delete(workingDirectory, recursive: true);
     }
 }
 }

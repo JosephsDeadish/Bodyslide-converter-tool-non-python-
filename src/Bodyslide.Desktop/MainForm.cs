@@ -1668,6 +1668,11 @@ public sealed class MainForm : Form
             Add("Body references", inspection.Armor.BodyReferenceFiles.Count.ToString());
             Add("Weight variants", inspection.Armor.WeightVariantPairs?.Count.ToString() ?? "0");
             Add("Custom body profiles", inspection.Armor.CustomBodyProfiles?.Count.ToString() ?? "0");
+            if (inspection.NifSupport is { Count: > 0 } nifSupport)
+            {
+                Add("NIF support", string.Join(", ",
+                    nifSupport.Select(report => $"{Path.GetFileName(report.MeshPath)}={report.Status}/{report.ParseMode}")));
+            }
             if (inspection.Armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
             {
                 Add("Custom body names", string.Join(", ", customProfiles.Select(profile => profile.Name)));
