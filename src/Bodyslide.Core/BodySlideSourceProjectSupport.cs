@@ -475,26 +475,28 @@ internal static class BodySlideSourceProjectSupport
 
     private static SourceMorphQualityMetrics? BuildSourceMorphQuality(IEnumerable<SourceSliderCandidate> sliderCandidates, IEnumerable<SourceSliderCandidate> zapCandidates)
     {
-        var payloadCandidates = sliderCandidates
+        var payloadStats = sliderCandidates
             .Concat(zapCandidates)
-            .Where(static candidate => candidate.PayloadStats is not null)
+            .Select(static candidate => candidate.PayloadStats)
+            .Where(static stats => stats is not null)
+            .Select(static stats => stats!.Value)
             .ToArray();
-        if (payloadCandidates.Length == 0)
+        if (payloadStats.Length == 0)
         {
             return null;
         }
 
-        var meaningfulPayloadMorphCount = payloadCandidates.Count(static candidate => candidate.PayloadStats!.MeaningfulCount > 0);
-        var payloadStrengthScore = payloadCandidates
-            .Select(static candidate => ComputePayloadStrengthScore(candidate.PayloadStats!))
+        var meaningfulPayloadMorphCount = payloadStats.Count(static stats => stats.MeaningfulCount > 0);
+        var payloadStrengthScore = payloadStats
+            .Select(ComputePayloadStrengthScore)
             .DefaultIfEmpty(0d)
             .Average();
-        var payloadCoverageRatio = payloadCandidates.Length == 0
+        var payloadCoverageRatio = payloadStats.Length == 0
             ? 0d
-            : (double)meaningfulPayloadMorphCount / payloadCandidates.Length;
+            : (double)meaningfulPayloadMorphCount / payloadStats.Length;
 
         return new SourceMorphQualityMetrics(
-            PayloadMorphCount: payloadCandidates.Length,
+            PayloadMorphCount: payloadStats.Length,
             MeaningfulPayloadMorphCount: meaningfulPayloadMorphCount,
             PayloadCoverageRatio: Math.Round(Math.Clamp(payloadCoverageRatio, 0d, 1d), 4),
             PayloadStrengthScore: Math.Round(Math.Clamp(payloadStrengthScore, 0d, 1d), 4));
