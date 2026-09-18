@@ -15057,10 +15057,40 @@ internal sealed class LocalExportService(
 
     private static int GetDiscouragedSourcePathPenalty(string sourceMeshPath)
     {
-        var discouragedSegments = NormalizeComparablePath(sourceMeshPath)
+        var normalizedPath = NormalizeComparablePath(sourceMeshPath);
+        var relativeMeshPath = TryTrimPathToMeshesSubpath(normalizedPath, out var trimmedPath)
+            ? trimmedPath
+            : normalizedPath;
+        var discouragedSegments = relativeMeshPath
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Count(IsDiscouragedSourcePathSegment);
         return discouragedSegments * 350;
+    }
+
+    private static bool TryTrimPathToMeshesSubpath(string path, out string trimmedPath)
+    {
+        trimmedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        const string meshesToken = "/meshes/";
+        var normalizedPath = NormalizeComparablePath(path);
+        var meshesIndex = normalizedPath.LastIndexOf(meshesToken, StringComparison.OrdinalIgnoreCase);
+        if (meshesIndex < 0)
+        {
+            if (normalizedPath.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmedPath = normalizedPath;
+                return true;
+            }
+
+            return false;
+        }
+
+        trimmedPath = normalizedPath[(meshesIndex + 1)..];
+        return true;
     }
 
     private static bool IsDiscouragedSourcePathSegment(string segment) =>
