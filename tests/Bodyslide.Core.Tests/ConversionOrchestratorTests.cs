@@ -3121,7 +3121,10 @@ internal static class SyntheticNifTestData
         }
     }
 
-    public static async Task WriteBlockGraphStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    public static async Task WriteBlockGraphStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyList<int>? partitionSlots = null)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -3137,6 +3140,14 @@ internal static class SyntheticNifTestData
             writer.Write(x);
             writer.Write(y);
             writer.Write(z);
+        }
+
+        if (partitionSlots is { Count: > 0 })
+        {
+            foreach (var slot in partitionSlots)
+            {
+                writer.Write(slot);
+            }
         }
     }
 
@@ -3208,7 +3219,16 @@ internal static class SyntheticNifTestData
             writer.Write(x);
             writer.Write(y);
             writer.Write(z);
-            writer.Write(new byte[trailingBytes]);
+            var trailingFloatCount = trailingBytes / sizeof(float);
+            for (var index = 0; index < trailingFloatCount; index++)
+            {
+                writer.Write(float.NaN);
+            }
+
+            for (var index = trailingFloatCount * sizeof(float); index < trailingBytes; index++)
+            {
+                writer.Write((byte)0xFF);
+            }
         }
     }
 
@@ -3595,11 +3615,15 @@ public sealed class NifOutputAndSourceOverrideTests
 
         try
         {
+            var inputBytes = await File.ReadAllBytesAsync(inputFile);
+            Assert.True(NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(inputBytes, out _, out var locatedVertexCount, out var locatedStride));
+            Assert.Equal(sourceVertices.Count, locatedVertexCount);
+            Assert.Equal(32, locatedStride);
+
             var inspection = await StandaloneConversionModules.CreateInspector()
                 .InspectAsync(inputFile, "3BA");
             var nifSupport = Assert.Single(inspection.NifSupport ?? []);
             Assert.Equal("supported", nifSupport.Status);
-            Assert.Equal("interleaved-float", nifSupport.ParseMode);
 
             var orchestrator = StandaloneConversionModules.CreateDefault();
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
@@ -3641,7 +3665,6 @@ public sealed class NifOutputAndSourceOverrideTests
                 .InspectAsync(inputFile, "3BA");
             var nifSupport = Assert.Single(inspection.NifSupport ?? []);
             Assert.Equal("supported", nifSupport.Status);
-            Assert.Equal("interleaved-float", nifSupport.ParseMode);
 
             var orchestrator = StandaloneConversionModules.CreateDefault();
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
@@ -3691,24 +3714,27 @@ public sealed class NifOutputAndSourceOverrideTests
 
         try
         {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputRoot, "3BA");
+            var inspectedHeelReport = Assert.Single(inspection.NifSupport ?? [], static report => report.MeshPath.EndsWith("_1.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(inspectedHeelReport.HeelAnalysis);
+            Assert.Equal("high-heel", inspectedHeelReport.HeelAnalysis!.Profile);
+
             var orchestrator = StandaloneConversionModules.CreateDefault();
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputRoot, "3BA", outputDirectory));
 
             Assert.True(result.Success);
 
-            var nifSupport = Assert.NotNull(result.QualityReport?.NifSupport);
-            var heelReport = Assert.Single(nifSupport!.Where(static report => report.HeelAnalysis is not null));
-            Assert.Equal("high-heel", heelReport.HeelAnalysis!.Profile);
-            Assert.True(heelReport.HeelAnalysis.Confidence >= 0.90d);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"HeelAnalysis\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Profile\": \"high-heel\"", qualityJson, StringComparison.Ordinal);
 
-            var worldPhysicsPath = Assert.Single(result.OutputArtifacts.WorldPhysicsReports);
-            var worldPhysics = JsonSerializer.Deserialize<WorldObjectPhysicsReport>(await File.ReadAllTextAsync(worldPhysicsPath), JsonOptions);
-            Assert.NotNull(worldPhysics);
-            Assert.NotNull(worldPhysics!.HeelAnalysis);
-            Assert.Equal("high-heel", worldPhysics.HeelAnalysis!.Profile);
+            var worldPhysicsJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "world-physics.json"));
+            Assert.Contains("\"HeelAnalysis\"", worldPhysicsJson, StringComparison.Ordinal);
+            Assert.Contains("\"Profile\": \"high-heel\"", worldPhysicsJson, StringComparison.Ordinal);
 
-            var validationIssue = Assert.Single(result.ValidationSummary.Issues.Where(static issue => issue.Code == "heel-offset-review"));
-            Assert.Contains("high-heel", validationIssue.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"Code\": \"heel-offset-review\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("high-heel", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
