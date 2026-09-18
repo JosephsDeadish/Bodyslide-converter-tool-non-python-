@@ -5983,7 +5983,7 @@ public sealed class PluginPatchGuidanceTests
     public void PluginPatches_LegacyLinkedFormIds_FallBackToOwningPluginScope()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+        var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
         Directory.CreateDirectory(Path.GetDirectoryName(stagedMeshPath)!);
         File.WriteAllText(stagedMeshPath, "mesh");
 
@@ -5992,11 +5992,11 @@ public sealed class PluginPatchGuidanceTests
             var rewritePlan = new PluginRewritePlan(
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["meshes/armor/iron/ironarmor_0.nif"] = "meshes/slidesmith/cbbe/ironarmor_0.nif"
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "meshes/slidesmith/cbbe/armor/iron/ironarmor_0.nif"
                 },
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["meshes/armor/iron/ironarmor_0.nif"] = "ironarmor_0.nif"
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "armor/iron/ironarmor_0.nif"
                 },
                 [],
                 [],

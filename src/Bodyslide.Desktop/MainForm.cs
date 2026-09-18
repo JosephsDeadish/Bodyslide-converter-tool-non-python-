@@ -971,7 +971,11 @@ public sealed class MainForm : Form
                 break;
             case Label label:
                 label.BackColor = Color.Transparent;
-                label.ForeColor = ReferenceEquals(label, _statusLabel) || ReferenceEquals(label, _presetDetailsLabel)
+                label.ForeColor = ReferenceEquals(label, _statusLabel) ||
+                    ReferenceEquals(label, _presetDetailsLabel) ||
+                    ReferenceEquals(label, _targetDetailsLabel) ||
+                    ReferenceEquals(label, _sourceDetailsLabel) ||
+                    ReferenceEquals(label, _physicsDetailsLabel)
                     ? palette.SecondaryForeground
                     : palette.Foreground;
                 break;

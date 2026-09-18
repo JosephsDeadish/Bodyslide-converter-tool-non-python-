@@ -38,19 +38,19 @@
     {
       "body": "Goat Humanoid",
       "compatibleGroups": ["humanoid", "beast"],
-      "warningGroups": ["humanoid", "beast"],
+      "warningGroups": [],
       "warningMessage": "horn, tail, hoof, and digitigrade leg rigging should still be verified in-game."
     },
     {
       "body": "Hagraven",
       "compatibleGroups": ["humanoid", "beast"],
-      "warningGroups": ["humanoid", "beast"],
+      "warningGroups": [],
       "warningMessage": "wing, claw, and skin or feather seam rigging should still be verified in-game."
     },
     {
       "body": "Spriggan",
       "compatibleGroups": ["humanoid", "beast"],
-      "warningGroups": ["humanoid", "beast"],
+      "warningGroups": [],
       "warningMessage": "branch, wing, and bark or leaf seam rigging should still be verified in-game."
     }
   ]
