@@ -201,6 +201,7 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? MissingStagedMeshes = null,
     IReadOnlyList<string>? MissingLinkedArmorAddonRecords = null,
     IReadOnlyList<string>? UnscannedLinkedArmorAddonReferences = null,
+    IReadOnlyList<string>? UnsupportedLinkedArmorAddonMeshes = null,
     IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
     IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
@@ -2151,6 +2152,7 @@ internal static class NifGeometrySignatureReader
         var bestOffset = -1;
         var bestCount = 0;
         var bestStride = 0;
+        var bestTrailingBytes = int.MaxValue;
 
         // Scan for BSVertexDesc (uint64).  Bits 44-47 encode stride / 4.
         // Layout following a valid BSVertexDesc:
@@ -2165,11 +2167,17 @@ internal static class NifGeometrySignatureReader
         var scanEnd = bytes.Length - 16;
         for (var offset = 32; offset <= scanEnd; offset++)
         {
+            if (LooksLikeAsciiTokenWindow(bytes, offset, sizeof(ulong)))
+            {
+                continue;
+            }
+
             var desc = BitConverter.ToUInt64(bytes, offset);
             var strideDiv4 = (int)((desc >> 44) & 0xF);
 
-            // Accept strides 12–40 bytes (common SSE armor: 20 non-skinned, 32 skinned).
-            if (strideDiv4 < 3 || strideDiv4 > 10)
+            // Accept strides 12–60 bytes. Real-world SSE armor meshes can include
+            // larger BSVertexData payloads than the most common 20/32-byte layouts.
+            if (strideDiv4 < 3 || strideDiv4 > 15)
                 continue;
 
             var candidateStride = strideDiv4 * 4;
@@ -2188,12 +2196,16 @@ internal static class NifGeometrySignatureReader
                 continue;
 
             var score = ScoreHalfFloatVertexBlock(bytes, vertStart, numVertices, candidateStride);
-            if (score > bestScore)
+            var trailingBytes = bytes.Length - (int)(vertStart + vertSize);
+            if (score > bestScore ||
+                (score == bestScore && trailingBytes < bestTrailingBytes) ||
+                (score == bestScore && trailingBytes == bestTrailingBytes && numVertices > bestCount))
             {
                 bestScore = score;
                 bestOffset = vertStart;
                 bestCount = numVertices;
                 bestStride = candidateStride;
+                bestTrailingBytes = trailingBytes;
             }
         }
 
@@ -2238,6 +2250,26 @@ internal static class NifGeometrySignatureReader
 
     private static bool IsPlausibleHalfCoordinate(float value) =>
         float.IsFinite(value) && MathF.Abs(value) <= 512f;
+
+    private static bool LooksLikeAsciiTokenWindow(byte[] bytes, int offset, int length)
+    {
+        if (offset < 0 || length <= 0 || offset + length > bytes.Length)
+        {
+            return false;
+        }
+
+        var printableCount = 0;
+        for (var index = 0; index < length; index++)
+        {
+            var value = bytes[offset + index];
+            if (value is >= 32 and <= 126)
+            {
+                printableCount++;
+            }
+        }
+
+        return printableCount >= length - 1;
+    }
 
     private static bool ContainsSupportedSseHalfFloatShape(byte[] bytes)
     {
@@ -11638,7 +11670,8 @@ internal sealed class LocalExportService(
                 outputDirectory,
                 stagedPluginMeshSet,
                 patchVerificationPaths,
-                pluginPatchWarnings);
+                pluginPatchWarnings,
+                sourceNifSupport);
 
             var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
             var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
@@ -11666,7 +11699,8 @@ internal sealed class LocalExportService(
             outputDirectory,
             stagedPluginMeshSet,
             patchVerificationPaths,
-            pluginPatchWarnings);
+            pluginPatchWarnings,
+            sourceNifSupport);
 
         var partitionSignals = BuildPartitionSignalReport(steps);
         qualityWarnings = qualityWarnings
@@ -13598,6 +13632,14 @@ internal sealed class LocalExportService(
                     $"Some ARMO records referenced ARMA FormIDs in master or external plugins that were not part of the scanned input set: {string.Join(", ", pluginRewriteVerification.UnscannedLinkedArmorAddonReferences.Take(4))}."));
             }
 
+            if (pluginRewriteVerification.UnsupportedLinkedArmorAddonMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-unsupported-nif-layout",
+                    "high",
+                    $"Some linked ARMO→ARMA source meshes were detected but could not be parsed with supported NIF readers: {string.Join(", ", pluginRewriteVerification.UnsupportedLinkedArmorAddonMeshes.Take(4))}."));
+            }
+
             if (pluginRewriteVerification.MissingLinkedConvertedMatches is { Count: > 0 })
             {
                 issues.Add(new ConversionValidationIssue(
@@ -14624,6 +14666,7 @@ internal sealed class LocalExportService(
         int VerifiedLinkedArmorReferenceCount,
         IReadOnlyList<string> MissingLinkedArmorAddonRecords,
         IReadOnlyList<string> UnscannedLinkedArmorAddonReferences,
+        IReadOnlyList<string> UnsupportedLinkedArmorAddonMeshes,
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
 
@@ -14633,7 +14676,8 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlySet<string> stagedPluginMeshes,
         IReadOnlyList<string> patchedPluginPaths,
-        IReadOnlyList<string> warnings)
+        IReadOnlyList<string> warnings,
+        IReadOnlyList<NifSupportReport>? sourceNifSupport = null)
     {
         var rewrittenPaths = pluginRewritePlan.RewriteMap.Values
             .Select(NormalizePluginMeshPath)
@@ -14676,7 +14720,8 @@ internal sealed class LocalExportService(
         var linkedArmorVerification = BuildLinkedArmorAddonVerificationSummary(
             pluginAnalysis,
             pluginRewritePlan,
-            missingStagedMeshes);
+            missingStagedMeshes,
+            sourceNifSupport);
 
         return new PluginRewriteVerificationReport(
             DetectedMeshPathCount: pluginRewritePlan.DetectedMeshPathCount,
@@ -14690,6 +14735,7 @@ internal sealed class LocalExportService(
             MissingStagedMeshes: missingStagedMeshes,
             MissingLinkedArmorAddonRecords: linkedArmorVerification.MissingLinkedArmorAddonRecords,
             UnscannedLinkedArmorAddonReferences: linkedArmorVerification.UnscannedLinkedArmorAddonReferences,
+            UnsupportedLinkedArmorAddonMeshes: linkedArmorVerification.UnsupportedLinkedArmorAddonMeshes,
             MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
             MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
@@ -14699,14 +14745,22 @@ internal sealed class LocalExportService(
     private static LinkedArmorAddonVerificationSummary BuildLinkedArmorAddonVerificationSummary(
         PluginAnalysisResult pluginAnalysis,
         PluginRewritePlan pluginRewritePlan,
-        IReadOnlyList<string> missingStagedMeshes)
+        IReadOnlyList<string> missingStagedMeshes,
+        IReadOnlyList<NifSupportReport>? sourceNifSupport)
     {
         var linkedReferenceCount = 0;
         var verifiedLinkedReferenceCount = 0;
         var missingLinkedArmorAddons = new List<string>();
         var unscannedLinkedArmorAddons = new List<string>();
+        var unsupportedLinkedArmorMeshes = new List<string>();
         var missingLinkedConvertedMatches = new List<string>();
         var missingLinkedStagedMeshes = new List<string>();
+        var sourceSupportByMeshPath = (sourceNifSupport ?? [])
+            .Where(static report => !string.IsNullOrWhiteSpace(report.MeshPath))
+            .ToDictionary(
+                static report => NormalizeComparablePath(report.MeshPath),
+                static report => report,
+                StringComparer.OrdinalIgnoreCase);
         var addonByResolvedKey = pluginAnalysis.ArmorAddons
             .Where(static addon => addon.FormId != 0)
             .Select(addon => new
@@ -14783,6 +14837,37 @@ internal sealed class LocalExportService(
                     .ToList();
                 if (missingLinkedRewrites.Count > 0)
                 {
+                    var unsupportedLinkedSources = missingLinkedRewrites
+                        .Select(path => new
+                        {
+                            PluginPath = path,
+                            SourceMeshPath = pluginRewritePlan.SourceMeshMap.TryGetValue(path, out var sourceMeshPath)
+                                ? sourceMeshPath
+                                : null
+                        })
+                        .Where(entry => !string.IsNullOrWhiteSpace(entry.SourceMeshPath))
+                        .Select(entry => new
+                        {
+                            entry.PluginPath,
+                            Support = sourceSupportByMeshPath.TryGetValue(
+                                NormalizeComparablePath(entry.SourceMeshPath!),
+                                out var report)
+                                ? report
+                                : null
+                        })
+                        .Where(static entry => entry.Support is not null &&
+                            entry.Support.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                        .Select(entry => $"{entry.PluginPath} [{entry.Support!.ParseMode}]")
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (unsupportedLinkedSources.Count > 0)
+                    {
+                        unsupportedLinkedArmorMeshes.Add(
+                            $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", unsupportedLinkedSources)}");
+                        continue;
+                    }
+
                     missingLinkedConvertedMatches.Add(
                         $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}");
                     continue;
@@ -14813,6 +14898,10 @@ internal sealed class LocalExportService(
                 .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
             UnscannedLinkedArmorAddonReferences: unscannedLinkedArmorAddons
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            UnsupportedLinkedArmorAddonMeshes: unsupportedLinkedArmorMeshes
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
                 .ToList(),

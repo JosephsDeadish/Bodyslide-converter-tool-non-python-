@@ -37,6 +37,95 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void PluginPatches_LinkedArmorAddonsWithUnsupportedSourceNifs_ReportSpecificVerificationIssue()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor_0.nif")
+                },
+                [],
+                [],
+                1);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["LinkedArmor.esp [ESP; confidence=1.00]"],
+                [
+                    new PluginArmorAddon(
+                        "LinkedArmor.esp [ESP; confidence=1.00]",
+                        ["meshes/armor/iron/ironarmor_0.nif"],
+                        FormId: 0x00000802u,
+                        EditorId: "LinkedAddon",
+                        OwningPluginFileName: "LinkedArmor.esp",
+                        LocalFormId: 0x00000802u)
+                ],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "LinkedArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x00000801u,
+                        EditorId: "LinkedArmor",
+                        OwningPluginFileName: "LinkedArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences:
+                        [
+                            new PluginLinkedFormReference(
+                                RawFormId: 0x00000802u,
+                                OwningPluginFileName: "LinkedArmor.esp",
+                                LocalFormId: 0x00000802u)
+                        ])
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    Array.Empty<string>(),
+                    new[]
+                    {
+                        new NifSupportReport(
+                            Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor_0.nif"),
+                            "unsupported",
+                            "unreadable-geometry",
+                            null,
+                            ["manual-review-required"])
+                    }
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(0, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Contains(
+                "LinkedArmor (0x00000801) -> LinkedAddon (0x00000802) => meshes/armor/iron/ironarmor_0.nif [unreadable-geometry]",
+                report.UnsupportedLinkedArmorAddonMeshes ?? []);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PluginPatches_ReportsAmbiguousConvertedFilenameCollisions_ForManualReview()
     {
         static void WriteUInt32Le(byte[] bytes, int offset, uint value)
@@ -3386,17 +3475,19 @@ internal static class SyntheticNifTestData
     /// 20-byte vertex element).  Layout matches the real SSE format closely enough for
     /// the <c>TryLocateHalfFloatVertexBlock</c> heuristic to detect and transform it.
     /// </summary>
-    public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
-        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape");
+    public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape", stride);
 
-    public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
-        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape");
+    public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape", stride);
 
     private static async Task WriteBsHalfFloatTriShapeStyleAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
-        string blockTypeName)
+        string blockTypeName,
+        int stride)
     {
+        Assert.True(stride >= 12 && stride <= 60 && stride % 4 == 0, "Stride must be a 4-byte multiple between 12 and 60.");
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
 
@@ -3409,8 +3500,7 @@ internal static class SyntheticNifTestData
         // BSVertexDesc: bits 44-47 encode stride / 4.
         // stride = 20 bytes (non-skinned: pos(6) + bitX(2) + uv(4) + normal(4) + tangent(4))
         // → strideDiv4 = 5 → bits 44-47 = 5 → (5UL << 44) | flags = 0x0000_5000_0000_0057UL
-        const ulong bsVertexDesc = 0x0000_5000_0000_0057UL;
-        const int stride = 20;
+        var bsVertexDesc = (0x0000_5000_0000_0057UL & ~(0xFUL << 44)) | ((ulong)(stride / 4) << 44);
 
         // Minimal triangle list (degenerate but sufficient for the transform test)
         var numTriangles = Math.Max(1, vertices.Count / 3);
@@ -3427,7 +3517,7 @@ internal static class SyntheticNifTestData
         }
 
         // Vertex data: BSVertexData layout — Half XYZ at bytes 0,2,4; remaining 14 bytes zero.
-        var padding = new byte[stride - 6];
+        var padding = Enumerable.Repeat((byte)0xA5, stride - 6).ToArray();
         foreach (var (x, y, z) in vertices)
         {
             writer.Write(BitConverter.GetBytes((Half)x));
@@ -3450,7 +3540,6 @@ internal static class SyntheticNifTestData
 
     private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
-        const int stride = 20;
         var bsToken = System.Text.Encoding.ASCII.GetBytes(blockTypeName);
         var tokenPos = bytes.AsSpan().IndexOf(bsToken);
         if (tokenPos < 0)
@@ -3461,6 +3550,12 @@ internal static class SyntheticNifTestData
         if (descOffset + 14 >= bytes.Length)
             return [];
 
+        var desc = BitConverter.ToUInt64(bytes, descOffset);
+        var strideDiv4 = (int)((desc >> 44) & 0xF);
+        if (strideDiv4 < 3 || strideDiv4 > 15)
+            return [];
+
+        var stride = strideDiv4 * 4;
         var numTriangles = BitConverter.ToInt32(bytes, descOffset + 8);
         var numVertices = (int)BitConverter.ToUInt16(bytes, descOffset + 12);
         var vertStart = descOffset + 14 + numTriangles * 6;
@@ -4299,6 +4394,51 @@ public sealed class NifOutputAndSourceOverrideTests
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
                     .Any(static changed => changed),
                 "Expected at least one BSSubIndexTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithWideStrideBsTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "wide_stride_bstrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices, stride: 48);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "wide_stride_bstrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted wide-stride SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one wide-stride SSE half-float vertex to be transformed.");
         }
         finally
         {
@@ -6341,7 +6481,8 @@ public sealed class PluginPatchGuidanceTests
                     outputDirectory,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase) { stagedMeshPath },
                     Array.Empty<string>(),
-                    Array.Empty<string>()
+                    Array.Empty<string>(),
+                    Array.Empty<NifSupportReport>()
                 }));
 
             Assert.Equal(1, report.LinkedArmorReferenceCount);
@@ -6408,7 +6549,8 @@ public sealed class PluginPatchGuidanceTests
                     outputDirectory,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
-                    Array.Empty<string>()
+                    Array.Empty<string>(),
+                    Array.Empty<NifSupportReport>()
                 }));
 
             Assert.Equal(1, report.LinkedArmorReferenceCount);
