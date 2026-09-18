@@ -8341,25 +8341,17 @@ public sealed class RealisticModPackFixtureTests
         try
         {
             var orchestrator = StandaloneConversionModules.CreateDefault();
-            var runner = new BatchConversionRunner(orchestrator);
-            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
 
-            Assert.Equal(2, results.Count);
-            Assert.All(results, result => Assert.True(result.Success));
-
-            var cuirassOutput = results.Single(result =>
-                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
-
-            var patchJson = await File.ReadAllTextAsync(Path.Combine(cuirassOutput.OutputDirectory, "plugin-patches.json"));
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
             Assert.Contains("meshes/slidesmith/3ba/armor/common/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
 
-            var qualityJson = await File.ReadAllTextAsync(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json"));
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
 
-            var bootsOutput = results.Single(result =>
-                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
-            var bootsQualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            var bootsQualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "nordic_boots", "conversion-quality.json"));
             Assert.Contains("\"Code\": \"unsupported-nif-layout\"", bootsQualityJson, StringComparison.Ordinal);
         }
         finally
