@@ -3140,6 +3140,25 @@ internal static class SyntheticNifTestData
         }
     }
 
+    public static async Task WriteTriStripsStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"));
+        writer.Write(vertices.Count);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+    }
+
     public static async Task WriteInterleavedFloatStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
     {
         await using var stream = File.Create(path);
@@ -3471,6 +3490,50 @@ public sealed class NifOutputAndSourceOverrideTests
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
             var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
             Assert.NotEqual(sourceBytes, writtenBytes);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithTriStripsStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "tristrips_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteTriStripsStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("tristrips-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "tristrips_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one TriStrips vertex to be transformed.");
         }
         finally
         {
@@ -8959,6 +9022,28 @@ public sealed class PatchPluginWriterTests
         var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
         Assert.Contains("MAST", asLatin1);
         Assert.Contains(masterName, asLatin1);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_Tes4DataPreservesInheritedMastersBeforeSourcePlugin()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/orig/a.nif\0"));
+        var descriptor = BuildDescriptor(0x02000001u, "ArmorRec", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/orig/a.nif"] = "meshes/slidesmith/new/a.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            "OriginalArmor.esp",
+            [descriptor],
+            rewriteMap,
+            headerSize: 24,
+            inheritedMasterFileNames: ["Skyrim.esm", "BaseAddon.esp"]);
+
+        var masters = BinaryArmaParser.ExtractMasterFileNames(patchBytes);
+        Assert.Equal(["Skyrim.esm", "BaseAddon.esp", "OriginalArmor.esp"], masters);
     }
 
     [Fact]

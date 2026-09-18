@@ -1839,6 +1839,11 @@ internal static class NifGeometrySignatureReader
             supportedModes.Add("block-graph");
         }
 
+        if (Inspect(CreateTriStripsProbeBytes(), "tristrips-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("tristrips-float");
+        }
+
         if (Inspect(CreateBsTriShapeProbeBytes(), "bstri-probe").Status is "supported" or "degraded")
         {
             supportedModes.Add("bstri-half-float");
@@ -2154,7 +2159,31 @@ internal static class NifGeometrySignatureReader
         return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
     }
 
-    private static bool TryLocateVertexBlockFromGraph(byte[] bytes, out int vertexDataOffset, out int vertexCount)
+    private static MeshGeometrySignature? TryReadTriStripsVertexBlock(byte[] bytes)
+    {
+        if (!TryLocateVertexBlockFromGraph(
+                bytes,
+                out var vertexDataOffset,
+                out var vertexCount,
+                static typeName => typeName.Contains("TriStripsData", StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+    }
+
+    private static bool TryLocateVertexBlockFromGraph(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        Func<string, bool>? nodeFilter = null)
     {
         vertexDataOffset = 0;
         vertexCount = 0;
@@ -2171,6 +2200,11 @@ internal static class NifGeometrySignatureReader
 
         foreach (var node in preferredNodes)
         {
+            if (nodeFilter is not null && !nodeFilter(node.TypeName))
+            {
+                continue;
+            }
+
             var score = GetBlockVertexCandidateScore(node.TypeName);
             if (score <= 0)
             {
@@ -2448,6 +2482,12 @@ internal static class NifGeometrySignatureReader
             }
         }
 
+        var triStripsSignature = TryReadTriStripsVertexBlock(bytes);
+        if (triStripsSignature is not null)
+        {
+            return (triStripsSignature, "tristrips-float");
+        }
+
         var graphSignature = TryReadBlockGraphVertexBlock(bytes);
         if (graphSignature is not null)
         {
@@ -2515,6 +2555,26 @@ internal static class NifGeometrySignatureReader
         writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
         writer.Write(new byte[32]);
         writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[4]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateTriStripsProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"));
         writer.Write(new byte[4]);
         writer.Write(256);
         for (var index = 0; index < 256; index++)
@@ -9824,9 +9884,9 @@ internal static class BinaryArmaParser
 /// <summary>
 /// Generates a minimal Bethesda override/patch ESP that:
 /// <list type="bullet">
-///   <item>Contains a TES4 header (with ESL flag 0x200) listing the original plugin as its single master file.</item>
+///   <item>Contains a TES4 header (with ESL flag 0x200) listing the source plugin's inherited masters followed by the original plugin file.</item>
 ///   <item>Holds only the ARMA and ARMO records that actually had mesh paths rewritten — no extra records.</item>
-///   <item>Uses the same FormIDs as the originals (master index 0 = original plugin).</item>
+///   <item>Uses the same FormIDs as the originals by preserving the original master ordering context.</item>
 ///   <item>Reports the accurate record count in the HEDR subrecord.</item>
 /// </list>
 /// The result can be placed in the Data folder alongside the original plugin as a standard
@@ -9849,7 +9909,7 @@ internal static class PatchPluginWriter
     /// </summary>
     /// <param name="masterPluginFileName">
     ///   The file name (with extension) of the original plugin, e.g. "MyArmor.esp".
-    ///   Listed as the sole MAST entry in the TES4 header.
+    ///   Listed after any inherited masters so original record FormIDs keep their source meaning.
     /// </param>
     /// <param name="descriptors">
     ///   Parsed ARMA descriptors from <see cref="BinaryArmaParser.ExtractArmaRecords"/>.
@@ -9860,6 +9920,9 @@ internal static class PatchPluginWriter
     ///   Path-rewrite map (lowercase forward-slash normalised keys to new path values).
     /// </param>
     /// <param name="headerSize">Record header size (24 for SSE, 20 for LE).</param>
+    /// <param name="inheritedMasterFileNames">
+    ///   Optional TES4 master files declared by the source plugin, in source order.
+    /// </param>
     /// <param name="armoDescriptors">
     ///   Optional ARMO record descriptors extracted from the same plugin.
     ///   Emitted into a separate ARMO GRUP when any paths match.
@@ -9870,6 +9933,7 @@ internal static class PatchPluginWriter
         IReadOnlyList<ArmaRecordDescriptor> descriptors,
         IReadOnlyDictionary<string, string> rewriteMap,
         int headerSize = SseHeaderSize,
+        IReadOnlyList<string>? inheritedMasterFileNames = null,
         IReadOnlyList<ArmoRecordDescriptor>? armoDescriptors = null)
     {
         // ── 1. Build patched ARMA record buffers ──────────────────────────────
@@ -9901,7 +9965,7 @@ internal static class PatchPluginWriter
 
         // ── 3. TES4 record (ESL-flagged, accurate numRecords) ─────────────────
         using var ms = new MemoryStream();
-        var tes4Data = BuildTes4Data(masterPluginFileName, totalRecords);
+        var tes4Data = BuildTes4Data(masterPluginFileName, inheritedMasterFileNames, totalRecords);
         WriteFlatRecord(ms, "TES4", tes4Data, formId: 0, headerSize: headerSize, flags: EslFlag);
 
         if (totalRecords == 0)
@@ -9926,7 +9990,10 @@ internal static class PatchPluginWriter
 
     // ── TES4 data builder ─────────────────────────────────────────────────────
 
-    private static byte[] BuildTes4Data(string masterPluginFileName, int numRecords = 0)
+    private static byte[] BuildTes4Data(
+        string masterPluginFileName,
+        IReadOnlyList<string>? inheritedMasterFileNames,
+        int numRecords = 0)
     {
         using var ms = new MemoryStream();
 
@@ -9942,12 +10009,44 @@ internal static class PatchPluginWriter
         // CNAM: author name (null-terminated).
         WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
 
-        // MAST + DATA pair: lists the original plugin as a master.
-        WriteSubrecord(ms, "MAST",
-            System.Text.Encoding.ASCII.GetBytes(masterPluginFileName + '\0'));
-        WriteSubrecord(ms, "DATA", new byte[8]);  // 8 zero bytes (always follows MAST)
+        foreach (var masterFileName in BuildOrderedMasterList(masterPluginFileName, inheritedMasterFileNames))
+        {
+            WriteSubrecord(ms, "MAST",
+                System.Text.Encoding.ASCII.GetBytes(masterFileName + '\0'));
+            WriteSubrecord(ms, "DATA", new byte[8]);  // 8 zero bytes (always follows MAST)
+        }
 
         return ms.ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildOrderedMasterList(
+        string masterPluginFileName,
+        IReadOnlyList<string>? inheritedMasterFileNames)
+    {
+        var orderedMasters = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (inheritedMasterFileNames is not null)
+        {
+            foreach (var inheritedMasterFileName in inheritedMasterFileNames)
+            {
+                var normalizedMasterFileName = Path.GetFileName(inheritedMasterFileName)?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedMasterFileName) || !seen.Add(normalizedMasterFileName))
+                {
+                    continue;
+                }
+
+                orderedMasters.Add(normalizedMasterFileName);
+            }
+        }
+
+        var normalizedPluginFileName = Path.GetFileName(masterPluginFileName)?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedPluginFileName) && seen.Add(normalizedPluginFileName))
+        {
+            orderedMasters.Add(normalizedPluginFileName);
+        }
+
+        return orderedMasters;
     }
 
     // ── GRUP writer ───────────────────────────────────────────────────────────
@@ -10999,8 +11098,8 @@ internal sealed class LocalExportService(
                     patchVerificationPaths.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
-                    // This patch contains ONLY the touched ARMA/ARMO records and lists the
-                    // original plugin as its single master.  It is a proper Bethesda
+                    // This patch contains ONLY the touched ARMA/ARMO records and carries the
+                    // source plugin's TES4 master chain plus the original plugin. It is a proper Bethesda
                     // override plugin (ESL-flagged) that can be loaded after the original
                     // in any order without consuming a load order slot.
                     foreach (var pluginPath in safeSourcePluginPaths)
@@ -11010,11 +11109,13 @@ internal sealed class LocalExportService(
                             var pluginBytes    = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
                             var headerSize     = BinaryArmaParser.DetectHeaderSize(pluginBytes);
                             var pluginName     = Path.GetFileName(pluginPath) ?? pluginPath;
+                            var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(pluginBytes);
                             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
                             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(pluginBytes, pluginName);
 
                             var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
                                 pluginName, armaDescriptors, normMap, headerSize,
+                                inheritedMasterFileNames: masterFileNames,
                                 armoDescriptors: armoDescriptors);
 
                             if (included > 0)
