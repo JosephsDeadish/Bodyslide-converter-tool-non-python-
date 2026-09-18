@@ -8161,7 +8161,10 @@ public sealed class RealisticModPackFixtureTests
 
             using var packValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
             var packReadinessStatus = packValidation.RootElement.GetProperty("PackReadinessStatus").GetString();
-            Assert.Contains(packReadinessStatus, ["needs-review", "high-risk"]);
+            Assert.True(
+                string.Equals(packReadinessStatus, "needs-review", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(packReadinessStatus, "high-risk", StringComparison.OrdinalIgnoreCase),
+                $"Expected reviewable pack readiness status but found '{packReadinessStatus}'.");
         }
         finally
         {
