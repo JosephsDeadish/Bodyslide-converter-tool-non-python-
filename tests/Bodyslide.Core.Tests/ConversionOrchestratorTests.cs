@@ -6981,6 +6981,57 @@ public sealed class SourceTargetDeltaTests
         Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
         Assert.True(Math.Abs(result.RegionalMorphing["butt"] - 1d) > Math.Abs(baseButtDelta - 1d));
     }
+
+    [Theory]
+    [InlineData("CBBE", "UNP", "breasts")]
+    [InlineData("UNPB", "UNP", "breasts")]
+    [InlineData("UUNP", "UNP", "butt")]
+    [InlineData("COCO CBBE", "CBBE", "breasts")]
+    [InlineData("COCO UUNP", "UUNP", "butt")]
+    [InlineData("TBD", "UNP", "thighs")]
+    [InlineData("Vanilla Beast", "Vanilla", "pelvis")]
+    [InlineData("Goat Humanoid", "Vanilla Beast", "calves")]
+    [InlineData("Hagraven", "CBBE", "arms")]
+    [InlineData("Spriggan", "CBBE", "waist")]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_CoversAdditionalBodies(
+        string targetBody,
+        string sourceBody,
+        string region)
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var sourceField = BodyTransformationFieldCatalog.Resolve(sourceBody);
+        var targetField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        var baseDelta = targetField[region] / sourceField[region];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, targetBody, null, sourceBody, CancellationToken.None);
+
+        Assert.True(
+            Math.Abs(result.RegionalMorphing[region] - 1d) > Math.Abs(baseDelta - 1d),
+            $"{targetBody} should tune the {region} region beyond the untuned base delta from {sourceBody}.");
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_LeavesVanillaUntuned()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        var vanillaField = BodyTransformationFieldCatalog.Resolve("Vanilla");
+        var baseChestDelta = vanillaField["chest"] / cbbeField["chest"];
+        var baseWaistDelta = vanillaField["waist"] / cbbeField["waist"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "Vanilla", null, "CBBE", CancellationToken.None);
+
+        Assert.Equal(baseChestDelta, result.RegionalMorphing["chest"], precision: 5);
+        Assert.Equal(baseWaistDelta, result.RegionalMorphing["waist"], precision: 5);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

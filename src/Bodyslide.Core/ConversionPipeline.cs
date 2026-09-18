@@ -6799,39 +6799,40 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             return EmptyTuning;
         }
 
-        return canonicalName switch
-        {
-            "3BA" or "BHUNP" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["breasts"] = 1.06d,
-                ["butt"] = 1.04d,
-                ["thighs"] = 1.04d
-            },
-            "UBE" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["breasts"] = 1.08d,
-                ["belly"] = 1.05d,
-                ["butt"] = 1.05d
-            },
-            "HIMBO" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"] = 1.05d,
-                ["shoulders"] = 1.08d,
-                ["arms"] = 1.06d
-            },
-            "SAM" or "SAM Light" or "SOS" or "TNG" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"] = 1.04d,
-                ["shoulders"] = 1.06d,
-                ["arms"] = 1.05d,
-                ["waist"] = 0.96d
-            },
-            _ => EmptyTuning
-        };
+        return TargetBodyTunings.TryGetValue(canonicalName, out var tuning)
+            ? tuning
+            : EmptyTuning;
     }
 
     private static readonly IReadOnlyDictionary<string, double> EmptyTuning =
         new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> TargetBodyTunings =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"] = CreateTuning(("breasts", 1.03d), ("butt", 1.02d), ("thighs", 1.02d)),
+            ["3BA"] = CreateTuning(("breasts", 1.06d), ("butt", 1.04d), ("thighs", 1.04d)),
+            ["BHUNP"] = CreateTuning(("breasts", 1.06d), ("butt", 1.04d), ("thighs", 1.04d)),
+            ["UNP"] = CreateTuning(("breasts", 1.02d), ("butt", 1.01d)),
+            ["UNPB"] = CreateTuning(("breasts", 1.04d), ("butt", 1.03d), ("thighs", 1.03d)),
+            ["UUNP"] = CreateTuning(("breasts", 1.04d), ("butt", 1.03d), ("thighs", 1.03d)),
+            ["COCO CBBE"] = CreateTuning(("breasts", 1.06d), ("butt", 1.05d), ("thighs", 1.04d), ("belly", 1.03d)),
+            ["COCO UUNP"] = CreateTuning(("breasts", 1.06d), ("butt", 1.05d), ("thighs", 1.04d), ("belly", 1.03d)),
+            ["TBD"] = CreateTuning(("breasts", 1.03d), ("butt", 1.02d), ("thighs", 1.02d)),
+            ["HIMBO"] = CreateTuning(("chest", 1.05d), ("shoulders", 1.08d), ("arms", 1.06d)),
+            ["SAM"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["SAM Light"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["SOS"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["TNG"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["UBE"] = CreateTuning(("breasts", 1.08d), ("belly", 1.05d), ("butt", 1.05d)),
+            ["Vanilla Beast"] = CreateTuning(("pelvis", 1.02d), ("butt", 1.02d), ("thighs", 1.03d), ("calves", 1.03d)),
+            ["Goat Humanoid"] = CreateTuning(("chest", 1.03d), ("breasts", 1.05d), ("legs", 1.04d), ("calves", 1.06d)),
+            ["Hagraven"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.05d), ("shoulders", 1.06d), ("arms", 1.07d)),
+            ["Spriggan"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.07d), ("shoulders", 1.05d), ("arms", 1.06d)),
+        };
+
+    private static IReadOnlyDictionary<string, double> CreateTuning(params (string Region, double Scale)[] entries) =>
+        entries.ToDictionary(static entry => entry.Region, static entry => entry.Scale, StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, double> ApplyRegionAwareSolver(IReadOnlyDictionary<string, double> field, string meshType)
     {
