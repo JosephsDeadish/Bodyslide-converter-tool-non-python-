@@ -5788,6 +5788,59 @@ public sealed class PluginPatchGuidanceTests
     }
 
     [Fact]
+    public async Task PluginPatches_UsesLinkedArmoContext_ToResolveAmbiguousArmaMeshPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "iron"));
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "steel"));
+
+        var espPath = Path.Combine(workingDirectory, "LinkedContext.esp");
+        var pluginBytes = BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+            armoEditorId: "LinkedWorldArmor",
+            armoFormId: 0x00000801u,
+            armoWorldMeshPath: "meshes/armor/iron/iron_ground.nif",
+            linkedArmaFormId: 0x00000802u,
+            armaEditorId: "LinkedSharedAddon",
+            armaMeshPath: "meshes/armor/common/shared_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "iron", "iron_ground.nif"),
+            "iron-ground");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "iron", "shared_0.nif"),
+            "iron-shared");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "steel", "shared_0.nif"),
+            "steel-shared");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/armor/common/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "common", "shared_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PluginPatches_VerifiesLinkedArmoToArmaRewriteCoverage()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6146,6 +6199,28 @@ public sealed class PluginPatchGuidanceTests
         {
             return [..tes4, ..armo];
         }
+
+        var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
+        var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));
+        var armaData = armaEditorData.Concat(armaMeshData).ToArray();
+        var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
+        return [..tes4, ..armo, ..arma];
+    }
+
+    private static byte[] BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+        string armoEditorId,
+        uint armoFormId,
+        string armoWorldMeshPath,
+        uint linkedArmaFormId,
+        string armaEditorId,
+        string armaMeshPath)
+    {
+        var tes4 = BuildSseRecord("TES4", []);
+        var armoEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armoEditorId + "\0"));
+        var armoWorldData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armoWorldMeshPath + "\0"));
+        var armoLinkData = BuildSubrecord("ARMA", BitConverter.GetBytes(linkedArmaFormId));
+        var armoData = armoEditorData.Concat(armoWorldData).Concat(armoLinkData).ToArray();
+        var armo = BuildSseRecord("ARMO", armoData, formId: armoFormId);
 
         var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
         var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));

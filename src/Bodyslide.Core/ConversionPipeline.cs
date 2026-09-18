@@ -13893,6 +13893,8 @@ internal sealed class LocalExportService(
         var sourceMeshMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingAmbiguous = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var relatedPluginMeshPaths = BuildRelatedPluginMeshPathMap(pluginAnalysis);
 
         // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
         var allPaths = pluginAnalysis.ArmorAddons
@@ -13916,7 +13918,7 @@ internal sealed class LocalExportService(
             {
                 if (ambiguousMatches.Count > 0)
                 {
-                    ambiguous.Add($"{originalPath} => {string.Join(" | ", ambiguousMatches.Select(Path.GetFileName))}");
+                    pendingAmbiguous[originalPath] = ambiguousMatches;
                 }
                 else
                 {
@@ -13930,12 +13932,126 @@ internal sealed class LocalExportService(
             sourceMeshMap[originalPath] = sourceMeshPath;
         }
 
+        var madeProgress = true;
+        while (pendingAmbiguous.Count > 0 && madeProgress)
+        {
+            madeProgress = false;
+            foreach (var (pluginMeshPath, candidatePaths) in pendingAmbiguous.ToArray())
+            {
+                if (!TryResolveAmbiguousSourceMeshFromContext(
+                        pluginMeshPath,
+                        candidatePaths,
+                        sourceMeshMap,
+                        relatedPluginMeshPaths,
+                        out var resolvedSourceMeshPath))
+                {
+                    continue;
+                }
+
+                rewrites[pluginMeshPath] = BuildPluginConvertedMeshPath(targetBody, pluginMeshPath, resolvedSourceMeshPath);
+                sourceMeshMap[pluginMeshPath] = resolvedSourceMeshPath;
+                pendingAmbiguous.Remove(pluginMeshPath);
+                madeProgress = true;
+            }
+        }
+
+        foreach (var (originalPath, ambiguousMatches) in pendingAmbiguous)
+        {
+            ambiguous.Add($"{originalPath} => {string.Join(" | ", ambiguousMatches.Select(Path.GetFileName))}");
+        }
+
         return new PluginRewritePlan(
             rewrites,
             sourceMeshMap,
             missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             allPaths.Count);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildRelatedPluginMeshPathMap(PluginAnalysisResult pluginAnalysis)
+    {
+        var relatedPathsByMeshPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        static IReadOnlyList<PluginLinkedFormReference> GetLinkedReferences(PluginArmorRecord armorRecord) =>
+            armorRecord.LinkedArmorAddonReferences?.Count > 0
+                ? armorRecord.LinkedArmorAddonReferences
+                : armorRecord.LinkedArmorAddonFormIds?.Select(rawFormId => new PluginLinkedFormReference(
+                    rawFormId,
+                    armorRecord.OwningPluginFileName,
+                    rawFormId & 0x00FFFFFFu)).ToList()
+                    ?? [];
+
+        static void AddRelatedGroup(
+            Dictionary<string, HashSet<string>> map,
+            IEnumerable<string> paths)
+        {
+            var normalizedPaths = paths
+                .Select(NormalizePluginMeshPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (normalizedPaths.Count < 2)
+            {
+                return;
+            }
+
+            foreach (var path in normalizedPaths)
+            {
+                if (!map.TryGetValue(path, out var related))
+                {
+                    related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    map[path] = related;
+                }
+
+                foreach (var candidate in normalizedPaths)
+                {
+                    if (!path.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        related.Add(candidate);
+                    }
+                }
+            }
+        }
+
+        var addonByResolvedKey = pluginAnalysis.ArmorAddons
+            .Where(static addon => addon.FormId != 0)
+            .Select(addon => new
+            {
+                Addon = addon,
+                Key = BuildResolvedPluginFormKey(
+                    addon.OwningPluginFileName,
+                    addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
+            })
+            .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            AddRelatedGroup(relatedPathsByMeshPath, addon.DetectedMeshPaths);
+        }
+
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            var relatedPaths = new List<string>();
+            relatedPaths.AddRange(armorRecord.DetectedMeshPaths);
+            foreach (var linkedReference in GetLinkedReferences(armorRecord))
+            {
+                var linkedKey = BuildResolvedPluginFormKey(
+                    linkedReference.OwningPluginFileName,
+                    linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
+                if (addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
+                {
+                    relatedPaths.AddRange(linkedAddon.DetectedMeshPaths);
+                }
+            }
+
+            AddRelatedGroup(relatedPathsByMeshPath, relatedPaths);
+        }
+
+        return relatedPathsByMeshPath.ToDictionary(
+            static pair => pair.Key,
+            static pair => (IReadOnlyList<string>)pair.Value.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToList(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private static string NormalizePluginMeshPath(string pluginPath) =>
@@ -13990,6 +14106,59 @@ internal sealed class LocalExportService(
         return true;
     }
 
+    private static bool TryResolveAmbiguousSourceMeshFromContext(
+        string pluginMeshPath,
+        IReadOnlyList<string> candidatePaths,
+        IReadOnlyDictionary<string, string> resolvedSourceMeshByPluginPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths,
+        out string sourceMeshPath)
+    {
+        sourceMeshPath = string.Empty;
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        if (!relatedPluginMeshPaths.TryGetValue(normalizedPluginMeshPath, out var relatedPaths) ||
+            relatedPaths.Count == 0)
+        {
+            return false;
+        }
+
+        var resolvedNeighborPaths = relatedPaths
+            .Select(path => resolvedSourceMeshByPluginPath.TryGetValue(path, out var resolvedPath) ? resolvedPath : null)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (resolvedNeighborPaths.Count == 0)
+        {
+            return false;
+        }
+
+        var scoredCandidates = candidatePaths
+            .Select(path => new
+            {
+                Path = path,
+                Score = ScoreSourceMeshCandidateFromNeighbors(path, resolvedNeighborPaths)
+            })
+            .Where(static candidate => candidate.Score > 0)
+            .ToList();
+        if (scoredCandidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestScore = scoredCandidates.Max(static candidate => candidate.Score);
+        var bestMatches = scoredCandidates
+            .Where(candidate => candidate.Score == bestScore)
+            .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (bestMatches.Count != 1)
+        {
+            return false;
+        }
+
+        sourceMeshPath = bestMatches[0].Path;
+        return true;
+    }
+
     private static int ScoreSourceMeshCandidate(string pluginMeshPath, string sourceMeshPath)
     {
         var normalizedPluginPath = NormalizePluginMeshPath(pluginMeshPath);
@@ -14020,6 +14189,38 @@ internal sealed class LocalExportService(
                 score += 75;
             }
 
+            bestScore = Math.Max(bestScore, score);
+        }
+
+        return bestScore;
+    }
+
+    private static int ScoreSourceMeshCandidateFromNeighbors(
+        string candidatePath,
+        IReadOnlyList<string> resolvedNeighborPaths)
+    {
+        var candidateDirectory = NormalizeComparablePath(Path.GetDirectoryName(candidatePath) ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidateDirectory))
+        {
+            return 0;
+        }
+
+        var bestScore = 0;
+        foreach (var neighborPath in resolvedNeighborPaths)
+        {
+            var neighborDirectory = NormalizeComparablePath(Path.GetDirectoryName(neighborPath) ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(neighborDirectory))
+            {
+                continue;
+            }
+
+            var score = CountMatchingTrailingSegments(candidateDirectory, neighborDirectory) * 250;
+            if (candidateDirectory.Equals(neighborDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 10_000;
+            }
+
+            score += CountSharedPathTokens(candidateDirectory, neighborDirectory) * 20;
             bestScore = Math.Max(bestScore, score);
         }
 
