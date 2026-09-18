@@ -11026,6 +11026,11 @@ internal static class ConversionReadmeGenerator
         sb.AppendLine("    Open your mod manager (Mod Organizer 2, Vortex, etc.) and install");
         sb.AppendLine("    this output folder as a mod.  The included FOMOD installer will");
         sb.AppendLine("    automatically place all files in the correct Data sub-folders.");
+        sb.AppendLine("    A mod manager also keeps the conversion isolated, makes rollback easy,");
+        sb.AppendLine("    and lets the generated meshes/plugins win conflicts without overwriting");
+        sb.AppendLine("    your base armor mod permanently.");
+        sb.AppendLine("    Place the SlideSmith output mod below the original armor/body mod so");
+        sb.AppendLine("    the converted meshes, physics XMLs, and generated plugins take priority.");
         sb.AppendLine();
         sb.AppendLine("  OPTION B — Manual (drop-in):");
         sb.AppendLine("    The output folder is already structured as a Skyrim Data package.");
@@ -11064,6 +11069,9 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine("  This patch contains ONLY the ARMA records that needed mesh-path updates.");
             sb.AppendLine("  It lists the original plugin as its master and does NOT replace it.");
             sb.AppendLine("  Load order: place this patch AFTER the original plugin.");
+            sb.AppendLine("  In Mod Organizer 2 / Vortex, keep the generated SlideSmith mod enabled");
+            sb.AppendLine("  after the source armor mod, then place this patch after the source plugin");
+            sb.AppendLine("  and any related overrides noted in plugin-patches.json.");
             if (rewriteMap.Count > 0)
             {
                 sb.AppendLine();
@@ -11609,6 +11617,7 @@ internal sealed class LocalExportService(
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var pluginPatchWarnings = new List<string>();
         var patchVerificationPaths = new List<string>();
+        var pluginInstallHints = new List<PluginInstallHint>();
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
@@ -11774,6 +11783,7 @@ internal sealed class LocalExportService(
                                 pluginName, armaDescriptors, normMap, headerSize,
                                 inheritedMasterFileNames: masterFileNames,
                                 armoDescriptors: armoDescriptors);
+                            string? generatedPatchPlugin = null;
 
                             if (included > 0)
                             {
@@ -11783,13 +11793,31 @@ internal sealed class LocalExportService(
                                 outputFiles.Add(patchPath);
                                 patchEspGenerated = true;
                                 patchVerificationPaths.Add(patchPath);
+                                generatedPatchPlugin = Path.GetFileName(patchPath);
                             }
+
+                            pluginInstallHints.Add(BuildPluginInstallHint(
+                                pluginName,
+                                masterFileNames,
+                                generatedPatchPlugin,
+                                manualReviewRequired: false));
                         }
                         catch (Exception ex) when (ex is IOException or InvalidDataException)
                         {
                             // Non-fatal — patch generation skipped for this plugin.
                             pluginPatchWarnings.Add($"{Path.GetFileName(pluginPath)} patch generation skipped: {ex.Message}");
                         }
+                    }
+
+                    foreach (var skippedPluginPath in sourcePluginPaths.Except(safeSourcePluginPaths, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var skippedPluginName = Path.GetFileName(skippedPluginPath) ?? skippedPluginPath;
+                        pluginInstallHints.Add(BuildPluginInstallHint(
+                            skippedPluginName,
+                            [],
+                            null,
+                            manualReviewRequired: true,
+                            manualReviewReason: "Automated rewrite was skipped because the plugin uses an ambiguous ESL/ESPFE layout and should be reviewed in xEdit before installing any override patch."));
                     }
 
                 }
@@ -11812,6 +11840,7 @@ internal sealed class LocalExportService(
                 pluginAnalysis.ArmorAddons,
                 pluginAnalysis.PatchGuidance,
                 AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
+                PluginInstallHints = pluginInstallHints,
                 RewriteMappings = pluginRewriteMap
                     .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
                     .ToList(),
@@ -11998,7 +12027,7 @@ internal sealed class LocalExportService(
             cancellationToken);
         await File.WriteAllTextAsync(
             fomodInfoPath,
-            BuildFomodInfoXml(packageName),
+            BuildFomodInfoXml(packageName, fomodRootFiles),
             cancellationToken);
         outputFiles.Add(fomodModuleConfigPath);
         outputFiles.Add(fomodInfoPath);
@@ -14838,6 +14867,15 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
 
+    private sealed record PluginInstallHint(
+        string SourcePlugin,
+        IReadOnlyList<string> InheritedMasters,
+        string? GeneratedPatchPlugin,
+        IReadOnlyList<string> RecommendedPluginLoadAfter,
+        string RecommendedModManagerPlacement,
+        bool ManualReviewRequired,
+        IReadOnlyList<string> Notes);
+
     private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
         PluginRewritePlan pluginRewritePlan,
         PluginAnalysisResult pluginAnalysis,
@@ -15470,6 +15508,54 @@ internal sealed class LocalExportService(
         return steps;
     }
 
+    private static PluginInstallHint BuildPluginInstallHint(
+        string sourcePlugin,
+        IReadOnlyList<string> inheritedMasterFileNames,
+        string? generatedPatchPlugin,
+        bool manualReviewRequired,
+        string? manualReviewReason = null)
+    {
+        var sourcePluginFileName = Path.GetFileName(sourcePlugin) ?? sourcePlugin;
+        var normalizedMasters = inheritedMasterFileNames
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(static name => Path.GetFileName(name) ?? name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var recommendedLoadAfter = normalizedMasters
+            .Append(sourcePluginFileName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var notes = new List<string>
+        {
+            "Install the SlideSmith output as a separate mod and place it below the original armor/body mod in Mod Organizer 2 or Vortex so converted meshes and physics files win conflicts."
+        };
+
+        if (!string.IsNullOrWhiteSpace(generatedPatchPlugin))
+        {
+            notes.Add($"{generatedPatchPlugin} should load after {sourcePluginFileName} and after any inherited masters listed here.");
+        }
+        else
+        {
+            notes.Add($"No generated override patch was written for {sourcePluginFileName}; use plugin-patches.json and patch-armor.pas/xEdit guidance for manual plugin updates.");
+        }
+
+        if (manualReviewRequired && !string.IsNullOrWhiteSpace(manualReviewReason))
+        {
+            notes.Add(manualReviewReason);
+        }
+
+        return new PluginInstallHint(
+            sourcePluginFileName,
+            normalizedMasters,
+            generatedPatchPlugin,
+            recommendedLoadAfter,
+            "Keep the SlideSmith output mod below the source armor mod so converted assets and generated plugins win conflicts cleanly.",
+            manualReviewRequired,
+            notes);
+    }
+
     private static string BuildFomodModuleConfigXml(
         string packageName,
         string targetBody,
@@ -15480,6 +15566,12 @@ internal sealed class LocalExportService(
         var safePackage = XmlEscape(packageName);
         var safeTargetBody = XmlEscape(targetBody);
         var safeProjectName = XmlEscape(bodySlideProjectName);
+        var patchPluginName = rootFileNames
+            .Select(static name => Path.GetFileName(name) ?? name)
+            .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
+        var installDescription = patchPluginName is null
+            ? $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this mod below the original armor mod in Mod Organizer 2 or Vortex so the converted files win conflicts cleanly."
+            : $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this mod below the original armor mod in Mod Organizer 2 or Vortex and load {XmlEscape(patchPluginName)} after its source plugin.";
 
         // Build <files> content: one <folder> per Data subfolder + one <file> per root ESP/plugin.
         var filesContent = new System.Text.StringBuilder();
@@ -15508,7 +15600,7 @@ internal sealed class LocalExportService(
                     <group name="Body">
                       <plugins order="Explicit">
                         <plugin name="{{safeTargetBody}}">
-                          <description>Generated conversion output for {{safeTargetBody}} with BodySlide project {{safeProjectName}}.</description>
+                          <description>{{installDescription}}</description>
             {{filesBlock}}
                           <conditionFlags />
                           <typeDescriptor>
@@ -15524,9 +15616,15 @@ internal sealed class LocalExportService(
             """;
     }
 
-    private static string BuildFomodInfoXml(string packageName)
+    private static string BuildFomodInfoXml(string packageName, IReadOnlyList<string> rootFileNames)
     {
         var safePackage = XmlEscape(packageName);
+        var patchPluginName = rootFileNames
+            .Select(static name => Path.GetFileName(name) ?? name)
+            .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
+        var description = patchPluginName is null
+            ? "Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex and keep the SlideSmith mod below the original armor mod for clean conflict handling."
+            : $"Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex, keep the SlideSmith mod below the original armor mod, and load {XmlEscape(patchPluginName)} after its source plugin.";
 
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -15535,7 +15633,7 @@ internal sealed class LocalExportService(
               <Author>SlideSmith</Author>
               <Version MachineVersion="0.1">0.1</Version>
               <Website></Website>
-              <Description>Auto-generated FOMOD metadata for SlideSmith conversion output.</Description>
+              <Description>{{description}}</Description>
             </fomod>
             """;
     }

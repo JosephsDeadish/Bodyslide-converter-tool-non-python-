@@ -1307,6 +1307,8 @@ public sealed class ConversionOrchestratorTests
             var infoXml = await File.ReadAllTextAsync(infoPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
+            Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("keep the SlideSmith mod below the original armor mod", infoXml, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -6059,6 +6061,49 @@ public sealed class PluginPatchGuidanceTests
 
             var rewrittenMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
             Assert.True(File.Exists(rewrittenMeshPath), "Converted mesh should be staged at the rewritten plugin path.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_IncludeInstallHintsForMastersAndLoadOrder()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "MasteredArmor.esp");
+        var pluginBytes = BuildSsePluginWithMasters(
+            ["Skyrim.esm", "ArmorPack.esm"],
+            BuildSseRecord(
+                "ARMA",
+                BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasteredArmorAddon\0"))
+                    .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                    .ToArray(),
+                formId: 0x02000801u));
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"PluginInstallHints\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"SourcePlugin\": \"MasteredArmor.esp\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"InheritedMasters\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("ArmorPack.esm", patchJson, StringComparison.Ordinal);
+            Assert.Contains("Skyrim.esm", patchJson, StringComparison.Ordinal);
+            Assert.Contains("MasteredArmor_SlidesmithPatch.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("RecommendedPluginLoadAfter", patchJson, StringComparison.Ordinal);
+            Assert.Contains("Mod Organizer 2 or Vortex", patchJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -10880,6 +10925,8 @@ public sealed class ConversionReadmeGeneratorTests
         var readme = BuildReadme(patchEspGenerated: true, espPath: "/out/MyMod_SlidesmithPatch.esp");
         Assert.Contains("SlidesmithPatch", readme);
         Assert.Contains("override patch", readme);
+        Assert.Contains("Mod Organizer 2 / Vortex", readme, StringComparison.Ordinal);
+        Assert.Contains("after the source armor mod", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
