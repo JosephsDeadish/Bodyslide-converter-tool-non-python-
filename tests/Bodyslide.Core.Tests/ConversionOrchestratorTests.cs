@@ -871,6 +871,72 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithPluginSource_IncludesEsmRootPluginInFomod()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "testarmor");
+        Directory.CreateDirectory(meshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "testarmor_0.nif"), "mesh");
+        await File.WriteAllBytesAsync(
+            Path.Combine(inputDirectory, "TestArmor.esm"),
+            BuildMinimalPluginWithArmaMod2Path("meshes/armor/testarmor/testarmor_0.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var moduleConfig = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"));
+            Assert.Contains("TestArmor_patched.esm", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("TestArmor_SlidesmithPatch.esp", moduleConfig, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildMinimalPluginWithArmaMod2Path(string meshPath)
+        {
+            var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+            var tes4 = BuildSseRecord("TES4", []);
+            var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
+            return [.. tes4, .. arma];
+        }
+
+        static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
+        {
+            var buf = new byte[24 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            WriteUInt32Le(buf, 4, (uint)data.Length);
+            WriteUInt32Le(buf, 8, 0u);
+            WriteUInt32Le(buf, 12, formId);
+            data.CopyTo(buf, 24);
+            return buf;
+        }
+
+        static byte[] BuildSubrecord(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static void WriteUInt32Le(byte[] bytes, int offset, uint value)
+        {
+            bytes[offset] = (byte)(value & 0xFF);
+            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
+            bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
+            bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithOutputZip_ProducesZipFile()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -12214,6 +12280,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("missing-fomod-module-config", codes);
             Assert.Contains("missing-bodyslide-osp", codes);
             Assert.Contains("missing-bodyslide-shape-data", codes);
+            Assert.Contains("missing-staged-mesh-output", codes);
             Assert.Contains("missing-xedit-script", codes);
             Assert.Contains("missing-plugin-patch-report", codes);
             Assert.Contains("missing-output-zip", codes);
@@ -12239,8 +12306,13 @@ public sealed class OutputCompletenessTests
             File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
             File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
             File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
             Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
-            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config/>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /></config>");
             File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
 
             var request = new ConversionRequest(
@@ -12265,6 +12337,80 @@ public sealed class OutputCompletenessTests
         finally
         {
             Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsBrokenFomodAndZipContents()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(Path.Combine(sliderSetDirectory, "NordicProject.osp"), "<osp/>");
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "NordicProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "Belly.bsd"), "bsd");
+
+            var pluginPath = Path.Combine(outputDirectory, "Armor_patched.esm");
+            File.WriteAllText(pluginPath, "plugin");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var zipPath = outputDirectory + ".zip";
+            using (ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+            }
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                OutputZip: true,
+                GenerateBodySlideFiles: true);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [pluginPath, zipPath],
+                new BodySlideProject("NordicProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("fomod-missing-folder-entry", codes);
+            Assert.Contains("fomod-missing-root-plugin-entry", codes);
+            Assert.Contains("missing-bodyslide-reference-nif", codes);
+            Assert.Contains("zip-missing-readme", codes);
+            Assert.Contains("zip-missing-fomod-module-config", codes);
+            Assert.Contains("zip-missing-staged-mesh-output", codes);
+            Assert.Contains("zip-missing-root-plugin", codes);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
         }
     }
 

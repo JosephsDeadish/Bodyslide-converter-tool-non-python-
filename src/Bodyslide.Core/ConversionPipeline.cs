@@ -10756,7 +10756,7 @@ internal static class ConversionReadmeGenerator
         var nifFiles   = outputFiles.Where(f => f.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)).ToList();
         var bsdFiles   = outputFiles.Where(f => f.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase)).ToList();
         var ospFiles   = outputFiles.Where(f => f.EndsWith(".osp", StringComparison.OrdinalIgnoreCase)).ToList();
-        var espFiles   = outputFiles.Where(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)).ToList();
+        var pluginFiles = outputFiles.Where(IsBethesdaPluginFile).ToList();
         var xmlFiles   = outputFiles.Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).ToList();
         var pasFiles   = outputFiles.Where(f => f.EndsWith(".pas", StringComparison.OrdinalIgnoreCase)).ToList();
         var fomodFiles = outputFiles.Where(f => f.Contains("fomod", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -10771,7 +10771,7 @@ internal static class ConversionReadmeGenerator
         }
 
         ListFiles(nifFiles,   "Converted Meshes");
-        ListFiles(espFiles,   "Plugin Files");
+        ListFiles(pluginFiles, "Plugin Files");
         ListFiles(ospFiles,   "BodySlide Project");
         ListFiles(bsdFiles,   "BodySlide Slider Data");
         ListFiles(xmlFiles,   "Physics Configs");
@@ -10796,7 +10796,7 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderSets\\    ← BodySlide .osp project");
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\  ← .bsd sliders + source NIF");
         }
-        sb.AppendLine("    Also copy any .esp plugin files to Data\\ root.");
+        sb.AppendLine("    Also copy any generated plugin files (.esp/.esm/.esl) to Data\\ root.");
         sb.AppendLine("    Physics configs (.xml) go to:");
         sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
         sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
@@ -10806,11 +10806,11 @@ internal static class ConversionReadmeGenerator
         // ── Plugin patching instructions ───────────────────────────────────
         sb.AppendLine("PLUGIN PATCH");
         sb.AppendLine("------------");
-        if (patchEspGenerated && espFiles.Count > 0)
+        if (patchEspGenerated && pluginFiles.Count > 0)
         {
-            var patchEspName = espFiles
+            var patchEspName = pluginFiles
                 .FirstOrDefault(f => f.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase))
-                ?? espFiles[0];
+                ?? pluginFiles[0];
             sb.AppendLine($"  A minimal override patch ESP has been generated:");
             sb.AppendLine($"    {Path.GetFileName(patchEspName)}");
             sb.AppendLine();
@@ -10881,6 +10881,9 @@ internal static class ConversionReadmeGenerator
 
         return sb.ToString();
     }
+
+    private static bool IsBethesdaPluginFile(string path) =>
+        Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 }
 
 /// <summary>
