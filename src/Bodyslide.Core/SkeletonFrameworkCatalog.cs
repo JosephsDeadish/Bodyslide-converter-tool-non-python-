@@ -51,6 +51,16 @@ internal static class SkeletonFrameworkCatalog
             return null;
         }
 
+        var normalizedBoneNames = boneNames
+            .Where(static bone => !string.IsNullOrWhiteSpace(bone))
+            .Select(static bone => bone.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedBoneNames.Length == 0)
+        {
+            return null;
+        }
+
         foreach (var framework in All)
         {
             var signatures = framework.DistinctiveSignatures
@@ -63,8 +73,8 @@ internal static class SkeletonFrameworkCatalog
             }
 
             var matches = signatures.Count(signature =>
-                boneNames.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
-                                      bone.Equals(signature, StringComparison.OrdinalIgnoreCase)));
+                normalizedBoneNames.Any(bone => bone.Contains(signature, StringComparison.OrdinalIgnoreCase) ||
+                                               bone.Equals(signature, StringComparison.OrdinalIgnoreCase)));
             if (matches >= Math.Min(Math.Max(framework.MinimumSignatureMatches, 1), signatures.Length))
             {
                 return framework.Label;

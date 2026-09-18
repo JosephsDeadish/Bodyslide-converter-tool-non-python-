@@ -27,13 +27,24 @@ internal static class SemanticBoneAliasCatalog
         var data = JsonSerializer.Deserialize<Dictionary<string, string[]>>(raw, JsonOptions)
             ?? throw new InvalidOperationException("Semantic bone alias metadata could not be deserialized.");
 
-        return data.ToDictionary(
-            static pair => pair.Key,
-            static pair => (IReadOnlyList<string>)pair.Value
-                .Where(static value => !string.IsNullOrWhiteSpace(value))
-                .Select(static value => value.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            StringComparer.OrdinalIgnoreCase);
+        return data
+            .Select(static pair => new
+            {
+                Key = pair.Key.Trim(),
+                Values = (IReadOnlyList<string>)pair.Value
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Select(static value => value.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            })
+            .Where(static pair => !string.IsNullOrWhiteSpace(pair.Key))
+            .GroupBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => (IReadOnlyList<string>)group
+                    .SelectMany(static pair => pair.Values)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                StringComparer.OrdinalIgnoreCase);
     }
 }
