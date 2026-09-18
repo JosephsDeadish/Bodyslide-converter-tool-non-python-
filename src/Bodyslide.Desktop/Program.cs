@@ -5,8 +5,13 @@ namespace Bodyslide.Desktop;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            return RunSmokeTest();
+        }
+
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += OnThreadException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
@@ -15,10 +20,29 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             Application.Run(new MainForm());
+            return 0;
         }
         catch (Exception ex)
         {
             ShowFatalError(ex);
+            return 1;
+        }
+    }
+
+    private static int RunSmokeTest()
+    {
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            using var form = new MainForm();
+            form.CreateControl();
+            Console.WriteLine($"SlideSmith desktop smoke test passed: {form.GetSmokeTestSummary()}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"SlideSmith desktop smoke test failed: {ex}");
+            return 1;
         }
     }
 

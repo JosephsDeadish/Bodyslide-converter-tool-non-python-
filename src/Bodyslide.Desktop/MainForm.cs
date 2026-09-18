@@ -895,6 +895,17 @@ public sealed class MainForm : Form
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
     }
 
+    internal string GetSmokeTestSummary()
+    {
+        return
+            $"title=\"{Text}\", " +
+            $"presets={_presetComboBox.Items.Count}, " +
+            $"targets={_targetComboBox.Items.Count}, " +
+            $"profiles={_profileComboBox.Items.Count}, " +
+            $"physics={_physicsComboBox.Items.Count}, " +
+            $"tabs={_resultsTabControl.TabPages.Count}";
+    }
+
     private static GroupBox CreateSection(string title, Control content)
     {
         content.Dock = DockStyle.Fill;
