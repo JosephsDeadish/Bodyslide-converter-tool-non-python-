@@ -1824,6 +1824,13 @@ internal static class NifGeometrySignatureReader
         IReadOnlyList<int> PartitionSlots,
         IReadOnlyList<string> BoneNames);
 
+    internal readonly record struct HalfFloatVertexBlockCandidate(
+        int VertexDataOffset,
+        int VertexCount,
+        int VertexStride,
+        int Score,
+        int TrailingBytes);
+
     public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
     {
         MeshGeometrySignature? best = null;
@@ -2324,11 +2331,32 @@ internal static class NifGeometrySignatureReader
         if (!ContainsSupportedSseHalfFloatShape(bytes))
             return false;
 
-        var bestScore = 0;
-        var bestOffset = -1;
-        var bestCount = 0;
-        var bestStride = 0;
-        var bestTrailingBytes = int.MaxValue;
+        var candidates = LocateHalfFloatVertexBlocks(bytes);
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestCandidate = candidates
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenBy(static candidate => candidate.TrailingBytes)
+            .ThenByDescending(static candidate => candidate.VertexCount)
+            .First();
+
+        vertexDataOffset = bestCandidate.VertexDataOffset;
+        vertexCount = bestCandidate.VertexCount;
+        vertexStride = bestCandidate.VertexStride;
+        return true;
+    }
+
+    internal static IReadOnlyList<HalfFloatVertexBlockCandidate> LocateHalfFloatVertexBlocks(byte[] bytes)
+    {
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0 || !ContainsSupportedSseHalfFloatShape(bytes))
+        {
+            return [];
+        }
+
+        var candidates = new Dictionary<(int Offset, int Count, int Stride), HalfFloatVertexBlockCandidate>();
 
         // Scan for BSVertexDesc (uint64).  Bits 44-47 encode stride / 4.
         // Layout following a valid BSVertexDesc:
@@ -2373,25 +2401,31 @@ internal static class NifGeometrySignatureReader
 
             var score = ScoreHalfFloatVertexBlock(bytes, vertStart, numVertices, candidateStride);
             var trailingBytes = bytes.Length - (int)(vertStart + vertSize);
-            if (score > bestScore ||
-                (score == bestScore && trailingBytes < bestTrailingBytes) ||
-                (score == bestScore && trailingBytes == bestTrailingBytes && numVertices > bestCount))
+            if (score < Math.Max(1, numVertices / 2))
             {
-                bestScore = score;
-                bestOffset = vertStart;
-                bestCount = numVertices;
-                bestStride = candidateStride;
-                bestTrailingBytes = trailingBytes;
+                continue;
+            }
+
+            var key = (vertStart, numVertices, candidateStride);
+            var candidate = new HalfFloatVertexBlockCandidate(
+                VertexDataOffset: vertStart,
+                VertexCount: numVertices,
+                VertexStride: candidateStride,
+                Score: score,
+                TrailingBytes: trailingBytes);
+
+            if (!candidates.TryGetValue(key, out var existing) ||
+                candidate.Score > existing.Score ||
+                (candidate.Score == existing.Score && candidate.TrailingBytes < existing.TrailingBytes))
+            {
+                candidates[key] = candidate;
             }
         }
 
-        if (bestOffset < 0 || bestScore < bestCount / 2)
-            return false;
-
-        vertexDataOffset = bestOffset;
-        vertexCount = bestCount;
-        vertexStride = bestStride;
-        return true;
+        return candidates.Values
+            .OrderBy(static candidate => candidate.VertexDataOffset)
+            .ThenByDescending(static candidate => candidate.Score)
+            .ToList();
     }
 
     /// <summary>
@@ -13412,22 +13446,47 @@ internal sealed class LocalExportService(
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage? deformationCage)
     {
-        if (!NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(
-                sourceBytes,
-                out var vertexDataOffset,
-                out var vertexCount,
-                out var vertexStride))
+        var blocks = NifGeometrySignatureReader.LocateHalfFloatVertexBlocks(sourceBytes);
+        if (blocks.Count == 0)
         {
             return sourceBytes;
         }
 
-        if (vertexCount <= 0 || vertexStride < 6)
-            return sourceBytes;
-
         var transformed = sourceBytes.ToArray();
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
+        var transformedAny = false;
+        foreach (var block in blocks)
+        {
+            transformedAny |= TryApplyHalfFloatVertexBlockTransform(
+                transformed,
+                block.VertexDataOffset,
+                block.VertexCount,
+                block.VertexStride,
+                regionalMorphing,
+                effectiveCage);
+        }
+
+        return transformedAny ? transformed : sourceBytes;
+    }
+
+    private static bool TryApplyHalfFloatVertexBlockTransform(
+        byte[] transformed,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage effectiveCage)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return false;
+        }
+
         var requiredBytes = (long)vertexCount * vertexStride;
         if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
-            return sourceBytes;
+        {
+            return false;
+        }
 
         var minX = float.MaxValue;
         var maxX = float.MinValue;
@@ -13436,7 +13495,6 @@ internal sealed class LocalExportService(
         var minZ = float.MaxValue;
         var maxZ = float.MinValue;
 
-        // First pass: bounding box + collect positions for the animation-driven solver.
         var rawVertices = new (float X, float Y, float Z)[vertexCount];
         for (var i = 0; i < vertexCount; i++)
         {
@@ -13445,9 +13503,12 @@ internal sealed class LocalExportService(
             var y = (float)BitConverter.ToHalf(transformed.AsSpan(off + 2));
             var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
             rawVertices[i] = (x, y, z);
-            minX = MathF.Min(minX, x); maxX = MathF.Max(maxX, x);
-            minY = MathF.Min(minY, y); maxY = MathF.Max(maxY, y);
-            minZ = MathF.Min(minZ, z); maxZ = MathF.Max(maxZ, z);
+            minX = MathF.Min(minX, x);
+            maxX = MathF.Max(maxX, x);
+            minY = MathF.Min(minY, y);
+            maxY = MathF.Max(maxY, y);
+            minZ = MathF.Min(minZ, z);
+            maxZ = MathF.Max(maxZ, z);
         }
 
         var zRange = Math.Max(0.0001f, maxZ - minZ);
@@ -13455,14 +13516,11 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
-
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+        var transformedAny = false;
 
-        // Second pass: apply the same regional morph + push-out + shrinkwrap as the LE path,
-        // but encode results back as Half to preserve the BSVertexData layout.
         for (var i = 0; i < vertexCount; i++)
         {
             var off = vertexDataOffset + i * vertexStride;
@@ -13513,18 +13571,22 @@ internal sealed class LocalExportService(
                     ref transformedY);
             }
 
-            // Clamp to Half range (±65504) and write back the 6 position bytes only;
-            // the remaining bytes within the vertex element (UV, normals, tangents, etc.)
-            // are left unchanged.
             transformedX = Math.Clamp(transformedX, -65504f, 65504f);
             transformedY = Math.Clamp(transformedY, -65504f, 65504f);
             transformedZ = Math.Clamp(transformedZ, -65504f, 65504f);
-            BitConverter.TryWriteBytes(transformed.AsSpan(off),     (Half)transformedX);
+            if (MathF.Abs(transformedX - x) > 0.0001f ||
+                MathF.Abs(transformedY - y) > 0.0001f ||
+                MathF.Abs(transformedZ - z) > 0.0001f)
+            {
+                transformedAny = true;
+            }
+
+            BitConverter.TryWriteBytes(transformed.AsSpan(off), (Half)transformedX);
             BitConverter.TryWriteBytes(transformed.AsSpan(off + 2), (Half)transformedY);
             BitConverter.TryWriteBytes(transformed.AsSpan(off + 4), (Half)transformedZ);
         }
 
-        return transformed;
+        return transformedAny;
     }
 
     private static (double WidthScale, double DepthScale, double HeightScale) ComputeCageProjectionScales(

@@ -8988,6 +8988,61 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticMultiBlockLinkedFrameworkModPackDirectory_TransformsEveryExplicitHalfFloatBlock()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMultiBlockLinkedFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var sourceNifPath = Path.Combine(workingDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif");
+            Assert.True(File.Exists(writtenPath), "Converted multi-block framework NIF was not written.");
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var sourceBytes = await File.ReadAllBytesAsync(sourceNifPath);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+
+            var sourceSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(sourceBytes);
+            var writtenSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceSubIndex.Count, writtenSubIndex.Count);
+            Assert.True(
+                sourceSubIndex.Zip(writtenSubIndex, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected the BSSubIndexTriShape block to be transformed.");
+
+            var sourceSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(sourceBytes);
+            var writtenSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceSegmented.Count, writtenSegmented.Count);
+            Assert.True(
+                sourceSegmented.Zip(writtenSegmented, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected the BSSegmentedTriShape block to be transformed.");
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"heuristic-nif-read\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticMasterChainBodyFrameworkModPackDirectory_ResolvesStandaloneMasterChainFamilyContext()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMasterChainBodyFrameworkModPack");
