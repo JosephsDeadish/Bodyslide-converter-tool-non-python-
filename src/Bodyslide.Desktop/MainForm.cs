@@ -62,6 +62,8 @@ public sealed class MainForm : Form
     private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _guidanceTabPage;
+    private readonly ListView _guidanceListView;
     private readonly TabPage _reportsTabPage;
     private readonly ListView _reportsListView;
     private readonly TabPage _catalogTabPage;
@@ -793,6 +795,20 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _guidanceTabPage = new TabPage("Next actions");
+        _guidanceListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _guidanceListView.Columns.Add("Area", 150);
+        _guidanceListView.Columns.Add("Priority", 90);
+        _guidanceListView.Columns.Add("Guidance", -2);
+        _guidanceTabPage.Controls.Add(_guidanceListView);
+        _resultsTabControl.TabPages.Add(_guidanceTabPage);
         _reportsTabPage = new TabPage("Reports");
         _reportsListView = new ListView
         {
@@ -882,6 +898,7 @@ public sealed class MainForm : Form
         UpdatePhysicsDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
+        PopulateGuidanceTab([], null);
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
@@ -1482,6 +1499,13 @@ public sealed class MainForm : Form
             PopulateSummaryTab(results);
             PopulateReportsTab(results);
             PopulateArtifactsTab(results);
+            var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
+
+            _resultsTabControl.SelectedTab = guidanceNeedsReview
+                ? _guidanceTabPage
+                : !string.IsNullOrWhiteSpace(_lastPreviewPath)
+                    ? _previewTabPage
+                    : _summaryTabPage;
 
             AppendLog($"Converted {results.Count} armor item(s).");
             if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
@@ -1501,6 +1525,15 @@ public sealed class MainForm : Form
                     builder.AppendLine($"  - {step}");
                 }
                 AppendLog(builder.ToString().TrimEnd());
+            }
+
+            if (guidanceNeedsReview)
+            {
+                AppendLog("Review recommended next actions in the Next actions tab before installing or sharing the output.");
+            }
+            else if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
+            {
+                AppendLog("Preview looks ready for review. Open the Preview tab for a final visual pass before installing or sharing.");
             }
 
             _statusLabel.Text = "Conversion complete.";
@@ -1745,7 +1778,8 @@ public sealed class MainForm : Form
         _ = await LoadPreviewInAppAsync(previewPath);
         PopulateReportsTab(selectedFolder);
         PopulateArtifactsTab(selectedFolder);
-        _resultsTabControl.SelectedTab = _previewTabPage;
+        var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
+        _resultsTabControl.SelectedTab = guidanceNeedsReview ? _guidanceTabPage : _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
     }
 
@@ -1934,6 +1968,89 @@ public sealed class MainForm : Form
 
             Add("Output files", result.OutputFiles.Count.ToString());
         }
+    }
+
+    private bool PopulateGuidanceTab(IReadOnlyList<ConversionResult> results, string? previewPath)
+    {
+        var outputDirectories = results
+            .Select(result => result.OutputDirectory)
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return PopulateGuidanceTab(outputDirectories, previewPath);
+    }
+
+    private bool PopulateGuidanceTab(string? outputDirectory, string? previewPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            return PopulateGuidanceTab([], previewPath);
+        }
+
+        return PopulateGuidanceTab([outputDirectory], previewPath);
+    }
+
+    private bool PopulateGuidanceTab(IReadOnlyList<string> outputDirectories, string? previewPath)
+    {
+        var requiresReview = false;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        _guidanceListView.BeginUpdate();
+        try
+        {
+            _guidanceListView.Items.Clear();
+
+            void Add(string area, string priority, string guidance)
+            {
+                if (string.IsNullOrWhiteSpace(guidance) ||
+                    !seen.Add($"{area}|{priority}|{guidance}"))
+                {
+                    return;
+                }
+
+                _guidanceListView.Items.Add(new ListViewItem([area, priority, guidance]));
+            }
+
+            if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
+            {
+                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
+            {
+                Add(
+                    "Preview",
+                    "Info",
+                    "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.");
+            }
+            else
+            {
+                requiresReview = true;
+                Add(
+                    "Preview",
+                    "Warning",
+                    "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.");
+            }
+
+            foreach (var outputDirectory in outputDirectories)
+            {
+                AppendGuidanceFromConversionQuality(outputDirectory, Add, ref requiresReview);
+                AppendGuidanceFromPackValidation(outputDirectory, Add, ref requiresReview);
+                AppendGuidanceFromPluginPatches(outputDirectory, Add, ref requiresReview);
+            }
+
+            if (_guidanceListView.Items.Count == 0)
+            {
+                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+            }
+        }
+        finally
+        {
+            _guidanceListView.EndUpdate();
+        }
+
+        return requiresReview;
     }
 
     private void PopulateInspectionTab(ConversionInspectionResult inspection)
@@ -3089,6 +3206,190 @@ public sealed class MainForm : Form
         TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
             ? TryReadString(nested, nestedPropertyName)
             : null;
+
+    private static int? TryReadIntValue(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
+            ? result
+            : null;
+
+    private static int TryReadArrayCount(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.GetArrayLength()
+            : 0;
+
+    private static ConversionValidationSummary? TryReadValidationSummary(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ValidationSummary", out var summary) || summary.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var status = TryReadString(summary, "Status");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        var issues = new List<ConversionValidationIssue>();
+        if (TryGetProperty(summary, "Issues", out var issuesValue) && issuesValue.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var issue in issuesValue.EnumerateArray())
+            {
+                var code = TryReadString(issue, "Code");
+                var severity = TryReadString(issue, "Severity");
+                var message = TryReadString(issue, "Message");
+                if (string.IsNullOrWhiteSpace(code) ||
+                    string.IsNullOrWhiteSpace(severity) ||
+                    string.IsNullOrWhiteSpace(message))
+                {
+                    continue;
+                }
+
+                issues.Add(new ConversionValidationIssue(code, severity, message));
+            }
+        }
+
+        return new ConversionValidationSummary(
+            status,
+            TryReadIntValue(summary, "Score") ?? 0,
+            TryReadIntValue(summary, "HighSeverityCount") ?? 0,
+            TryReadIntValue(summary, "MediumSeverityCount") ?? 0,
+            TryReadIntValue(summary, "LowSeverityCount") ?? 0,
+            issues);
+    }
+
+    private static void AppendGuidanceFromConversionQuality(
+        string outputDirectory,
+        Action<string, string, string> add,
+        ref bool requiresReview)
+    {
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        if (!File.Exists(qualityPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(qualityPath));
+            var root = document.RootElement;
+            var targetBody = TryReadString(root, "TargetBody") ?? "target body";
+            var validationSummary = TryReadValidationSummary(root);
+            if (validationSummary is null)
+            {
+                return;
+            }
+
+            if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+                validationSummary.Issues.Count > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Validation",
+                validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
+                $"Validation status: {validationSummary.Status} (score {validationSummary.Score}). Open conversion-quality.json for the full breakdown.");
+
+            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
+            {
+                add("Warning", ToDisplayPriority(issue.Severity), issue.Message);
+            }
+
+            foreach (var action in ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody, maxActions: 4))
+            {
+                add("Next action", "Action", action);
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}");
+        }
+    }
+
+    private static void AppendGuidanceFromPackValidation(
+        string outputDirectory,
+        Action<string, string, string> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "armor-pack-validation.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var status = TryReadString(root, "PackReadinessStatus");
+            var needsReviewCount = TryReadIntValue(root, "NeedsReviewCount") ?? 0;
+            var highRiskCount = TryReadIntValue(root, "HighRiskCount") ?? 0;
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return;
+            }
+
+            if (!status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+                needsReviewCount > 0 ||
+                highRiskCount > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Packaging",
+                status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
+                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.");
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}");
+        }
+    }
+
+    private static void AppendGuidanceFromPluginPatches(
+        string outputDirectory,
+        Action<string, string, string> add,
+        ref bool requiresReview)
+    {
+        var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+        if (!File.Exists(patchPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(patchPath));
+            var root = document.RootElement;
+            var patchSteps = TryReadArrayCount(root, "ProposedPatchSteps");
+            var rewriteMappings = TryReadArrayCount(root, "RewriteMappings");
+            if (patchSteps <= 0 && rewriteMappings <= 0)
+            {
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Plugin patching",
+                "Action",
+                $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.");
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Plugin patching", "Warning", $"Could not read plugin-patches.json: {ex.Message}");
+        }
+    }
+
+    private static string ToDisplayPriority(string severity) =>
+        severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? "High"
+        : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? "Medium"
+        : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? "Low"
+        : "Info";
 
     private static string? TryReadArray(JsonElement element, string propertyName)
     {
