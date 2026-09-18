@@ -5816,6 +5816,68 @@ public sealed class PluginPatchGuidanceTests
     }
 
     [Fact]
+    public async Task PluginPatches_UsesIndexedMasterLinkedResolution_WhenSecondMasterSharesLocalFormId()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "FirstAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("WrongIndexedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/steel/steelarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "SecondAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RightIndexedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["FirstAddon.esp", "SecondAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("IndexedMasterArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x01000802u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("IndexedMasterArmor (0x00000801) -> WrongIndexedAddon", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PluginPatches_LegacyLinkedFormIds_FallBackToOwningPluginScope()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6106,6 +6168,39 @@ public sealed class PhysicsMeshTypeTuningTests
             Assert.Contains("NPC L Pec",     config.SmpConfigXml, StringComparison.Ordinal);
             Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public async Task BuildAsync_CustomSpecialBones_EmitsExtendedSmpNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "mixed",
+            "default",
+            true,
+            TargetPhysicsBones: ["Vagina", "Anus", "HDT Mouth", "NPC Head", "HDT HighHeel_L"]);
+
+        var config = await service.BuildAsync(mesh, "UBE", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Vagina", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Anus", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("HDT Mouth", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("NPC Head", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("HDT HighHeel_L", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuiltInBodyCatalog_ExposesUbeAndSosSpecialBones()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("UBE", out var ube));
+        Assert.Contains("Vagina", ube.AvailablePhysicsBones);
+        Assert.Contains("Anus", ube.AvailablePhysicsBones);
+        Assert.Contains("BellyLower", ube.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
+        Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
+        Assert.Contains("SOS Scrotum", sos.AvailablePhysicsBones);
     }
 
     [Fact]
@@ -6637,6 +6732,44 @@ public sealed class SourceTargetDeltaTests
         Assert.True(cbbeField.ContainsKey(region) && unpField.ContainsKey(region));
         var expectedDelta = unpField[region] / cbbeField[region];
         Assert.Equal(expectedDelta, result.RegionalMorphing[region], precision: 5);
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_CrossGenderTuning_AdjustsMaleToFemaleDelta()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var himboField = BodyTransformationFieldCatalog.Resolve("HIMBO");
+        var ubeField = BodyTransformationFieldCatalog.Resolve("UBE");
+        var baseBreastDelta = ubeField["breasts"] / himboField["breasts"];
+        var baseShoulderDelta = ubeField["shoulders"] / himboField["shoulders"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "UBE", null, "HIMBO", CancellationToken.None);
+
+        Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
+        Assert.True(Math.Abs(result.RegionalMorphing["shoulders"] - 1d) < Math.Abs(baseShoulderDelta - 1d));
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_AmplifiesUbeDelta()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        var ubeField = BodyTransformationFieldCatalog.Resolve("UBE");
+        var baseBreastDelta = ubeField["breasts"] / cbbeField["breasts"];
+        var baseBellyDelta = ubeField["belly"] / cbbeField["belly"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "UBE", null, "CBBE", CancellationToken.None);
+
+        Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
+        Assert.True(Math.Abs(result.RegionalMorphing["belly"] - 1d) > Math.Abs(baseBellyDelta - 1d));
     }
 }
 

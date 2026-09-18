@@ -6665,7 +6665,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             baseField = BodyTransformationFieldCatalog.Resolve(targetBody, armor);
         }
 
-        var profileField = DeformationProfileModifier.Apply(baseField, deformationProfile);
+        var tunedField = ApplyBodySpecificTuning(baseField, targetBody, sourceBody);
+        var profileField = DeformationProfileModifier.Apply(tunedField, deformationProfile);
         var regionalMorphing = analysis.MeshType switch
         {
             "plate" => ApplyRigidityConstraints(profileField),
@@ -6699,6 +6700,124 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 1.15), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, double> ApplyBodySpecificTuning(
+        IReadOnlyDictionary<string, double> field,
+        string targetBody,
+        string? sourceBody)
+    {
+        if (field.Count == 0)
+        {
+            return field;
+        }
+
+        var tuned = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+        ApplyDirectionalTuning(tuned, GetTargetBodyTuning(targetBody));
+
+        if (!string.IsNullOrWhiteSpace(sourceBody) &&
+            BodyTypeCatalog.TryGetGender(sourceBody, out var sourceGender) &&
+            BodyTypeCatalog.TryGetGender(targetBody, out var targetGender) &&
+            !string.Equals(sourceGender, targetGender, StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyDirectionalTuning(tuned, GetCrossGenderTuning(sourceGender, targetGender));
+        }
+
+        return tuned;
+    }
+
+    private static void ApplyDirectionalTuning(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, double> tuning)
+    {
+        foreach (var (region, scale) in tuning)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(1d + ((value - 1d) * scale), 6);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, double> GetCrossGenderTuning(string sourceGender, string targetGender)
+    {
+        if (string.Equals(sourceGender, "male", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetGender, "female", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["breasts"] = 1.22d,
+                ["waist"] = 1.08d,
+                ["pelvis"] = 1.12d,
+                ["butt"] = 1.14d,
+                ["thighs"] = 1.12d,
+                ["shoulders"] = 0.88d,
+                ["arms"] = 0.90d,
+                ["chest"] = 0.94d
+            };
+        }
+
+        if (string.Equals(sourceGender, "female", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetGender, "male", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.10d,
+                ["shoulders"] = 1.16d,
+                ["arms"] = 1.12d,
+                ["waist"] = 1.06d,
+                ["belly"] = 1.05d,
+                ["breasts"] = 0.78d,
+                ["pelvis"] = 0.88d,
+                ["butt"] = 0.86d,
+                ["thighs"] = 0.90d
+            };
+        }
+
+        return EmptyTuning;
+    }
+
+    private static IReadOnlyDictionary<string, double> GetTargetBodyTuning(string targetBody)
+    {
+        if (!BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalName))
+        {
+            return EmptyTuning;
+        }
+
+        return canonicalName switch
+        {
+            "3BA" or "BHUNP" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["breasts"] = 1.06d,
+                ["butt"] = 1.04d,
+                ["thighs"] = 1.04d
+            },
+            "UBE" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["breasts"] = 1.08d,
+                ["belly"] = 1.05d,
+                ["butt"] = 1.05d
+            },
+            "HIMBO" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.05d,
+                ["shoulders"] = 1.08d,
+                ["arms"] = 1.06d
+            },
+            "SAM" or "SAM Light" or "SOS" or "TNG" => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.04d,
+                ["shoulders"] = 1.06d,
+                ["arms"] = 1.05d,
+                ["waist"] = 0.96d
+            },
+            _ => EmptyTuning
+        };
+    }
+
+    private static readonly IReadOnlyDictionary<string, double> EmptyTuning =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, double> ApplyRegionAwareSolver(IReadOnlyDictionary<string, double> field, string meshType)
     {
@@ -7167,7 +7286,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             }
 
             var lowered = extraBone.ToLowerInvariant();
-            if (lowered.Contains("genital", StringComparison.Ordinal) || lowered.Contains("balls", StringComparison.Ordinal))
+            if (MatchesSemanticAlias(lowered, "genitals") || lowered.Contains("balls", StringComparison.Ordinal))
             {
                 AppendBone(extraBone, 1.25, 0.72, 0.62, 12, 0.12);
             }
@@ -7178,6 +7297,21 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             else if (lowered.Contains("breast", StringComparison.Ordinal) || lowered.Contains("pec", StringComparison.Ordinal) || lowered.Contains("lat", StringComparison.Ordinal))
             {
                 AppendBone(extraBone, 2.1, 0.78, 0.56, 16, 0.16);
+            }
+            else if (MatchesSemanticAlias(lowered, "mouth") ||
+                     lowered.Contains("jaw", StringComparison.Ordinal) ||
+                     lowered.Contains("tongue", StringComparison.Ordinal) ||
+                     lowered.Contains("lip", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 0.85, 0.92, 0.78, 6, 0.06);
+            }
+            else if (MatchesSemanticAlias(lowered, "head"))
+            {
+                AppendBone(extraBone, 1.10, 0.94, 0.82, 5, 0.05);
+            }
+            else if (MatchesSemanticAlias(lowered, "heel"))
+            {
+                AppendBone(extraBone, 0.95, 0.96, 0.86, 4, 0.05);
             }
         }
 
@@ -7192,6 +7326,10 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             sb.AppendLine("  </bone>");
         }
     }
+
+    private static bool MatchesSemanticAlias(string loweredBoneName, string semanticKey) =>
+        SemanticBoneAliasCatalog.All.TryGetValue(semanticKey, out var aliases) &&
+        aliases.Any(loweredBoneName.Contains);
 }
 
 /// <summary>

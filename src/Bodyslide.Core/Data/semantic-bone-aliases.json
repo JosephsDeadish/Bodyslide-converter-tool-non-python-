@@ -45,9 +45,30 @@
     "schlong",
     "penis",
     "vagina",
+    "anus",
+    "anal",
     "groin",
     "crotch",
     "pubic"
+  ],
+  "mouth": [
+    "mouth",
+    "lip",
+    "jaw",
+    "tongue",
+    "teeth"
+  ],
+  "head": [
+    "head",
+    "face",
+    "brow",
+    "ear",
+    "horn"
+  ],
+  "heel": [
+    "heel",
+    "ankle",
+    "foot"
   ],
   "hair": [
     "hair",

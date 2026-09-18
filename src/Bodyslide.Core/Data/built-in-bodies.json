@@ -927,9 +927,10 @@
       "NPC L Pec",
       "NPC R Pec",
       "NPC Belly",
-      "NPC GenitalsBase",
-      "NPC Genitals01",
-      "NPC Genitals02"
+      "SOS GenitalsBase",
+      "SOS Genitals01",
+      "SOS Genitals02",
+      "SOS Scrotum"
     ],
     "referenceTokens": [
       "schlongs",
@@ -974,9 +975,10 @@
     "depthToWidthRatioMin": 0.32,
     "depthToWidthRatioMax": 0.95,
     "physicsBoneSignatures": [
-      "NPC GenitalsBase",
-      "NPC Genitals01",
-      "NPC Genitals02"
+      "SOS GenitalsBase",
+      "SOS Genitals01",
+      "SOS Genitals02",
+      "SOS Scrotum"
     ],
     "skeletonFramework": "xpmsse-male-smp"
   },
@@ -1005,7 +1007,10 @@
       "BreastOuter",
       "BreastInner",
       "ButtUpper",
-      "ButtLower"
+      "ButtLower",
+      "BellyLower",
+      "Vagina",
+      "Anus"
     ],
     "referenceTokens": [
       "ube",
@@ -1065,6 +1070,9 @@
       "BreastInner",
       "ButtUpper",
       "ButtLower",
+      "BellyLower",
+      "Vagina",
+      "Anus",
       "NPC L Breast01",
       "NPC R Breast01",
       "NPC Belly",
