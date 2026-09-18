@@ -6509,6 +6509,14 @@ public sealed class BodyTypeCatalogTests
     [InlineData("3BBB", "3BA")]
     [InlineData("CBBE 3BBB", "3BA")]
     [InlineData("UNP Blessed", "UNPB")]
+    [InlineData("PB", "UNPB")]
+    [InlineData("Blessed Body", "UNPB")]
+    [InlineData("7B Oppai", "UUNP")]
+    [InlineData("Wench Body 7B Oppai", "UUNP")]
+    [InlineData("SevenBase Bombshell", "UUNP")]
+    [InlineData("Shiva UUNP", "UUNP")]
+    [InlineData("Shiva CBBE", "CBBE")]
+    [InlineData("Shiva TBD", "TBD")]
     [InlineData("SAMLight", "SAM Light")]
     [InlineData("Schlongs of Skyrim", "SOS")]
     [InlineData("The New Gentleman", "TNG")]
@@ -6523,12 +6531,25 @@ public sealed class BodyTypeCatalogTests
     [Theory]
     [InlineData("3BBB", "3BA")]
     [InlineData("Touched By Dibella", "TBD")]
+    [InlineData("Shiva TBD", "TBD")]
+    [InlineData("PB body", "UNPB")]
+    [InlineData("7BO", "UUNP")]
     [InlineData("TNG Extended", "TNG")]
     [InlineData("Vanilla Body", "Vanilla")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
         Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
         Assert.Equal(expected, profile.Name);
+    }
+
+    [Theory]
+    [InlineData("Shiva")]
+    [InlineData("Bombshell")]
+    [InlineData("Shizo's body")]
+    public void BodyTypeCatalog_ResolveName_DoesNotForceUnsafeAmbiguousMappings(string requested)
+    {
+        Assert.Equal(requested, BodyTypeCatalog.ResolveName(requested));
+        Assert.False(BodyTechnicalProfileCatalog.TryGet(requested, out _));
     }
 
     [Theory]
@@ -7012,6 +7033,39 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "batch-report.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithLegacyAliasTarget_PreservesModReadyOutputs()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Wench Body 7B Oppai", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "uunp", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "uunp", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "fomod", "ModuleConfig.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
+
+            var readme = await File.ReadAllTextAsync(Path.Combine(cuirassOutput.OutputDirectory, "README.txt"));
+            Assert.Contains("Target body:    UUNP", readme, StringComparison.Ordinal);
         }
         finally
         {

@@ -4,7 +4,8 @@
     "aliases": [
       "Caliente's Beautiful Bodies Enhancer",
       "CBBE Curvy",
-      "CBBE Slim"
+      "CBBE Slim",
+      "Shiva CBBE"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -319,7 +320,10 @@
   {
     "name": "UNPB",
     "aliases": [
-      "UNP Blessed"
+      "UNP Blessed",
+      "PB",
+      "PB body",
+      "Blessed Body"
     ],
     "gender": "female",
     "defaultPhysics": "cbpc",
@@ -399,7 +403,16 @@
     "aliases": [
       "Unified UNP",
       "7Base",
-      "UN7B"
+      "UN7B",
+      "7B Oppai",
+      "7BO",
+      "7Base Oppai",
+      "SevenBase Oppai",
+      "Wench Body 7B Oppai",
+      "7B Bombshell",
+      "SevenBase Bombshell",
+      "SeveNBase Bombshell",
+      "Shiva UUNP"
     ],
     "gender": "female",
     "defaultPhysics": "cbpc",
@@ -662,7 +675,8 @@
     "name": "TBD",
     "aliases": [
       "Touched By Dibella",
-      "The Body Deluxe"
+      "The Body Deluxe",
+      "Shiva TBD"
     ],
     "gender": "female",
     "defaultPhysics": "cbpc",
