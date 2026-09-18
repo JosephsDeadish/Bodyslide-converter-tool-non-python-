@@ -1762,6 +1762,7 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
         (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
     ];
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
     private const int MaxFloatVertexStride = 160;
@@ -2009,6 +2010,11 @@ internal static class NifGeometrySignatureReader
         if (Inspect(CreateInterleavedFloatProbeBytes(), "interleaved-float-probe").Status is "supported" or "degraded")
         {
             supportedModes.Add("interleaved-float");
+        }
+
+        if (Inspect(CreateTokenGuidedFloatProbeBytes("NiMesh"), "nimesh-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("nimesh-float");
         }
 
         return supportedModes.Count == 0
@@ -3134,6 +3140,26 @@ internal static class NifGeometrySignatureReader
             writer.Write(float.NegativeInfinity);
             writer.Write(float.MaxValue);
             writer.Write(float.MinValue);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateTokenGuidedFloatProbeBytes(string geometryToken)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        writer.Write(new byte[8]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
         }
 
         writer.Flush();
@@ -14547,6 +14573,7 @@ internal sealed class LocalExportService(
                         candidatePaths,
                         sourceMeshMap,
                         relatedPluginMeshPaths,
+                        pendingAmbiguous,
                         out var resolvedSourceMeshPath))
                 {
                     continue;
@@ -14716,32 +14743,30 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> candidatePaths,
         IReadOnlyDictionary<string, string> resolvedSourceMeshByPluginPath,
         IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths,
         out string sourceMeshPath)
     {
         sourceMeshPath = string.Empty;
         var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
-        if (!relatedPluginMeshPaths.TryGetValue(normalizedPluginMeshPath, out var relatedPaths) ||
-            relatedPaths.Count == 0)
-        {
-            return false;
-        }
+        var relatedGroup = CollectRelatedPluginMeshPathGroup(normalizedPluginMeshPath, relatedPluginMeshPaths);
 
-        var resolvedNeighborPaths = relatedPaths
+        var resolvedNeighborPaths = relatedGroup
             .Select(path => resolvedSourceMeshByPluginPath.TryGetValue(path, out var resolvedPath) ? resolvedPath : null)
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (resolvedNeighborPaths.Count == 0)
-        {
-            return false;
-        }
+        var pendingGroupPaths = relatedGroup
+            .Where(pendingAmbiguousCandidatePaths.ContainsKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var groupContextSupport = BuildGroupContextSupportMap(pendingGroupPaths, pendingAmbiguousCandidatePaths);
 
         var scoredCandidates = candidatePaths
             .Select(path => new
             {
                 Path = path,
-                Score = ScoreSourceMeshCandidateFromNeighbors(path, resolvedNeighborPaths)
+                Score = ScoreSourceMeshCandidateFromContext(path, resolvedNeighborPaths, groupContextSupport)
             })
             .Where(static candidate => candidate.Score > 0)
             .ToList();
@@ -14762,6 +14787,69 @@ internal sealed class LocalExportService(
 
         sourceMeshPath = bestMatches[0].Path;
         return true;
+    }
+
+    private static IReadOnlyList<string> CollectRelatedPluginMeshPathGroup(
+        string pluginMeshPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths)
+    {
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        if (string.IsNullOrWhiteSpace(normalizedPluginMeshPath))
+        {
+            return [];
+        }
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+        visited.Add(normalizedPluginMeshPath);
+        queue.Enqueue(normalizedPluginMeshPath);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!relatedPluginMeshPaths.TryGetValue(current, out var neighbors))
+            {
+                continue;
+            }
+
+            foreach (var neighbor in neighbors)
+            {
+                if (string.IsNullOrWhiteSpace(neighbor) || !visited.Add(neighbor))
+                {
+                    continue;
+                }
+
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        return visited.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildGroupContextSupportMap(
+        IReadOnlyList<string> groupPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths)
+    {
+        var support = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var groupPluginMeshPath in groupPluginMeshPaths)
+        {
+            if (!pendingAmbiguousCandidatePaths.TryGetValue(groupPluginMeshPath, out var candidatePaths) ||
+                candidatePaths.Count == 0)
+            {
+                continue;
+            }
+
+            var candidateFamilies = candidatePaths
+                .SelectMany(static path => EnumerateComparablePathAncestors(Path.GetDirectoryName(path) ?? string.Empty))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var family in candidateFamilies)
+            {
+                support[family] = support.GetValueOrDefault(family) + 1;
+            }
+        }
+
+        return support;
     }
 
     private static int ScoreSourceMeshCandidate(
@@ -14850,6 +14938,32 @@ internal sealed class LocalExportService(
         return bestScore;
     }
 
+    private static int ScoreSourceMeshCandidateFromContext(
+        string candidatePath,
+        IReadOnlyList<string> resolvedNeighborPaths,
+        IReadOnlyDictionary<string, int> groupContextSupport)
+    {
+        var bestScore = ScoreSourceMeshCandidateFromNeighbors(candidatePath, resolvedNeighborPaths);
+        var candidateDirectory = NormalizeComparablePath(Path.GetDirectoryName(candidatePath) ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidateDirectory))
+        {
+            return bestScore;
+        }
+
+        foreach (var ancestor in EnumerateComparablePathAncestors(candidateDirectory))
+        {
+            if (!groupContextSupport.TryGetValue(ancestor, out var supportCount) || supportCount < 2)
+            {
+                continue;
+            }
+
+            var score = supportCount * 10_000 + CountPathSegments(ancestor) * 100;
+            bestScore = Math.Max(bestScore, score);
+        }
+
+        return bestScore;
+    }
+
     private static int CountMatchingTrailingSegments(string leftPath, string rightPath)
     {
         var leftSegments = NormalizeComparablePath(leftPath)
@@ -14879,6 +14993,27 @@ internal sealed class LocalExportService(
         return normalizedPath.Equals(normalizedSuffix, StringComparison.OrdinalIgnoreCase)
             || normalizedPath.EndsWith($"/{normalizedSuffix}", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static IEnumerable<string> EnumerateComparablePathAncestors(string path)
+    {
+        var normalized = NormalizeComparablePath(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            yield break;
+        }
+
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var length = segments.Length; length >= 1; length--)
+        {
+            yield return string.Join('/', segments.Take(length));
+        }
+    }
+
+    private static int CountPathSegments(string path) =>
+        NormalizeComparablePath(path)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
 
     private static string NormalizeComparablePath(string path) =>
         string.IsNullOrWhiteSpace(path)

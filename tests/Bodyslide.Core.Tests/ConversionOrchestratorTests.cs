@@ -37,6 +37,7 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+
     [Fact]
     public void PluginPatches_LinkedArmorAddonsWithUnsupportedSourceNifs_ReportSpecificVerificationIssue()
     {
@@ -196,6 +197,7 @@ public sealed class ConversionOrchestratorTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
 
     [Fact]
     public async Task ConvertAsync_ThrowsWhenInputDoesNotExist()
@@ -374,6 +376,43 @@ public sealed class ConversionOrchestratorTests
 
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithNiMeshTokenGuidedFloatNif_ParsesAsSupportedAndAvoidsUnsupportedIssue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "nimesh_token_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            geometryToken: "NiMesh",
+            bytesBeforeCount: 8,
+            prefixPadding: 24);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.NotEqual("unreadable-geometry", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -6484,6 +6523,57 @@ public sealed class PluginPatchGuidanceTests
     }
 
     [Fact]
+    public async Task PluginPatches_UsesLinkedGroupInference_WhenAllRelatedPluginPathsAreIndividuallyAmbiguous()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "LinkedGroupInference.esp");
+        var pluginBytes = BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+            armoEditorId: "LinkedGroupArmor",
+            armoFormId: 0x00000801u,
+            armoWorldMeshPath: "meshes/armor/common/skyguard_ground.nif",
+            linkedArmaFormId: 0x00000802u,
+            armaEditorId: "LinkedGroupAddon",
+            armaMeshPath: "meshes/armor/common/skyguard_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        var preferredFamily = Path.Combine(workingDirectory, "meshes", "source", "skyguard");
+        var decoyWorldFamily = Path.Combine(workingDirectory, "meshes", "decoy-world");
+        var decoyEquipFamily = Path.Combine(workingDirectory, "meshes", "decoy-equipped");
+        Directory.CreateDirectory(preferredFamily);
+        Directory.CreateDirectory(decoyWorldFamily);
+        Directory.CreateDirectory(decoyEquipFamily);
+
+        await File.WriteAllTextAsync(Path.Combine(preferredFamily, "skyguard_ground.nif"), "preferred-world");
+        await File.WriteAllTextAsync(Path.Combine(preferredFamily, "skyguard_0.nif"), "preferred-equipped");
+        await File.WriteAllTextAsync(Path.Combine(decoyWorldFamily, "skyguard_ground.nif"), "decoy-world");
+        await File.WriteAllTextAsync(Path.Combine(decoyEquipFamily, "skyguard_0.nif"), "decoy-equipped");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/skyguard_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/skyguard_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PluginPatches_VerifiesLinkedArmoToArmaRewriteCoverage()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6947,6 +7037,82 @@ public sealed class PluginPatchGuidanceTests
             {
                 Directory.Delete(outputDirectory, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_RicherCrossPluginMasterFailureFixture_ReportsAmbiguousAndMissingLinkedOutputs()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseLinked.esm"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RelicAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "SecondLinked.esm"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MissingBootAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_boots_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000803u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "RelicArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseLinked.esm", "SecondLinked.esm"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RelicArmor\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_ground.nif\0")))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x01000803u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        var packA = Path.Combine(workingDirectory, "meshes", "pack-a");
+        var packB = Path.Combine(workingDirectory, "meshes", "pack-b");
+        Directory.CreateDirectory(packA);
+        Directory.CreateDirectory(packB);
+        await File.WriteAllTextAsync(Path.Combine(packA, "relic_ground.nif"), "pack-a-ground");
+        await File.WriteAllTextAsync(Path.Combine(packA, "relic_0.nif"), "pack-a-equipped");
+        await File.WriteAllTextAsync(Path.Combine(packB, "relic_ground.nif"), "pack-b-ground");
+        await File.WriteAllTextAsync(Path.Combine(packB, "relic_0.nif"), "pack-b-equipped");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 2", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 0", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/common/relic_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/armor/common/relic_boots_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("plugin-link-missing-converted-match", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
@@ -7661,6 +7827,7 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Contains("readable NIF modes", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bslod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bsmeshlod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nimesh-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
 
