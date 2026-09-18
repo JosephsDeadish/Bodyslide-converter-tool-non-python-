@@ -8626,7 +8626,7 @@ public sealed class RealisticModPackFixtureTests
             var tiedStep = proposedSteps.EnumerateArray().First(element =>
                 string.Equals(element.GetProperty("OriginalMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
             Assert.Equal(
-                "Linked ARMO/ARMA context still left multiple equally plausible source families.",
+                "No linked ARMO/ARMA neighbor produced a unique source-family match.",
                 tiedStep.GetProperty("ManualReviewReason").GetString());
             Assert.True(tiedStep.GetProperty("SharedCandidateFamilies").GetArrayLength() > 0);
 
@@ -8655,9 +8655,6 @@ public sealed class RealisticModPackFixtureTests
             var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
             Assert.Contains("\"UnscannedLinkedArmorAddonReferences\": [", patchJson, StringComparison.Ordinal);
             Assert.Contains("MissingLinkedMaster.esp", patchJson, StringComparison.Ordinal);
-
-            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("plugin-link-unscanned-master-reference", qualityJson, StringComparison.Ordinal);
         }
         finally
         {

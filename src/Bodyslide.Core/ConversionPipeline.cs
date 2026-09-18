@@ -14980,10 +14980,10 @@ internal sealed class LocalExportService(
             .OrderByDescending(static pair => pair.Value)
             .ThenByDescending(static pair => CountPathSegments(pair.Key))
             .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(static pair => new PluginTieFamilyHint(pair.Key, pair.Value))
+            .Select(static pair => new PluginTieFamilyHint(DescribeSourceContextPath(pair.Key), pair.Value))
             .ToList();
         var candidateFamilies = candidatePaths
-            .Select(path => NormalizeComparablePath(Path.GetDirectoryName(path) ?? string.Empty))
+            .Select(path => DescribeSourceContextPath(Path.GetDirectoryName(path) ?? string.Empty))
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
@@ -14994,12 +14994,16 @@ internal sealed class LocalExportService(
 
         return new UnresolvedPluginTieGroup(
             normalizedPluginMeshPath,
-            candidatePaths.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            candidatePaths.Select(DescribeSourceContextPath)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             candidateFamilies,
             relatedGroup.Where(path => !path.Equals(normalizedPluginMeshPath, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
-            resolvedNeighborPaths,
+            resolvedNeighborPaths.Select(DescribeSourceContextPath)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             sharedCandidateFamilies,
             manualReviewReason);
     }
@@ -15172,6 +15176,26 @@ internal sealed class LocalExportService(
         string.IsNullOrWhiteSpace(path)
             ? string.Empty
             : path.Replace('\\', '/').Trim().Trim('/');
+
+    private static string DescribeSourceContextPath(string path)
+    {
+        var normalized = NormalizeComparablePath(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        foreach (var marker in new[] { "meshes/", "textures/", "skse/", "calientetools/" })
+        {
+            var index = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return normalized[index..];
+            }
+        }
+
+        return normalized;
+    }
 
     private static IReadOnlyDictionary<string, int> BuildSourceMeshVariantCountMap(IReadOnlyList<string> sourceMeshPaths)
     {
