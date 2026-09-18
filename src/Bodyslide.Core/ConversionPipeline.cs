@@ -258,6 +258,7 @@ internal static class ConversionValidationGuidance
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
             "plugin-link-missing-arma-record" or
+            "plugin-link-partial-family-failure" or
             "plugin-link-unscanned-master-reference" or
             "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" =>
@@ -281,6 +282,7 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? UnsupportedLinkedArmorAddonMeshes = null,
     IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
     IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
+    IReadOnlyList<PartialLinkedArmorFamilyFailure>? PartialLinkedArmorFamilyFailures = null,
     IReadOnlyList<string>? MissingPatchPluginMasters = null,
     IReadOnlyList<string>? PatchPluginMasterOrderMismatches = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
@@ -595,6 +597,17 @@ public sealed record UnresolvedPluginTieGroup(
     IReadOnlyList<string> RelatedPluginMeshPaths,
     IReadOnlyList<string> ResolvedNeighborSourceMeshPaths,
     IReadOnlyList<PluginTieFamilyHint> SharedCandidateFamilies,
+    string ManualReviewReason);
+
+public sealed record PartialLinkedArmorFamilyFailure(
+    string ArmorRecord,
+    string OwningPluginFileName,
+    int TotalLinkedArmorAddonReferences,
+    int VerifiedLinkedArmorAddonReferences,
+    IReadOnlyList<string> VerifiedLinkedArmorAddonRecords,
+    IReadOnlyList<string> UnresolvedLinkedArmorAddonReferences,
+    IReadOnlyList<string> CandidateSourceFamilies,
+    IReadOnlyList<string> FailureCategories,
     string ManualReviewReason);
 
 internal sealed record ConvertedNifWriteResult(
@@ -14067,6 +14080,20 @@ internal sealed class LocalExportService(
                     "high",
                     $"Some ARMO→ARMA linked mesh outputs were not staged into the package: {string.Join(", ", pluginRewriteVerification.MissingLinkedStagedMeshes.Take(4))}."));
             }
+
+            if (pluginRewriteVerification.PartialLinkedArmorFamilyFailures is { Count: > 0 } partialFamilyFailures)
+            {
+                var familyDetails = partialFamilyFailures
+                    .Select(static failure =>
+                        $"{failure.ArmorRecord} [{failure.VerifiedLinkedArmorAddonReferences}/{failure.TotalLinkedArmorAddonReferences} linked ARMA members verified]")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(4)
+                    .ToList();
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-partial-family-failure",
+                    "high",
+                    $"Some linked armor families mixed verified and unresolved ARMA members across the same master chain: {string.Join(", ", familyDetails)}."));
+            }
         }
 
         issues.AddRange(BuildPackageArtifactIssues(
@@ -15600,7 +15627,14 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> UnscannedLinkedArmorAddonReferences,
         IReadOnlyList<string> UnsupportedLinkedArmorAddonMeshes,
         IReadOnlyList<string> MissingLinkedConvertedMatches,
-        IReadOnlyList<string> MissingLinkedStagedMeshes);
+        IReadOnlyList<string> MissingLinkedStagedMeshes,
+        IReadOnlyList<PartialLinkedArmorFamilyFailure> PartialLinkedArmorFamilyFailures);
+
+    private sealed record LinkedArmorReferenceOutcome(
+        bool Verified,
+        string Detail,
+        string Category,
+        IReadOnlyList<string> CandidateSourceFamilies);
 
     private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
         PluginRewritePlan pluginRewritePlan,
@@ -15697,6 +15731,7 @@ internal sealed class LocalExportService(
             UnsupportedLinkedArmorAddonMeshes: linkedArmorVerification.UnsupportedLinkedArmorAddonMeshes,
             MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
             MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
+            PartialLinkedArmorFamilyFailures: linkedArmorVerification.PartialLinkedArmorFamilyFailures,
             MissingPatchPluginMasters: missingPatchPluginMasters,
             PatchPluginMasterOrderMismatches: patchPluginMasterOrderMismatches,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
@@ -15717,6 +15752,9 @@ internal sealed class LocalExportService(
         var unsupportedLinkedArmorMeshes = new List<string>();
         var missingLinkedConvertedMatches = new List<string>();
         var missingLinkedStagedMeshes = new List<string>();
+        var partialLinkedArmorFamilyFailures = new List<PartialLinkedArmorFamilyFailure>();
+        var unresolvedTieLookup = (pluginRewritePlan.UnresolvedTieGroups ?? [])
+            .ToDictionary(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase);
         var sourceSupportByMeshPath = (sourceNifSupport ?? [])
             .Where(static report => !string.IsNullOrWhiteSpace(report.MeshPath))
             .ToDictionary(
@@ -15755,6 +15793,7 @@ internal sealed class LocalExportService(
             }
 
             var armorLabel = DescribePluginRecord(armorRecord.EditorId, armorRecord.FormId);
+            var linkedReferenceOutcomes = new List<LinkedArmorReferenceOutcome>();
             foreach (var linkedReference in linkedReferences
                 .GroupBy(reference => BuildResolvedPluginFormKey(
                     reference.OwningPluginFileName,
@@ -15772,11 +15811,23 @@ internal sealed class LocalExportService(
                     if (!string.IsNullOrWhiteSpace(linkedOwner) &&
                         !scannedPluginFileNames.Contains(linkedOwner))
                     {
-                        unscannedLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
+                        var unresolvedReference = FormatResolvedPluginFormReference(linkedReference);
+                        unscannedLinkedArmorAddons.Add($"{armorLabel} -> {unresolvedReference}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: unresolvedReference,
+                            Category: "unscanned-master-reference",
+                            CandidateSourceFamilies: []));
                     }
                     else
                     {
-                        missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
+                        var unresolvedReference = FormatResolvedPluginFormReference(linkedReference);
+                        missingLinkedArmorAddons.Add($"{armorLabel} -> {unresolvedReference}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: unresolvedReference,
+                            Category: "missing-arma-record",
+                            CandidateSourceFamilies: []));
                     }
                     continue;
                 }
@@ -15790,6 +15841,11 @@ internal sealed class LocalExportService(
                 if (normalizedPaths.Count == 0)
                 {
                     missingLinkedConvertedMatches.Add($"{armorLabel} -> {linkedAddonLabel} (no ARMA mesh paths)");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} (no ARMA mesh paths)",
+                        Category: "missing-converted-match",
+                        CandidateSourceFamilies: []));
                     continue;
                 }
 
@@ -15823,15 +15879,33 @@ internal sealed class LocalExportService(
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
                         .ToList();
+                    var unresolvedCandidateFamilies = missingLinkedRewrites
+                        .Select(path => unresolvedTieLookup.TryGetValue(path, out var unresolvedTieGroup)
+                            ? unresolvedTieGroup.CandidateSourceFamilies
+                            : [])
+                        .SelectMany(static families => families)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
                     if (unsupportedLinkedSources.Count > 0)
                     {
                         unsupportedLinkedArmorMeshes.Add(
                             $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", unsupportedLinkedSources)}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: $"{linkedAddonLabel} => {string.Join(", ", unsupportedLinkedSources)}",
+                            Category: "unsupported-nif-layout",
+                            CandidateSourceFamilies: unresolvedCandidateFamilies));
                         continue;
                     }
 
                     missingLinkedConvertedMatches.Add(
                         $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}",
+                        Category: unresolvedCandidateFamilies.Count > 0 ? "ambiguous-family" : "missing-converted-match",
+                        CandidateSourceFamilies: unresolvedCandidateFamilies));
                     continue;
                 }
 
@@ -15845,10 +15919,64 @@ internal sealed class LocalExportService(
                 {
                     missingLinkedStagedMeshes.Add(
                         $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedStagePaths)}");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} => {string.Join(", ", missingLinkedStagePaths)}",
+                        Category: "missing-staged-mesh",
+                        CandidateSourceFamilies: []));
                     continue;
                 }
 
                 verifiedLinkedReferenceCount++;
+                var rewrittenLinkedPaths = normalizedPaths
+                    .Select(path => NormalizePluginMeshPath(pluginRewritePlan.RewriteMap[path]))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                    Verified: true,
+                    Detail: $"{linkedAddonLabel} => {string.Join(", ", rewrittenLinkedPaths)}",
+                    Category: "verified",
+                    CandidateSourceFamilies: []));
+            }
+
+            if (linkedReferenceOutcomes.Count > 0 &&
+                linkedReferenceOutcomes.Any(static outcome => outcome.Verified) &&
+                linkedReferenceOutcomes.Any(static outcome => !outcome.Verified))
+            {
+                var unresolvedOutcomes = linkedReferenceOutcomes
+                    .Where(static outcome => !outcome.Verified)
+                    .ToList();
+                var candidateFamilies = unresolvedOutcomes
+                    .SelectMany(static outcome => outcome.CandidateSourceFamilies)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var failureCategories = unresolvedOutcomes
+                    .Select(static outcome => outcome.Category)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static category => category, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var manualReviewReason = candidateFamilies.Count > 0
+                    ? $"This linked armor family mixed verified and unresolved ARMA members across its master chain. Unresolved members still map to multiple source families ({string.Join(", ", candidateFamilies.Take(3))})."
+                    : "This linked armor family mixed verified and unresolved ARMA members across its master chain. Review every linked ARMA member before trusting the generated patch.";
+                partialLinkedArmorFamilyFailures.Add(new PartialLinkedArmorFamilyFailure(
+                    ArmorRecord: armorLabel,
+                    OwningPluginFileName: NormalizeResolvedPluginFileName(armorRecord.OwningPluginFileName),
+                    TotalLinkedArmorAddonReferences: linkedReferenceOutcomes.Count,
+                    VerifiedLinkedArmorAddonReferences: linkedReferenceOutcomes.Count(static outcome => outcome.Verified),
+                    VerifiedLinkedArmorAddonRecords: linkedReferenceOutcomes
+                        .Where(static outcome => outcome.Verified)
+                        .Select(static outcome => outcome.Detail)
+                        .OrderBy(static detail => detail, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    UnresolvedLinkedArmorAddonReferences: unresolvedOutcomes
+                        .Select(static outcome => outcome.Detail)
+                        .OrderBy(static detail => detail, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    CandidateSourceFamilies: candidateFamilies,
+                    FailureCategories: failureCategories,
+                    ManualReviewReason: manualReviewReason));
             }
         }
 
@@ -15874,6 +16002,9 @@ internal sealed class LocalExportService(
             MissingLinkedStagedMeshes: missingLinkedStagedMeshes
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            PartialLinkedArmorFamilyFailures: partialLinkedArmorFamilyFailures
+                .OrderBy(static entry => entry.ArmorRecord, StringComparer.OrdinalIgnoreCase)
                 .ToList());
     }
 

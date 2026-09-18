@@ -8930,6 +8930,49 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticFailurePartialLinkedFamilyModPackDirectory_ReportsMixedFamilyVerification()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailurePartialLinkedFamilyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var partialFamilies = patchReport.RootElement
+                .GetProperty("RewriteVerification")
+                .GetProperty("PartialLinkedArmorFamilyFailures");
+            Assert.Single(partialFamilies.EnumerateArray());
+
+            var partialFamily = partialFamilies.EnumerateArray().First();
+            Assert.Equal("LinkedDeviousHarnessArmor (0x01000810)", partialFamily.GetProperty("ArmorRecord").GetString());
+            Assert.Equal("LinkedDeviousChild.esp", partialFamily.GetProperty("OwningPluginFileName").GetString());
+            Assert.Equal(2, partialFamily.GetProperty("TotalLinkedArmorAddonReferences").GetInt32());
+            Assert.Equal(1, partialFamily.GetProperty("VerifiedLinkedArmorAddonReferences").GetInt32());
+            Assert.Contains(
+                partialFamily.GetProperty("FailureCategories").EnumerateArray().Select(element => element.GetString()),
+                value => string.Equals(value, "missing-converted-match", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                partialFamily.GetProperty("VerifiedLinkedArmorAddonRecords").EnumerateArray().Select(element => element.GetString()),
+                value => value is not null && value.Contains("LinkedDeviousPanelAA", StringComparison.Ordinal));
+            Assert.Contains(
+                partialFamily.GetProperty("UnresolvedLinkedArmorAddonReferences").EnumerateArray().Select(element => element.GetString()),
+                value => value is not null && value.Contains("LinkedDeviousMissingRestraintAA", StringComparison.Ordinal));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousHarnessArmor", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
