@@ -11642,11 +11642,11 @@ internal sealed class LocalExportService(
         var fomodDataFolders = knownDataFolders
             .Where(f => Directory.Exists(Path.Combine(outputDirectory, f)))
             .ToList();
-        // ESP files at the output root are plugins and must be installed directly to Data\.
+        // Plugin files at the output root must be installed directly to Data\.
         var fomodRootFiles = outputFiles
             .Where(f => string.Equals(
                             Path.GetDirectoryName(f), outputDirectory, StringComparison.OrdinalIgnoreCase)
-                        && Path.GetExtension(f).Equals(".esp", StringComparison.OrdinalIgnoreCase))
+                        && IsBethesdaPluginFile(f))
             .Select(f => Path.GetFileName(f)!)
             .ToList();
         await File.WriteAllTextAsync(
@@ -13440,12 +13440,26 @@ internal sealed class LocalExportService(
         PluginAnalysisResult pluginAnalysis)
     {
         var issues = new List<ConversionValidationIssue>();
+        var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+        var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", safeBodyToken);
+        var expectedFomodDataFolders = new[] { "meshes", "CalienteTools", "textures", "SKSE", "scripts" }
+            .Where(folder => Directory.Exists(Path.Combine(outputDirectory, folder)))
+            .ToList();
+        var expectedFomodRootFiles = outputFiles
+            .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase)
+                && IsBethesdaPluginFile(path))
+            .Select(path => Path.GetFileName(path)!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         bool HasFile(string path) =>
             outputFiles.Any(existing => PathsEqual(existing, path)) || File.Exists(path);
 
         bool HasAnyFile(string directoryPath, string searchPattern) =>
             Directory.Exists(directoryPath) && Directory.EnumerateFiles(directoryPath, searchPattern).Any();
+
+        bool ContainsXmlAttributeValue(string xmlContent, string attributeName, string value) =>
+            xmlContent.Contains($"{attributeName}=\"{SecurityElement.Escape(value)}\"", StringComparison.OrdinalIgnoreCase);
 
         void AddMissingFileIssue(string relativePath, string code, string severity, string message)
         {
@@ -13474,6 +13488,40 @@ internal sealed class LocalExportService(
             "fomod/ModuleConfig.xml was not generated, so mod managers cannot install the package as a FOMOD.");
         AddMissingFileIssue(Path.Combine("fomod", "info.xml"), "missing-fomod-info", "medium",
             "fomod/info.xml was not generated, so the FOMOD package metadata is incomplete.");
+        if (!HasAnyFile(stagedMeshDirectory, "*.nif"))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-mesh-output",
+                "high",
+                $"Converted meshes were not staged under 'meshes/slidesmith/{safeBodyToken}', so the package is not installable."));
+        }
+
+        var moduleConfigPath = Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml");
+        if (HasFile(moduleConfigPath))
+        {
+            var moduleConfigContent = File.ReadAllText(moduleConfigPath);
+            foreach (var folder in expectedFomodDataFolders)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", folder))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-folder-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include an installer entry for the '{folder}' output folder."));
+                }
+            }
+
+            foreach (var pluginFileName in expectedFomodRootFiles)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", pluginFileName))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-root-plugin-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include a root installer entry for plugin '{pluginFileName}'."));
+                }
+            }
+        }
 
         if (request.GenerateBodySlideFiles)
         {
@@ -13498,6 +13546,13 @@ internal sealed class LocalExportService(
                     "medium",
                     $"Expected BodySlide ShapeData assets for '{bodySlideProject.ProjectName}' were not generated."));
             }
+            else if (!HasAnyFile(shapeDataDirectory, "*.nif"))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-reference-nif",
+                    "medium",
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing a reference NIF, so Outfit Studio cannot load the generated project correctly."));
+            }
         }
 
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
@@ -13518,10 +13573,71 @@ internal sealed class LocalExportService(
                     "medium",
                     "The requested distributable ZIP package was not generated."));
             }
+            else
+            {
+                try
+                {
+                    using var archive = ZipFile.OpenRead(zipPath);
+                    var zipEntries = archive.Entries
+                        .Select(entry => entry.FullName.Replace('\\', '/').Trim('/'))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    bool ZipContains(string relativePath) =>
+                        zipEntries.Contains(relativePath.Replace('\\', '/').Trim('/'));
+
+                    bool ZipContainsPrefix(string relativeDirectory) =>
+                        zipEntries.Any(entry => entry.StartsWith(relativeDirectory.Replace('\\', '/').Trim('/') + "/", StringComparison.OrdinalIgnoreCase));
+
+                    if (!ZipContains("README.txt"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-readme",
+                            "medium",
+                            "The distributable ZIP is missing README.txt, so install guidance is absent from the packaged archive."));
+                    }
+
+                    if (!ZipContains("fomod/ModuleConfig.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-fomod-module-config",
+                            "medium",
+                            "The distributable ZIP is missing fomod/ModuleConfig.xml, so mod managers cannot install the archive as a FOMOD."));
+                    }
+
+                    if (!ZipContainsPrefix($"meshes/slidesmith/{safeBodyToken}"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-mesh-output",
+                            "high",
+                            $"The distributable ZIP is missing converted meshes under 'meshes/slidesmith/{safeBodyToken}'."));
+                    }
+
+                    foreach (var pluginFileName in expectedFomodRootFiles)
+                    {
+                        if (!ZipContains(pluginFileName))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-root-plugin",
+                                "medium",
+                                $"The distributable ZIP is missing root plugin '{pluginFileName}'."));
+                        }
+                    }
+                }
+                catch (InvalidDataException)
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "invalid-output-zip",
+                        "high",
+                        "The requested distributable ZIP could not be read, so the generated package is corrupt."));
+                }
+            }
         }
 
         return issues;
     }
+
+    private static bool IsBethesdaPluginFile(string path) =>
+        Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
     {
