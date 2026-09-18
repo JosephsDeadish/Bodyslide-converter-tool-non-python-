@@ -6152,11 +6152,15 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("\"PluginInstallHints\"", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"SourcePlugin\": \"MasteredArmor.esp\"", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"InheritedMasters\": [", patchJson, StringComparison.Ordinal);
-            Assert.Contains("ArmorPack.esm", patchJson, StringComparison.Ordinal);
             Assert.Contains("Skyrim.esm", patchJson, StringComparison.Ordinal);
+            Assert.Contains("ArmorPack.esm", patchJson, StringComparison.Ordinal);
             Assert.Contains("MasteredArmor_SlidesmithPatch.esp", patchJson, StringComparison.Ordinal);
             Assert.Contains("RecommendedPluginLoadAfter", patchJson, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"RecommendedPluginLoadAfter\": [\n        \"Skyrim.esm\",\n        \"ArmorPack.esm\",\n        \"MasteredArmor.esp\"\n      ]", patchJson, StringComparison.Ordinal);
+            Assert.Contains("Skyrim.esm -> ArmorPack.esm -> MasteredArmor.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingPatchPluginMasters\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"PatchPluginMasterOrderMismatches\": []", patchJson, StringComparison.Ordinal);
         }
         finally
         {

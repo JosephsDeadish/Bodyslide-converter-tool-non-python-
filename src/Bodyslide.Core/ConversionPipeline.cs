@@ -204,6 +204,8 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? UnsupportedLinkedArmorAddonMeshes = null,
     IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
     IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
+    IReadOnlyList<string>? MissingPatchPluginMasters = null,
+    IReadOnlyList<string>? PatchPluginMasterOrderMismatches = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
     IReadOnlyList<string>? Warnings = null);
 
@@ -392,7 +394,8 @@ public sealed record PluginArmorRecord(
     IReadOnlyList<uint>? LinkedArmorAddonFormIds = null,
     string? OwningPluginFileName = null,
     uint? LocalFormId = null,
-    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null);
+    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null,
+    IReadOnlyList<string>? DeclaredMasterFileNames = null);
 
 /// <summary>
 /// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
@@ -8897,6 +8900,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             var pluginKind = ClassifyPluginKind(pluginPath, bytes);
             var pluginName = Path.GetFileName(pluginPath) ?? pluginPath;
             var pluginLabel = $"{pluginName} [{pluginKind.Type}; confidence={pluginKind.Confidence:0.00}]";
+            var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(bytes);
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes, pluginName);
@@ -8936,7 +8940,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.LinkedArmorAddonFormIds,
                     d.OwningPluginFileName,
                     d.LocalFormId,
-                    d.LinkedArmorAddonReferences))
+                    d.LinkedArmorAddonReferences,
+                    masterFileNames))
                 .ToList();
 
             return (pluginLabel, pluginName, pluginKind.Type, addons, records);
@@ -10582,7 +10587,7 @@ internal static class PatchPluginWriter
         return ms.ToArray();
     }
 
-    private static IReadOnlyList<string> BuildOrderedMasterList(
+    internal static IReadOnlyList<string> BuildOrderedMasterList(
         string masterPluginFileName,
         IReadOnlyList<string>? inheritedMasterFileNames)
     {
@@ -11624,6 +11629,7 @@ internal sealed class LocalExportService(
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var pluginPatchWarnings = new List<string>();
         var patchVerificationPaths = new List<string>();
+        var patchMasterValidationExpectations = new Dictionary<string, PatchPluginMasterValidationExpectation>(StringComparer.OrdinalIgnoreCase);
         var pluginInstallHints = new List<PluginInstallHint>();
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
@@ -11801,6 +11807,9 @@ internal sealed class LocalExportService(
                                 patchEspGenerated = true;
                                 patchVerificationPaths.Add(patchPath);
                                 generatedPatchPlugin = Path.GetFileName(patchPath);
+                                patchMasterValidationExpectations[patchPath] = new PatchPluginMasterValidationExpectation(
+                                    pluginName,
+                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, masterFileNames));
                             }
 
                             pluginInstallHints.Add(BuildPluginInstallHint(
@@ -11836,6 +11845,7 @@ internal sealed class LocalExportService(
                 outputDirectory,
                 stagedPluginMeshSet,
                 patchVerificationPaths,
+                patchMasterValidationExpectations,
                 pluginPatchWarnings,
                 sourceNifSupport);
 
@@ -11866,6 +11876,7 @@ internal sealed class LocalExportService(
             outputDirectory,
             stagedPluginMeshSet,
             patchVerificationPaths,
+            patchMasterValidationExpectations,
             pluginPatchWarnings,
             sourceNifSupport);
 
@@ -13786,6 +13797,22 @@ internal sealed class LocalExportService(
                     $"Some generated plugin patches could not be re-verified for rewritten mesh paths: {string.Join(", ", pluginRewriteVerification.UnverifiedPatchedPlugins.Take(4))}."));
             }
 
+            if (pluginRewriteVerification.MissingPatchPluginMasters is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-patch-missing-master-chain",
+                    "high",
+                    $"Some generated override patches are missing required TES4 masters from the source plugin chain: {string.Join(", ", pluginRewriteVerification.MissingPatchPluginMasters.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.PatchPluginMasterOrderMismatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-patch-master-order-mismatch",
+                    "high",
+                    $"Some generated override patches did not preserve the source plugin master order needed for stable FormID resolution: {string.Join(", ", pluginRewriteVerification.PatchPluginMasterOrderMismatches.Take(4))}."));
+            }
+
             if (pluginRewriteVerification.MissingLinkedArmorAddonRecords is { Count: > 0 })
             {
                 issues.Add(new ConversionValidationIssue(
@@ -14905,6 +14932,10 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
 
+    private sealed record PatchPluginMasterValidationExpectation(
+        string SourcePluginFileName,
+        IReadOnlyList<string> ExpectedMasters);
+
     private sealed record PluginInstallHint(
         string SourcePlugin,
         IReadOnlyList<string> InheritedMasters,
@@ -14920,6 +14951,7 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlySet<string> stagedPluginMeshes,
         IReadOnlyList<string> patchedPluginPaths,
+        IReadOnlyDictionary<string, PatchPluginMasterValidationExpectation> patchMasterValidationExpectations,
         IReadOnlyList<string> warnings,
         IReadOnlyList<NifSupportReport>? sourceNifSupport = null)
     {
@@ -14929,6 +14961,8 @@ internal sealed class LocalExportService(
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missingStagedMeshes = BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes);
         var verifiedPluginPathCount = 0;
+        var missingPatchPluginMasters = new List<string>();
+        var patchPluginMasterOrderMismatches = new List<string>();
         var unverifiedPatchedPlugins = new List<string>();
 
         foreach (var pluginPath in patchedPluginPaths.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -14944,6 +14978,30 @@ internal sealed class LocalExportService(
                     .Where(path => !string.IsNullOrWhiteSpace(path))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+                if (patchMasterValidationExpectations.TryGetValue(pluginPath, out var masterExpectation))
+                {
+                    var actualMasters = BinaryArmaParser.ExtractMasterFileNames(pluginBytes)
+                        .Select(static name => Path.GetFileName(name) ?? name)
+                        .Where(static name => !string.IsNullOrWhiteSpace(name))
+                        .ToList();
+                    var expectedMasters = masterExpectation.ExpectedMasters
+                        .Select(static name => Path.GetFileName(name) ?? name)
+                        .Where(static name => !string.IsNullOrWhiteSpace(name))
+                        .ToList();
+                    var missingMasters = expectedMasters
+                        .Except(actualMasters, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (missingMasters.Count > 0)
+                    {
+                        missingPatchPluginMasters.Add(
+                            $"{Path.GetFileName(pluginPath) ?? pluginPath} missing expected masters for {masterExpectation.SourcePluginFileName}: {string.Join(", ", missingMasters)}");
+                    }
+                    else if (!actualMasters.SequenceEqual(expectedMasters, StringComparer.OrdinalIgnoreCase))
+                    {
+                        patchPluginMasterOrderMismatches.Add(
+                            $"{Path.GetFileName(pluginPath) ?? pluginPath} expected master order {string.Join(" -> ", expectedMasters)} but found {string.Join(" -> ", actualMasters)}");
+                    }
+                }
 
                 var verifiedCount = detectedPaths.Count(rewrittenPaths.Contains);
                 if (verifiedCount > 0)
@@ -14982,6 +15040,8 @@ internal sealed class LocalExportService(
             UnsupportedLinkedArmorAddonMeshes: linkedArmorVerification.UnsupportedLinkedArmorAddonMeshes,
             MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
             MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
+            MissingPatchPluginMasters: missingPatchPluginMasters,
+            PatchPluginMasterOrderMismatches: patchPluginMasterOrderMismatches,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
             Warnings: warnings);
     }
@@ -15554,16 +15614,10 @@ internal sealed class LocalExportService(
         string? manualReviewReason = null)
     {
         var sourcePluginFileName = Path.GetFileName(sourcePlugin) ?? sourcePlugin;
-        var normalizedMasters = inheritedMasterFileNames
+        var normalizedMasters = PatchPluginWriter.BuildOrderedMasterList(string.Empty, inheritedMasterFileNames)
             .Where(static name => !string.IsNullOrWhiteSpace(name))
-            .Select(static name => Path.GetFileName(name) ?? name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var recommendedLoadAfter = normalizedMasters
-            .Append(sourcePluginFileName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var recommendedLoadAfter = PatchPluginWriter.BuildOrderedMasterList(sourcePluginFileName, normalizedMasters);
 
         var notes = new List<string>
         {
@@ -15572,7 +15626,7 @@ internal sealed class LocalExportService(
 
         if (!string.IsNullOrWhiteSpace(generatedPatchPlugin))
         {
-            notes.Add($"{generatedPatchPlugin} should load after {sourcePluginFileName} and after any inherited masters listed here.");
+            notes.Add($"{generatedPatchPlugin} should load after {sourcePluginFileName} and keep the inherited master chain in this same order: {string.Join(" -> ", recommendedLoadAfter)}.");
         }
         else
         {
