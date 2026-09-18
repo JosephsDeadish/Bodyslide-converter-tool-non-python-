@@ -9370,6 +9370,66 @@ public sealed class BinaryArmaParserTests
     }
 
     [Fact]
+    public void ExtractArmoRecords_ExtractsAllLinkedArmorAddonsFromSingleArmaSubrecord()
+    {
+        using var armaMs = new MemoryStream();
+        WriteUInt32Le(armaMs, 0x00000802u);
+        WriteUInt32Le(armaMs, 0x00000803u);
+        byte[] linkedArmas = BuildSubrecord("ARMA", armaMs.ToArray());
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("PackedLinksArmor\0"));
+        byte[] data = [..edid, ..linkedArmas];
+
+        var plugin = BuildMinimalPlugin_SseWithArmo(data);
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "PackedLinks.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal([0x00000802u, 0x00000803u], descriptor.LinkedArmorAddonFormIds);
+        Assert.Equal("PackedLinks.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000002u, descriptor.LocalFormId);
+        var linkedReferences = Assert.IsAssignableFrom<IReadOnlyList<PluginLinkedFormReference>>(descriptor.LinkedArmorAddonReferences);
+        Assert.Equal(["PackedLinks.esp", "PackedLinks.esp"], linkedReferences.Select(static reference => reference.OwningPluginFileName));
+        Assert.Equal([0x00000802u, 0x00000803u], linkedReferences.Select(static reference => reference.LocalFormId!.Value));
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_ResolvesAllLinkedArmorAddonReferencesAcrossMastersFromSingleArmaSubrecord()
+    {
+        using var armaMs = new MemoryStream();
+        WriteUInt32Le(armaMs, 0x00000802u);
+        WriteUInt32Le(armaMs, 0x01000803u);
+        byte[] linkedArmas = BuildSubrecord("ARMA", armaMs.ToArray());
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossPluginPackedArmor\0"));
+        byte[] data = [..edid, ..linkedArmas];
+
+        var plugin = BuildMinimalPlugin_SseWithArmoAndMasters(
+            data,
+            formId: 0x02000801u,
+            masters: ["BaseAddon.esp", "SecondAddon.esm"]);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "TargetArmor.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal("TargetArmor.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000801u, descriptor.LocalFormId);
+        Assert.Equal([0x00000802u, 0x01000803u], descriptor.LinkedArmorAddonFormIds);
+
+        var linkedReferences = Assert.IsAssignableFrom<IReadOnlyList<PluginLinkedFormReference>>(descriptor.LinkedArmorAddonReferences);
+        Assert.Collection(linkedReferences,
+            first =>
+            {
+                Assert.Equal(0x00000802u, first.RawFormId);
+                Assert.Equal("BaseAddon.esp", first.OwningPluginFileName);
+                Assert.Equal(0x00000802u, first.LocalFormId);
+            },
+            second =>
+            {
+                Assert.Equal(0x01000803u, second.RawFormId);
+                Assert.Equal("SecondAddon.esm", second.OwningPluginFileName);
+                Assert.Equal(0x00000803u, second.LocalFormId);
+            });
+    }
+
+    [Fact]
     public void ExtractArmoRecords_EmptyInput_ReturnsEmpty()
     {
         var result = BinaryArmaParser.ExtractArmoRecords([]);

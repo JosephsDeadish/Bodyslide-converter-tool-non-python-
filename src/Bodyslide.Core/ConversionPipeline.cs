@@ -10139,7 +10139,11 @@ internal static class BinaryArmaParser
             }
             else if (string.Equals(subTag, "ARMA", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
-                linkedArmorAddonFormIds.Add(ReadUInt32Le(dataBytes, dataStart));
+                var linkedCount = effectiveSubSize / 4;
+                for (int linkedIndex = 0; linkedIndex < linkedCount; linkedIndex++)
+                {
+                    linkedArmorAddonFormIds.Add(ReadUInt32Le(dataBytes, dataStart + linkedIndex * 4));
+                }
             }
             else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
