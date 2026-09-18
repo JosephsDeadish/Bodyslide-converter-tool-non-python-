@@ -11036,10 +11036,17 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderSets\\    ← BodySlide .osp project");
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\  ← .bsd sliders + source NIF");
         }
+        if (outputFiles.Any(path => path.EndsWith(Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP64\\  ← staged SMP config");
+        }
+        if (outputFiles.Any(path => path.EndsWith(Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  ← staged CBPC config");
+        }
         sb.AppendLine("    Also copy any generated plugin files (.esp/.esm/.esl) to Data\\ root.");
-        sb.AppendLine("    Physics configs (.xml) go to:");
-        sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
-        sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
+        sb.AppendLine("    Generated physics configs are already staged under SKSE\\Plugins\\.");
+        sb.AppendLine("    Root-level physics XML files are compatibility copies for inspection/manual relocation.");
 
         sb.AppendLine();
 
@@ -11618,6 +11625,11 @@ internal sealed class LocalExportService(
             var cbpcPath = Path.Combine(outputDirectory, "cbpc-config.xml");
             await File.WriteAllTextAsync(cbpcPath, physics.CbpcConfigXml, cancellationToken);
             outputFiles.Add(cbpcPath);
+
+            var stagedCbpcPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(stagedCbpcPath)!);
+            await File.WriteAllTextAsync(stagedCbpcPath, physics.CbpcConfigXml, cancellationToken);
+            outputFiles.Add(stagedCbpcPath);
         }
 
         // Write SMP physics config XML when present.
@@ -11626,6 +11638,11 @@ internal sealed class LocalExportService(
             var smpPath = Path.Combine(outputDirectory, "smp-config.xml");
             await File.WriteAllTextAsync(smpPath, physics.SmpConfigXml, cancellationToken);
             outputFiles.Add(smpPath);
+
+            var stagedSmpPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(stagedSmpPath)!);
+            await File.WriteAllTextAsync(stagedSmpPath, physics.SmpConfigXml, cancellationToken);
+            outputFiles.Add(stagedSmpPath);
         }
 
         if (request.GenerateBodySlideFiles)
@@ -13856,6 +13873,27 @@ internal sealed class LocalExportService(
             "fomod/ModuleConfig.xml was not generated, so mod managers cannot install the package as a FOMOD.");
         AddMissingFileIssue(Path.Combine("fomod", "info.xml"), "missing-fomod-info", "medium",
             "fomod/info.xml was not generated, so the FOMOD package metadata is incomplete.");
+
+        var rootCbpcConfigPath = Path.Combine(outputDirectory, "cbpc-config.xml");
+        var stagedCbpcConfigPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml");
+        if (HasFile(rootCbpcConfigPath) && !HasFile(stagedCbpcConfigPath))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-cbpc-config",
+                "medium",
+                "cbpc-config.xml was generated but was not staged into SKSE/Plugins/CBPCSystem/, so the package is not mod-manager ready for CBPC installs."));
+        }
+
+        var rootSmpConfigPath = Path.Combine(outputDirectory, "smp-config.xml");
+        var stagedSmpConfigPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml");
+        if (HasFile(rootSmpConfigPath) && !HasFile(stagedSmpConfigPath))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-smp-config",
+                "medium",
+                "smp-config.xml was generated but was not staged into SKSE/Plugins/hdtSMP64/, so the package is not mod-manager ready for SMP installs."));
+        }
+
         if (!HasAnyFile(stagedMeshDirectory, "*.nif"))
         {
             issues.Add(new ConversionValidationIssue(
@@ -13996,6 +14034,22 @@ internal sealed class LocalExportService(
                             "zip-missing-staged-mesh-output",
                             "high",
                             $"The distributable ZIP is missing converted meshes under 'meshes/slidesmith/{safeBodyToken}'."));
+                    }
+
+                    if (HasFile(rootCbpcConfigPath) && !ZipContains("SKSE/Plugins/CBPCSystem/cbpc-config.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-cbpc-config",
+                            "medium",
+                            "The distributable ZIP is missing SKSE/Plugins/CBPCSystem/cbpc-config.xml, so the packaged CBPC config will not install automatically."));
+                    }
+
+                    if (HasFile(rootSmpConfigPath) && !ZipContains("SKSE/Plugins/hdtSMP64/smp-config.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-smp-config",
+                            "medium",
+                            "The distributable ZIP is missing SKSE/Plugins/hdtSMP64/smp-config.xml, so the packaged SMP config will not install automatically."));
                     }
 
                     foreach (var pluginFileName in expectedFomodRootFiles)

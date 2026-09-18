@@ -231,9 +231,13 @@ output/
   <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
   fomod/
     info.xml
-    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
-  cbpc-config.xml                ← CBPC physics XML (when selected physics profile includes CBPC)
-  smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
+    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/ + SKSE/
+  SKSE/Plugins/CBPCSystem/
+    cbpc-config.xml              ← staged CBPC physics XML for mod-manager/manual Data installs
+  SKSE/Plugins/hdtSMP64/
+    smp-config.xml               ← staged SMP physics XML for mod-manager/manual Data installs
+  cbpc-config.xml                ← compatibility/root copy of generated CBPC physics XML
+  smp-config.xml                 ← compatibility/root copy of generated SMP physics XML
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
@@ -251,10 +255,12 @@ output/
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
-| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
+| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
-| `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
-| `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
+| `SKSE/Plugins/CBPCSystem/cbpc-config.xml` | Data-relative staged CBPC physics config for direct installation into Skyrim's SKSE plugin layout |
+| `SKSE/Plugins/hdtSMP64/smp-config.xml` | Data-relative staged SMP physics config for direct installation into Skyrim's SKSE plugin layout |
+| `cbpc-config.xml` | Compatibility/root copy of the generated CBPC physics config for inspection or manual relocation |
+| `smp-config.xml` | Compatibility/root copy of the generated SMP physics config for inspection or manual relocation |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
 | `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |

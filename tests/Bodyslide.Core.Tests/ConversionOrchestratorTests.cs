@@ -4927,6 +4927,8 @@ public sealed class PhysicsXmlTests
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml")));
         }
         finally
         {
@@ -7857,6 +7859,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "dependency-map.json")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
@@ -13116,6 +13120,8 @@ public sealed class OutputCompletenessTests
 
             var pluginPath = Path.Combine(outputDirectory, "Armor_patched.esm");
             File.WriteAllText(pluginPath, "plugin");
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<cbpc/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "smp-config.xml"), "<smp/>");
 
             Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
             File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config/>");
@@ -13151,6 +13157,10 @@ public sealed class OutputCompletenessTests
             Assert.Contains("zip-missing-fomod-module-config", codes);
             Assert.Contains("zip-missing-fomod-info", codes);
             Assert.Contains("zip-missing-staged-mesh-output", codes);
+            Assert.Contains("missing-staged-cbpc-config", codes);
+            Assert.Contains("missing-staged-smp-config", codes);
+            Assert.Contains("zip-missing-staged-cbpc-config", codes);
+            Assert.Contains("zip-missing-staged-smp-config", codes);
             Assert.Contains("zip-missing-bodyslide-osp", codes);
             Assert.Contains("zip-missing-bodyslide-shape-data", codes);
             Assert.Contains("zip-missing-root-plugin", codes);
