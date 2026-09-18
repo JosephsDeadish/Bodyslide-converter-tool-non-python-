@@ -1991,9 +1991,19 @@ internal static class NifGeometrySignatureReader
             supportedModes.Add("tristrips-float");
         }
 
-        if (Inspect(CreateBsTriShapeProbeBytes(), "bstri-probe").Status is "supported" or "degraded")
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSTriShape"), "bstri-probe").Status is "supported" or "degraded")
         {
             supportedModes.Add("bstri-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSLODTriShape"), "bslod-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bslod-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSMeshLODTriShape"), "bsmeshlod-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bsmeshlod-half-float");
         }
 
         if (Inspect(CreateInterleavedFloatProbeBytes(), "interleaved-float-probe").Status is "supported" or "degraded")
@@ -3076,13 +3086,13 @@ internal static class NifGeometrySignatureReader
         return stream.ToArray();
     }
 
-    private static byte[] CreateBsTriShapeProbeBytes()
+    private static byte[] CreateBsHalfFloatProbeBytes(string blockTypeName)
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
         writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
         writer.Write(new byte[32]);
-        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSTriShape"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(blockTypeName));
         writer.Write(new byte[8]);
         var strideDiv4 = 5UL;
         var desc = strideDiv4 << 44;
@@ -14488,6 +14498,7 @@ internal sealed class LocalExportService(
         var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pendingAmbiguous = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var relatedPluginMeshPaths = BuildRelatedPluginMeshPathMap(pluginAnalysis);
+        var sourceMeshVariantCounts = BuildSourceMeshVariantCountMap(sourceMeshPaths);
 
         // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
         var allPaths = pluginAnalysis.ArmorAddons
@@ -14507,7 +14518,7 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            if (!TryResolveSourceMeshForPluginPath(originalPath, sourceMeshPaths, out var sourceMeshPath, out var ambiguousMatches))
+            if (!TryResolveSourceMeshForPluginPath(originalPath, sourceMeshPaths, sourceMeshVariantCounts, out var sourceMeshPath, out var ambiguousMatches))
             {
                 if (ambiguousMatches.Count > 0)
                 {
@@ -14655,6 +14666,7 @@ internal sealed class LocalExportService(
     private static bool TryResolveSourceMeshForPluginPath(
         string pluginMeshPath,
         IReadOnlyList<string> sourceMeshPaths,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts,
         out string sourceMeshPath,
         out IReadOnlyList<string> ambiguousMatches)
     {
@@ -14674,7 +14686,7 @@ internal sealed class LocalExportService(
             .Select(path => new
             {
                 Path = path,
-                Score = ScoreSourceMeshCandidate(pluginMeshPath, path)
+                Score = ScoreSourceMeshCandidate(pluginMeshPath, path, sourceMeshVariantCounts)
             })
             .Where(candidate => candidate.Score > 0)
             .ToList();
@@ -14752,10 +14764,15 @@ internal sealed class LocalExportService(
         return true;
     }
 
-    private static int ScoreSourceMeshCandidate(string pluginMeshPath, string sourceMeshPath)
+    private static int ScoreSourceMeshCandidate(
+        string pluginMeshPath,
+        string sourceMeshPath,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts)
     {
         var normalizedPluginPath = NormalizePluginMeshPath(pluginMeshPath);
         var comparableSourcePath = NormalizeComparablePath(sourceMeshPath);
+        var pluginFileName = Path.GetFileName(normalizedPluginPath);
+        var sourceFileName = Path.GetFileName(comparableSourcePath);
         var pluginStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(normalizedPluginPath));
         var sourceStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(comparableSourcePath));
         var pluginVariants = new[]
@@ -14781,6 +14798,19 @@ internal sealed class LocalExportService(
             {
                 score += 75;
             }
+
+            if (!string.IsNullOrWhiteSpace(pluginFileName) &&
+                pluginFileName.Equals(sourceFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250;
+            }
+
+            if (PreferLowWeightVariantForUnsuffixedPlugin(pluginFileName, sourceFileName))
+            {
+                score += 40;
+            }
+
+            score += GetSourceMeshVariantCountBonus(comparableSourcePath, sourceMeshVariantCounts);
 
             bestScore = Math.Max(bestScore, score);
         }
@@ -14854,6 +14884,51 @@ internal sealed class LocalExportService(
         string.IsNullOrWhiteSpace(path)
             ? string.Empty
             : path.Replace('\\', '/').Trim().Trim('/');
+
+    private static IReadOnlyDictionary<string, int> BuildSourceMeshVariantCountMap(IReadOnlyList<string> sourceMeshPaths)
+    {
+        return sourceMeshPaths
+            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(
+                path => $"{NormalizeComparablePath(Path.GetDirectoryName(path) ?? string.Empty)}|{NormalizeMeshStemForPluginMatch(Path.GetFileName(path))}",
+                StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group =>
+            {
+                var count = group.Count();
+                return group.Select(path => new KeyValuePair<string, int>(NormalizeComparablePath(path), count));
+            })
+            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int GetSourceMeshVariantCountBonus(
+        string sourceMeshPath,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts)
+    {
+        if (!sourceMeshVariantCounts.TryGetValue(NormalizeComparablePath(sourceMeshPath), out var variantCount) ||
+            variantCount <= 1)
+        {
+            return 0;
+        }
+
+        return (variantCount - 1) * 120;
+    }
+
+    private static bool PreferLowWeightVariantForUnsuffixedPlugin(string? pluginFileName, string? sourceFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(sourceFileName))
+        {
+            return false;
+        }
+
+        var pluginStem = Path.GetFileNameWithoutExtension(pluginFileName) ?? pluginFileName;
+        var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName) ?? sourceFileName;
+        return !HasExplicitBodyWeightSuffix(pluginStem) &&
+               sourceStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExplicitBodyWeightSuffix(string fileStem) =>
+        fileStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+        fileStem.EndsWith("_1", StringComparison.OrdinalIgnoreCase);
 
     private static string TrimMeshesPrefix(string pluginPath)
     {
