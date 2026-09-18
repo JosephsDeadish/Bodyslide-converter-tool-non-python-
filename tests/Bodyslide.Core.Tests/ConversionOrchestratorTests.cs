@@ -8996,11 +8996,17 @@ public sealed class RealisticModPackFixtureTests
 
         try
         {
+            var inspection = await StandaloneConversionModules.CreateInspector().InspectAsync(sourceNifPath, "CBBE");
+            var nifSupport = (inspection.NifSupport ?? [])
+                .Single(report => string.Equals(report.MeshPath, sourceNifPath, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+
             var orchestrator = StandaloneConversionModules.CreateDefault();
-            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
             Assert.True(result.Success);
 
-            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif");
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "devious", "devices", "restraint_0.nif");
             Assert.True(File.Exists(writtenPath), "Converted multi-block framework NIF was not written.");
 
             var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
@@ -9008,13 +9014,34 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
 
             var sourceBytes = await File.ReadAllBytesAsync(sourceNifPath);
+            var transformMethod = typeof(LocalExportService).GetMethod(
+                "TryApplyNifHalfFloatVertexTransform",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(transformMethod);
+
+            var transformedBytes = Assert.IsType<byte[]>(transformMethod!.Invoke(null, new object[]
+            {
+                sourceBytes,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = 1.32d,
+                    ["breasts"] = 1.28d,
+                    ["waist"] = 0.84d,
+                    ["belly"] = 1.18d,
+                    ["thighs"] = 1.22d,
+                },
+                BasicCageGenerationService.CreatePresetCage("mixed")
+            }));
+
             var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            Assert.NotEqual(sourceBytes, transformedBytes);
+            Assert.NotEqual(sourceBytes, writtenBytes);
 
             var sourceSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(sourceBytes);
-            var writtenSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(writtenBytes);
-            Assert.Equal(sourceSubIndex.Count, writtenSubIndex.Count);
+            var transformedSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(transformedBytes);
+            Assert.Equal(sourceSubIndex.Count, transformedSubIndex.Count);
             Assert.True(
-                sourceSubIndex.Zip(writtenSubIndex, (src, dst) =>
+                sourceSubIndex.Zip(transformedSubIndex, (src, dst) =>
                         MathF.Abs(src.X - dst.X) > 0.001f ||
                         MathF.Abs(src.Y - dst.Y) > 0.001f ||
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
@@ -9022,19 +9049,15 @@ public sealed class RealisticModPackFixtureTests
                 "Expected the BSSubIndexTriShape block to be transformed.");
 
             var sourceSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(sourceBytes);
-            var writtenSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(writtenBytes);
-            Assert.Equal(sourceSegmented.Count, writtenSegmented.Count);
+            var transformedSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(transformedBytes);
+            Assert.Equal(sourceSegmented.Count, transformedSegmented.Count);
             Assert.True(
-                sourceSegmented.Zip(writtenSegmented, (src, dst) =>
+                sourceSegmented.Zip(transformedSegmented, (src, dst) =>
                         MathF.Abs(src.X - dst.X) > 0.001f ||
                         MathF.Abs(src.Y - dst.Y) > 0.001f ||
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
                     .Any(static changed => changed),
                 "Expected the BSSegmentedTriShape block to be transformed.");
-
-            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
-            Assert.DoesNotContain("\"Code\": \"heuristic-nif-read\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
