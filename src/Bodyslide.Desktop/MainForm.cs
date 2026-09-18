@@ -50,6 +50,9 @@ public sealed class MainForm : Form
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _statusLabel;
     private readonly Label _presetDetailsLabel;
+    private readonly Label _targetDetailsLabel;
+    private readonly Label _sourceDetailsLabel;
+    private readonly Label _physicsDetailsLabel;
     private readonly ProgressBar _progressBar;
     private readonly TabControl _resultsTabControl;
     private readonly TabPage _previewTabPage;
@@ -72,6 +75,7 @@ public sealed class MainForm : Form
     private readonly ListView _customProfilesListView;
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
+    private readonly ToolTip _optionToolTip;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
@@ -124,6 +128,13 @@ public sealed class MainForm : Form
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
         _inspector = StandaloneConversionModules.CreateInspector();
+        _optionToolTip = new ToolTip
+        {
+            AutoPopDelay = 12000,
+            InitialDelay = 300,
+            ReshowDelay = 150,
+            ShowAlways = true,
+        };
 
         var layout = new TableLayoutPanel
         {
@@ -216,13 +227,13 @@ public sealed class MainForm : Form
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Preset mode (quick destination setup)",
+            Text = "Preset mode (recommended quick setup)",
             AutoSize = true,
             Checked = true,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Manual mode (choose destination body)",
+            Text = "Manual mode (choose the destination body yourself)",
             AutoSize = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
@@ -233,7 +244,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(12, 4, 0, 0),
-            Text = "Converts armor/clothes: FROM body = source armor body, TO body = destination fit.",
+            Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
         });
         layout.Controls.Add(modeRow, 0, 2);
 
@@ -257,14 +268,14 @@ public sealed class MainForm : Form
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var conversionGuideLabel = new Label
         {
-            Text = "Tip: each supported body includes a \"<Body> Zeroed\" preset.",
+            Text = "Use a preset when you want one named output setup. Presets choose the destination body, slider shape, and default output physics for you.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(conversionGuideLabel, 0, 0);
         leftOptions.SetColumnSpan(conversionGuideLabel, 2);
-        leftOptions.Controls.Add(new Label { Text = "Preset (to-body + slider shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        leftOptions.Controls.Add(new Label { Text = "Preset (destination body + shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -275,16 +286,21 @@ public sealed class MainForm : Form
             _presetComboBox.Items.Add(preset.Name);
         }
 
-        _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
+        _presetComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            UpdatePresetDetails();
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
         leftOptions.Controls.Add(_presetComboBox, 1, 1);
-        leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        leftOptions.Controls.Add(new Label { Text = "Preset batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _presetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
         leftOptions.Controls.Add(_presetBatchTextBox, 1, 2);
-        leftOptions.Controls.Add(new Label { Text = "To body (destination)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        leftOptions.Controls.Add(new Label { Text = "To body / destination body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -298,8 +314,18 @@ public sealed class MainForm : Form
         {
             _targetComboBox.SelectedIndex = 0;
         }
+        _targetComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
+        _targetComboBox.TextChanged += (_, _) =>
+        {
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
         leftOptions.Controls.Add(_targetComboBox, 1, 3);
-        leftOptions.Controls.Add(new Label { Text = "Destination batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        leftOptions.Controls.Add(new Label { Text = "Destination body batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _targetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
@@ -309,7 +335,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label(), 0, 5);
         var allBodiesButton = new Button
         {
-            Text = "Convert armor to all bodies",
+            Text = "Convert to every supported body",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 4),
@@ -326,13 +352,22 @@ public sealed class MainForm : Form
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
+            MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(_presetDetailsLabel, 1, 6);
+        leftOptions.Controls.Add(new Label { Text = "Destination body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
+        _targetDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        leftOptions.Controls.Add(_targetDetailsLabel, 1, 7);
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        conversionOptionsPanel.Controls.Add(CreateSection("Destination setup", leftOptions), 0, 0);
+        conversionOptionsPanel.Controls.Add(CreateSection("Destination setup (what you want to build)", leftOptions), 0, 0);
 
         var rightOptions = new TableLayoutPanel
         {
@@ -342,7 +377,16 @@ public sealed class MainForm : Form
         };
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        rightOptions.Controls.Add(new Label { Text = "Profile (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        var overrideGuideLabel = new Label
+        {
+            Text = "These fields are optional hints or overrides. They help the converter understand the source armor or change the output behavior when auto-detection is not enough.",
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(overrideGuideLabel, 0, 0);
+        rightOptions.SetColumnSpan(overrideGuideLabel, 2);
+        rightOptions.Controls.Add(new Label { Text = "Shape profile (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _profileComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -354,9 +398,9 @@ public sealed class MainForm : Form
             _profileComboBox.Items.Add(profile);
         }
         _profileComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_profileComboBox, 1, 0);
+        rightOptions.Controls.Add(_profileComboBox, 1, 1);
 
-        rightOptions.Controls.Add(new Label { Text = "From body (source armor body, optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        rightOptions.Controls.Add(new Label { Text = "From body / source armor body (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -368,9 +412,19 @@ public sealed class MainForm : Form
             _sourceComboBox.Items.Add(body.Name);
         }
         _sourceComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_sourceComboBox, 1, 1);
+        _sourceComboBox.SelectedIndexChanged += (_, _) => UpdateSourceDetails();
+        _sourceComboBox.TextChanged += (_, _) => UpdateSourceDetails();
+        rightOptions.Controls.Add(_sourceComboBox, 1, 2);
+        rightOptions.Controls.Add(new Label { Text = "Source body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _sourceDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(_sourceDetailsLabel, 1, 3);
 
-        rightOptions.Controls.Add(new Label { Text = "Physics (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        rightOptions.Controls.Add(new Label { Text = "Physics for converted output (optional override)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _physicsComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -382,19 +436,18 @@ public sealed class MainForm : Form
             _physicsComboBox.Items.Add(PhysicsProfileCatalog.ToDisplayName(profile));
         }
         _physicsComboBox.SelectedIndex = 0;
-        var physicsToolTip = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400 };
-        physicsToolTip.SetToolTip(_physicsComboBox,
-            "Overrides the physics bone injection for the target body.\n" +
-            "ANY body can use ANY physics profile — this is not restricted to a body's default.\n" +
-            "  (auto)     — uses each body's built-in default (e.g. smp+cbpc for 3BA, none for CBBE)\n" +
-            "  none       — no soft-body bones injected; safe for all bodies\n" +
-            "  cbpc       — CBPC CPU soft-body bones\n" +
-            "  smp        — SMP GPU soft-body bones\n" +
-            "  Soft Body (CBPC + SMP) — full soft-body (SMP + CBPC combined)\n" +
-            "  alias accepted on CLI: soft-body => smp+cbpc");
-        rightOptions.Controls.Add(_physicsComboBox, 1, 2);
+        _physicsComboBox.SelectedIndexChanged += (_, _) => UpdatePhysicsDetails();
+        rightOptions.Controls.Add(_physicsComboBox, 1, 4);
+        rightOptions.Controls.Add(new Label { Text = "Physics details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 5);
+        _physicsDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(_physicsDetailsLabel, 1, 5);
 
-        rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        rightOptions.Controls.Add(new Label { Text = "Dropped-item / world mesh mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
         _worldModeComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -406,9 +459,9 @@ public sealed class MainForm : Form
             _worldModeComboBox.Items.Add(worldMode);
         }
         _worldModeComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_worldModeComboBox, 1, 3);
+        rightOptions.Controls.Add(_worldModeComboBox, 1, 6);
 
-        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF for bone mapping (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
         var skeletonNifPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -428,9 +481,9 @@ public sealed class MainForm : Form
         browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonNif();
         skeletonNifPanel.Controls.Add(_skeletonNifTextBox, 0, 0);
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
-        rightOptions.Controls.Add(skeletonNifPanel, 1, 4);
+        rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
 
-        conversionOptionsPanel.Controls.Add(CreateSection("Overrides and support files", rightOptions), 1, 0);
+        conversionOptionsPanel.Controls.Add(CreateSection("Source hints, output overrides, and support files", rightOptions), 1, 0);
         layout.Controls.Add(CreateSection("Conversion setup", conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
@@ -511,13 +564,13 @@ public sealed class MainForm : Form
         };
         _outputZipCheckBox = new CheckBox
         {
-            Text = "Create output zip",
+            Text = "Package output as zip",
             AutoSize = true,
             Margin = new Padding(0, 8, 12, 0),
         };
         _buildSlidersCheckBox = new CheckBox
         {
-            Text = "Build BodySlide files",
+            Text = "Generate BodySlide project files",
             AutoSize = true,
             Checked = true,
             Margin = new Padding(0, 8, 12, 0),
@@ -824,6 +877,9 @@ public sealed class MainForm : Form
 
         RefreshModeState();
         UpdatePresetDetails();
+        UpdateTargetDetails();
+        UpdateSourceDetails();
+        UpdatePhysicsDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
         RefreshCustomProfilesList();
@@ -832,10 +888,11 @@ public sealed class MainForm : Form
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
+        ConfigureOptionTooltips();
         _currentTheme = LoadThemePreference();
         _themeComboBox.SelectedItem = _currentTheme.ToString();
         ApplyTheme(_currentTheme);
-        AppendLog("Ready. Choose armor/clothing input, set FROM (source, optional) and TO (destination), then click Convert.");
+        AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
     }
 
     private static GroupBox CreateSection(string title, Control content)
@@ -1036,7 +1093,7 @@ public sealed class MainForm : Form
             [
                 "Preset",
                 preset.Name,
-                $"Target={preset.TargetBody}; Deformation={preset.DeformationProfile}; Physics={preset.PhysicsProfile}",
+                $"Builds for {preset.TargetBody}; shape={preset.DeformationProfile}; output physics={PhysicsProfileCatalog.ToDisplayName(preset.PhysicsProfile)} [{preset.PhysicsProfile}]",
             ]));
         }
 
@@ -1052,22 +1109,25 @@ public sealed class MainForm : Form
                 : "n/a";
 
             string details;
-            if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+            if (BuiltInBodyMetadataCatalog.TryGet(body.Name, out var metadata) &&
+                BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
             {
-                var physicsLabel = $"Default physics={PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]";
-                var recommendedLabel = $"Recommended physics={PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]";
-                var supportsLabel = $"SupportsPhysics={profile.SupportsPhysics}";
+                var aliases = metadata.Aliases.Count == 0
+                    ? "none"
+                    : string.Join(", ", metadata.Aliases);
+                var physicsLabel = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
+                var recommendedLabel = PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile);
                 var bonesLabel = profile.SupportsPhysics
-                    ? $"RequiredPhysicsBones=[{string.Join(", ", profile.RequiredPhysicsBones)}]"
-                    : "RequiredPhysicsBones=[]";
-                var groupLabel = profile.SupportsPhysics
-                    ? $"BoneGroups=[{string.Join(", ", profile.PhysicsBoneGroups.Keys.OrderBy(static k => k, StringComparer.OrdinalIgnoreCase))}]"
-                    : "BoneGroups=[]";
-                details = $"Vertices={vertexRange}; Skeleton={profile.SkeletonFoundation}; {physicsLabel}; {recommendedLabel}; {supportsLabel}; {bonesLabel}; {groupLabel}; Notes={profile.Notes}";
+                    ? string.Join(", ", profile.RequiredPhysicsBones.Take(6)) + (profile.RequiredPhysicsBones.Count > 6 ? ", ..." : string.Empty)
+                    : "none";
+                var slidersLabel = metadata.SliderNames.Count == 0
+                    ? "none listed"
+                    : string.Join(", ", metadata.SliderNames.Take(6)) + (metadata.SliderNames.Count > 6 ? ", ..." : string.Empty);
+                details = $"Gender={metadata.Gender}; Aliases={aliases}; Vertex range={vertexRange}; Skeleton={profile.SkeletonFoundation}; Default output physics={physicsLabel} [{profile.DefaultPhysics}]; Recommended override={recommendedLabel} [{profile.RecommendedPhysicsProfile}]; Physics bones={bonesLabel}; Example sliders={slidersLabel}; Notes={profile.Notes}";
             }
             else
             {
-                details = $"Vertices={vertexRange}; No technical profile data. Any physics profile can still be applied via the Physics override.";
+                details = $"Vertex range={vertexRange}; No built-in body notes available. You can still target it manually and apply any physics override.";
             }
 
             _catalogListView.Items.Add(new ListViewItem(["Body", body.Name, details]));
@@ -1088,7 +1148,7 @@ public sealed class MainForm : Form
             var name = string.Equals(displayName, physics, StringComparison.OrdinalIgnoreCase)
                 ? physics
                 : $"{displayName} [{physics}]";
-            _catalogListView.Items.Add(new ListViewItem(["Physics profile", name, physDesc ?? ""]));
+            _catalogListView.Items.Add(new ListViewItem(["Physics profile", name, physDesc ?? "Applies to the converted output, not to the original source armor."]));
         }
 
         // ── World drop modes ─────────────────────────────────────────────────
@@ -1278,6 +1338,10 @@ public sealed class MainForm : Form
                 _targetComboBox.SelectedIndex = targetIndex;
             }
         }
+
+        UpdatePresetDetails();
+        UpdateTargetDetails();
+        UpdatePhysicsDetails();
     }
 
     private async Task ConvertAsync()
@@ -2161,7 +2225,131 @@ public sealed class MainForm : Form
             return;
         }
 
-        _presetDetailsLabel.Text = $"TO body: {preset.TargetBody} | Slider shape: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
+        _presetDetailsLabel.Text =
+            $"Preset output: build for {preset.TargetBody}, use the {preset.DeformationProfile} shape profile, and default to {PhysicsProfileCatalog.ToDisplayName(preset.PhysicsProfile)} output physics.";
+    }
+
+    private void UpdateTargetDetails()
+    {
+        var targetBody = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        if (string.IsNullOrWhiteSpace(targetBody) || string.Equals(targetBody, "CUSTOM", StringComparison.OrdinalIgnoreCase))
+        {
+            _targetDetailsLabel.Text = "Type or select the body you want the converted armor to fit.";
+            return;
+        }
+
+        _targetDetailsLabel.Text = BuildBodyDetailsText(
+            targetBody,
+            defaultText: $"This is the destination body the converted armor will be reshaped for.",
+            isSourceContext: false);
+    }
+
+    private void UpdateSourceDetails()
+    {
+        var rawSource = string.IsNullOrWhiteSpace(_sourceComboBox.Text)
+            ? _sourceComboBox.SelectedItem?.ToString()
+            : _sourceComboBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(rawSource) ||
+            string.Equals(rawSource, "(auto)", StringComparison.OrdinalIgnoreCase))
+        {
+            _sourceDetailsLabel.Text =
+                "Auto means the app tries to detect what body the original armor was built for from meshes, plugins, and BodySlide support files. Choose a source body only if detection is wrong or the mod is unusual.";
+            return;
+        }
+
+        var resolvedSource = BodyTypeCatalog.ResolveName(rawSource);
+        _sourceDetailsLabel.Text =
+            $"Source hint only: treat the original armor as built for {resolvedSource}. This does not change the destination body or output physics. " +
+            BuildBodyDetailsText(resolvedSource, defaultText: string.Empty, isSourceContext: true);
+    }
+
+    private void UpdatePhysicsDetails()
+    {
+        var effectiveTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        var selectedPhysics = ReadOptionalComboValue(_physicsComboBox);
+        if (PhysicsProfileCatalog.TryNormalize(selectedPhysics, out var normalizedOverride))
+        {
+            _physicsDetailsLabel.Text =
+                $"Output physics override: the converted armor will use {PhysicsProfileCatalog.ToDisplayName(normalizedOverride)} regardless of the source armor. " +
+                BuildPhysicsHelpSuffix(normalizedOverride, effectiveTarget);
+            return;
+        }
+
+        var effectivePhysics = ResolveEffectivePhysicsProfile(effectiveTarget);
+        _physicsDetailsLabel.Text =
+            $"Auto output physics: the converter will use {PhysicsProfileCatalog.ToDisplayName(effectivePhysics)} based on the selected preset/body. " +
+            "This setting controls the converted output, not the original source armor's physics. " +
+            BuildPhysicsHelpSuffix(effectivePhysics, effectiveTarget);
+    }
+
+    private void ConfigureOptionTooltips()
+    {
+        _optionToolTip.SetToolTip(_usePresetRadio,
+            "Recommended for most users. A preset picks the destination body, shape profile, and default output physics together.");
+        _optionToolTip.SetToolTip(_useCustomTargetRadio,
+            "Use this when you want to type or choose the destination body directly instead of starting from a preset.");
+        _optionToolTip.SetToolTip(_presetComboBox,
+            "Quick setup for the output you want. Presets do not describe the original source armor body.");
+        _optionToolTip.SetToolTip(_presetBatchTextBox,
+            "Optional comma-separated preset list for batch conversion. Example: 3BA Curvy, HIMBO Lean");
+        _optionToolTip.SetToolTip(_targetComboBox,
+            "The body you want the converted armor to fit. This is the destination/output body.");
+        _optionToolTip.SetToolTip(_targetBatchTextBox,
+            "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.");
+        _optionToolTip.SetToolTip(_profileComboBox,
+            "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
+        _optionToolTip.SetToolTip(_sourceComboBox,
+            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This does not choose the output body.");
+        _optionToolTip.SetToolTip(_physicsComboBox,
+            "Controls the converted output physics, not the source armor.\n" +
+            "Auto = use the preset/body default.\n" +
+            "None = no soft-body bones.\n" +
+            "CBPC = CPU physics bones.\n" +
+            "SMP = GPU cloth/soft-body bones.\n" +
+            "Soft Body (CBPC + SMP) = combined setup.");
+        _optionToolTip.SetToolTip(_worldModeComboBox,
+            "Controls how dropped-item/world meshes are reported and packaged for the converted output.");
+        _optionToolTip.SetToolTip(_skeletonNifTextBox,
+            "Optional skeleton file used to improve bone mapping. Leave blank if the input mod already includes the right skeleton support.");
+        _optionToolTip.SetToolTip(_outputZipCheckBox,
+            "Create a ready-to-share zip package of the converted output.");
+        _optionToolTip.SetToolTip(_buildSlidersCheckBox,
+            "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+    }
+
+    private static string BuildBodyDetailsText(string bodyName, string defaultText, bool isSourceContext)
+    {
+        if (!BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata) ||
+            !BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile))
+        {
+            return defaultText;
+        }
+
+        var aliases = metadata.Aliases.Count == 0
+            ? string.Empty
+            : $" Also known as {string.Join(", ", metadata.Aliases)}.";
+        var physics = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
+        var roleText = isSourceContext
+            ? "Use this if the original armor was authored for this body family."
+            : "Use this if you want the converted armor to fit this body family.";
+        return $"{roleText} {metadata.Gender} body. Skeleton: {profile.SkeletonFoundation}. Default output physics: {physics}.{aliases} {metadata.Notes}".Trim();
+    }
+
+    private static string BuildPhysicsHelpSuffix(string physicsProfile, string targetBody)
+    {
+        if (!BodyTechnicalProfileCatalog.TryGet(targetBody, out var profile))
+        {
+            return "Any supported body can use any physics option.";
+        }
+
+        if (string.Equals(physicsProfile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return "No extra soft-body bones will be injected into the converted meshes.";
+        }
+
+        return profile.SupportsPhysics
+            ? $"Typical bones for {targetBody} include {string.Join(", ", profile.RequiredPhysicsBones.Take(4))}{(profile.RequiredPhysicsBones.Count > 4 ? ", ..." : string.Empty)}."
+            : $"{targetBody} has no built-in body-specific physics-bone catalog, so this acts as a general output override.";
     }
 
     private bool TryGetSelectedPreset(out ConversionPreset preset)
