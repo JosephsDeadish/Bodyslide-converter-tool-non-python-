@@ -8993,36 +8993,85 @@ public sealed class RealisticModPackFixtureTests
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMasterChainBodyFrameworkModPack");
         var outputDirectory = Path.Combine(workingDirectory, "output");
 
+        static byte[] BuildSubrecordLocal(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static void WriteUInt32LeLocal(byte[] buf, int offset, uint value)
+        {
+            buf[offset] = (byte)value;
+            buf[offset + 1] = (byte)(value >> 8);
+            buf[offset + 2] = (byte)(value >> 16);
+            buf[offset + 3] = (byte)(value >> 24);
+        }
+
+        static byte[] BuildSseRecordLocal(string tag, byte[] data, uint formId = 0u)
+        {
+            var buf = new byte[24 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            WriteUInt32LeLocal(buf, 4, (uint)data.Length);
+            WriteUInt32LeLocal(buf, 8, 0u);
+            WriteUInt32LeLocal(buf, 12, formId);
+            data.CopyTo(buf, 24);
+            return buf;
+        }
+
+        static byte[] BuildTes4DataWithMastersLocal(IReadOnlyList<string> masters)
+        {
+            using var ms = new MemoryStream();
+            ms.Write(BuildSubrecordLocal("HEDR", new byte[12]));
+            ms.Write(BuildSubrecordLocal("CNAM", new byte[] { 0 }));
+            foreach (var master in masters)
+            {
+                ms.Write(BuildSubrecordLocal("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+                ms.Write(BuildSubrecordLocal("DATA", new byte[8]));
+            }
+
+            return ms.ToArray();
+        }
+
+        static byte[] BuildSsePluginWithMastersLocal(IReadOnlyList<string> masters, params byte[][] records)
+        {
+            var tes4 = BuildSseRecordLocal("TES4", BuildTes4DataWithMastersLocal(masters));
+            return [..tes4, ..records.SelectMany(static record => record)];
+        }
+
         await File.WriteAllBytesAsync(
             Path.Combine(workingDirectory, "MasterChainStandaloneRoot.esp"),
-            BuildSsePluginWithMasters(
+            BuildSsePluginWithMastersLocal(
                 [],
-                BuildSseRecord(
+                BuildSseRecordLocal(
                     "ARMA",
-                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessPanelAA\0"))
-                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/ebonite/devious_panel_0.nif\0")))
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessPanelAA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/ebonite/devious_panel_0.nif\0")))
                         .ToArray(),
                     formId: 0x00000800u)));
 
         await File.WriteAllBytesAsync(
             Path.Combine(workingDirectory, "MasterChainStandaloneBridge.esp"),
-            BuildSsePluginWithMasters(
+            BuildSsePluginWithMastersLocal(
                 ["MasterChainStandaloneRoot.esp"],
-                BuildSseRecord(
+                BuildSseRecordLocal(
                     "ARMA",
-                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintAA\0"))
-                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_0.nif\0")))
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintAA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_0.nif\0")))
                         .ToArray(),
                     formId: 0x01000801u)));
 
         await File.WriteAllBytesAsync(
             Path.Combine(workingDirectory, "MasterChainStandaloneChild.esp"),
-            BuildSsePluginWithMasters(
+            BuildSsePluginWithMastersLocal(
                 ["MasterChainStandaloneBridge.esp"],
-                BuildSseRecord(
+                BuildSseRecordLocal(
                     "ARMA",
-                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintVariantAA\0"))
-                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_1.nif\0")))
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraint1AA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_1.nif\0")))
                         .ToArray(),
                     formId: 0x01000802u)));
 
