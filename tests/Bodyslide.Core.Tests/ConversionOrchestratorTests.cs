@@ -6352,7 +6352,10 @@ public sealed class PluginPatchGuidanceTests
         }
         finally
         {
-            Directory.Delete(outputDirectory, recursive: true);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
         }
     }
 
@@ -6419,7 +6422,10 @@ public sealed class PluginPatchGuidanceTests
         }
         finally
         {
-            Directory.Delete(outputDirectory, recursive: true);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
         }
     }
 

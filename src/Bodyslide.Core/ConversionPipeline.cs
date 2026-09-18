@@ -2062,7 +2062,7 @@ internal static class NifGeometrySignatureReader
         var bestStride = 0;
         var bestPaddingIndex = int.MaxValue;
 
-        for (var offset = NifHeader.Length; offset <= scanEnd; offset += sizeof(int))
+        for (var offset = NifHeaderToken.Length; offset <= scanEnd; offset++)
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
             if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
@@ -14721,7 +14721,7 @@ internal sealed class LocalExportService(
         var missingStagedSet = missingStagedMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var scannedPluginFileNames = pluginAnalysis.ArmorAddons
             .Select(static addon => NormalizeResolvedPluginFileName(addon.OwningPluginFileName))
-            .Concat(pluginAnalysis.ArmorRecords.Select(static record => NormalizeResolvedPluginFileName(record.OwningPluginFileName)))
+            .Concat((pluginAnalysis.ArmorRecords ?? []).Select(static record => NormalizeResolvedPluginFileName(record.OwningPluginFileName)))
             .Where(static fileName => !string.IsNullOrWhiteSpace(fileName))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
