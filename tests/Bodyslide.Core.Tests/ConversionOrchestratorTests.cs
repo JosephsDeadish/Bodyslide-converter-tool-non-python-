@@ -3310,6 +3310,41 @@ internal static class SyntheticNifTestData
         }
     }
 
+    public static async Task WriteGraphlessInterleavedFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding,
+        int stride)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("CustomVertexBlob"));
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        var trailingBytes = Math.Max(0, stride - (sizeof(float) * 3));
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            var trailingFloatCount = trailingBytes / sizeof(float);
+            for (var index = 0; index < trailingFloatCount; index++)
+            {
+                writer.Write(float.NaN);
+            }
+
+            for (var index = trailingFloatCount * sizeof(float); index < trailingBytes; index++)
+            {
+                writer.Write((byte)0x7F);
+            }
+        }
+    }
+
     public static async Task WriteBlockGraphStyleWithSkinPartitionsAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -3897,6 +3932,53 @@ public sealed class NifOutputAndSourceOverrideTests
                         Math.Abs(src.Z - dst.Z) > 0.0001f)
                     .Any(static changed => changed),
                 "Expected at least one extra-wide interleaved vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithGraphlessInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "graphless_interleaved_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteGraphlessInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 24, stride: 36);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(96, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "graphless_interleaved_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one graphless interleaved float vertex to be transformed.");
         }
         finally
         {
@@ -6265,6 +6347,73 @@ public sealed class PluginPatchGuidanceTests
             Assert.Equal(1, report.LinkedArmorReferenceCount);
             Assert.Equal(1, report.VerifiedLinkedArmorReferenceCount);
             Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Empty(report.MissingLinkedStagedMeshes ?? []);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PluginPatches_UnscannedMasterLinkedArmorAddons_AreReportedSeparatelyFromMissingRecords()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                [],
+                [],
+                0);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["TargetArmor.esp [ESP; confidence=1.00]"],
+                [],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "TargetArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x01000801u,
+                        EditorId: "TargetArmor",
+                        OwningPluginFileName: "TargetArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences:
+                        [
+                            new PluginLinkedFormReference(
+                                RawFormId: 0x02001802u,
+                                OwningPluginFileName: "ExternalAddon.esm",
+                                LocalFormId: 0x00001802u)
+                        ])
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    Array.Empty<string>()
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(0, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Contains(
+                "TargetArmor (0x01000801) -> ExternalAddon.esm::0x00001802",
+                report.UnscannedLinkedArmorAddonReferences ?? []);
             Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
             Assert.Empty(report.MissingLinkedStagedMeshes ?? []);
         }

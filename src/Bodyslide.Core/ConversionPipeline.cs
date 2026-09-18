@@ -200,6 +200,7 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? AmbiguousConvertedMatches = null,
     IReadOnlyList<string>? MissingStagedMeshes = null,
     IReadOnlyList<string>? MissingLinkedArmorAddonRecords = null,
+    IReadOnlyList<string>? UnscannedLinkedArmorAddonReferences = null,
     IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
     IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
@@ -1981,56 +1982,113 @@ internal static class NifGeometrySignatureReader
             return false;
         }
 
-        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
         {
-            return false;
-        }
+            var bestNodeScore = int.MinValue;
+            var bestVertexCount = 0;
+            var bestOffset = -1;
+            var bestStride = 0;
+            var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
 
-        var bestNodeScore = int.MinValue;
-        var bestVertexCount = 0;
-        var bestOffset = -1;
-        var bestStride = 0;
-        var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
-
-        foreach (var node in preferredNodes)
-        {
-            var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
-            if (nodeScore <= 0)
+            foreach (var node in preferredNodes)
             {
-                continue;
-            }
-
-            var scanStart = Math.Max(node.StartOffset, 0);
-            var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
-
-            for (var offset = scanStart; offset <= scanEnd; offset++)
-            {
-                var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+                if (nodeScore <= 0)
                 {
                     continue;
                 }
 
-                foreach (var prefixPadding in CommonFloatVertexPrefixPaddings)
-                {
-                    var candidateDataOffset = offset + sizeof(int) + prefixPadding;
-                    foreach (var stride in EnumerateCandidateFloatVertexStrides())
-                    {
-                        var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
-                        if (candidate is null)
-                        {
-                            continue;
-                        }
+                var scanStart = Math.Max(node.StartOffset, 0);
+                var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
 
-                        if (nodeScore > bestNodeScore ||
-                            (nodeScore == bestNodeScore && candidate.VertexCount > bestVertexCount) ||
-                            (nodeScore == bestNodeScore && candidate.VertexCount == bestVertexCount && (bestStride == 0 || stride < bestStride)))
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    foreach (var prefixPadding in CommonFloatVertexPrefixPaddings)
+                    {
+                        var candidateDataOffset = offset + sizeof(int) + prefixPadding;
+                        foreach (var stride in EnumerateCandidateFloatVertexStrides())
                         {
-                            bestNodeScore = nodeScore;
-                            bestVertexCount = candidate.VertexCount;
-                            bestOffset = candidateDataOffset;
-                            bestStride = stride;
+                            var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
+                            if (candidate is null)
+                            {
+                                continue;
+                            }
+
+                            if (nodeScore > bestNodeScore ||
+                                (nodeScore == bestNodeScore && candidate.VertexCount > bestVertexCount) ||
+                                (nodeScore == bestNodeScore && candidate.VertexCount == bestVertexCount && (bestStride == 0 || stride < bestStride)))
+                            {
+                                bestNodeScore = nodeScore;
+                                bestVertexCount = candidate.VertexCount;
+                                bestOffset = candidateDataOffset;
+                                bestStride = stride;
+                            }
                         }
+                    }
+                }
+            }
+
+            if (bestOffset >= 0)
+            {
+                vertexDataOffset = bestOffset;
+                vertexCount = bestVertexCount;
+                vertexStride = bestStride;
+                return true;
+            }
+        }
+
+        return TryLocateHeuristicInterleavedFloatVertexBlock(bytes, out vertexDataOffset, out vertexCount, out vertexStride);
+    }
+
+    private static bool TryLocateHeuristicInterleavedFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        var scanEnd = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
+        var bestOffset = -1;
+        var bestVertexCount = 0;
+        var bestStride = 0;
+        var bestPaddingIndex = int.MaxValue;
+
+        for (var offset = NifHeader.Length; offset <= scanEnd; offset += sizeof(int))
+        {
+            var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+            if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+            {
+                continue;
+            }
+
+            for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+            {
+                var candidateDataOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                foreach (var stride in EnumerateCandidateFloatVertexStrides())
+                {
+                    var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
+
+                    if (candidate.VertexCount > bestVertexCount ||
+                        (candidate.VertexCount == bestVertexCount && paddingIndex < bestPaddingIndex) ||
+                        (candidate.VertexCount == bestVertexCount && paddingIndex == bestPaddingIndex && (bestStride == 0 || stride < bestStride)))
+                    {
+                        bestOffset = candidateDataOffset;
+                        bestVertexCount = candidate.VertexCount;
+                        bestStride = stride;
+                        bestPaddingIndex = paddingIndex;
                     }
                 }
             }
@@ -10994,6 +11052,7 @@ internal static class ConversionReadmeGenerator
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
             "plugin-link-missing-arma-record" or
+            "plugin-link-unscanned-master-reference" or
             "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" =>
                 "Open plugin-patches.json in xEdit context, verify each ARMO/ARMA mesh path, and patch unresolved records before release.",
@@ -13531,6 +13590,14 @@ internal sealed class LocalExportService(
                     $"Some ARMO records referenced ARMA FormIDs that could not be correlated during verification: {string.Join(", ", pluginRewriteVerification.MissingLinkedArmorAddonRecords.Take(4))}."));
             }
 
+            if (pluginRewriteVerification.UnscannedLinkedArmorAddonReferences is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-unscanned-master-reference",
+                    "medium",
+                    $"Some ARMO records referenced ARMA FormIDs in master or external plugins that were not part of the scanned input set: {string.Join(", ", pluginRewriteVerification.UnscannedLinkedArmorAddonReferences.Take(4))}."));
+            }
+
             if (pluginRewriteVerification.MissingLinkedConvertedMatches is { Count: > 0 })
             {
                 issues.Add(new ConversionValidationIssue(
@@ -14556,6 +14623,7 @@ internal sealed class LocalExportService(
         int LinkedArmorReferenceCount,
         int VerifiedLinkedArmorReferenceCount,
         IReadOnlyList<string> MissingLinkedArmorAddonRecords,
+        IReadOnlyList<string> UnscannedLinkedArmorAddonReferences,
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
 
@@ -14621,6 +14689,7 @@ internal sealed class LocalExportService(
             AmbiguousConvertedMatches: pluginRewritePlan.AmbiguousConvertedMatches,
             MissingStagedMeshes: missingStagedMeshes,
             MissingLinkedArmorAddonRecords: linkedArmorVerification.MissingLinkedArmorAddonRecords,
+            UnscannedLinkedArmorAddonReferences: linkedArmorVerification.UnscannedLinkedArmorAddonReferences,
             MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
             MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
@@ -14635,6 +14704,7 @@ internal sealed class LocalExportService(
         var linkedReferenceCount = 0;
         var verifiedLinkedReferenceCount = 0;
         var missingLinkedArmorAddons = new List<string>();
+        var unscannedLinkedArmorAddons = new List<string>();
         var missingLinkedConvertedMatches = new List<string>();
         var missingLinkedStagedMeshes = new List<string>();
         var addonByResolvedKey = pluginAnalysis.ArmorAddons
@@ -14649,6 +14719,11 @@ internal sealed class LocalExportService(
             .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
         var missingStagedSet = missingStagedMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var scannedPluginFileNames = pluginAnalysis.ArmorAddons
+            .Select(static addon => NormalizeResolvedPluginFileName(addon.OwningPluginFileName))
+            .Concat(pluginAnalysis.ArmorRecords.Select(static record => NormalizeResolvedPluginFileName(record.OwningPluginFileName)))
+            .Where(static fileName => !string.IsNullOrWhiteSpace(fileName))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
         {
@@ -14677,7 +14752,16 @@ internal sealed class LocalExportService(
                     linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
                 if (!addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
                 {
-                    missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
+                    var linkedOwner = NormalizeResolvedPluginFileNameOrNull(linkedReference.OwningPluginFileName);
+                    if (!string.IsNullOrWhiteSpace(linkedOwner) &&
+                        !scannedPluginFileNames.Contains(linkedOwner))
+                    {
+                        unscannedLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
+                    }
+                    else
+                    {
+                        missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
+                    }
                     continue;
                 }
 
@@ -14725,6 +14809,10 @@ internal sealed class LocalExportService(
             LinkedArmorReferenceCount: linkedReferenceCount,
             VerifiedLinkedArmorReferenceCount: verifiedLinkedReferenceCount,
             MissingLinkedArmorAddonRecords: missingLinkedArmorAddons
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            UnscannedLinkedArmorAddonReferences: unscannedLinkedArmorAddons
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
