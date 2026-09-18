@@ -11497,66 +11497,6 @@ internal sealed class LocalExportService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var validationSummary = BuildValidationSummary(
-            detectedBody,
-            morphs,
-            payloadReuse,
-            clipping,
-            correction,
-            voxelResult,
-            skeletonMapping,
-            textureSummary,
-            poseSimulation,
-            topologyMismatchRisk,
-            nifSupport,
-            partitionSignals,
-            pluginRewriteVerification,
-            qualityWarnings,
-            steps);
-
-        var qualityReport = new ConversionQualityReport(
-            DetectedSourceBody:        detectedBody.Body,
-            BodyDetectionConfidence:   detectedBody.Confidence,
-            BodyDetectionEvidence:     detectedBody.Evidence,
-            TargetBody:                request.TargetBody,
-            MeshType:                  analysis.MeshType,
-            Strategy:                  mesh.Strategy,
-            RegionalMorphing:          mesh.RegionalMorphing,
-            ClippingDetected:          clipping.HasClipping,
-            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
-            CorrectionApplied:         correction.Applied,
-            CorrectionMethod:          correction.Method,
-            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
-            VoxelAffectedRegions:      voxelResult.AffectedRegions,
-            SourceSkeleton:            skeletonMapping.SourceSkeleton,
-            TargetSkeleton:            skeletonMapping.TargetSkeleton,
-            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
-            UnsupportedBones:          skeletonMapping.UnsupportedBones,
-            GeneratedAt:               DateTimeOffset.UtcNow,
-            TopologyMismatchRisk:      topologyMismatchRisk,
-            VertexCountDeltaRatio:     vertexCountDeltaRatio,
-            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
-            UvAspectRatioDelta:        uvAspectRatioDelta,
-            QualityWarnings:           qualityWarnings,
-            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
-            BodySlideCompatible:       morphs.BodySlideCompatible,
-            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
-            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
-            MissingNormalCount:        textureSummary.MissingNormals.Count,
-            ValidationSummary:         validationSummary,
-            SourceMorphQuality:        morphs.SourceMorphQuality,
-            SourceAssetSupport:        morphs.SourceAssetSupport,
-            PayloadReuse:              payloadReuse,
-            NifSupport:                nifSupport,
-            PluginRewriteVerification: pluginRewriteVerification,
-            PartitionSignals:          partitionSignals);
-        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
-        await File.WriteAllTextAsync(
-            qualityPath,
-            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-        outputFiles.Add(qualityPath);
-
         // Generate a scratch ESP when no source plugin exists for this armor.
         // This enables the converted meshes to be installed as a new standalone mod without
         // requiring the user to create ARMO/ARMA records in xEdit manually.
@@ -11749,17 +11689,91 @@ internal sealed class LocalExportService(
         await ConversionLearningCache.SaveToGlobalAndLocalAsync(cache, cachePath, cancellationToken);
         outputFiles.Add(cachePath);
 
+        string? zipPath = null;
         if (request.OutputZip)
         {
-            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             if (File.Exists(zipPath))
             {
                 File.Delete(zipPath);
             }
 
             ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
-            outputFiles = [zipPath];
-            return (outputDirectory, outputFiles);
+            outputFiles.Add(zipPath);
+        }
+
+        var validationSummary = BuildValidationSummary(
+            detectedBody,
+            morphs,
+            payloadReuse,
+            clipping,
+            correction,
+            voxelResult,
+            skeletonMapping,
+            textureSummary,
+            poseSimulation,
+            topologyMismatchRisk,
+            nifSupport,
+            partitionSignals,
+            pluginRewriteVerification,
+            qualityWarnings,
+            steps,
+            request,
+            outputDirectory,
+            outputFiles,
+            bodySlideProject,
+            pluginAnalysis);
+
+        var qualityReport = new ConversionQualityReport(
+            DetectedSourceBody:        detectedBody.Body,
+            BodyDetectionConfidence:   detectedBody.Confidence,
+            BodyDetectionEvidence:     detectedBody.Evidence,
+            TargetBody:                request.TargetBody,
+            MeshType:                  analysis.MeshType,
+            Strategy:                  mesh.Strategy,
+            RegionalMorphing:          mesh.RegionalMorphing,
+            ClippingDetected:          clipping.HasClipping,
+            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
+            CorrectionApplied:         correction.Applied,
+            CorrectionMethod:          correction.Method,
+            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
+            VoxelAffectedRegions:      voxelResult.AffectedRegions,
+            SourceSkeleton:            skeletonMapping.SourceSkeleton,
+            TargetSkeleton:            skeletonMapping.TargetSkeleton,
+            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
+            UnsupportedBones:          skeletonMapping.UnsupportedBones,
+            GeneratedAt:               DateTimeOffset.UtcNow,
+            TopologyMismatchRisk:      topologyMismatchRisk,
+            VertexCountDeltaRatio:     vertexCountDeltaRatio,
+            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
+            UvAspectRatioDelta:        uvAspectRatioDelta,
+            QualityWarnings:           qualityWarnings,
+            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
+            BodySlideCompatible:       morphs.BodySlideCompatible,
+            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
+            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
+            MissingNormalCount:        textureSummary.MissingNormals.Count,
+            ValidationSummary:         validationSummary,
+            SourceMorphQuality:        morphs.SourceMorphQuality,
+            SourceAssetSupport:        morphs.SourceAssetSupport,
+            PayloadReuse:              payloadReuse,
+            NifSupport:                nifSupport,
+            PluginRewriteVerification: pluginRewriteVerification,
+            PartitionSignals:          partitionSignals);
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        await File.WriteAllTextAsync(
+            qualityPath,
+            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        if (!outputFiles.Contains(qualityPath, StringComparer.OrdinalIgnoreCase))
+        {
+            outputFiles.Add(qualityPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(zipPath))
+        {
+            File.Delete(zipPath);
+            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
         }
 
         return (outputDirectory, outputFiles);
@@ -13111,7 +13125,12 @@ internal sealed class LocalExportService(
         PartitionSignalReport? partitionSignals,
         PluginRewriteVerificationReport? pluginRewriteVerification,
         IReadOnlyList<string> qualityWarnings,
-        IReadOnlyList<string> steps)
+        IReadOnlyList<string> steps,
+        ConversionRequest request,
+        string outputDirectory,
+        IReadOnlyList<string> outputFiles,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis)
     {
         var issues = new List<ConversionValidationIssue>();
 
@@ -13387,6 +13406,13 @@ internal sealed class LocalExportService(
             }
         }
 
+        issues.AddRange(BuildPackageArtifactIssues(
+            request,
+            outputDirectory,
+            outputFiles,
+            bodySlideProject,
+            pluginAnalysis));
+
         var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
         var mediumSeverityCount = issues.Count(issue => issue.Severity.Equals("medium", StringComparison.OrdinalIgnoreCase));
         var lowSeverityCount = issues.Count(issue => issue.Severity.Equals("low", StringComparison.OrdinalIgnoreCase));
@@ -13404,6 +13430,97 @@ internal sealed class LocalExportService(
             MediumSeverityCount: mediumSeverityCount,
             LowSeverityCount: lowSeverityCount,
             Issues: issues);
+    }
+
+    internal static IReadOnlyList<ConversionValidationIssue> BuildPackageArtifactIssues(
+        ConversionRequest request,
+        string outputDirectory,
+        IReadOnlyList<string> outputFiles,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis)
+    {
+        var issues = new List<ConversionValidationIssue>();
+
+        bool HasFile(string path) =>
+            outputFiles.Any(existing => PathsEqual(existing, path)) || File.Exists(path);
+
+        bool HasAnyFile(string directoryPath, string searchPattern) =>
+            Directory.Exists(directoryPath) && Directory.EnumerateFiles(directoryPath, searchPattern).Any();
+
+        void AddMissingFileIssue(string relativePath, string code, string severity, string message)
+        {
+            var fullPath = Path.Combine(outputDirectory, relativePath);
+            if (!HasFile(fullPath))
+            {
+                issues.Add(new ConversionValidationIssue(code, severity, message));
+            }
+        }
+
+        AddMissingFileIssue("README.txt", "missing-readme", "medium",
+            "README.txt was not generated, so install guidance and manual follow-up notes are missing.");
+        AddMissingFileIssue("dependency-map.json", "missing-dependency-map", "medium",
+            "dependency-map.json was not generated, so required source assets and plugin dependencies are not summarized.");
+        AddMissingFileIssue("pose-simulation-report.json", "missing-pose-report", "low",
+            "pose-simulation-report.json was not generated, so post-conversion pose-risk review data is missing.");
+        AddMissingFileIssue("world-physics.json", "missing-world-physics-report", "low",
+            "world-physics.json was not generated, so dropped-item/world-model guidance is missing.");
+        AddMissingFileIssue("preview.svg", "missing-preview-svg", "low",
+            "preview.svg was not generated, so a static preview render is missing.");
+        AddMissingFileIssue("preview.html", "missing-preview-html", "low",
+            "preview.html was not generated, so the interactive conversion preview is missing.");
+        AddMissingFileIssue("preview-workbench.html", "missing-preview-workbench", "low",
+            "preview-workbench.html was not generated, so the side-by-side review workbench is missing.");
+        AddMissingFileIssue(Path.Combine("fomod", "ModuleConfig.xml"), "missing-fomod-module-config", "medium",
+            "fomod/ModuleConfig.xml was not generated, so mod managers cannot install the package as a FOMOD.");
+        AddMissingFileIssue(Path.Combine("fomod", "info.xml"), "missing-fomod-info", "medium",
+            "fomod/info.xml was not generated, so the FOMOD package metadata is incomplete.");
+
+        if (request.GenerateBodySlideFiles)
+        {
+            var ospPath = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets", $"{bodySlideProject.ProjectName}.osp");
+            if (!HasFile(ospPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-osp",
+                    "medium",
+                    $"Expected BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp' was not generated."));
+            }
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
+            var hasShapeData = Directory.Exists(shapeDataDirectory)
+                && (HasAnyFile(shapeDataDirectory, "*.nif")
+                    || HasAnyFile(shapeDataDirectory, "*.bsd")
+                    || HasAnyFile(shapeDataDirectory, "*.tri"));
+            if (!hasShapeData)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-shape-data",
+                    "medium",
+                    $"Expected BodySlide ShapeData assets for '{bodySlideProject.ProjectName}' were not generated."));
+            }
+        }
+
+        if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+        {
+            AddMissingFileIssue("patch-armor.pas", "missing-xedit-script", "medium",
+                "patch-armor.pas was not generated, so xEdit automation for plugin rewrites is missing.");
+            AddMissingFileIssue("plugin-patches.json", "missing-plugin-patch-report", "medium",
+                "plugin-patches.json was not generated, so plugin rewrite guidance and verification output are missing.");
+        }
+
+        if (request.OutputZip)
+        {
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            if (!HasFile(zipPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-output-zip",
+                    "medium",
+                    "The requested distributable ZIP package was not generated."));
+            }
+        }
+
+        return issues;
     }
 
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)

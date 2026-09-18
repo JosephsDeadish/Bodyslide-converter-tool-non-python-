@@ -887,8 +887,8 @@ public sealed class ConversionOrchestratorTests
             Assert.True(result.Success);
             var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             Assert.True(File.Exists(zipPath), $"Expected ZIP at {zipPath}");
-            Assert.Single(result.OutputFiles);
-            Assert.EndsWith(".zip", result.OutputFiles[0], StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -12176,6 +12176,125 @@ public sealed class OutputCompletenessTests
         finally
         {
             Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingExpectedArtifacts()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "3BA",
+                OutputDirectory: outputDirectory,
+                OutputZip: true,
+                GenerateBodySlideFiles: true);
+            var bodySlideProject = new BodySlideProject("NordicProject", "3BA", ["Belly"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult(
+                [Path.Combine(outputDirectory, "Armor.esp")],
+                [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
+                "patch");
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                bodySlideProject,
+                pluginAnalysis);
+
+            var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("missing-readme", codes);
+            Assert.Contains("missing-dependency-map", codes);
+            Assert.Contains("missing-preview-html", codes);
+            Assert.Contains("missing-preview-workbench", codes);
+            Assert.Contains("missing-fomod-module-config", codes);
+            Assert.Contains("missing-bodyslide-osp", codes);
+            Assert.Contains("missing-bodyslide-shape-data", codes);
+            Assert.Contains("missing-xedit-script", codes);
+            Assert.Contains("missing-plugin-patch-report", codes);
+            Assert.Contains("missing-output-zip", codes);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_SkipsOptionalFamiliesWhenDisabled()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: false);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-bodyslide-osp", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-bodyslide-shape-data", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-xedit-script", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-plugin-patch-report", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WhenOutputZipEnabled_ReturnsZipAlongsideGeneratedArtifacts()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory, OutputZip: true));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(outputDirectory + ".zip"));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
         }
     }
 
