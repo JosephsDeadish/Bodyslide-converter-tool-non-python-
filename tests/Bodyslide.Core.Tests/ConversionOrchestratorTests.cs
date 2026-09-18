@@ -3,6 +3,7 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using SharpCompress.Common;
 using SharpCompress.Writers.SevenZip;
 
@@ -8129,6 +8130,46 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticFailureModPackDirectory_FlagsUnsupportedLayoutAndPreservesGuidanceArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("Conversion Readiness &amp; Next Actions", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("Recommended next actions", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("re-save/export it in a supported Skyrim NIF layout", previewHtml, StringComparison.OrdinalIgnoreCase);
+
+            var workbenchHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview-workbench.html"));
+            Assert.Contains("Recommended next actions", workbenchHtml, StringComparison.Ordinal);
+            Assert.Contains("conversion-quality.json", workbenchHtml, StringComparison.Ordinal);
+
+            using var packValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+            var packReadinessStatus = packValidation.RootElement.GetProperty("PackReadinessStatus").GetString();
+            Assert.Contains(packReadinessStatus, ["needs-review", "high-risk"]);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -8163,20 +8204,20 @@ public sealed class RealisticModPackFixtureTests
         }
     }
 
-    private static string CopyFixtureToTemporaryWorkspace()
+    private static string CopyFixtureToTemporaryWorkspace(string fixtureName = "RealisticModPack")
     {
-        var sourceDirectory = GetFixtureDirectory();
+        var sourceDirectory = GetFixtureDirectory(fixtureName);
         var destinationDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         CopyDirectory(sourceDirectory, destinationDirectory);
         return destinationDirectory;
     }
 
-    private static string GetFixtureDirectory([CallerFilePath] string currentFilePath = "")
+    private static string GetFixtureDirectory(string fixtureName = "RealisticModPack", [CallerFilePath] string currentFilePath = "")
     {
         return Path.Combine(
             Path.GetDirectoryName(currentFilePath)!,
             "Fixtures",
-            "RealisticModPack");
+            fixtureName);
     }
 
     private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
@@ -8423,6 +8464,31 @@ public sealed class PoseSimulationAndPreviewTests
             var svg = await File.ReadAllTextAsync(previewSvgPath);
             Assert.Contains("<svg ", svg, StringComparison.Ordinal);
             Assert.Contains("region-box-", svg, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithBsTriShapeStyleNif_WritesWorkbenchPreviewFromHalfFloatVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "preview_half_float.nif");
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(320));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
+            Assert.Contains("\"Mode\":\"real-3d-point-cloud\"", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"VertexCount\":320", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Conversion Readiness &amp; Next Actions", html, StringComparison.Ordinal);
         }
         finally
         {

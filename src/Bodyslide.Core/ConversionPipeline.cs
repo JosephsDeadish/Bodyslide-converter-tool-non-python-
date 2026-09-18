@@ -189,6 +189,83 @@ public sealed record ConversionValidationSummary(
     int LowSeverityCount,
     IReadOnlyList<ConversionValidationIssue> Issues);
 
+internal static class ConversionValidationGuidance
+{
+    public static IReadOnlyList<ConversionValidationIssue> PrioritizeIssues(
+        ConversionValidationSummary? validationSummary,
+        int maxIssues = int.MaxValue)
+    {
+        if (validationSummary?.Issues is not { Count: > 0 } issues)
+        {
+            return [];
+        }
+
+        return issues
+            .OrderByDescending(static issue => GetIssueSeverityRank(issue.Severity))
+            .ThenBy(static issue => issue.Code, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxIssues))
+            .ToList();
+    }
+
+    public static IReadOnlyList<string> BuildFollowUpActions(
+        ConversionValidationSummary? validationSummary,
+        string targetBody,
+        int maxActions = 6)
+    {
+        if (validationSummary?.Issues is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return PrioritizeIssues(validationSummary)
+            .Select(issue => GetIssueFollowUp(issue.Code, targetBody))
+            .Where(static action => !string.IsNullOrWhiteSpace(action))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxActions))
+            .Cast<string>()
+            .ToList();
+    }
+
+    public static int GetIssueSeverityRank(string severity) =>
+        severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? 3
+        : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? 2
+        : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? 1
+        : 0;
+
+    public static string? GetIssueFollowUp(string code, string targetBody) =>
+        code switch
+        {
+            "unsupported-nif-layout" =>
+                "Open the listed mesh in NifSkope or Outfit Studio, re-save/export it in a supported Skyrim NIF layout, then re-run the conversion.",
+            "heuristic-nif-read" =>
+                "Inspect the converted mesh in NifSkope to confirm vertex order, skinning, and partitions were preserved by the heuristic reader.",
+            "incomplete-source-fallback" =>
+                "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit and re-run the conversion so it can reuse the real source sliders.",
+            "synthetic-morph-fallback" =>
+                "Build the generated project in BodySlide at low and high weights, then inspect extreme sliders in Outfit Studio for shape drift.",
+            "topology-mismatch-risk" =>
+                "Inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits before shipping the package.",
+            "clipping-detected" or "voxel-penetration" or "pose-risk" =>
+                $"Test the output on the {targetBody} body in Outfit Studio and in-game, focusing on the flagged regions and stressed animation poses.",
+            "heel-offset-review" =>
+                "Check ankle height, toe angle, and ground contact on the converted footwear, especially during idle and walk animations.",
+            "unsupported-bones" =>
+                "Install the skeleton expected by the target body or patch the outfit weights/bone names so the missing bones are covered.",
+            "race-compatibility-warning" =>
+                "Review race-specific ARMO/ARMA entries and confirm beast/custom races have matching body meshes or dedicated addon records.",
+            "plugin-rewrite-ambiguous-filename" or
+            "plugin-rewrite-missing-converted-match" or
+            "plugin-rewrite-missing-staged-mesh" or
+            "plugin-rewrite-verification-warning" or
+            "plugin-link-missing-arma-record" or
+            "plugin-link-unscanned-master-reference" or
+            "plugin-link-missing-converted-match" or
+            "plugin-link-missing-staged-mesh" =>
+                "Open plugin-patches.json in xEdit context, verify each ARMO/ARMA mesh path, and patch unresolved records before release.",
+            _ => null
+        };
+}
+
 public sealed record PluginRewriteVerificationReport(
     int DetectedMeshPathCount,
     int RewriteReadyCount,
@@ -11214,12 +11291,12 @@ internal static class ConversionReadmeGenerator
         }
 
         foreach (var issue in validationSummary.Issues
-                     .OrderByDescending(static issue => GetIssueSeverityRank(issue.Severity))
+                     .OrderByDescending(static issue => ConversionValidationGuidance.GetIssueSeverityRank(issue.Severity))
                      .ThenBy(static issue => issue.Code, StringComparer.OrdinalIgnoreCase)
                      .Take(8))
         {
             sb.AppendLine($"  * [{issue.Severity.ToUpperInvariant()}] {issue.Code}: {issue.Message}");
-            var nextStep = GetIssueFollowUp(issue.Code, request.TargetBody);
+            var nextStep = ConversionValidationGuidance.GetIssueFollowUp(issue.Code, request.TargetBody);
             if (!string.IsNullOrWhiteSpace(nextStep))
             {
                 sb.AppendLine($"    Next step: {nextStep}");
@@ -11233,44 +11310,6 @@ internal static class ConversionReadmeGenerator
         }
     }
 
-    private static int GetIssueSeverityRank(string severity) =>
-        severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? 3
-        : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? 2
-        : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? 1
-        : 0;
-
-    private static string? GetIssueFollowUp(string code, string targetBody) =>
-        code switch
-        {
-            "unsupported-nif-layout" =>
-                "Open the listed mesh in NifSkope or Outfit Studio, re-save/export it in a supported Skyrim NIF layout, then re-run the conversion.",
-            "heuristic-nif-read" =>
-                "Inspect the converted mesh in NifSkope to confirm vertex order, skinning, and partitions were preserved by the heuristic reader.",
-            "incomplete-source-fallback" =>
-                "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit and re-run the conversion so it can reuse the real source sliders.",
-            "synthetic-morph-fallback" =>
-                "Build the generated project in BodySlide at low and high weights, then inspect extreme sliders in Outfit Studio for shape drift.",
-            "topology-mismatch-risk" =>
-                "Inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits before shipping the package.",
-            "clipping-detected" or "voxel-penetration" or "pose-risk" =>
-                $"Test the output on the {targetBody} body in Outfit Studio and in-game, focusing on the flagged regions and stressed animation poses.",
-            "heel-offset-review" =>
-                "Check ankle height, toe angle, and ground contact on the converted footwear, especially during idle and walk animations.",
-            "unsupported-bones" =>
-                "Install the skeleton expected by the target body or patch the outfit weights/bone names so the missing bones are covered.",
-            "race-compatibility-warning" =>
-                "Review race-specific ARMO/ARMA entries and confirm beast/custom races have matching body meshes or dedicated addon records.",
-            "plugin-rewrite-ambiguous-filename" or
-            "plugin-rewrite-missing-converted-match" or
-            "plugin-rewrite-missing-staged-mesh" or
-            "plugin-rewrite-verification-warning" or
-            "plugin-link-missing-arma-record" or
-            "plugin-link-unscanned-master-reference" or
-            "plugin-link-missing-converted-match" or
-            "plugin-link-missing-staged-mesh" =>
-                "Open plugin-patches.json in xEdit context, verify each ARMO/ARMA mesh path, and patch unresolved records before release.",
-            _ => null
-        };
 }
 
 /// <summary>
@@ -12029,14 +12068,14 @@ internal sealed class LocalExportService(
         // in any browser without an additional 3D engine.
         var previewPath = Path.Combine(outputDirectory, "preview.html");
         await File.WriteAllTextAsync(previewPath,
-            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary),
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary, validationSummary: null),
             cancellationToken);
         outputFiles.Add(previewPath);
 
         var previewWorkbenchPath = Path.Combine(outputDirectory, "preview-workbench.html");
         await File.WriteAllTextAsync(
             previewWorkbenchPath,
-            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs),
+            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs, validationSummary: null),
             cancellationToken);
         outputFiles.Add(previewWorkbenchPath);
 
@@ -12154,6 +12193,15 @@ internal sealed class LocalExportService(
             outputFiles,
             bodySlideProject,
             pluginAnalysis);
+
+        await File.WriteAllTextAsync(
+            previewPath,
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary, validationSummary),
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            previewWorkbenchPath,
+            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs, validationSummary),
+            cancellationToken);
 
         await File.WriteAllTextAsync(
             readmePath,
@@ -16407,16 +16455,79 @@ internal sealed class LocalExportService(
             """;
     }
 
+    private static string BuildValidationPreviewPanelHtml(
+        ConversionValidationSummary? validationSummary,
+        string targetBody)
+    {
+        if (validationSummary is null)
+        {
+            return string.Empty;
+        }
+
+        var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 8);
+        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody);
+        var statusColor = validationSummary.Status switch
+        {
+            "ready" => "#6bcb77",
+            "needs-review" => "#ffd93d",
+            "high-risk" => "#ff6b6b",
+            _ => "#9ab"
+        };
+
+        var panel = new System.Text.StringBuilder();
+        panel.AppendLine("""      <div class="panel">""");
+        panel.AppendLine("""        <h3 style="margin-top:0">Conversion Readiness &amp; Next Actions</h3>""");
+        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Status:</strong> <span style="color:{statusColor};font-weight:700">{HtmlEncode(validationSummary.Status)}</span> · <strong>Score:</strong> {validationSummary.Score}</p>""");
+        panel.AppendLine($"""        <p style="font-size:.8rem;color:#9ab;margin:0 0 10px">Issues: {validationSummary.HighSeverityCount} high · {validationSummary.MediumSeverityCount} medium · {validationSummary.LowSeverityCount} low</p>""");
+
+        if (prioritizedIssues.Count == 0)
+        {
+            panel.AppendLine("""        <p style="color:#6bcb77;font-size:.85rem;margin:0">✓ No follow-up issues were reported by the conversion checks.</p>""");
+        }
+        else
+        {
+            panel.AppendLine("""        <table><tr><th>Severity</th><th>Issue</th><th>What happened</th></tr>""");
+            foreach (var issue in prioritizedIssues)
+            {
+                panel.AppendLine($"""          <tr><td>{HtmlEncode(issue.Severity.ToUpperInvariant())}</td><td>{HtmlEncode(issue.Code)}</td><td>{HtmlEncode(issue.Message)}</td></tr>""");
+            }
+
+            panel.AppendLine("        </table>");
+            if (validationSummary.Issues.Count > prioritizedIssues.Count)
+            {
+                panel.AppendLine($"""        <p style="font-size:.8rem;color:#9ab;margin:8px 0 0">Showing {prioritizedIssues.Count} of {validationSummary.Issues.Count} issues. Open conversion-quality.json for the full machine-readable list.</p>""");
+            }
+        }
+
+        if (followUpActions.Count > 0)
+        {
+            panel.AppendLine("""        <h4 style="margin:12px 0 8px;color:#9bb7f2">Recommended next actions</h4>""");
+            panel.AppendLine("""        <ul style="font-size:.85rem;padding-left:18px;margin:0">""");
+            foreach (var action in followUpActions)
+            {
+                panel.AppendLine($"""          <li>{HtmlEncode(action)}</li>""");
+            }
+
+            panel.AppendLine("        </ul>");
+        }
+
+        panel.AppendLine("""        <p style="font-size:.8rem;color:#9ab;margin:10px 0 0">Use README.txt and conversion-quality.json for full follow-up details before release.</p>""");
+        panel.AppendLine("      </div>");
+        return panel.ToString();
+    }
+
     private static string BuildPreviewWorkbenchHtml(
         ConversionRequest request,
         ImportedArmor armor,
         MeshAnalysis analysis,
         ConvertedMesh mesh,
-        IReadOnlyList<string> convertedMeshPaths)
+        IReadOnlyList<string> convertedMeshPaths,
+        ConversionValidationSummary? validationSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths);
         var payloadJson = JsonSerializer.Serialize(payload);
+        var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
 
         return $$"""
             <!DOCTYPE html>
@@ -16452,18 +16563,21 @@ internal sealed class LocalExportService(
                   </div>
                   <p id="workbench-status" class="subtitle" style="margin-top:10px"></p>
                 </div>
-                <div class="panel">
-                  <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
-                  <ul class="kvs">
-                    <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
-                    <li><strong>Points loaded:</strong> {{payload.VertexCount}}</li>
-                    <li><strong>NIF file:</strong> {{HtmlEncode(payload.MeshFile)}}</li>
-                  </ul>
-                  <p class="subtitle" style="margin-top:10px">{{HtmlEncode(payload.Note)}}</p>
-                  <p style="font-size:.85rem;margin:12px 0 0">
-                    Drag to rotate · mouse wheel (or zoom slider) to zoom · use
-                    <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
-                  </p>
+                <div style="display:flex;flex-direction:column;gap:18px">
+                  <div class="panel">
+                    <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
+                    <ul class="kvs">
+                      <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
+                      <li><strong>Points loaded:</strong> {{payload.VertexCount}}</li>
+                      <li><strong>NIF file:</strong> {{HtmlEncode(payload.MeshFile)}}</li>
+                    </ul>
+                    <p class="subtitle" style="margin-top:10px">{{HtmlEncode(payload.Note)}}</p>
+                    <p style="font-size:.85rem;margin:12px 0 0">
+                      Drag to rotate · mouse wheel (or zoom slider) to zoom · use
+                      <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
+                    </p>
+                  </div>
+            {{validationPanelHtml}}
                 </div>
               </div>
               <script>
@@ -16656,37 +16770,124 @@ internal sealed class LocalExportService(
 
     private static IReadOnlyList<(float X, float Y, float Z)> ExtractPreviewWorkbenchVertices(byte[] bytes, int maxVertices)
     {
+        if (NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(bytes, out var halfOffset, out var halfCount, out var halfStride))
+        {
+            var halfVertices = ReadPreviewWorkbenchHalfFloatVertices(bytes, halfOffset, halfCount, halfStride, maxVertices);
+            if (halfVertices.Count > 0)
+            {
+                return halfVertices;
+            }
+        }
+
+        if (NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedOffset, out var interleavedCount, out var interleavedStride))
+        {
+            var interleavedVertices = ReadPreviewWorkbenchFloatStrideVertices(bytes, interleavedOffset, interleavedCount, interleavedStride, maxVertices);
+            if (interleavedVertices.Count > 0)
+            {
+                return interleavedVertices;
+            }
+        }
+
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(bytes, out var offset, out var count) || count <= 0)
         {
             return [];
         }
 
-        const int vertexSize = 12;
-        var required = (long)count * vertexSize;
-        if (offset < 0 || offset + required > bytes.Length)
+        return ReadPreviewWorkbenchFloatStrideVertices(bytes, offset, count, vertexStride: 12, maxVertices);
+    }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadPreviewWorkbenchFloatStrideVertices(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        int maxVertices)
+    {
+        if (vertexCount <= 0 || vertexStride < 12)
         {
             return [];
         }
 
-        var sampleStride = Math.Max(1, count / Math.Max(1, maxVertices));
-        var sampledCount = Math.Min(count, maxVertices);
+        var required = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var sampleStride = Math.Max(1, vertexCount / Math.Max(1, maxVertices));
+        var sampledCount = Math.Min(vertexCount, maxVertices);
         var vertices = new List<(float, float, float)>(sampledCount);
-        for (var i = 0; i < count; i += sampleStride)
+        for (var i = 0; i < vertexCount; i += sampleStride)
         {
             if (vertices.Count >= maxVertices)
             {
                 break;
             }
 
-            var o = offset + i * vertexSize;
-            vertices.Add((
-                BitConverter.ToSingle(bytes, o),
-                BitConverter.ToSingle(bytes, o + 4),
-                BitConverter.ToSingle(bytes, o + 8)));
+            var offset = vertexDataOffset + (i * vertexStride);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPreviewWorkbenchCoordinate(x, maxMagnitude: 8192f) ||
+                !IsPreviewWorkbenchCoordinate(y, maxMagnitude: 8192f) ||
+                !IsPreviewWorkbenchCoordinate(z, maxMagnitude: 8192f))
+            {
+                return [];
+            }
+
+            vertices.Add((x, y, z));
         }
 
         return vertices;
     }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadPreviewWorkbenchHalfFloatVertices(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        int maxVertices)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return [];
+        }
+
+        var required = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var sampleStride = Math.Max(1, vertexCount / Math.Max(1, maxVertices));
+        var sampledCount = Math.Min(vertexCount, maxVertices);
+        var vertices = new List<(float, float, float)>(sampledCount);
+        for (var i = 0; i < vertexCount; i += sampleStride)
+        {
+            if (vertices.Count >= maxVertices)
+            {
+                break;
+            }
+
+            var offset = vertexDataOffset + (i * vertexStride);
+            var x = (float)BitConverter.ToHalf(bytes.AsSpan(offset));
+            var y = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 2));
+            var z = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 4));
+            if (!IsPreviewWorkbenchCoordinate(x, maxMagnitude: 512f) ||
+                !IsPreviewWorkbenchCoordinate(y, maxMagnitude: 512f) ||
+                !IsPreviewWorkbenchCoordinate(z, maxMagnitude: 512f))
+            {
+                return [];
+            }
+
+            vertices.Add((x, y, z));
+        }
+
+        return vertices;
+    }
+
+    private static bool IsPreviewWorkbenchCoordinate(float value, float maxMagnitude) =>
+        float.IsFinite(value) && MathF.Abs(value) <= maxMagnitude;
 
     private static string BuildPreviewHtml(
         ConversionRequest request,
@@ -16698,7 +16899,8 @@ internal sealed class LocalExportService(
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics,
         CorrectionResult correction,
-        TextureSummary textureSummary)
+        TextureSummary textureSummary,
+        ConversionValidationSummary? validationSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var orderedRegions = mesh.RegionalMorphing
@@ -16840,6 +17042,7 @@ internal sealed class LocalExportService(
         var highRiskBadge = poseSimulation.HighRiskRegions.Count > 0
             ? $" &nbsp;·&nbsp; <span style=\"color:#ff6b6b\">High-risk: {HtmlEncode(string.Join(", ", poseSimulation.HighRiskRegions.OrderBy(r => r, StringComparer.OrdinalIgnoreCase)))}</span>"
             : string.Empty;
+        var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
 
         // Auto-correction panel.
         var correctionPanelHtml = new System.Text.StringBuilder();
@@ -16995,7 +17198,7 @@ internal sealed class LocalExportService(
                     <h3 style="margin-top:0">Physics Nodes</h3>
                     {{physicsPanel}}
                   </div>
-            {{posePanelHtml}}{{correctionPanelHtml}}{{texturePanelHtml}}{{worldPhysicsPanelHtml}}      </div>
+            {{validationPanelHtml}}{{posePanelHtml}}{{correctionPanelHtml}}{{texturePanelHtml}}{{worldPhysicsPanelHtml}}      </div>
               </div>
               <script>
                 const baseFactors = {{baseFactorsJson}};
