@@ -184,9 +184,14 @@ public sealed record PluginRewriteVerificationReport(
     int RewriteReadyCount,
     int VerifiedPluginPathCount,
     int StagedMeshCount,
+    int LinkedArmorReferenceCount = 0,
+    int VerifiedLinkedArmorReferenceCount = 0,
     IReadOnlyList<string>? MissingConvertedMatches = null,
     IReadOnlyList<string>? AmbiguousConvertedMatches = null,
     IReadOnlyList<string>? MissingStagedMeshes = null,
+    IReadOnlyList<string>? MissingLinkedArmorAddonRecords = null,
+    IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
+    IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
     IReadOnlyList<string>? Warnings = null);
 
@@ -265,8 +270,18 @@ public sealed record RaceCompatibilityReport(
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> IncompatibleRaces);
 
+public sealed record ConversionStageProgressUpdate(string Stage, int StepIndex, int StepCount);
+
 /// <summary>Reports progress during a batch conversion run.</summary>
-public sealed record BatchProgressUpdate(int Completed, int Total, string CurrentFile, bool Success);
+public sealed record BatchProgressUpdate(
+    int Completed,
+    int Total,
+    string CurrentFile,
+    bool Success,
+    string? Stage = null,
+    int StageIndex = 0,
+    int StageCount = 0,
+    bool IsItemCompleted = true);
 
 public sealed record ArmorPackValidationIssueCount(string Code, int Count);
 public sealed record ArmorPackValidationItem(
@@ -3183,7 +3198,10 @@ public sealed class ConversionOrchestrator(
     IWeightSolverService? weightSolverService = null,
     IRigidIslandDetectionService? rigidIslandService = null)
 {
-    public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
+    public async Task<ConversionResult> ConvertAsync(
+        ConversionRequest request,
+        CancellationToken cancellationToken = default,
+        IProgress<ConversionStageProgressUpdate>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(request.InputPath))
         {
@@ -3206,6 +3224,10 @@ public sealed class ConversionOrchestrator(
 
         try
         {
+            const int totalStages = 18;
+            void ReportStage(string stage, int stepIndex) =>
+                progress?.Report(new ConversionStageProgressUpdate(stage, stepIndex, totalStages));
+
             var deformationProfile = normalized.Preset?.DeformationProfile ?? normalized.Request.DeformationProfile;
             if (!string.IsNullOrWhiteSpace(deformationProfile))
             {
@@ -3213,6 +3235,7 @@ public sealed class ConversionOrchestrator(
             }
 
             var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
+            ReportStage("Importing input", 1);
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories);
 
             // Merge any explicitly-provided custom profile paths from the request with the
@@ -3296,6 +3319,7 @@ public sealed class ConversionOrchestrator(
                 }
             }
 
+            ReportStage("Analyzing textures", 2);
             var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
             if (textureSummary.MissingNormals.Count > 0)
             {
@@ -3307,6 +3331,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"material-textures:{textureSummary.MaterialTexturePaths.Count}");
             }
 
+            ReportStage("Scanning plugins", 3);
             var pluginAnalysis = await pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken);
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
@@ -3324,6 +3349,7 @@ public sealed class ConversionOrchestrator(
 
             if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
             {
+                ReportStage("Checking plugin race compatibility", 4);
                 var raceReport = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
                 if (raceReport.IncompatibleRaces.Count > 0)
                 {
@@ -3335,6 +3361,7 @@ public sealed class ConversionOrchestrator(
                 }
             }
 
+            ReportStage("Detecting source body", 5);
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
             steps.Add($"detected-body:{detectedBody.Body}@{detectedBody.Confidence:P0}");
@@ -3349,12 +3376,15 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"source-body-override:{normalized.Request.SourceBodyOverride}");
             }
 
+            ReportStage("Analyzing mesh", 6);
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
             steps.Add($"mesh-type:{analysis.MeshType}");
 
+            ReportStage("Binding armor regions", 7);
             var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
 
+            ReportStage("Building deformation cage", 8);
             var cage = await cageGenerator.BuildAsync(analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"cage:{cage.Mode}");
 
@@ -3364,6 +3394,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"conversion-delta:{sourceBodyForDelta}→{normalized.Request.TargetBody}");
             }
 
+            ReportStage("Converting mesh", 9);
             var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, sourceBodyForDelta, cancellationToken);
             if (cachedEntry is not null && cachedEntry.RegionalMorphing.Count > 0)
             {
@@ -3399,6 +3430,7 @@ public sealed class ConversionOrchestrator(
                     : "rigid-islands:none");
             }
 
+            ReportStage("Transferring weights", 10);
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken);
             steps.Add($"weights:{weighted.WeightProfile}");
             if (weighted.SourceSmpBones is { Count: > 0 } smpBones)
@@ -3436,6 +3468,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"normals:{normalRecalc.SmoothingMethod},recalculated={normalRecalc.RecalculatedCount},groups={normalRecalc.SmoothingGroupCount}");
             }
 
+            ReportStage("Mapping skeleton", 11);
             var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
             if (skeletonMapping.UnsupportedBones.Count > 0)
@@ -3443,9 +3476,11 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"skeleton-warnings:unsupported-bones={string.Join('+', skeletonMapping.UnsupportedBones)}");
             }
 
+            ReportStage("Generating morphs", 12);
             var morphs = await morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
+            ReportStage("Rebuilding partitions", 13);
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
 
             var nifPartitionSlots = armor.MeshFiles
@@ -3481,9 +3516,11 @@ public sealed class ConversionOrchestrator(
 
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
+            ReportStage("Detecting clipping", 14);
             var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
 
+            ReportStage("Correcting mesh fit", 15);
             var correction = await autoCorrection.CorrectAsync(converted, clipping, cancellationToken);
             steps.Add($"correction:{(correction.Applied ? correction.Method : "not-required")}");
 
@@ -3503,6 +3540,7 @@ public sealed class ConversionOrchestrator(
 
             // Voxel collision offset pass — detects body/armor penetrations using a
             // simplified voxel grid and computes per-region push-out magnitudes.
+            ReportStage("Running collision and pose checks", 16);
             var voxelResult = await voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add(voxelResult.HasPenetrations
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
@@ -3539,6 +3577,7 @@ public sealed class ConversionOrchestrator(
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
 
+            ReportStage("Building physics and BodySlide data", 17);
             var physicsProfile = ResolvePhysicsProfile(normalized.Request, armor, normalized.Preset);
             if (!string.IsNullOrWhiteSpace(normalized.Request.PhysicsProfileOverride))
             {
@@ -3558,6 +3597,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add("bodyslide-export:disabled");
             }
 
+            ReportStage("Exporting outputs", 18);
             var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
@@ -3719,6 +3759,29 @@ public sealed class ConversionInspector(
 
 public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 {
+    private static IProgress<ConversionStageProgressUpdate>? CreateStageProgressReporter(
+        IProgress<BatchProgressUpdate>? progress,
+        string currentFile,
+        int completed,
+        int total)
+    {
+        if (progress is null)
+        {
+            return null;
+        }
+
+        return new Progress<ConversionStageProgressUpdate>(update =>
+            progress.Report(new BatchProgressUpdate(
+                completed,
+                total,
+                currentFile,
+                Success: false,
+                Stage: update.Stage,
+                StageIndex: update.StepIndex,
+                StageCount: update.StepCount,
+                IsItemCompleted: false)));
+    }
+
     public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(
         ConversionRequest request,
         CancellationToken cancellationToken = default,
@@ -3758,7 +3821,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     {
         if (variants.Count <= 1)
         {
-            var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken);
+            var currentFile = Path.GetFileName(originalRequest.InputPath);
+            var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: 0, total: 1);
+            var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken, stageProgress);
             progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(originalRequest.InputPath), single.Success));
             return [single];
         }
@@ -3773,9 +3838,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variantRootOutput = BuildVariantRootOutput(originalRequest, variant, batchMode: false);
             var variantOutput = Path.Combine(variantRootOutput, armorName);
             var variantRequest = variant.Request with { OutputDirectory = variantOutput };
-            var result = await orchestrator.ConvertAsync(variantRequest, cancellationToken);
+            var currentFile = $"{fileName} [{variant.DisplayName}]";
+            var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: index, total: variants.Count);
+            var result = await orchestrator.ConvertAsync(variantRequest, cancellationToken, stageProgress);
             results.Add(result);
-            progress?.Report(new BatchProgressUpdate(index + 1, variants.Count, $"{fileName} [{variant.DisplayName}]", result.Success));
+            progress?.Report(new BatchProgressUpdate(index + 1, variants.Count, currentFile, result.Success));
         }
 
         return results;
@@ -10636,6 +10703,7 @@ internal sealed class LocalExportService(
 
             pluginRewriteVerification = BuildPluginRewriteVerificationReport(
                 pluginRewritePlan,
+                pluginAnalysis,
                 outputDirectory,
                 stagedPluginMeshSet,
                 patchVerificationPaths,
@@ -10663,6 +10731,7 @@ internal sealed class LocalExportService(
 
         pluginRewriteVerification ??= BuildPluginRewriteVerificationReport(
             pluginRewritePlan,
+            pluginAnalysis,
             outputDirectory,
             stagedPluginMeshSet,
             patchVerificationPaths,

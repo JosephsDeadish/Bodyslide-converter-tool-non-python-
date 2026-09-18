@@ -1137,16 +1137,40 @@ public sealed class MainForm : Form
 
             // Wire a per-item progress callback so the progress bar advances
             // during batch runs instead of showing a marquee spinner throughout.
+            string? lastProgressLogMessage = null;
             var progress = new Progress<BatchProgressUpdate>(update =>
             {
                 var total = Math.Max(1, update.Total);
                 var completed = Math.Clamp(update.Completed, 0, total);
-                var percent = (int)Math.Round((double)completed / total * 100d, MidpointRounding.AwayFromZero);
+                double progressUnits = completed;
+                if (!update.IsItemCompleted && update.StageCount > 0)
+                {
+                    var stageFraction = Math.Clamp((double)update.StageIndex / update.StageCount, 0d, 1d);
+                    progressUnits = Math.Min(total, completed + stageFraction);
+                }
+
+                var percent = (int)Math.Round(progressUnits / total * 100d, MidpointRounding.AwayFromZero);
+                var activeItem = update.IsItemCompleted
+                    ? completed
+                    : Math.Min(total, Math.Max(1, completed + 1));
+                var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
+                    ? update.CurrentFile
+                    : $"{update.CurrentFile} — {update.Stage}";
                 _progressBar.Style = ProgressBarStyle.Continuous;
                 _progressBar.MarqueeAnimationSpeed = 0;
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
-                _statusLabel.Text = $"Converting {completed}/{total} ({percent}%): {update.CurrentFile}";
+                _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
+
+                if (!string.IsNullOrWhiteSpace(update.Stage))
+                {
+                    var logMessage = $"Processing {activeItem}/{total}: {update.CurrentFile} — {update.Stage}";
+                    if (!string.Equals(logMessage, lastProgressLogMessage, StringComparison.Ordinal))
+                    {
+                        AppendLog(logMessage);
+                        lastProgressLogMessage = logMessage;
+                    }
+                }
             });
 
             var results = await Task.Run(
@@ -1310,7 +1334,7 @@ public sealed class MainForm : Form
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
-        UseWaitCursor = false;
+        UseWaitCursor = isBusy;
         if (!isBusy)
         {
             _progressBar.Style = ProgressBarStyle.Continuous;
