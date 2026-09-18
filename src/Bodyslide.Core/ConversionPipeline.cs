@@ -460,7 +460,8 @@ public sealed record PluginArmorAddon(
     IReadOnlyList<int>? BipedSlots = null,
     uint? RaceFormId = null,
     string? OwningPluginFileName = null,
-    uint? LocalFormId = null);
+    uint? LocalFormId = null,
+    IReadOnlyList<string>? DeclaredMasterFileNames = null);
 
 public sealed record PluginLinkedFormReference(
     uint RawFormId,
@@ -9139,7 +9140,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                         d.BipedSlots.Count > 0 ? d.BipedSlots : null,
                         d.RaceFormId,
                         d.OwningPluginFileName,
-                        d.LocalFormId))
+                        d.LocalFormId,
+                        masterFileNames))
                     .ToList();
             }
             else
@@ -14813,9 +14815,13 @@ internal sealed class LocalExportService(
                      .GroupBy(static entry => entry.FamilyKey!, StringComparer.OrdinalIgnoreCase)
                      .Where(static group => group.Count() > 1))
         {
-            AddRelatedGroup(
-                relatedPathsByMeshPath,
-                standaloneAddonFamily.SelectMany(static entry => entry.Addon.DetectedMeshPaths));
+            foreach (var relatedStandaloneFamily in BuildStandaloneArmorAddonFamilyComponents(
+                         standaloneAddonFamily.Select(static entry => entry.Addon)))
+            {
+                AddRelatedGroup(
+                    relatedPathsByMeshPath,
+                    relatedStandaloneFamily.SelectMany(static addon => addon.DetectedMeshPaths));
+            }
         }
 
         foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
@@ -14849,14 +14855,84 @@ internal sealed class LocalExportService(
 
     private static string? BuildStandaloneArmorAddonFamilyKey(PluginArmorAddon addon)
     {
-        var pluginFileName = NormalizeResolvedPluginFileNameOrNull(addon.OwningPluginFileName);
         var editorFamily = ExtractStandaloneArmorAddonEditorFamily(addon.EditorId);
-        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(editorFamily))
+        return string.IsNullOrWhiteSpace(editorFamily) ? null : editorFamily;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<PluginArmorAddon>> BuildStandaloneArmorAddonFamilyComponents(
+        IEnumerable<PluginArmorAddon> addons)
+    {
+        var remaining = addons
+            .Distinct()
+            .ToList();
+        var components = new List<IReadOnlyList<PluginArmorAddon>>();
+        while (remaining.Count > 0)
         {
-            return null;
+            var seed = remaining[0];
+            remaining.RemoveAt(0);
+            var component = new List<PluginArmorAddon> { seed };
+            var queue = new Queue<PluginArmorAddon>();
+            queue.Enqueue(seed);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                for (var index = remaining.Count - 1; index >= 0; index--)
+                {
+                    if (!AreStandaloneArmorAddonFamiliesRelated(current, remaining[index]))
+                    {
+                        continue;
+                    }
+
+                    var match = remaining[index];
+                    remaining.RemoveAt(index);
+                    component.Add(match);
+                    queue.Enqueue(match);
+                }
+            }
+
+            if (component.Count > 1)
+            {
+                components.Add(component);
+            }
         }
 
-        return $"{pluginFileName}|{editorFamily}";
+        return components;
+    }
+
+    private static bool AreStandaloneArmorAddonFamiliesRelated(PluginArmorAddon left, PluginArmorAddon right)
+    {
+        var leftOwner = NormalizeResolvedPluginFileNameOrNull(left.OwningPluginFileName);
+        var rightOwner = NormalizeResolvedPluginFileNameOrNull(right.OwningPluginFileName);
+        if (string.IsNullOrWhiteSpace(leftOwner) || string.IsNullOrWhiteSpace(rightOwner))
+        {
+            return false;
+        }
+
+        if (leftOwner.Equals(rightOwner, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var leftMasters = NormalizeDeclaredMasterFileNames(left.DeclaredMasterFileNames);
+        var rightMasters = NormalizeDeclaredMasterFileNames(right.DeclaredMasterFileNames);
+        return leftMasters.Contains(rightOwner)
+            || rightMasters.Contains(leftOwner);
+    }
+
+    private static IReadOnlySet<string> NormalizeDeclaredMasterFileNames(IReadOnlyList<string>? masterFileNames)
+    {
+        var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var masterFileName in masterFileNames ?? [])
+        {
+            var normalizedFileName = NormalizeResolvedPluginFileNameOrNull(masterFileName);
+            if (!string.IsNullOrWhiteSpace(normalizedFileName))
+            {
+                normalized.Add(normalizedFileName);
+            }
+        }
+
+        return normalized;
     }
 
     private static string? ExtractStandaloneArmorAddonEditorFamily(string? editorId)

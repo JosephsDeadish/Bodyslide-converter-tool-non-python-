@@ -8808,6 +8808,64 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_StandaloneMasterChainFixture_UsesMasterChainFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticMasterChainStandaloneAddonModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["MasterChainStandaloneChild.esp", "MasterChainStandaloneMaster.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "MasterChainStandaloneMaster.esp",
+                    ["meshes/devious/ebonite/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "LinkedDeviousHarnessPanelAA",
+                    OwningPluginFileName: "MasterChainStandaloneMaster.esp",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "MasterChainStandaloneChild.esp",
+                    ["meshes/devious/devices/restraint_0.nif"],
+                    FormId: 0x02000801u,
+                    EditorId: "LinkedDeviousHarnessRestraintAA",
+                    OwningPluginFileName: "MasterChainStandaloneChild.esp",
+                    LocalFormId: 0x00000801u,
+                    DeclaredMasterFileNames: ["MasterChainStandaloneMaster.esp"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var unresolvedTieGroups = Assert.IsAssignableFrom<IReadOnlyList<object>>(
+            plan.GetType().GetProperty("UnresolvedTieGroups")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Empty(unresolvedTieGroups);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/ebonite/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+    }
+
+    [Fact]
     public void BuildPluginRewritePlan_RealisticLinkedModularFrameworkFixture_UsesLinkedMasterChildFamilyContext()
     {
         var fixtureDirectory = GetFixtureDirectory("RealisticLinkedModularFrameworkModPack");
