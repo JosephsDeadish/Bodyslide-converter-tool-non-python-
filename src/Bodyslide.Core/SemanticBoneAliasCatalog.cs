@@ -30,14 +30,19 @@ internal static class SemanticBoneAliasCatalog
         return data
             .Select(static pair => new
             {
-                Key = pair.Key.Trim(),
-                Values = (IReadOnlyList<string>)pair.Value
+                Key = pair.Key?.Trim(),
+                Values = (IReadOnlyList<string>)(pair.Value ?? [])
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Select(static value => value.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray()
             })
             .Where(static pair => !string.IsNullOrWhiteSpace(pair.Key))
+            .Select(static pair => new
+            {
+                Key = pair.Key!,
+                pair.Values
+            })
             .GroupBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 static group => group.Key,
