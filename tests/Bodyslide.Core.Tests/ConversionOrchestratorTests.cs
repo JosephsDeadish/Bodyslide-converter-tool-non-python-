@@ -3124,7 +3124,8 @@ internal static class SyntheticNifTestData
     public static async Task WriteBlockGraphStyleAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
-        IReadOnlyList<int>? partitionSlots = null)
+        IReadOnlyList<int>? partitionSlots = null,
+        int prefixPadding = 0)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -3134,6 +3135,7 @@ internal static class SyntheticNifTestData
         writer.Write(0); // root has no relevant geometry payload
         writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
         writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
 
         foreach (var (x, y, z) in vertices)
         {
@@ -3151,7 +3153,10 @@ internal static class SyntheticNifTestData
         }
     }
 
-    public static async Task WriteTriStripsStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    public static async Task WriteTriStripsStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding = 0)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -3161,6 +3166,7 @@ internal static class SyntheticNifTestData
         writer.Write(0);
         writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"));
         writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
 
         foreach (var (x, y, z) in vertices)
         {
@@ -3596,6 +3602,96 @@ public sealed class NifOutputAndSourceOverrideTests
                         Math.Abs(src.Z - dst.Z) > 0.0001f)
                     .Any(static changed => changed),
                 "Expected at least one TriStrips vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSmallPaddedBlockGraphStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_padded_block_graph_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(inputFile, sourceVertices, prefixPadding: 24);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("block-graph-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_padded_block_graph_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one small padded block-graph vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSmallPaddedTriStripsStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_padded_tristrips_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteTriStripsStyleAsync(inputFile, sourceVertices, prefixPadding: 16);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("tristrips-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_padded_tristrips_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one small padded TriStrips vertex to be transformed.");
         }
         finally
         {

@@ -1448,7 +1448,7 @@ internal static class NifBlockGraphParser
         var scanStart = Math.Max(startOffset, 0);
         var scanEnd = Math.Min(endOffset - sizeof(int), bytes.Length - sizeof(int));
 
-        for (var offset = scanStart; offset <= scanEnd; offset += sizeof(int))
+        for (var offset = scanStart; offset <= scanEnd; offset++)
         {
             var candidate = BitConverter.ToInt32(bytes, offset);
             if (candidate >= 0 && candidate < blockCount)
@@ -2259,8 +2259,8 @@ internal static class NifGeometrySignatureReader
                 continue;
             }
 
-            var score = GetBlockVertexCandidateScore(node.TypeName);
-            if (score <= 0)
+            var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+            if (nodeScore <= 0)
             {
                 continue;
             }
@@ -2271,22 +2271,27 @@ internal static class NifGeometrySignatureReader
             for (var offset = scanStart; offset <= scanEnd; offset++)
             {
                 var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-                if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
+                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
                 {
                     continue;
                 }
 
-                var candidate = BuildSignature(bytes, offset + sizeof(int), candidateVertexCount);
-                if (candidate is null)
+                for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
                 {
-                    continue;
-                }
+                    var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                    var candidate = BuildSignature(bytes, candidateOffset, candidateVertexCount);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
 
-                if (score > bestScore || (score == bestScore && candidate.VertexCount > bestCount))
-                {
-                    bestScore = score;
-                    bestCount = candidate.VertexCount;
-                    bestOffset = offset + sizeof(int);
+                    var score = nodeScore - paddingIndex;
+                    if (score > bestScore || (score == bestScore && candidate.VertexCount > bestCount))
+                    {
+                        bestScore = score;
+                        bestCount = candidate.VertexCount;
+                        bestOffset = candidateOffset;
+                    }
                 }
             }
         }
