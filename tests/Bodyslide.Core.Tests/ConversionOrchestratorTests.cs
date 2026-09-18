@@ -5319,6 +5319,122 @@ public sealed class PluginPatchGuidanceTests
         }
     }
 
+    [Fact]
+    public async Task PluginPatches_VerifiesCrossPluginLinkedArmaUsingMasters()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseAddon.esp"),
+            BuildSsePluginWithMasters(
+                ["Skyrim.esm"],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("BaseLinkedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossLinkedArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedStagedMeshes\": []", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesMasterAwareLinkedResolution_WhenDifferentPluginsShareFormId()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "AAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("WrongAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/steel/steelarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RightAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("ChoosesRightAddon\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/steel/steelarmor_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ChoosesRightAddon (0x01000801) -> WrongAddon", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
     {
         var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
@@ -5350,6 +5466,26 @@ public sealed class PluginPatchGuidanceTests
         var armaData = armaEditorData.Concat(armaMeshData).ToArray();
         var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
         return [..tes4, ..armo, ..arma];
+    }
+
+    private static byte[] BuildSsePluginWithMasters(IReadOnlyList<string> masters, params byte[][] records)
+    {
+        var tes4 = BuildSseRecord("TES4", BuildTes4DataWithMasters(masters));
+        return [..tes4, ..records.SelectMany(static record => record)];
+    }
+
+    private static byte[] BuildTes4DataWithMasters(IReadOnlyList<string> masters)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(BuildSubrecord("HEDR", new byte[12]));
+        ms.Write(BuildSubrecord("CNAM", [0x00]));
+        foreach (var master in masters)
+        {
+            ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+            ms.Write(BuildSubrecord("DATA", new byte[8]));
+        }
+
+        return ms.ToArray();
     }
 
     private static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
@@ -8365,6 +8501,29 @@ public sealed class BinaryArmaParserTests
     }
 
     [Fact]
+    public void ExtractArmoRecords_ResolvesLinkedArmorAddonReferenceAcrossMasters()
+    {
+        byte[] linkedArma = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u));
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossPluginArmor\0"));
+        byte[] data = [..edid, ..linkedArma];
+
+        var plugin = BuildMinimalPlugin_SseWithArmoAndMasters(
+            data,
+            formId: 0x01000801u,
+            masters: ["BaseAddon.esp"]);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "TargetArmor.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal("TargetArmor.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000801u, descriptor.LocalFormId);
+        var linkedReference = Assert.Single(descriptor.LinkedArmorAddonReferences!);
+        Assert.Equal(0x00000802u, linkedReference.RawFormId);
+        Assert.Equal("BaseAddon.esp", linkedReference.OwningPluginFileName);
+        Assert.Equal(0x00000802u, linkedReference.LocalFormId);
+    }
+
+    [Fact]
     public void ExtractArmoRecords_EmptyInput_ReturnsEmpty()
     {
         var result = BinaryArmaParser.ExtractArmoRecords([]);
@@ -8492,6 +8651,28 @@ public sealed class BinaryArmaParserTests
         return buf;
     }
 
+    private static byte[] BuildMinimalPlugin_SseNoArmaWithMasters(IReadOnlyList<string> masters)
+    {
+        byte[] hedrData = new byte[12];
+        byte[] hedr = BuildSubrecord("HEDR", hedrData);
+        byte[] cnam = BuildSubrecord("CNAM", [0x00]);
+        using var ms = new MemoryStream();
+        ms.Write(hedr);
+        ms.Write(cnam);
+        foreach (var master in masters)
+        {
+            ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+            ms.Write(BuildSubrecord("DATA", new byte[8]));
+        }
+
+        byte[] tes4Data = ms.ToArray();
+        var buf = new byte[24 + tes4Data.Length];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)tes4Data.Length);
+        tes4Data.CopyTo(buf, 24);
+        return buf;
+    }
+
     private static byte[] BuildMinimalPlugin_SseWithArma(byte[] armaSubrecords)
     {
         byte[] tes4 = BuildMinimalPlugin_SseNoArma();
@@ -8535,6 +8716,20 @@ public sealed class BinaryArmaParserTests
         System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
         WriteUInt32Le(buf, 4, (uint)armoSubrecords.Length);
         WriteUInt32Le(buf, 12, 0x00000002u); // FormID
+        armoSubrecords.CopyTo(buf, 24);
+        return [..tes4, ..buf];
+    }
+
+    private static byte[] BuildMinimalPlugin_SseWithArmoAndMasters(
+        byte[] armoSubrecords,
+        uint formId,
+        IReadOnlyList<string> masters)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArmaWithMasters(masters);
+        var buf = new byte[24 + armoSubrecords.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)armoSubrecords.Length);
+        WriteUInt32Le(buf, 12, formId);
         armoSubrecords.CopyTo(buf, 24);
         return [..tes4, ..buf];
     }

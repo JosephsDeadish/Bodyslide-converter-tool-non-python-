@@ -355,7 +355,14 @@ public sealed record PluginArmorAddon(
     uint FormId = 0,
     string? EditorId = null,
     IReadOnlyList<int>? BipedSlots = null,
-    uint? RaceFormId = null);
+    uint? RaceFormId = null,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null);
+
+public sealed record PluginLinkedFormReference(
+    uint RawFormId,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null);
 
 /// <summary>
 /// Describes a single ARMO (Armor) record found in a plugin file.
@@ -370,7 +377,10 @@ public sealed record PluginArmorRecord(
     IReadOnlyList<uint>? KeywordFormIds = null,
     uint? RaceFormId = null,
     IReadOnlyList<int>? BipedSlots = null,
-    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null);
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null,
+    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null);
 
 /// <summary>
 /// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
@@ -499,7 +509,9 @@ internal sealed record ArmaRecordDescriptor(
     IReadOnlyList<string> MeshPaths,
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
     byte[] OriginalDataBytes,           // The record data payload (not including header)
-    uint? RaceFormId = null);           // RNAM — the race this ArmorAddon applies to
+    uint? RaceFormId = null,            // RNAM — the race this ArmorAddon applies to
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null);
 
 /// <summary>
 /// Full parsed descriptor for a single ARMO (Armor) record — carries everything the
@@ -517,7 +529,10 @@ internal sealed record ArmoRecordDescriptor(
     IReadOnlyList<uint>? KeywordFormIds = null,  // KWDA — keyword FormIDs
     uint? RaceFormId = null,                    // RNAM — race FormID
     IReadOnlyList<int>? BipedSlots = null,      // BOD2/BODT — decoded equipment slots
-    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null); // ARMA — linked ArmorAddon FormIDs
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null, // ARMA — linked ArmorAddon FormIDs
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null,
+    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null);
 
 public sealed record MeshDependencyMapEntry(
     string Mesh,
@@ -8279,7 +8294,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             var pluginLabel = $"{pluginName} [{pluginKind.Type}; confidence={pluginKind.Confidence:0.00}]";
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
-            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
+            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes, pluginName);
             List<PluginArmorAddon> addons;
 
             if (armaDescriptors.Count > 0)
@@ -8291,7 +8306,9 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                         d.FormId,
                         d.EditorId,
                         d.BipedSlots.Count > 0 ? d.BipedSlots : null,
-                        d.RaceFormId))
+                        d.RaceFormId,
+                        d.OwningPluginFileName,
+                        d.LocalFormId))
                     .ToList();
             }
             else
@@ -8301,7 +8318,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
 
             // ── ARMO records (Armor — world/inventory models) ──────────────────
-            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes);
+            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes, pluginName);
             var records = armoDescriptors
                 .Select(d => new PluginArmorRecord(
                     pluginLabel,
@@ -8311,7 +8328,10 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.KeywordFormIds,
                     d.RaceFormId,
                     d.BipedSlots,
-                    d.LinkedArmorAddonFormIds))
+                    d.LinkedArmorAddonFormIds,
+                    d.OwningPluginFileName,
+                    d.LocalFormId,
+                    d.LinkedArmorAddonReferences))
                 .ToList();
 
             return (pluginLabel, pluginName, pluginKind.Type, addons, records);
@@ -9292,7 +9312,8 @@ internal static class BinaryArmaParser
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
         var pluginFileName = string.Empty;   // filled in by callers that know the filename
-        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     /// <summary>
@@ -9303,7 +9324,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     /// <summary>Extracts all ARMO record descriptors from a plugin byte array.</summary>
@@ -9311,7 +9333,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, string.Empty);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, string.Empty, masterFiles);
     }
 
     /// <summary>
@@ -9322,7 +9345,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     // ── Header-size detection (same logic as BinaryPluginRewriteService) ─────
@@ -9344,10 +9368,100 @@ internal static class BinaryArmaParser
         return SseHeaderSize;
     }
 
+    internal static IReadOnlyList<string> ExtractMasterFileNames(byte[] bytes)
+    {
+        if (bytes.Length < 4)
+        {
+            return [];
+        }
+
+        return ExtractMasterFileNames(bytes, DetectHeaderSize(bytes));
+    }
+
+    private static IReadOnlyList<string> ExtractMasterFileNames(byte[] bytes, int headerSize)
+    {
+        if (bytes.Length < headerSize ||
+            bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return [];
+        }
+
+        var dataSize = (int)ReadUInt32Le(bytes, 4);
+        if (dataSize <= 0 || headerSize + dataSize > bytes.Length)
+        {
+            return [];
+        }
+
+        var flags = ReadUInt32Le(bytes, 8);
+        var dataBytes = GetRecordData(bytes, 0, dataSize, headerSize, flags);
+        if (dataBytes.Length == 0)
+        {
+            return [];
+        }
+
+        var masters = new List<string>();
+        int pos = 0;
+        int? pendingExtendedSize = null;
+        while (pos + SubrecordHeaderSize <= dataBytes.Length)
+        {
+            var subTag = ReadTag(dataBytes, pos);
+            var subSize = ReadUInt16Le(dataBytes, pos + 4);
+            if (pos + SubrecordHeaderSize + subSize > dataBytes.Length)
+            {
+                break;
+            }
+
+            if (string.Equals(subTag, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
+            {
+                pendingExtendedSize = (int)ReadUInt32Le(dataBytes, pos + SubrecordHeaderSize);
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > dataBytes.Length)
+            {
+                break;
+            }
+
+            if (string.Equals(subTag, "MAST", StringComparison.Ordinal) && effectiveSubSize > 0)
+            {
+                int dataStart = pos + SubrecordHeaderSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen = nullIdx >= 0 ? nullIdx : effectiveSubSize;
+                var master = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen).Trim();
+                if (!string.IsNullOrWhiteSpace(master))
+                {
+                    masters.Add(Path.GetFileName(master));
+                }
+            }
+
+            pos += SubrecordHeaderSize + effectiveSubSize;
+        }
+
+        return masters;
+    }
+
+    private static string ResolveOwningPluginFileName(uint formId, string pluginFileName, IReadOnlyList<string> masterFiles)
+    {
+        var moduleIndex = (int)((formId >> 24) & 0xFF);
+        if (moduleIndex >= 0 &&
+            moduleIndex < masterFiles.Count &&
+            !string.IsNullOrWhiteSpace(masterFiles[moduleIndex]))
+        {
+            return masterFiles[moduleIndex];
+        }
+
+        return pluginFileName;
+    }
+
+    private static uint GetLocalFormId(uint formId) => formId & 0x00FFFFFFu;
+
     // ── ARMA tree walk ────────────────────────────────────────────────────────
 
     private static List<ArmaRecordDescriptor> WalkArmaRecords(
-        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var results = new List<ArmaRecordDescriptor>();
         int pos = start;
@@ -9366,7 +9480,7 @@ internal static class BinaryArmaParser
 
                 // Recurse into GRUP content.
                 results.AddRange(WalkArmaRecords(
-                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName, masterFiles));
 
                 pos += groupTotal;
             }
@@ -9383,7 +9497,7 @@ internal static class BinaryArmaParser
                     if (dataBytes.Length > 0)
                     {
                         var desc = ParseArmaRecord(
-                            bytes, pos, dataBytes, headerSize, pluginFileName);
+                            bytes, pos, dataBytes, headerSize, pluginFileName, masterFiles);
                         if (desc is not null) results.Add(desc);
                     }
                 }
@@ -9398,7 +9512,7 @@ internal static class BinaryArmaParser
     // ── ARMO tree walk ────────────────────────────────────────────────────────
 
     private static List<ArmoRecordDescriptor> WalkArmoRecords(
-        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var results = new List<ArmoRecordDescriptor>();
         int pos = start;
@@ -9416,7 +9530,7 @@ internal static class BinaryArmaParser
                 if (groupTotal < headerSize || pos + groupTotal > end) break;
 
                 results.AddRange(WalkArmoRecords(
-                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName, masterFiles));
 
                 pos += groupTotal;
             }
@@ -9433,7 +9547,7 @@ internal static class BinaryArmaParser
                     if (dataBytes.Length > 0)
                     {
                         var desc = ParseArmoRecord(
-                            bytes, pos, dataBytes, headerSize, pluginFileName);
+                            bytes, pos, dataBytes, headerSize, pluginFileName, masterFiles);
                         if (desc is not null) results.Add(desc);
                     }
                 }
@@ -9488,9 +9602,11 @@ internal static class BinaryArmaParser
     // ── ARMA record parser ────────────────────────────────────────────────────
 
     private static ArmaRecordDescriptor? ParseArmaRecord(
-        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var formId = ReadUInt32Le(bytes, recordStart + 12);
+        var owningPluginFileName = ResolveOwningPluginFileName(formId, pluginFileName, masterFiles);
+        var localFormId = GetLocalFormId(formId);
 
         string? editorId    = null;
         var bipedSlots      = new List<int>();
@@ -9567,15 +9683,19 @@ internal static class BinaryArmaParser
             meshPaths,
             headerBytes,
             dataBytes,        // decompressed (or raw) data — PatchPluginWriter uses this
-            raceFormId);
+            raceFormId,
+            owningPluginFileName,
+            localFormId);
     }
 
     // ── ARMO record parser ────────────────────────────────────────────────────
 
     private static ArmoRecordDescriptor? ParseArmoRecord(
-        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var formId = ReadUInt32Le(bytes, recordStart + 12);
+        var owningPluginFileName = ResolveOwningPluginFileName(formId, pluginFileName, masterFiles);
+        var localFormId = GetLocalFormId(formId);
 
         string? editorId = null;
         var meshPaths    = new List<string>();
@@ -9664,7 +9784,17 @@ internal static class BinaryArmaParser
             keywords.Count > 0 ? keywords : null,
             raceFormId,
             bipedSlots.Count > 0 ? bipedSlots : null,
-            linkedArmorAddonFormIds.Count > 0 ? linkedArmorAddonFormIds : null);
+            linkedArmorAddonFormIds.Count > 0 ? linkedArmorAddonFormIds : null,
+            owningPluginFileName,
+            localFormId,
+            linkedArmorAddonFormIds.Count > 0
+                ? linkedArmorAddonFormIds
+                    .Select(linkedFormId => new PluginLinkedFormReference(
+                        linkedFormId,
+                        ResolveOwningPluginFileName(linkedFormId, pluginFileName, masterFiles),
+                        GetLocalFormId(linkedFormId)))
+                    .ToList()
+                : null);
     }
 
     // ── Binary helpers ────────────────────────────────────────────────────────
@@ -13403,26 +13533,44 @@ internal sealed class LocalExportService(
         var missingLinkedArmorAddons = new List<string>();
         var missingLinkedConvertedMatches = new List<string>();
         var missingLinkedStagedMeshes = new List<string>();
-        var addonByFormId = pluginAnalysis.ArmorAddons
+        var addonByResolvedKey = pluginAnalysis.ArmorAddons
             .Where(static addon => addon.FormId != 0)
-            .GroupBy(static addon => addon.FormId)
-            .ToDictionary(static group => group.Key, static group => group.First());
+            .Select(addon => new
+            {
+                Addon = addon,
+                Key = BuildResolvedPluginFormKey(
+                    addon.OwningPluginFileName,
+                    addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
+            })
+            .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
         var missingStagedSet = missingStagedMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
         {
-            if (armorRecord.LinkedArmorAddonFormIds is not { Count: > 0 } linkedFormIds)
+            var linkedReferences = armorRecord.LinkedArmorAddonReferences?.Count > 0
+                ? armorRecord.LinkedArmorAddonReferences
+                : armorRecord.LinkedArmorAddonFormIds?.Select(static rawFormId => new PluginLinkedFormReference(rawFormId)).ToList();
+            if (linkedReferences is not { Count: > 0 })
             {
                 continue;
             }
 
             var armorLabel = DescribePluginRecord(armorRecord.EditorId, armorRecord.FormId);
-            foreach (var linkedFormId in linkedFormIds.Distinct())
+            foreach (var linkedReference in linkedReferences
+                .GroupBy(static reference => BuildResolvedPluginFormKey(
+                    reference.OwningPluginFileName,
+                    reference.LocalFormId ?? (reference.RawFormId & 0x00FFFFFFu)),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(static group => group.First()))
             {
                 linkedReferenceCount++;
-                if (!addonByFormId.TryGetValue(linkedFormId, out var linkedAddon))
+                var linkedKey = BuildResolvedPluginFormKey(
+                    linkedReference.OwningPluginFileName,
+                    linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
+                if (!addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
                 {
-                    missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatPluginFormId(linkedFormId)}");
+                    missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatResolvedPluginFormReference(linkedReference)}");
                     continue;
                 }
 
@@ -13493,6 +13641,17 @@ internal sealed class LocalExportService(
         }
 
         return formId != 0 ? FormatPluginFormId(formId) : "unnamed-record";
+    }
+
+    private static string BuildResolvedPluginFormKey(string? pluginFileName, uint localFormId) =>
+        $"{(string.IsNullOrWhiteSpace(pluginFileName) ? "(unknown-plugin)" : pluginFileName.Trim())}|{localFormId:X8}";
+
+    private static string FormatResolvedPluginFormReference(PluginLinkedFormReference reference)
+    {
+        var formattedFormId = FormatPluginFormId(reference.LocalFormId ?? reference.RawFormId);
+        return string.IsNullOrWhiteSpace(reference.OwningPluginFileName)
+            ? formattedFormId
+            : $"{reference.OwningPluginFileName}::{formattedFormId}";
     }
 
     private static string FormatPluginFormId(uint formId) => $"0x{formId:X8}";
