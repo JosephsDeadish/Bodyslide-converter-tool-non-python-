@@ -6764,12 +6764,12 @@ public sealed class SourceTargetDeltaTests
         var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
         var ubeField = BodyTransformationFieldCatalog.Resolve("UBE");
         var baseBreastDelta = ubeField["breasts"] / cbbeField["breasts"];
-        var baseBellyDelta = ubeField["belly"] / cbbeField["belly"];
+        var baseButtDelta = ubeField["butt"] / cbbeField["butt"];
 
         var result = await service.ConvertAsync(armor, analysis, cage, "UBE", null, "CBBE", CancellationToken.None);
 
         Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
-        Assert.True(Math.Abs(result.RegionalMorphing["belly"] - 1d) > Math.Abs(baseBellyDelta - 1d));
+        Assert.True(Math.Abs(result.RegionalMorphing["butt"] - 1d) > Math.Abs(baseButtDelta - 1d));
     }
 }
 
