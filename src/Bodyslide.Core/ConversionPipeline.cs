@@ -11629,7 +11629,7 @@ internal sealed class LocalExportService(
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var pluginPatchWarnings = new List<string>();
         var patchVerificationPaths = new List<string>();
-        var patchMasterValidationExpectations = new Dictionary<string, PatchPluginMasterValidationExpectation>(StringComparer.OrdinalIgnoreCase);
+        var patchMasterValidationExpectations = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var pluginInstallHints = new List<PluginInstallHint>();
         PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
@@ -11807,9 +11807,8 @@ internal sealed class LocalExportService(
                                 patchEspGenerated = true;
                                 patchVerificationPaths.Add(patchPath);
                                 generatedPatchPlugin = Path.GetFileName(patchPath);
-                                patchMasterValidationExpectations[patchPath] = new PatchPluginMasterValidationExpectation(
-                                    pluginName,
-                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, masterFileNames));
+                                patchMasterValidationExpectations[patchPath] =
+                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, masterFileNames);
                             }
 
                             pluginInstallHints.Add(BuildPluginInstallHint(
@@ -14932,10 +14931,6 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
 
-    private sealed record PatchPluginMasterValidationExpectation(
-        string SourcePluginFileName,
-        IReadOnlyList<string> ExpectedMasters);
-
     private sealed record PluginInstallHint(
         string SourcePlugin,
         IReadOnlyList<string> InheritedMasters,
@@ -14951,7 +14946,7 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlySet<string> stagedPluginMeshes,
         IReadOnlyList<string> patchedPluginPaths,
-        IReadOnlyDictionary<string, PatchPluginMasterValidationExpectation> patchMasterValidationExpectations,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> patchMasterValidationExpectations,
         IReadOnlyList<string> warnings,
         IReadOnlyList<NifSupportReport>? sourceNifSupport = null)
     {
@@ -14984,7 +14979,7 @@ internal sealed class LocalExportService(
                         .Select(static name => Path.GetFileName(name) ?? name)
                         .Where(static name => !string.IsNullOrWhiteSpace(name))
                         .ToList();
-                    var expectedMasters = masterExpectation.ExpectedMasters
+                    var expectedMasters = masterExpectation
                         .Select(static name => Path.GetFileName(name) ?? name)
                         .Where(static name => !string.IsNullOrWhiteSpace(name))
                         .ToList();
@@ -14994,7 +14989,7 @@ internal sealed class LocalExportService(
                     if (missingMasters.Count > 0)
                     {
                         missingPatchPluginMasters.Add(
-                            $"{Path.GetFileName(pluginPath) ?? pluginPath} missing expected masters for {masterExpectation.SourcePluginFileName}: {string.Join(", ", missingMasters)}");
+                            $"{Path.GetFileName(pluginPath) ?? pluginPath} missing expected masters: {string.Join(", ", missingMasters)}");
                     }
                     else if (!actualMasters.SequenceEqual(expectedMasters, StringComparer.OrdinalIgnoreCase))
                     {

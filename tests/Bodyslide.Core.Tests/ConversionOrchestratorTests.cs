@@ -96,6 +96,7 @@ public sealed class ConversionOrchestratorTests
                     outputDirectory,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
                     new[]
                     {
@@ -6708,6 +6709,7 @@ public sealed class PluginPatchGuidanceTests
                     outputDirectory,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase) { stagedMeshPath },
                     Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
                     Array.Empty<NifSupportReport>()
                 }));
@@ -6776,6 +6778,7 @@ public sealed class PluginPatchGuidanceTests
                     outputDirectory,
                     new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
                     Array.Empty<string>(),
                     Array.Empty<NifSupportReport>()
                 }));
