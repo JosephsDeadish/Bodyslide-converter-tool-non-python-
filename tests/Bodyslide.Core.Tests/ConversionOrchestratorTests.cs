@@ -12503,7 +12503,10 @@ public sealed class OutputCompletenessTests
                 outputDirectory,
                 [pluginPath, zipPath],
                 new BodySlideProject("NordicProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
-                new PluginAnalysisResult([], [], string.Empty));
+                new PluginAnalysisResult(
+                    [Path.Combine(outputDirectory, "Armor.esp")],
+                    [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
+                    "patch"));
 
             var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
             Assert.Contains("fomod-missing-folder-entry", codes);
@@ -12511,8 +12514,13 @@ public sealed class OutputCompletenessTests
             Assert.Contains("missing-bodyslide-reference-nif", codes);
             Assert.Contains("zip-missing-readme", codes);
             Assert.Contains("zip-missing-fomod-module-config", codes);
+            Assert.Contains("zip-missing-fomod-info", codes);
             Assert.Contains("zip-missing-staged-mesh-output", codes);
+            Assert.Contains("zip-missing-bodyslide-osp", codes);
+            Assert.Contains("zip-missing-bodyslide-shape-data", codes);
             Assert.Contains("zip-missing-root-plugin", codes);
+            Assert.Contains("zip-missing-xedit-script", codes);
+            Assert.Contains("zip-missing-plugin-patch-report", codes);
         }
         finally
         {
@@ -12522,6 +12530,61 @@ public sealed class OutputCompletenessTests
             {
                 File.Delete(zipPath);
             }
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingBodySlideSliderPayloads()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(Path.Combine(sliderSetDirectory, "PayloadProject.osp"), "<osp/>");
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "PayloadProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                new BodySlideProject("PayloadProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("missing-bodyslide-slider-payload", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
         }
     }
 

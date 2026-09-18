@@ -901,8 +901,7 @@ public sealed class MainForm : Form
         return new GroupBox
         {
             Text = title,
-            Dock = DockStyle.Top,
-            AutoSize = true,
+            Dock = DockStyle.Fill,
             Padding = new Padding(10),
             Margin = new Padding(0, 8, 0, 0),
             Controls = { content }
@@ -996,7 +995,7 @@ public sealed class MainForm : Form
                 button.UseVisualStyleBackColor = false;
                 button.FlatStyle = FlatStyle.Flat;
                 button.FlatAppearance.BorderColor = palette.Border;
-                button.FlatAppearance.MouseDownBackColor = palette.Accent;
+                button.FlatAppearance.MouseDownBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.35);
                 button.FlatAppearance.MouseOverBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.18);
                 button.BackColor = palette.SurfaceBackground;
                 button.ForeColor = palette.Foreground;
@@ -1074,8 +1073,9 @@ public sealed class MainForm : Form
                 new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(settingsPath, json);
         }
-        catch
+        catch (Exception ex)
         {
+            AppendLog($"Failed to save theme preference: {ex.Message}");
         }
     }
 

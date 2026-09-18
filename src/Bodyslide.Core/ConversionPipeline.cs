@@ -13469,6 +13469,9 @@ internal sealed class LocalExportService(
         bool ContainsXmlAttributeValue(string xmlContent, string attributeName, string value) =>
             xmlContent.Contains($"{attributeName}=\"{SecurityElement.Escape(value)}\"", StringComparison.OrdinalIgnoreCase);
 
+        bool HasBodySlidePayloadFiles(string directoryPath) =>
+            HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri");
+
         void AddMissingFileIssue(string relativePath, string code, string severity, string message)
         {
             var fullPath = Path.Combine(outputDirectory, relativePath);
@@ -13561,6 +13564,16 @@ internal sealed class LocalExportService(
                     "medium",
                     $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing a reference NIF, so Outfit Studio cannot load the generated project correctly."));
             }
+
+            if (Directory.Exists(shapeDataDirectory) &&
+                bodySlideProject.Sliders.Count > 0 &&
+                !HasBodySlidePayloadFiles(shapeDataDirectory))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-slider-payload",
+                    "medium",
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+            }
         }
 
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
@@ -13612,6 +13625,14 @@ internal sealed class LocalExportService(
                             "The distributable ZIP is missing fomod/ModuleConfig.xml, so mod managers cannot install the archive as a FOMOD."));
                     }
 
+                    if (!ZipContains("fomod/info.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-fomod-info",
+                            "medium",
+                            "The distributable ZIP is missing fomod/info.xml, so the packaged FOMOD metadata is incomplete."));
+                    }
+
                     if (!ZipContainsPrefix($"meshes/slidesmith/{safeBodyToken}"))
                     {
                         issues.Add(new ConversionValidationIssue(
@@ -13628,6 +13649,70 @@ internal sealed class LocalExportService(
                                 "zip-missing-root-plugin",
                                 "medium",
                                 $"The distributable ZIP is missing root plugin '{pluginFileName}'."));
+                        }
+                    }
+
+                    if (request.GenerateBodySlideFiles)
+                    {
+                        var zipOspPath = $"CalienteTools/BodySlide/SliderSets/{bodySlideProject.ProjectName}.osp";
+                        var zipShapeDataPrefix = $"CalienteTools/BodySlide/ShapeData/{bodySlideProject.ProjectName}";
+                        if (!ZipContains(zipOspPath))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-bodyslide-osp",
+                                "medium",
+                                $"The distributable ZIP is missing BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp'."));
+                        }
+
+                        if (!ZipContainsPrefix(zipShapeDataPrefix))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-bodyslide-shape-data",
+                                "medium",
+                                $"The distributable ZIP is missing BodySlide ShapeData assets for '{bodySlideProject.ProjectName}'."));
+                        }
+                        else
+                        {
+                            if (!zipEntries.Any(entry =>
+                                    entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
+                                    entry.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                issues.Add(new ConversionValidationIssue(
+                                    "zip-missing-bodyslide-reference-nif",
+                                    "medium",
+                                    $"The distributable ZIP is missing a BodySlide reference NIF for '{bodySlideProject.ProjectName}'."));
+                            }
+
+                            if (bodySlideProject.Sliders.Count > 0 &&
+                                !zipEntries.Any(entry =>
+                                    entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
+                                    (entry.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                                     entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase))))
+                            {
+                                issues.Add(new ConversionValidationIssue(
+                                    "zip-missing-bodyslide-slider-payload",
+                                    "medium",
+                                    $"The distributable ZIP is missing BSD/TRI slider payload files for '{bodySlideProject.ProjectName}'."));
+                            }
+                        }
+                    }
+
+                    if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+                    {
+                        if (!ZipContains("patch-armor.pas"))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-xedit-script",
+                                "medium",
+                                "The distributable ZIP is missing patch-armor.pas, so xEdit-based plugin rewrite fallback is not packaged."));
+                        }
+
+                        if (!ZipContains("plugin-patches.json"))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-plugin-patch-report",
+                                "medium",
+                                "The distributable ZIP is missing plugin-patches.json, so plugin rewrite guidance and verification output are not packaged."));
                         }
                     }
                 }

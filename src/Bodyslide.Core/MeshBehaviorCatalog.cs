@@ -34,7 +34,7 @@ internal static class MeshBehaviorCatalog
         BaseInflation: 0.040,
         PhysicsSolver: new PhysicsSolverTuningProfile(1.00, 1.00, 1.00, 1.00, 1.00, 1.00));
 
-    private static readonly string[] FallbackMaleBodyTargets = ["HIMBO", "SAM", "SOS"];
+    private static readonly string[] FallbackMaleBodyTargets = ["HIMBO", "SAM", "SAM Light", "SOS", "TNG"];
     private static readonly Lazy<MeshBehaviorCatalogData> Data = new(Load);
 
     public static IReadOnlyCollection<string> MaleBodyTargets => Data.Value.MaleBodyTargets;
