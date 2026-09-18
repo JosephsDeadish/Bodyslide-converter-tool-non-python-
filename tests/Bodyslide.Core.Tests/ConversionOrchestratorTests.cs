@@ -3861,6 +3861,50 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithExtraWideInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "extra_wide_interleaved_boots.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 36, stride: 68);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "extra_wide_interleaved_boots.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one extra-wide interleaved vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithHighHeelFootwear_ReportsHeelAnalysisAndValidationWarning()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6091,6 +6135,62 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
             Assert.DoesNotContain("IndexedMasterArmor (0x00000801) -> WrongIndexedAddon", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesLightMasterLinkedResolution_WhenFeReferenceTargetsSecondMaster()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseMaster.esm"),
+            BuildSsePluginWithMasters([]));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "LightAddon.esl"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("LightLinkedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseMaster.esm", "LightAddon.esl"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("LightMasterArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0xFE001802u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("LightMasterArmor (0x02000801) -> LightAddon.esl::0x00001802", patchJson, StringComparison.Ordinal);
         }
         finally
         {

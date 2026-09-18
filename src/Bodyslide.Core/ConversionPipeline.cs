@@ -1659,6 +1659,7 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
     private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
+    private const int MaxFloatVertexStride = 96;
     private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40];
     private static readonly string[] FootwearKeywords = ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "footwear", "heel", "heels"];
     private static readonly string[] HighHeelKeywords = ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
@@ -2013,7 +2014,7 @@ internal static class NifGeometrySignatureReader
                 foreach (var prefixPadding in CommonFloatVertexPrefixPaddings)
                 {
                     var candidateDataOffset = offset + sizeof(int) + prefixPadding;
-                    foreach (var stride in CommonFloatVertexStrides)
+                    foreach (var stride in EnumerateCandidateFloatVertexStrides())
                     {
                         var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
                         if (candidate is null)
@@ -2044,6 +2045,21 @@ internal static class NifGeometrySignatureReader
         vertexCount = bestVertexCount;
         vertexStride = bestStride;
         return true;
+    }
+
+    private static IEnumerable<int> EnumerateCandidateFloatVertexStrides()
+    {
+        foreach (var stride in CommonFloatVertexStrides)
+        {
+            yield return stride;
+        }
+
+        for (var stride = CommonFloatVertexStrides[^1] + sizeof(float);
+             stride <= MaxFloatVertexStride;
+             stride += sizeof(float))
+        {
+            yield return stride;
+        }
     }
 
     /// <summary>
@@ -9824,6 +9840,17 @@ internal static class BinaryArmaParser
     private static string ResolveOwningPluginFileName(uint formId, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var moduleIndex = (int)((formId >> 24) & 0xFF);
+        if (moduleIndex == 0xFE)
+        {
+            var lightMasterIndex = (int)((formId >> 12) & 0xFFF);
+            if (lightMasterIndex >= 0 &&
+                lightMasterIndex < masterFiles.Count &&
+                !string.IsNullOrWhiteSpace(masterFiles[lightMasterIndex]))
+            {
+                return masterFiles[lightMasterIndex];
+            }
+        }
+
         if (moduleIndex >= 0 &&
             moduleIndex < masterFiles.Count &&
             !string.IsNullOrWhiteSpace(masterFiles[moduleIndex]))
@@ -9834,7 +9861,10 @@ internal static class BinaryArmaParser
         return pluginFileName;
     }
 
-    private static uint GetLocalFormId(uint formId) => formId & 0x00FFFFFFu;
+    private static uint GetLocalFormId(uint formId) =>
+        ((formId >> 24) & 0xFF) == 0xFE
+            ? formId & 0x00000FFFu
+            : formId & 0x00FFFFFFu;
 
     // ── ARMA tree walk ────────────────────────────────────────────────────────
 
