@@ -13651,7 +13651,10 @@ internal sealed class LocalExportService(
         {
             var linkedReferences = armorRecord.LinkedArmorAddonReferences?.Count > 0
                 ? armorRecord.LinkedArmorAddonReferences
-                : armorRecord.LinkedArmorAddonFormIds?.Select(static rawFormId => new PluginLinkedFormReference(rawFormId)).ToList();
+                : armorRecord.LinkedArmorAddonFormIds?.Select(rawFormId => new PluginLinkedFormReference(
+                    rawFormId,
+                    armorRecord.OwningPluginFileName,
+                    rawFormId & 0x00FFFFFFu)).ToList();
             if (linkedReferences is not { Count: > 0 })
             {
                 continue;
@@ -13659,11 +13662,11 @@ internal sealed class LocalExportService(
 
             var armorLabel = DescribePluginRecord(armorRecord.EditorId, armorRecord.FormId);
             foreach (var linkedReference in linkedReferences
-                .GroupBy(static reference => BuildResolvedPluginFormKey(
+                .GroupBy(reference => BuildResolvedPluginFormKey(
                     reference.OwningPluginFileName,
                     reference.LocalFormId ?? (reference.RawFormId & 0x00FFFFFFu)),
                     StringComparer.OrdinalIgnoreCase)
-                .Select(static group => group.First()))
+                .Select(group => group.First()))
             {
                 linkedReferenceCount++;
                 var linkedKey = BuildResolvedPluginFormKey(
@@ -13745,14 +13748,30 @@ internal sealed class LocalExportService(
     }
 
     private static string BuildResolvedPluginFormKey(string? pluginFileName, uint localFormId) =>
-        $"{(string.IsNullOrWhiteSpace(pluginFileName) ? "(unknown-plugin)" : pluginFileName.Trim())}|{localFormId:X8}";
+        $"{NormalizeResolvedPluginFileName(pluginFileName)}|{localFormId:X8}";
 
     private static string FormatResolvedPluginFormReference(PluginLinkedFormReference reference)
     {
         var formattedFormId = FormatPluginFormId(reference.LocalFormId ?? reference.RawFormId);
-        return string.IsNullOrWhiteSpace(reference.OwningPluginFileName)
+        var pluginFileName = NormalizeResolvedPluginFileNameOrNull(reference.OwningPluginFileName);
+        return string.IsNullOrWhiteSpace(pluginFileName)
             ? formattedFormId
-            : $"{reference.OwningPluginFileName}::{formattedFormId}";
+            : $"{pluginFileName}::{formattedFormId}";
+    }
+
+    private static string NormalizeResolvedPluginFileName(string? pluginFileName) =>
+        NormalizeResolvedPluginFileNameOrNull(pluginFileName) ?? "(unknown-plugin)";
+
+    private static string? NormalizeResolvedPluginFileNameOrNull(string? pluginFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName))
+        {
+            return null;
+        }
+
+        var trimmed = pluginFileName.Trim();
+        var fileName = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
     }
 
     private static string FormatPluginFormId(uint formId) => $"0x{formId:X8}";

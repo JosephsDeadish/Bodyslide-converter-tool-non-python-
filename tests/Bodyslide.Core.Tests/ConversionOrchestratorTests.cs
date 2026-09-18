@@ -5498,6 +5498,82 @@ public sealed class PluginPatchGuidanceTests
         }
     }
 
+    [Fact]
+    public void PluginPatches_LegacyLinkedFormIds_FallBackToOwningPluginScope()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(stagedMeshPath)!);
+        File.WriteAllText(stagedMeshPath, "mesh");
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "meshes/slidesmith/cbbe/ironarmor_0.nif"
+                },
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "ironarmor_0.nif"
+                },
+                [],
+                [],
+                1);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["LegacyArmor.esp [ESP; confidence=1.00]"],
+                [
+                    new PluginArmorAddon(
+                        "LegacyArmor.esp [ESP; confidence=1.00]",
+                        ["meshes/armor/iron/ironarmor_0.nif"],
+                        FormId: 0x00000802u,
+                        EditorId: "LegacyAddon",
+                        OwningPluginFileName: Path.Combine(outputDirectory, "LegacyArmor.esp"),
+                        LocalFormId: 0x00000802u)
+                ],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "LegacyArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x00000801u,
+                        EditorId: "LegacyArmor",
+                        LinkedArmorAddonFormIds: [0x00000802u],
+                        OwningPluginFileName: "LegacyArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences: null)
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase) { stagedMeshPath },
+                    Array.Empty<string>(),
+                    Array.Empty<string>()
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(1, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Empty(report.MissingLinkedStagedMeshes ?? []);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
     private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
     {
         var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
