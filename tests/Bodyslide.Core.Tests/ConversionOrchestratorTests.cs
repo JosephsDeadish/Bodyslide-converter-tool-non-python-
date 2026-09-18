@@ -8988,6 +8988,77 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticMasterChainBodyFrameworkModPackDirectory_ResolvesStandaloneMasterChainFamilyContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMasterChainBodyFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneRoot.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessPanelAA\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/ebonite/devious_panel_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000800u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneBridge.esp"),
+            BuildSsePluginWithMasters(
+                ["MasterChainStandaloneRoot.esp"],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintAA\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneChild.esp"),
+            BuildSsePluginWithMasters(
+                ["MasterChainStandaloneBridge.esp"],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintVariantAA\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_1.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000802u)));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var root = patchReport.RootElement;
+            Assert.Equal(0, root.GetProperty("UnresolvedTieGroups").GetArrayLength());
+            Assert.Equal(0, root.GetProperty("LinkedArmorFamilyReviewSteps").GetArrayLength());
+
+            var rewriteMappings = root.GetProperty("RewriteMappings").EnumerateArray().ToList();
+            Assert.Contains(rewriteMappings, mapping =>
+                string.Equals(mapping.GetProperty("OriginalMeshPath").GetString(), "meshes/devious/devices/restraint_0.nif", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(mapping.GetProperty("RewrittenMeshPath").GetString(), "meshes/slidesmith/3ba/devious/devices/restraint_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(rewriteMappings, mapping =>
+                string.Equals(mapping.GetProperty("OriginalMeshPath").GetString(), "meshes/devious/devices/restraint_1.nif", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(mapping.GetProperty("RewrittenMeshPath").GetString(), "meshes/slidesmith/3ba/devious/devices/restraint_1.nif", StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "ebonite", "devious_panel_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailurePartialLinkedFamilyModPackDirectory_ReportsMixedFamilyVerification()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailurePartialLinkedFamilyModPack");
@@ -9004,6 +9075,12 @@ public sealed class RealisticModPackFixtureTests
                 .GetProperty("RewriteVerification")
                 .GetProperty("PartialLinkedArmorFamilyFailures");
             Assert.Single(partialFamilies.EnumerateArray());
+
+            var linkedArmorFamilyReviewSteps = patchReport.RootElement.GetProperty("LinkedArmorFamilyReviewSteps");
+            Assert.Single(linkedArmorFamilyReviewSteps.EnumerateArray());
+            var reviewStep = linkedArmorFamilyReviewSteps.EnumerateArray().First();
+            Assert.Equal("partial-linked-family-failure", reviewStep.GetProperty("VerificationStatus").GetString());
+            Assert.Contains("xEdit", reviewStep.GetProperty("SuggestedXEditAction").GetString(), StringComparison.Ordinal);
 
             var partialFamily = partialFamilies.EnumerateArray().First();
             Assert.Equal("LinkedDeviousHarnessArmor (0x01000810)", partialFamily.GetProperty("ArmorRecord").GetString());

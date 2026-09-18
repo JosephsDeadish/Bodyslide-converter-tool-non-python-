@@ -12075,6 +12075,7 @@ internal sealed class LocalExportService(
                 AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
                 PluginInstallHints = pluginInstallHints,
                 UnresolvedTieGroups = pluginRewritePlan.UnresolvedTieGroups ?? [],
+                LinkedArmorFamilyReviewSteps = BuildLinkedArmorFamilyReviewSteps(pluginRewriteVerification, request.TargetBody),
                 RewriteMappings = pluginRewriteMap
                     .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
                     .ToList(),
@@ -16493,6 +16494,41 @@ internal sealed class LocalExportService(
         }
 
         return steps;
+    }
+
+    private static IReadOnlyList<object> BuildLinkedArmorFamilyReviewSteps(
+        PluginRewriteVerificationReport? pluginRewriteVerification,
+        string targetBody)
+    {
+        if (pluginRewriteVerification?.PartialLinkedArmorFamilyFailures is not { Count: > 0 } failures)
+        {
+            return [];
+        }
+
+        return failures
+            .OrderBy(static failure => failure.OwningPluginFileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static failure => failure.ArmorRecord, StringComparer.OrdinalIgnoreCase)
+            .Select(failure => (object)new
+            {
+                failure.ArmorRecord,
+                failure.OwningPluginFileName,
+                VerificationStatus = "partial-linked-family-failure",
+                failure.TotalLinkedArmorAddonReferences,
+                failure.VerifiedLinkedArmorAddonReferences,
+                failure.VerifiedLinkedArmorAddonRecords,
+                failure.UnresolvedLinkedArmorAddonReferences,
+                failure.CandidateSourceFamilies,
+                failure.FailureCategories,
+                failure.ManualReviewReason,
+                SuggestedXEditAction =
+                    $"Review every linked ARMA member for {failure.ArmorRecord} in xEdit before release and only keep {targetBody} overrides for the verified family members.",
+                ReviewPriority = failure.FailureCategories.Contains("unsupported-nif-layout", StringComparer.OrdinalIgnoreCase)
+                    ? "high"
+                    : failure.CandidateSourceFamilies.Count > 0
+                        ? "high"
+                        : "medium"
+            })
+            .ToList();
     }
 
     private static PluginInstallHint BuildPluginInstallHint(
