@@ -1660,7 +1660,14 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
-    private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+    private static readonly byte[][] DirectSseHalfFloatShapeTokens =
+    [
+        System.Text.Encoding.ASCII.GetBytes("BSTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"),
+    ];
     private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
     [
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
@@ -2287,7 +2294,7 @@ internal static class NifGeometrySignatureReader
 
     private static bool ContainsSupportedSseHalfFloatShape(byte[] bytes)
     {
-        if (bytes.AsSpan().IndexOf(BsTriShapeToken) >= 0)
+        if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
         {
             return true;
         }
@@ -2630,7 +2637,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var unsupportedMessages = new List<string>();
-        if (bytes.AsSpan().IndexOf(BsTriShapeToken) >= 0)
+        if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
         {
             unsupportedMessages.Add("bstri-layout-unreadable");
         }
@@ -12013,12 +12020,15 @@ internal sealed class LocalExportService(
         var fomodDataFolders = knownDataFolders
             .Where(f => Directory.Exists(Path.Combine(outputDirectory, f)))
             .ToList();
-        // Plugin files at the output root must be installed directly to Data\.
+        // Root install files are placed directly under Data\ by mod managers.
+        // Keep only files that remain useful after install (plugins + human/manual support files).
         var fomodRootFiles = outputFiles
             .Where(f => string.Equals(
                             Path.GetDirectoryName(f), outputDirectory, StringComparison.OrdinalIgnoreCase)
-                        && IsBethesdaPluginFile(f))
+                        && IsFomodRootInstallFile(Path.GetFileName(f)))
             .Select(f => Path.GetFileName(f)!)
+            .Concat(["README.txt"])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         await File.WriteAllTextAsync(
             fomodModuleConfigPath,
@@ -13856,9 +13866,15 @@ internal sealed class LocalExportService(
         var expectedFomodDataFolders = new[] { "meshes", "CalienteTools", "textures", "SKSE", "scripts" }
             .Where(folder => Directory.Exists(Path.Combine(outputDirectory, folder)))
             .ToList();
-        var expectedFomodRootFiles = outputFiles
+        var expectedFomodRootPlugins = outputFiles
             .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase)
                 && IsBethesdaPluginFile(path))
+            .Select(path => Path.GetFileName(path)!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expectedFomodRootSupportFiles = outputFiles
+            .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase)
+                && IsFomodRootSupportFile(Path.GetFileName(path)))
             .Select(path => Path.GetFileName(path)!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -13946,7 +13962,7 @@ internal sealed class LocalExportService(
                 }
             }
 
-            foreach (var pluginFileName in expectedFomodRootFiles)
+            foreach (var pluginFileName in expectedFomodRootPlugins)
             {
                 if (!ContainsXmlAttributeValue(moduleConfigContent, "source", pluginFileName))
                 {
@@ -13954,6 +13970,17 @@ internal sealed class LocalExportService(
                         "fomod-missing-root-plugin-entry",
                         "medium",
                         $"fomod/ModuleConfig.xml does not include a root installer entry for plugin '{pluginFileName}'."));
+                }
+            }
+
+            foreach (var supportFileName in expectedFomodRootSupportFiles)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", supportFileName))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-root-support-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include a root installer entry for support file '{supportFileName}'."));
                 }
             }
         }
@@ -14081,7 +14108,7 @@ internal sealed class LocalExportService(
                             "The distributable ZIP is missing SKSE/Plugins/hdtSMP64/smp-config.xml, so the packaged SMP config will not install automatically."));
                     }
 
-                    foreach (var pluginFileName in expectedFomodRootFiles)
+                    foreach (var pluginFileName in expectedFomodRootPlugins)
                     {
                         if (!ZipContains(pluginFileName))
                         {
@@ -14089,6 +14116,17 @@ internal sealed class LocalExportService(
                                 "zip-missing-root-plugin",
                                 "medium",
                                 $"The distributable ZIP is missing root plugin '{pluginFileName}'."));
+                        }
+                    }
+
+                    foreach (var supportFileName in expectedFomodRootSupportFiles)
+                    {
+                        if (!ZipContains(supportFileName))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-root-support-file",
+                                "medium",
+                                $"The distributable ZIP is missing root support file '{supportFileName}'."));
                         }
                     }
 
@@ -15570,10 +15608,10 @@ internal sealed class LocalExportService(
             .Select(static name => Path.GetFileName(name) ?? name)
             .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
         var installDescription = patchPluginName is null
-            ? $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this mod below the original armor mod in Mod Organizer 2 or Vortex so the converted files win conflicts cleanly."
-            : $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this mod below the original armor mod in Mod Organizer 2 or Vortex and load {XmlEscape(patchPluginName)} after its source plugin.";
+            ? $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod so converted files win conflicts cleanly, and keep README.txt for follow-up guidance."
+            : $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod, load {XmlEscape(patchPluginName)} after its source plugin, and keep README.txt for follow-up guidance.";
 
-        // Build <files> content: one <folder> per Data subfolder + one <file> per root ESP/plugin.
+        // Build <files> content: one <folder> per Data subfolder + one <file> per root install file.
         var filesContent = new System.Text.StringBuilder();
         foreach (var folder in dataFolderNames)
         {
@@ -15623,8 +15661,8 @@ internal sealed class LocalExportService(
             .Select(static name => Path.GetFileName(name) ?? name)
             .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
         var description = patchPluginName is null
-            ? "Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex and keep the SlideSmith mod below the original armor mod for clean conflict handling."
-            : $"Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex, keep the SlideSmith mod below the original armor mod, and load {XmlEscape(patchPluginName)} after its source plugin.";
+            ? "Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex as a separate mod, keep the SlideSmith mod below the original armor/body mod for clean conflict handling, and keep README.txt for manual follow-up guidance."
+            : $"Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex as a separate mod, keep the SlideSmith mod below the original armor/body mod, load {XmlEscape(patchPluginName)} after its source plugin, and keep README.txt for manual follow-up guidance.";
 
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -15642,6 +15680,15 @@ internal sealed class LocalExportService(
     {
         return SecurityElement.Escape(value) ?? string.Empty;
     }
+
+    private static bool IsFomodRootInstallFile(string? fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        (IsBethesdaPluginFile(fileName) || IsFomodRootSupportFile(fileName));
+
+    private static bool IsFomodRootSupportFile(string? fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        (fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Builds a BSD (BodySlide Data) binary payload for a single slider.

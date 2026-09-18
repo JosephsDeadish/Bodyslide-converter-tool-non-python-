@@ -981,6 +981,8 @@ public sealed class ConversionOrchestratorTests
             var moduleConfig = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"));
             Assert.Contains("TestArmor_patched.esm", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("TestArmor_SlidesmithPatch.esp", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("README.txt", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
         }
         finally
         {
@@ -3509,6 +3511,9 @@ internal static class SyntheticNifTestData
     public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
         => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape", stride);
 
+    public static async Task WriteBsDynamicTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSDynamicTriShape", stride);
+
     private static async Task WriteBsHalfFloatTriShapeStyleAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -3565,6 +3570,9 @@ internal static class SyntheticNifTestData
 
     public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSubIndexTriShapeVertices(byte[] bytes)
         => ReadBsHalfFloatTriShapeVertices(bytes, "BSSubIndexTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsDynamicTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSDynamicTriShape");
 
     private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
@@ -4520,6 +4528,51 @@ public sealed class NifOutputAndSourceOverrideTests
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
                     .Any(static changed => changed),
                 "Expected at least one BSSubIndexTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsDynamicTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bsdynamictrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsDynamicTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bsdynamictrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsDynamicTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsDynamicTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSDynamicTriShape half-float vertex to be transformed.");
         }
         finally
         {
