@@ -10373,6 +10373,44 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public void Generate_WithValidationIssues_IncludesIssueSpecificNextSteps()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            72,
+            2,
+            0,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "unsupported-nif-layout",
+                    "high",
+                    "Some NIF meshes could not be parsed with supported geometry readers and require manual review: boots_0.nif."),
+                new ConversionValidationIssue(
+                    "plugin-link-missing-converted-match",
+                    "high",
+                    "A linked ARMA path could not be matched to a converted mesh.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("Validation summary:", readme);
+        Assert.Contains("Status: needs-review (score 72)", readme);
+        Assert.Contains("[HIGH] unsupported-nif-layout", readme);
+        Assert.Contains("re-save/export it in a supported Skyrim NIF layout", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[HIGH] plugin-link-missing-converted-match", readme);
+        Assert.Contains("Open plugin-patches.json in xEdit context", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithCleanValidationSummary_StatesNoFollowUpIssues()
+    {
+        var readme = BuildReadme(validationSummary: new ConversionValidationSummary("ready", 100, 0, 0, 0, []));
+        Assert.Contains("Status: ready (score 100)", readme);
+        Assert.Contains("No follow-up issues were reported", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Generate_IsNonEmptyString()
     {
         var readme = BuildReadme();
@@ -10384,7 +10422,8 @@ public sealed class ConversionReadmeGeneratorTests
     private static string BuildReadme(
         bool patchEspGenerated = false,
         string? espPath = null,
-        bool includeBsd = false)
+        bool includeBsd = false,
+        ConversionValidationSummary? validationSummary = null)
     {
         var request    = new ConversionRequest("/src", "CBBE");
         var armor      = new ImportedArmor(
@@ -10414,7 +10453,7 @@ public sealed class ConversionReadmeGeneratorTests
 
         return ConversionReadmeGenerator.Generate(
             request, armor, mesh, bsProject,
-            pluginResult, files, rewriteMap, patchEspGenerated);
+            pluginResult, files, rewriteMap, patchEspGenerated, validationSummary);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
