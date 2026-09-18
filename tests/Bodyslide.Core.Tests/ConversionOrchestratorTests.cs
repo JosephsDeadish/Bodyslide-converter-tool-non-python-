@@ -11042,6 +11042,52 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public void Generate_WithPluginInstallHints_ListsPatchMastersAndLoadOrder()
+    {
+        var readme = BuildReadme(
+            pluginInstallHints:
+            [
+                new PluginInstallHint(
+                    "ArmorPack.esp",
+                    ["BaseMaster.esm", "SharedAddon.esm"],
+                    "ArmorPack_SlidesmithPatch.esp",
+                    ["BaseMaster.esm", "SharedAddon.esm", "ArmorPack.esp"],
+                    "Keep the SlideSmith output mod below the source armor mod.",
+                    false,
+                    ["ArmorPack_SlidesmithPatch.esp should load after ArmorPack.esp."])
+            ]);
+
+        Assert.Contains("PLUGIN LOAD ORDER & REVIEW", readme);
+        Assert.Contains("Source plugin: ArmorPack.esp", readme);
+        Assert.Contains("Generated patch: ArmorPack_SlidesmithPatch.esp", readme);
+        Assert.Contains("Inherited masters: BaseMaster.esm -> SharedAddon.esm", readme);
+        Assert.Contains("Load-after chain: BaseMaster.esm -> SharedAddon.esm -> ArmorPack.esp", readme);
+        Assert.Contains("Manual review required: no", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithManualReviewPluginInstallHint_FlagsManualReview()
+    {
+        var readme = BuildReadme(
+            pluginInstallHints:
+            [
+                new PluginInstallHint(
+                    "AmbiguousAddon.esl",
+                    [],
+                    null,
+                    ["AmbiguousAddon.esl"],
+                    "Keep the SlideSmith output mod below the source armor mod.",
+                    true,
+                    ["Automated rewrite was skipped because the plugin uses an ambiguous ESL/ESPFE layout and should be reviewed in xEdit before installing any override patch."])
+            ]);
+
+        Assert.Contains("Source plugin: AmbiguousAddon.esl", readme);
+        Assert.Contains("Generated patch: none", readme);
+        Assert.Contains("Manual review required: yes", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ambiguous ESL/ESPFE layout", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Generate_IsNonEmptyString()
     {
         var readme = BuildReadme();
@@ -11054,6 +11100,7 @@ public sealed class ConversionReadmeGeneratorTests
         bool patchEspGenerated = false,
         string? espPath = null,
         bool includeBsd = false,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints = null,
         ConversionValidationSummary? validationSummary = null)
     {
         var request    = new ConversionRequest("/src", "CBBE");
@@ -11084,7 +11131,7 @@ public sealed class ConversionReadmeGeneratorTests
 
         return ConversionReadmeGenerator.Generate(
             request, armor, mesh, bsProject,
-            pluginResult, files, rewriteMap, patchEspGenerated, validationSummary);
+            pluginResult, files, rewriteMap, patchEspGenerated, pluginInstallHints, validationSummary);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

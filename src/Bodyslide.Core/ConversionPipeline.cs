@@ -209,6 +209,15 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
     IReadOnlyList<string>? Warnings = null);
 
+internal sealed record PluginInstallHint(
+    string SourcePlugin,
+    IReadOnlyList<string> InheritedMasters,
+    string? GeneratedPatchPlugin,
+    IReadOnlyList<string> RecommendedPluginLoadAfter,
+    string RecommendedModManagerPlacement,
+    bool ManualReviewRequired,
+    IReadOnlyList<string> Notes);
+
 public sealed record PartitionSignalReport(
     IReadOnlyList<int> SourceNifSlots,
     IReadOnlyList<int> PluginSlots,
@@ -10978,6 +10987,7 @@ internal static class ConversionReadmeGenerator
         IReadOnlyList<string> outputFiles,
         IReadOnlyDictionary<string, string> rewriteMap,
         bool patchEspGenerated,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints = null,
         ConversionValidationSummary? validationSummary = null)
     {
         var sb = new System.Text.StringBuilder();
@@ -11111,6 +11121,8 @@ internal static class ConversionReadmeGenerator
 
         sb.AppendLine();
 
+        AppendPluginInstallHints(sb, pluginInstallHints);
+
         // ── BodySlide instructions ─────────────────────────────────────────
         if (bsdFiles.Count > 0)
         {
@@ -11153,6 +11165,34 @@ internal static class ConversionReadmeGenerator
 
     private static bool IsBethesdaPluginFile(string path) =>
         Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
+
+    private static void AppendPluginInstallHints(
+        System.Text.StringBuilder sb,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints)
+    {
+        if (pluginInstallHints is not { Count: > 0 })
+        {
+            return;
+        }
+
+        sb.AppendLine("PLUGIN LOAD ORDER & REVIEW");
+        sb.AppendLine("--------------------------");
+        foreach (var hint in pluginInstallHints.OrderBy(static hint => hint.SourcePlugin, StringComparer.OrdinalIgnoreCase))
+        {
+            sb.AppendLine($"  Source plugin: {hint.SourcePlugin}");
+            sb.AppendLine($"    Generated patch: {(string.IsNullOrWhiteSpace(hint.GeneratedPatchPlugin) ? "none" : hint.GeneratedPatchPlugin)}");
+            sb.AppendLine($"    Inherited masters: {(hint.InheritedMasters.Count == 0 ? "none" : string.Join(" -> ", hint.InheritedMasters))}");
+            sb.AppendLine($"    Load-after chain: {(hint.RecommendedPluginLoadAfter.Count == 0 ? hint.SourcePlugin : string.Join(" -> ", hint.RecommendedPluginLoadAfter))}");
+            sb.AppendLine($"    Mod manager placement: {hint.RecommendedModManagerPlacement}");
+            sb.AppendLine($"    Manual review required: {(hint.ManualReviewRequired ? "yes" : "no")}");
+            foreach (var note in hint.Notes.Where(static note => !string.IsNullOrWhiteSpace(note)))
+            {
+                sb.AppendLine($"    - {note}");
+            }
+
+            sb.AppendLine();
+        }
+    }
 
     private static void AppendValidationFollowUp(
         System.Text.StringBuilder sb,
@@ -12060,7 +12100,7 @@ internal sealed class LocalExportService(
             readmePath,
             ConversionReadmeGenerator.Generate(
                 request, armor, mesh, bodySlideProject,
-                pluginAnalysis, outputFiles, pluginRewriteMap, patchEspGenerated),
+                pluginAnalysis, outputFiles, pluginRewriteMap, patchEspGenerated, pluginInstallHints),
             cancellationToken);
         outputFiles.Add(readmePath);
 
@@ -12126,6 +12166,7 @@ internal sealed class LocalExportService(
                 outputFiles,
                 pluginRewriteMap,
                 patchEspGenerated,
+                pluginInstallHints,
                 validationSummary),
             cancellationToken);
 
@@ -14930,15 +14971,6 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> UnsupportedLinkedArmorAddonMeshes,
         IReadOnlyList<string> MissingLinkedConvertedMatches,
         IReadOnlyList<string> MissingLinkedStagedMeshes);
-
-    private sealed record PluginInstallHint(
-        string SourcePlugin,
-        IReadOnlyList<string> InheritedMasters,
-        string? GeneratedPatchPlugin,
-        IReadOnlyList<string> RecommendedPluginLoadAfter,
-        string RecommendedModManagerPlacement,
-        bool ManualReviewRequired,
-        IReadOnlyList<string> Notes);
 
     private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
         PluginRewritePlan pluginRewritePlan,
