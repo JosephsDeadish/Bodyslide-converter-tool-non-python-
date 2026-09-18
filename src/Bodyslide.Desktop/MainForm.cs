@@ -1849,6 +1849,8 @@ public sealed class MainForm : Form
                     Add("Detected body", step["detected-body:".Length..]);
                 else if (step.StartsWith("source-body-override:", StringComparison.Ordinal))
                     Add("Source body (override)", step["source-body-override:".Length..]);
+                else if (step.StartsWith("cross-gender-conversion:", StringComparison.Ordinal))
+                    Add("Cross-gender conversion", step["cross-gender-conversion:".Length..]);
                 else if (step.StartsWith("mesh-type:", StringComparison.Ordinal))
                     Add("Mesh type", step["mesh-type:".Length..]);
                 else if (step.StartsWith("cage:", StringComparison.Ordinal))
@@ -2803,9 +2805,7 @@ public sealed class MainForm : Form
             : @"meshes\actors\character\character assets\";
 
     private static bool IsMaleBody(string targetBody) =>
-        targetBody.Equals("HIMBO", StringComparison.OrdinalIgnoreCase) ||
-        targetBody.Equals("SAM", StringComparison.OrdinalIgnoreCase) ||
-        targetBody.Equals("SOS", StringComparison.OrdinalIgnoreCase);
+        BodyTypeCatalog.IsMaleBody(targetBody);
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
     {

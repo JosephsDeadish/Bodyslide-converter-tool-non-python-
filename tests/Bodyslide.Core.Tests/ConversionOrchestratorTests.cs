@@ -3227,6 +3227,15 @@ internal static class SyntheticNifTestData
     /// the <c>TryLocateHalfFloatVertexBlock</c> heuristic to detect and transform it.
     /// </summary>
     public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape");
+
+    public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape");
+
+    private static async Task WriteBsHalfFloatTriShapeStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        string blockTypeName)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -3234,7 +3243,7 @@ internal static class SyntheticNifTestData
         // NIF file header
         writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
         // Block type string so NifBlockGraphParser and NifGeometrySignatureReader recognise this as SSE
-        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSTriShape"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(blockTypeName));
         writer.Write((byte)0); // null terminator for the block type string
 
         // BSVertexDesc: bits 44-47 encode stride / 4.
@@ -3274,14 +3283,20 @@ internal static class SyntheticNifTestData
     /// the BSVertexDesc + triangle data at the known offset.
     /// </summary>
     public static IReadOnlyList<(float X, float Y, float Z)> ReadBsTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSubIndexTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSSubIndexTriShape");
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
         const int stride = 20;
-        var bsToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+        var bsToken = System.Text.Encoding.ASCII.GetBytes(blockTypeName);
         var tokenPos = bytes.AsSpan().IndexOf(bsToken);
         if (tokenPos < 0)
             return [];
 
-        // Desc is at tokenPos + len(BSTriShape) + 1 (null terminator)
+        // Desc is at tokenPos + len(typeName) + 1 (null terminator)
         var descOffset = tokenPos + bsToken.Length + 1;
         if (descOffset + 14 >= bytes.Length)
             return [];
@@ -3809,6 +3824,51 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithBsSubIndexTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bssubindextrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsSubIndexTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bssubindextrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSSubIndexTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithSmallInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -3892,6 +3952,31 @@ public sealed class NifOutputAndSourceOverrideTests
 
             Assert.True(result.Success);
             Assert.DoesNotContain(result.Steps, s => s.StartsWith("source-body-override:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithCrossGenderSourceOverride_RecordsStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cross_gender_armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "TNG", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("source-body-override:CBBE", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.Equals("cross-gender-conversion:female→male", StringComparison.Ordinal));
         }
         finally
         {
@@ -6205,6 +6290,20 @@ public sealed class BodyTypeCatalogTests
     {
         Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
         Assert.Equal(expected, profile.Name);
+    }
+
+    [Theory]
+    [InlineData("HIMBO", true)]
+    [InlineData("SAM", true)]
+    [InlineData("SAM Light", true)]
+    [InlineData("SOS", true)]
+    [InlineData("TNG", true)]
+    [InlineData("The New Gentleman", true)]
+    [InlineData("CBBE", false)]
+    [InlineData("3BA", false)]
+    public void BodyTypeCatalog_IsMaleBody_RecognizesBuiltInMaleTargetsAndAliases(string requested, bool expected)
+    {
+        Assert.Equal(expected, BodyTypeCatalog.IsMaleBody(requested));
     }
 
     [Fact]

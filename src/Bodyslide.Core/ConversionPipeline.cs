@@ -962,6 +962,24 @@ public static class BodyTypeCatalog
         body = match;
         return true;
     }
+
+    public static bool TryGetGender(string? requestedName, out string gender)
+    {
+        gender = string.Empty;
+        var resolvedName = ResolveName(requestedName);
+        if (string.IsNullOrWhiteSpace(resolvedName) ||
+            !BuiltInBodyMetadataCatalog.TryGet(resolvedName, out var metadata))
+        {
+            return false;
+        }
+
+        gender = metadata.Gender;
+        return true;
+    }
+
+    public static bool IsMaleBody(string? requestedName) =>
+        TryGetGender(requestedName, out var gender) &&
+        string.Equals(gender, "male", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -2029,8 +2047,8 @@ internal static class NifGeometrySignatureReader
         if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
             return false;
 
-        // Must be an SSE NIF containing at least one BSTriShape block type string.
-        if (bytes.AsSpan().IndexOf(BsTriShapeToken) < 0)
+        // Must be an SSE-style NIF containing a BS*TriShape block type that uses BSVertexData.
+        if (!ContainsSupportedSseHalfFloatShape(bytes))
             return false;
 
         var bestScore = 0;
@@ -2124,6 +2142,28 @@ internal static class NifGeometrySignatureReader
 
     private static bool IsPlausibleHalfCoordinate(float value) =>
         float.IsFinite(value) && MathF.Abs(value) <= 512f;
+
+    private static bool ContainsSupportedSseHalfFloatShape(byte[] bytes)
+    {
+        if (bytes.AsSpan().IndexOf(BsTriShapeToken) >= 0)
+        {
+            return true;
+        }
+
+        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        {
+            return false;
+        }
+
+        return graph.GeometryCandidates
+            .Concat(graph.Nodes)
+            .Any(static node => LooksLikeSupportedSseHalfFloatShapeType(node.TypeName));
+    }
+
+    private static bool LooksLikeSupportedSseHalfFloatShapeType(string typeName) =>
+        !string.IsNullOrWhiteSpace(typeName) &&
+        typeName.StartsWith("BS", StringComparison.Ordinal) &&
+        typeName.Contains("TriShape", StringComparison.Ordinal);
 
     private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
     {
@@ -3674,6 +3714,13 @@ public sealed class ConversionOrchestrator(
             if (!string.Equals(sourceBodyForDelta, normalized.Request.TargetBody, StringComparison.OrdinalIgnoreCase))
             {
                 steps.Add($"conversion-delta:{sourceBodyForDelta}→{normalized.Request.TargetBody}");
+            }
+
+            if (BodyTypeCatalog.TryGetGender(sourceBodyForDelta, out var sourceGender) &&
+                BodyTypeCatalog.TryGetGender(normalized.Request.TargetBody, out var targetGender) &&
+                !string.Equals(sourceGender, targetGender, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add($"cross-gender-conversion:{sourceGender}→{targetGender}");
             }
 
             ReportStage("Converting mesh", 9);
@@ -6032,7 +6079,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             "COCO CBBE" or "COCO UUNP" => "coco-family",
             "CBBE" or "3BA" => "cbbe-family",
             "UNP" or "UNPB" or "UUNP" or "BHUNP" or "TBD" => "unp-family",
-            "HIMBO" or "SAM" or "SOS" => "male-family",
+            "HIMBO" or "SAM" or "SAM Light" or "SOS" or "TNG" => "male-family",
             "UBE" => "ube-family",
             _ => bodyName
         };
