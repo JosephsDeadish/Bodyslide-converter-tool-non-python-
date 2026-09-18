@@ -3561,6 +3561,9 @@ internal static class SyntheticNifTestData
     public static async Task WriteBsMeshLodTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
         => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSMeshLODTriShape", stride);
 
+    public static async Task WriteBsSegmentedTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSegmentedTriShape", stride);
+
     private static async Task WriteBsHalfFloatTriShapeStyleAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -3626,6 +3629,9 @@ internal static class SyntheticNifTestData
 
     public static IReadOnlyList<(float X, float Y, float Z)> ReadBsMeshLodTriShapeVertices(byte[] bytes)
         => ReadBsHalfFloatTriShapeVertices(bytes, "BSMeshLODTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSegmentedTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSSegmentedTriShape");
 
     private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
@@ -4581,6 +4587,51 @@ public sealed class NifOutputAndSourceOverrideTests
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
                     .Any(static changed => changed),
                 "Expected at least one BSSubIndexTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsSegmentedTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bssegmentedtrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsSegmentedTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bssegmentedtrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted BSSegmentedTriShape NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSSegmentedTriShape half-float vertex to be transformed.");
         }
         finally
         {
@@ -7827,6 +7878,7 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Contains("readable NIF modes", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bslod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bsmeshlod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bssegmented-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("nimesh-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
@@ -8490,20 +8542,10 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
-    public async Task BatchConvert_RealisticFailureModPackDirectory_WithAmbiguousPlugin_PrefersCompleteWeightPairWhileKeepingFailureGuidance()
+    public async Task BatchConvert_RealisticFailureAmbiguousTieModPackDirectory_PrefersCanonicalFamilyWhileKeepingFailureGuidance()
     {
-        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureModPack");
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureAmbiguousTieModPack");
         var outputDirectory = Path.Combine(workingDirectory, "output");
-
-        var duplicateDirectory = Path.Combine(workingDirectory, "meshes", "duplicates", "nordic");
-        Directory.CreateDirectory(duplicateDirectory);
-        File.Copy(
-            Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_0.nif"),
-            Path.Combine(duplicateDirectory, "nordic_cuirass_0.nif"),
-            overwrite: true);
-
-        var pluginPath = Path.Combine(workingDirectory, "NordicFailureAmbiguous.esp");
-        await File.WriteAllBytesAsync(pluginPath, BuildFixtureArmaPlugin("meshes/armor/common/nordic_cuirass_0.nif"));
 
         try
         {
@@ -8512,7 +8554,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(result.Success);
 
             var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
-            Assert.Contains("meshes/slidesmith/3ba/armor/common/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/common/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/common/nordic/nordic_cuirass_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));

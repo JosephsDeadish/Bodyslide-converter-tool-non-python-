@@ -1756,6 +1756,7 @@ internal static class NifGeometrySignatureReader
         System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"),
         System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"),
         System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"),
     ];
     private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
     [
@@ -2005,6 +2006,11 @@ internal static class NifGeometrySignatureReader
         if (Inspect(CreateBsHalfFloatProbeBytes("BSMeshLODTriShape"), "bsmeshlod-probe").Status is "supported" or "degraded")
         {
             supportedModes.Add("bsmeshlod-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSSegmentedTriShape"), "bssegmented-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bssegmented-half-float");
         }
 
         if (Inspect(CreateInterleavedFloatProbeBytes(), "interleaved-float-probe").Status is "supported" or "degraded")
@@ -14899,6 +14905,7 @@ internal sealed class LocalExportService(
             }
 
             score += GetSourceMeshVariantCountBonus(comparableSourcePath, sourceMeshVariantCounts);
+            score -= GetDiscouragedSourcePathPenalty(comparableSourcePath);
 
             bestScore = Math.Max(bestScore, score);
         }
@@ -15047,6 +15054,26 @@ internal sealed class LocalExportService(
 
         return (variantCount - 1) * 120;
     }
+
+    private static int GetDiscouragedSourcePathPenalty(string sourceMeshPath)
+    {
+        var discouragedSegments = NormalizeComparablePath(sourceMeshPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Count(IsDiscouragedSourcePathSegment);
+        return discouragedSegments * 350;
+    }
+
+    private static bool IsDiscouragedSourcePathSegment(string segment) =>
+        segment.Equals("duplicate", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("duplicates", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("backup", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("backups", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("copy", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("copies", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("tmp", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("temp", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("old", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("deprecated", StringComparison.OrdinalIgnoreCase);
 
     private static bool PreferLowWeightVariantForUnsuffixedPlugin(string? pluginFileName, string? sourceFileName)
     {
