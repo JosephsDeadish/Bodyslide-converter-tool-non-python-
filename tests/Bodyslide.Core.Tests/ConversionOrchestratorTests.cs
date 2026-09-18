@@ -8663,6 +8663,55 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_RealisticModularFrameworkFixture_PrefersSiblingSourceFamilyOverLeafDirectoryCollision()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticModularFrameworkModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DeviousDevices.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    [
+                        "meshes/devious/devices/devious_panel_0.nif",
+                        "meshes/devious/devices/restraint_0.nif",
+                        "meshes/devious/devices/restraint_1.nif"
+                    ],
+                    FormId: 0x00004321u,
+                    EditorId: "DeviousHarnessAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var method = typeof(ConversionPipeline).GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/devices/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_1.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_1.nif"]);
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

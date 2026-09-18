@@ -15083,6 +15083,7 @@ internal sealed class LocalExportService(
             }
 
             var score = CountMatchingTrailingSegments(candidateDirectory, neighborDirectory) * 250;
+            score += CountMatchingLeadingSegments(candidateDirectory, neighborDirectory) * 400;
             if (candidateDirectory.Equals(neighborDirectory, StringComparison.OrdinalIgnoreCase))
             {
                 score += 10_000;
@@ -15133,6 +15134,27 @@ internal sealed class LocalExportService(
              leftIndex--, rightIndex--)
         {
             if (!leftSegments[leftIndex].Equals(rightSegments[rightIndex], StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            matches++;
+        }
+
+        return matches;
+    }
+
+    private static int CountMatchingLeadingSegments(string leftPath, string rightPath)
+    {
+        var leftSegments = NormalizeComparablePath(leftPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rightSegments = NormalizeComparablePath(rightPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var matches = 0;
+        var length = Math.Min(leftSegments.Length, rightSegments.Length);
+        for (var index = 0; index < length; index++)
+        {
+            if (!leftSegments[index].Equals(rightSegments[index], StringComparison.OrdinalIgnoreCase))
             {
                 break;
             }
