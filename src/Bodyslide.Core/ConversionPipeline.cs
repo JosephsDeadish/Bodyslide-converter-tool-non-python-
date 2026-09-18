@@ -156,6 +156,15 @@ public sealed record ConversionInspectionResult(
     SkeletonMappingResult? SkeletonMapping,
     IReadOnlyList<NifSupportReport>? NifSupport = null);
 
+public sealed record HeelAnalysisReport(
+    string Profile,
+    double Confidence,
+    IReadOnlyList<string> Evidence,
+    bool HasFootPartition = false,
+    bool HasCalfPartition = false,
+    bool HasFootwearKeywords = false,
+    double? GroundContactRatio = null);
+
 public sealed record NifSupportReport(
     string MeshPath,
     string Status,
@@ -164,7 +173,8 @@ public sealed record NifSupportReport(
     IReadOnlyList<string> Messages,
     string? SkinInstanceType = null,
     IReadOnlyList<int>? PartitionSlots = null,
-    int? BoneCount = null);
+    int? BoneCount = null,
+    HeelAnalysisReport? HeelAnalysis = null);
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -565,7 +575,8 @@ public sealed record WorldObjectPhysicsReport(
     bool SourcePhysicsDetected,
     bool RuntimePhysicsProfileGenerated,
     bool GroundMeshAvailable,
-    IReadOnlyList<string> Recommendations);
+    IReadOnlyList<string> Recommendations,
+    HeelAnalysisReport? HeelAnalysis = null);
 
 public sealed record PreviewWorkbenchPayload(
     string MeshFile,
@@ -1638,8 +1649,10 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
     private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
-    private static readonly int[] CommonFloatVertexStrides = [16, 20, 24, 28, 32, 36, 40, 48, 64];
-    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24];
+    private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
+    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40];
+    private static readonly string[] FootwearKeywords = ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "footwear", "heel", "heels"];
+    private static readonly string[] HighHeelKeywords = ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
     private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
     {
         30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56
@@ -2366,6 +2379,7 @@ internal static class NifGeometrySignatureReader
 
         var metadata = ExtractMetadata(bytes);
         var result = TryReadWithMode(bytes);
+        var heelAnalysis = AnalyzeHeelProfile(path, metadata, result.Signature);
         if (result.Signature is not null)
         {
             var status = result.Mode == "heuristic-float" ? "degraded" : "supported";
@@ -2373,7 +2387,8 @@ internal static class NifGeometrySignatureReader
                 status == "degraded"
                     ? ["heuristic-geometry-read", "manual-review-recommended"]
                     : [],
-                metadata);
+                metadata,
+                heelAnalysis);
             return new NifSupportReport(
                 path,
                 status,
@@ -2382,7 +2397,8 @@ internal static class NifGeometrySignatureReader
                 messages,
                 metadata.SkinInstanceType,
                 metadata.PartitionSlots,
-                metadata.BoneNames.Count);
+                metadata.BoneNames.Count,
+                heelAnalysis);
         }
 
         var unsupportedMessages = new List<string>();
@@ -2411,15 +2427,17 @@ internal static class NifGeometrySignatureReader
             "unsupported",
             "unreadable-geometry",
             null,
-            BuildMetadataMessages(unsupportedMessages, metadata),
+            BuildMetadataMessages(unsupportedMessages, metadata, heelAnalysis),
             metadata.SkinInstanceType,
             metadata.PartitionSlots,
-            metadata.BoneNames.Count);
+            metadata.BoneNames.Count,
+            heelAnalysis);
     }
 
     private static IReadOnlyList<string> BuildMetadataMessages(
         IReadOnlyList<string> baseMessages,
-        NifMeshMetadata metadata)
+        NifMeshMetadata metadata,
+        HeelAnalysisReport? heelAnalysis = null)
     {
         var messages = new List<string>(baseMessages);
         if (!string.IsNullOrWhiteSpace(metadata.SkinInstanceType))
@@ -2437,7 +2455,106 @@ internal static class NifGeometrySignatureReader
             messages.Add($"bone-count:{metadata.BoneNames.Count}");
         }
 
+        if (heelAnalysis is not null && !string.Equals(heelAnalysis.Profile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            messages.Add($"heel-profile:{heelAnalysis.Profile}");
+        }
+
         return messages;
+    }
+
+    private static HeelAnalysisReport? AnalyzeHeelProfile(
+        string meshPath,
+        NifMeshMetadata metadata,
+        MeshGeometrySignature? signature)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(meshPath)?.ToLowerInvariant() ?? string.Empty;
+        var hasFootPartition = metadata.PartitionSlots.Contains(37);
+        var hasCalfPartition = metadata.PartitionSlots.Contains(38);
+        var hasFootwearKeywords = FootwearKeywords.Any(fileName.Contains);
+        var hasHighHeelKeywords = HighHeelKeywords.Any(fileName.Contains);
+        var evidence = new List<string>();
+
+        if (hasFootPartition)
+        {
+            evidence.Add("partition-slot:37");
+        }
+
+        if (hasCalfPartition)
+        {
+            evidence.Add("partition-slot:38");
+        }
+
+        if (hasFootwearKeywords)
+        {
+            evidence.Add("filename:footwear");
+        }
+
+        if (hasHighHeelKeywords)
+        {
+            evidence.Add("filename:heel");
+        }
+
+        if (!hasFootPartition && !hasFootwearKeywords && !hasHighHeelKeywords)
+        {
+            return null;
+        }
+
+        double? groundContactRatio = null;
+        if (signature is not null && signature.Height > 0.001f && signature.SampleVertices.Count > 0)
+        {
+            groundContactRatio = EstimateGroundContactRatio(signature);
+            if (groundContactRatio is <= 0.18d)
+            {
+                evidence.Add($"low-ground-contact:{groundContactRatio.Value:P0}");
+            }
+        }
+
+        if (hasHighHeelKeywords)
+        {
+            return new HeelAnalysisReport(
+                Profile: "high-heel",
+                Confidence: groundContactRatio is <= 0.18d ? 0.98d : 0.95d,
+                Evidence: evidence,
+                HasFootPartition: hasFootPartition,
+                HasCalfPartition: hasCalfPartition,
+                HasFootwearKeywords: hasFootwearKeywords,
+                GroundContactRatio: groundContactRatio);
+        }
+
+        if ((hasCalfPartition || hasFootwearKeywords) && groundContactRatio is <= 0.18d)
+        {
+            return new HeelAnalysisReport(
+                Profile: "raised-heel",
+                Confidence: hasCalfPartition ? 0.72d : 0.62d,
+                Evidence: evidence,
+                HasFootPartition: hasFootPartition,
+                HasCalfPartition: hasCalfPartition,
+                HasFootwearKeywords: hasFootwearKeywords,
+                GroundContactRatio: groundContactRatio);
+        }
+
+        return new HeelAnalysisReport(
+            Profile: "footwear",
+            Confidence: hasFootPartition ? 0.55d : 0.40d,
+            Evidence: evidence,
+            HasFootPartition: hasFootPartition,
+            HasCalfPartition: hasCalfPartition,
+            HasFootwearKeywords: hasFootwearKeywords,
+            GroundContactRatio: groundContactRatio);
+    }
+
+    private static double EstimateGroundContactRatio(MeshGeometrySignature signature)
+    {
+        if (signature.SampleVertices.Count == 0 || signature.Height <= 0.001f)
+        {
+            return 1d;
+        }
+
+        var bandHeight = Math.Max(signature.Height * 0.12f, 0.005f);
+        var limit = signature.MinZ + bandHeight;
+        var bottomVertices = signature.SampleVertices.Count(vertex => vertex.Z <= limit);
+        return Math.Clamp(bottomVertices / (double)signature.SampleVertices.Count, 0d, 1d);
     }
 
     private static NifMeshMetadata ExtractMetadata(byte[] bytes)
@@ -11367,7 +11484,14 @@ internal sealed class LocalExportService(
 
         // Write dropped-item/world-object physics guidance.
         var worldPhysicsPath = Path.Combine(outputDirectory, "world-physics.json");
-        var worldPhysics = BuildWorldObjectPhysicsReport(analysis, mesh, physics, armor, groundMeshRelativePath, request.WorldDropModeOverride);
+        var worldPhysics = BuildWorldObjectPhysicsReport(
+            analysis,
+            mesh,
+            physics,
+            armor,
+            groundMeshRelativePath,
+            request.WorldDropModeOverride,
+            sourceNifSupport);
         await File.WriteAllTextAsync(worldPhysicsPath,
             JsonSerializer.Serialize(worldPhysics, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
@@ -12947,6 +13071,24 @@ internal sealed class LocalExportService(
                     "heuristic-nif-read",
                     "medium",
                     $"Some NIF meshes were handled through heuristic geometry scanning instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
+            }
+
+            var raisedHeels = nifSupport
+                .Where(report => report.HeelAnalysis is not null &&
+                                 report.HeelAnalysis.Profile is "high-heel" or "raised-heel")
+                .Select(report =>
+                {
+                    var profile = report.HeelAnalysis!.Profile;
+                    return $"{Path.GetFileName(report.MeshPath)} ({profile})";
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (raisedHeels.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "heel-offset-review",
+                    "medium",
+                    $"Raised-heel footwear was detected and should be checked for ankle height and foot placement after conversion: {string.Join(", ", raisedHeels.Take(6))}."));
             }
         }
 
@@ -14764,7 +14906,8 @@ internal sealed class LocalExportService(
         PhysicsConfig physics,
         ImportedArmor armor,
         string? groundMeshRelativePath,
-        string? worldModeOverride)
+        string? worldModeOverride,
+        IReadOnlyList<NifSupportReport>? nifSupport = null)
     {
         var sourcePhysicsDetected = analysis.PhysicsEnabled || armor.PhysicsFiles.Count > 0;
         var runtimePhysicsProfileGenerated = !string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase);
@@ -14777,6 +14920,11 @@ internal sealed class LocalExportService(
         var overrideHint = hasModeOverride
             ? $"World drop mode override active: {modeOverride}."
             : null;
+        var heelAnalysis = nifSupport?
+            .Where(static report => report.HeelAnalysis is not null)
+            .Select(static report => report.HeelAnalysis!)
+            .OrderByDescending(static report => report.Confidence)
+            .FirstOrDefault();
 
         if (useRigidProxyMode)
         {
@@ -14791,6 +14939,11 @@ internal sealed class LocalExportService(
             recommendations.Add(groundMeshAvailable
                 ? "Use the generated *_ground.nif as the dropped-item world model."
                 : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
+            if (heelAnalysis is not null &&
+                heelAnalysis.Profile is "high-heel" or "raised-heel")
+            {
+                recommendations.Add("Detected raised-heel footwear; manually verify ankle height, toe angle, and ground contact after conversion.");
+            }
 
             return new WorldObjectPhysicsReport(
                 Mode: "rigid-proxy",
@@ -14798,7 +14951,8 @@ internal sealed class LocalExportService(
                 SourcePhysicsDetected: sourcePhysicsDetected,
                 RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
                 GroundMeshAvailable: groundMeshAvailable,
-                Recommendations: recommendations);
+                Recommendations: recommendations,
+                HeelAnalysis: heelAnalysis);
         }
 
         var staticRecommendations = new List<string>();
@@ -14811,6 +14965,11 @@ internal sealed class LocalExportService(
         staticRecommendations.Add(groundMeshAvailable
             ? "Use the generated *_ground.nif for world/inventory model paths."
             : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
+        if (heelAnalysis is not null &&
+            heelAnalysis.Profile is "high-heel" or "raised-heel")
+        {
+            staticRecommendations.Add("Detected raised-heel footwear; manually verify ankle height, toe angle, and foot placement after conversion.");
+        }
 
         return new WorldObjectPhysicsReport(
             Mode: "static",
@@ -14818,7 +14977,8 @@ internal sealed class LocalExportService(
             SourcePhysicsDetected: sourcePhysicsDetected,
             RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
             GroundMeshAvailable: groundMeshAvailable,
-            Recommendations: staticRecommendations);
+            Recommendations: staticRecommendations,
+            HeelAnalysis: heelAnalysis);
     }
 
     /// <summary>

@@ -3185,6 +3185,33 @@ internal static class SyntheticNifTestData
         }
     }
 
+    public static async Task WritePaddedInterleavedFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding,
+        int stride)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        var trailingBytes = Math.Max(0, stride - (sizeof(float) * 3));
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            writer.Write(new byte[trailingBytes]);
+        }
+    }
+
     public static async Task WriteBlockGraphStyleWithSkinPartitionsAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -3591,6 +3618,97 @@ public sealed class NifOutputAndSourceOverrideTests
                         Math.Abs(src.Z - dst.Z) > 0.0001f)
                     .Any(static changed => changed),
                 "Expected at least one interleaved float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithWidePaddedInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "wide_padded_interleaved_boots.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 32, stride: 52);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "wide_padded_interleaved_boots.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one padded interleaved vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithHighHeelFootwear_ReportsHeelAnalysisAndValidationWarning()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputRoot = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var armorDirectory = Path.Combine(inputRoot, "meshes", "armor", "heels");
+        Directory.CreateDirectory(armorDirectory);
+        var armorMesh = Path.Combine(armorDirectory, "ebony_highheel_boots_1.nif");
+        var groundMesh = Path.Combine(armorDirectory, "ebony_highheel_boots_gnd.nif");
+
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+            armorMesh,
+            SyntheticNifTestData.CreateBodyVertices(320),
+            partitionSlots: [37, 38]);
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+            groundMesh,
+            SyntheticNifTestData.CreateBodyVertices(320),
+            partitionSlots: [37, 38]);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputRoot, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var nifSupport = Assert.NotNull(result.QualityReport?.NifSupport);
+            var heelReport = Assert.Single(nifSupport!.Where(static report => report.HeelAnalysis is not null));
+            Assert.Equal("high-heel", heelReport.HeelAnalysis!.Profile);
+            Assert.True(heelReport.HeelAnalysis.Confidence >= 0.90d);
+
+            var worldPhysicsPath = Assert.Single(result.OutputArtifacts.WorldPhysicsReports);
+            var worldPhysics = JsonSerializer.Deserialize<WorldObjectPhysicsReport>(await File.ReadAllTextAsync(worldPhysicsPath), JsonOptions);
+            Assert.NotNull(worldPhysics);
+            Assert.NotNull(worldPhysics!.HeelAnalysis);
+            Assert.Equal("high-heel", worldPhysics.HeelAnalysis!.Profile);
+
+            var validationIssue = Assert.Single(result.ValidationSummary.Issues.Where(static issue => issue.Code == "heel-offset-review"));
+            Assert.Contains("high-heel", validationIssue.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

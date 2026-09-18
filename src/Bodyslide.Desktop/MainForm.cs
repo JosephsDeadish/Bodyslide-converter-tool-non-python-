@@ -1977,6 +1977,14 @@ public sealed class MainForm : Form
             {
                 Add("NIF support", string.Join(", ",
                     nifSupport.Select(report => $"{Path.GetFileName(report.MeshPath)}={report.Status}/{report.ParseMode}")));
+                var heelReports = nifSupport
+                    .Where(static report => report.HeelAnalysis is not null)
+                    .Select(report => $"{Path.GetFileName(report.MeshPath)}={report.HeelAnalysis!.Profile} ({report.HeelAnalysis.Confidence:P0})")
+                    .ToList();
+                if (heelReports.Count > 0)
+                {
+                    Add("Heel / footwear detection", string.Join(", ", heelReports));
+                }
             }
             if (inspection.Armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
             {
