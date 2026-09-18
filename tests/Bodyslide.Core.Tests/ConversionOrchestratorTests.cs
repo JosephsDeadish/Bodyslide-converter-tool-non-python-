@@ -752,6 +752,65 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConversionLearningCache_LoadMergedEntries_IgnoresInvalidEntriesWithNullKeys()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var globalPath = Path.Combine(tmpDir, "global-cache.json");
+        var localPath = Path.Combine(tmpDir, "local-cache.json");
+        var now = DateTimeOffset.UtcNow;
+
+        await File.WriteAllTextAsync(
+            globalPath,
+            """
+            [
+              {
+                "Key": null,
+                "LastSuccessfulConversion": "2026-01-01T00:00:00+00:00",
+                "TargetBody": "3BA",
+                "MeshType": "Cuirass",
+                "Strategy": "cage",
+                "RegionalMorphing": {
+                  "Bust": 0.5
+                },
+                "HadClipping": false,
+                "CorrectionMethod": "none"
+              }
+            ]
+            """);
+        await File.WriteAllTextAsync(
+            localPath,
+            System.Text.Json.JsonSerializer.Serialize(
+                new[]
+                {
+                    new ConversionCacheEntry(
+                        Key: "boots:3ba",
+                        LastSuccessfulConversion: now,
+                        TargetBody: "3BA",
+                        MeshType: "Boots",
+                        Strategy: "cage",
+                        RegionalMorphing: new Dictionary<string, double> { ["Legs"] = 0.3 },
+                        HadClipping: false,
+                        CorrectionMethod: "none")
+                },
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        ConversionLearningCache.SetGlobalCachePath(globalPath);
+        try
+        {
+            var merged = await ConversionLearningCache.LoadMergedEntriesAsync(localPath, CancellationToken.None);
+
+            Assert.Single(merged);
+            Assert.Equal("boots:3ba", merged[0].Key);
+        }
+        finally
+        {
+            ConversionLearningCache.SetGlobalCachePath(null);
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithGlobalCachePreloaded_HitsGlobalCache()
     {
         var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

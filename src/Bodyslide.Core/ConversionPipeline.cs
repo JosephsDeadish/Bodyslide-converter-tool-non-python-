@@ -5998,7 +5998,19 @@ internal static class ConversionLearningCache
 
         try
         {
-            return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+            var entries = JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+            return entries
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
+                .Select(static entry => new ConversionCacheEntry(
+                    entry.Key,
+                    entry.LastSuccessfulConversion,
+                    string.IsNullOrWhiteSpace(entry.TargetBody) ? "unknown" : entry.TargetBody,
+                    string.IsNullOrWhiteSpace(entry.MeshType) ? "unknown" : entry.MeshType,
+                    string.IsNullOrWhiteSpace(entry.Strategy) ? "unknown" : entry.Strategy,
+                    entry.RegionalMorphing ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+                    entry.HadClipping,
+                    string.IsNullOrWhiteSpace(entry.CorrectionMethod) ? "unknown" : entry.CorrectionMethod))
+                .ToList();
         }
         catch (JsonException)
         {
