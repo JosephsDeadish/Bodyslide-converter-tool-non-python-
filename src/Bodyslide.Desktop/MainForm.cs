@@ -980,12 +980,6 @@ public sealed class MainForm : Form
                 break;
             case TextBox textBox:
                 textBox.BorderStyle = BorderStyle.FixedSingle;
-                textBox.BackColor = textBox.ReadOnly ? palette.SurfaceBackground : palette.InputBackground;
-                textBox.ForeColor = palette.Foreground;
-                break;
-            case ComboBox comboBox:
-                comboBox.BackColor = palette.InputBackground;
-                comboBox.ForeColor = palette.Foreground;
                 break;
             case ListView listView:
                 listView.BackColor = palette.SurfaceBackground;
