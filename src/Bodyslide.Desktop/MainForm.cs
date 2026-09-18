@@ -898,7 +898,7 @@ public sealed class MainForm : Form
         UpdatePhysicsDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
-        PopulateGuidanceTab([], null);
+        PopulateGuidanceTab(Array.Empty<string>(), null);
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
@@ -1984,7 +1984,7 @@ public sealed class MainForm : Form
     {
         if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
         {
-            return PopulateGuidanceTab([], previewPath);
+            return PopulateGuidanceTab(Array.Empty<string>(), previewPath);
         }
 
         return PopulateGuidanceTab([outputDirectory], previewPath);
