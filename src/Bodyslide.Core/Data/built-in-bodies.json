@@ -1295,5 +1295,222 @@
       "Tail2"
     ],
     "skeletonFramework": "beast-humanoid"
+  },
+  {
+    "name": "Goat Humanoid",
+    "aliases": [
+      "Goatkin",
+      "Goat Folk",
+      "Goat Reborn",
+      "Namira's Goat Reborn"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Horned beast-humanoid skeleton",
+    "notes": "Humanoid goat or satyr-style target for horned creature body mods, with tail-friendly proportions and hoof-aware lower-body scaling. No built-in physics by default; horn, tail, and digitigrade leg weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2"
+    ],
+    "referenceTokens": [
+      "goat",
+      "goatkin",
+      "satyr",
+      "hoof",
+      "horn"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase"
+    ],
+    "transformationField": {
+      "chest": 0.98,
+      "waist": 0.97,
+      "pelvis": 1.03,
+      "legs": 1.05,
+      "shoulders": 1.0,
+      "breasts": 0.97,
+      "butt": 1.01,
+      "belly": 1.0,
+      "arms": 0.99,
+      "thighs": 1.04,
+      "calves": 1.06
+    },
+    "detectionTokens": [
+      "goat",
+      "goatkin",
+      "satyr",
+      "hoof",
+      "horn"
+    ],
+    "textureTokens": [
+      "goat",
+      "beast",
+      "hoof",
+      "tail"
+    ],
+    "physicsTokens": [
+      "tail"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 6900,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.7,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2"
+    ],
+    "skeletonFramework": "horned-humanoid"
+  },
+  {
+    "name": "Hagraven",
+    "aliases": [
+      "Hag Raven",
+      "Hagraven Humanoid"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Winged creature-humanoid skeleton",
+    "notes": "Winged humanoid target for hagraven-style body and armor mods. No built-in physics by default; wing, claw, and skin or feather seam alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Wing.L",
+      "Wing.R"
+    ],
+    "referenceTokens": [
+      "hagraven",
+      "hag",
+      "wing",
+      "feather",
+      "claw"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "WingSpan"
+    ],
+    "transformationField": {
+      "chest": 0.95,
+      "waist": 0.93,
+      "pelvis": 1.0,
+      "legs": 0.99,
+      "shoulders": 1.07,
+      "breasts": 0.92,
+      "butt": 0.98,
+      "belly": 1.01,
+      "arms": 1.08,
+      "thighs": 0.99,
+      "calves": 0.97
+    },
+    "detectionTokens": [
+      "hagraven",
+      "hag",
+      "wing",
+      "feather"
+    ],
+    "textureTokens": [
+      "hagraven",
+      "wing",
+      "feather"
+    ],
+    "physicsTokens": [
+      "wing"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7200,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "Wing.L",
+      "Wing.R"
+    ],
+    "skeletonFramework": "winged-humanoid"
+  },
+  {
+    "name": "Spriggan",
+    "aliases": [
+      "Spriggan Humanoid",
+      "Spriggan Body"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Winged or branch creature-humanoid skeleton",
+    "notes": "Humanoid nature-creature target for spriggan-style bodies with narrow torsos and branch or leaf appendages. No built-in physics by default; bark, leaf, and branch seam alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Wing.L",
+      "Wing.R"
+    ],
+    "referenceTokens": [
+      "spriggan",
+      "branch",
+      "vine",
+      "bark",
+      "leaf"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "BranchSpread"
+    ],
+    "transformationField": {
+      "chest": 0.94,
+      "waist": 0.91,
+      "pelvis": 0.98,
+      "legs": 1.01,
+      "shoulders": 1.05,
+      "breasts": 0.9,
+      "butt": 0.97,
+      "belly": 1.0,
+      "arms": 1.06,
+      "thighs": 1.0,
+      "calves": 1.01
+    },
+    "detectionTokens": [
+      "spriggan",
+      "branch",
+      "vine",
+      "bark",
+      "leaf"
+    ],
+    "textureTokens": [
+      "spriggan",
+      "bark",
+      "leaf",
+      "vine"
+    ],
+    "physicsTokens": [
+      "vine",
+      "branch"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.9,
+    "physicsBoneSignatures": [
+      "Wing.L",
+      "Wing.R"
+    ],
+    "skeletonFramework": "winged-humanoid"
   }
 ]

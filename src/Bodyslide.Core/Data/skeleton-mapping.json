@@ -152,6 +152,42 @@
       ]
     },
     {
+      "id": "horned-humanoid",
+      "bones": [
+        "NPC Tail",
+        "Tail1",
+        "Tail2",
+        "Tail3",
+        "Horn.L",
+        "Horn.R",
+        "LeftHorn",
+        "RightHorn",
+        "GoatHorn.L",
+        "GoatHorn.R"
+      ],
+      "fallbackMappings": {
+        "HornTip.L": ["Horn.L", "LeftHorn", "GoatHorn.L"],
+        "HornTip.R": ["Horn.R", "RightHorn", "GoatHorn.R"]
+      }
+    },
+    {
+      "id": "winged-humanoid",
+      "bones": [
+        "Wing.L",
+        "Wing.R",
+        "LeftWing",
+        "RightWing",
+        "WingTip.L",
+        "WingTip.R",
+        "Feather.L",
+        "Feather.R"
+      ],
+      "fallbackMappings": {
+        "WingTip.L": ["Wing.L", "LeftWing"],
+        "WingTip.R": ["Wing.R", "RightWing"]
+      }
+    },
+    {
       "id": "vanilla-skyrim",
       "bones": []
     }

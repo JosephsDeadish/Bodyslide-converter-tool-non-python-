@@ -26,5 +26,19 @@
     "boneTokens": ["NPC Tail", "LeftWing", "RightWing", "Khajiit", "Argonian"],
     "distinctiveSignatures": ["Tail1", "Tail2"],
     "minimumSignatureMatches": 2
+  },
+  {
+    "label": "horned-humanoid",
+    "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn"],
+    "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof"],
+    "distinctiveSignatures": ["Horn.L", "Horn.R"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "winged-humanoid",
+    "bonePrefixes": ["Wing", "Feather"],
+    "boneTokens": ["Wing.L", "Wing.R", "LeftWing", "RightWing", "Hagraven", "Spriggan"],
+    "distinctiveSignatures": ["Wing.L", "Wing.R"],
+    "minimumSignatureMatches": 2
   }
 ]

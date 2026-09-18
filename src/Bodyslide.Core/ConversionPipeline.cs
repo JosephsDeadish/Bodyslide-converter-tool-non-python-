@@ -674,11 +674,20 @@ public static class PresetCatalog
         ["Vanilla Zeroed"]    = new("Vanilla Zeroed",     "Vanilla", "zeroed",   "none"),
         ["Vanilla Beast Balanced"] = new("Vanilla Beast Balanced", "Vanilla Beast", "balanced", "none"),
         ["Vanilla Beast Zeroed"] = new("Vanilla Beast Zeroed", "Vanilla Beast", "zeroed", "none"),
+        ["Goat Humanoid Balanced"] = new("Goat Humanoid Balanced", "Goat Humanoid", "balanced", "none"),
+        ["Goat Humanoid Zeroed"] = new("Goat Humanoid Zeroed", "Goat Humanoid", "zeroed", "none"),
+        ["Hagraven Balanced"] = new("Hagraven Balanced", "Hagraven", "balanced", "none"),
+        ["Hagraven Zeroed"] = new("Hagraven Zeroed", "Hagraven", "zeroed", "none"),
+        ["Spriggan Balanced"] = new("Spriggan Balanced", "Spriggan", "balanced", "none"),
+        ["Spriggan Zeroed"] = new("Spriggan Zeroed", "Spriggan", "zeroed", "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
         ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
         ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
         ["Vanilla to UNP"]    = new("Vanilla to UNP",     "UNP",     "balanced", "cbpc"),
         ["Vanilla to UNPB"]   = new("Vanilla to UNPB",    "UNPB",    "balanced", "cbpc"),
+        ["Vanilla to Goat Humanoid"] = new("Vanilla to Goat Humanoid", "Goat Humanoid", "balanced", "none"),
+        ["Vanilla to Hagraven"] = new("Vanilla to Hagraven", "Hagraven", "balanced", "none"),
+        ["Vanilla to Spriggan"] = new("Vanilla to Spriggan", "Spriggan", "balanced", "none"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
@@ -712,7 +721,7 @@ public static class PhysicsProfileCatalog
         {
             ["none"]      = "No soft-body bone injection. Armor uses static mesh weights only; safe for all bodies.",
             ["cbpc"]      = "CBPC (C++ Based Physics for Cloth) bone injection. Fast CPU-side soft-body simulation; lighter mod requirement.",
-            ["smp"]       = "Spriggan MeshPhysics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
+            ["smp"]       = "Skinned Mesh Physics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
             ["smp+cbpc"]  = "Soft Body (CBPC + SMP). Combined SMP + CBPC bone injection with full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
         };
 

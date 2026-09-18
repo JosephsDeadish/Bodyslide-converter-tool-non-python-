@@ -992,6 +992,9 @@ public sealed class ConversionOrchestratorTests
     [InlineData("UBE")]
     [InlineData("Vanilla")]
     [InlineData("Vanilla Beast")]
+    [InlineData("Goat Humanoid")]
+    [InlineData("Hagraven")]
+    [InlineData("Spriggan")]
     [InlineData("UNPB")]
     public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
     {
@@ -1023,6 +1026,9 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("COCO UUNP Athletic", presets);
         Assert.Contains("SAM Light Lean", presets);
         Assert.Contains("Vanilla Beast Balanced", presets);
+        Assert.Contains("Goat Humanoid Balanced", presets);
+        Assert.Contains("Hagraven Balanced", presets);
+        Assert.Contains("Spriggan Balanced", presets);
     }
 
     [Fact]
@@ -6318,6 +6324,13 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("beast", khajiitRace.Groups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));
         Assert.Equal("COCO CBBE", cocoRule.Body);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Goat Humanoid", out var goatRule));
+        Assert.Contains("humanoid", goatRule.CompatibleGroups);
+        Assert.Contains("beast", goatRule.CompatibleGroups);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HornTip.L", "horned-humanoid", out var hornFallbacks));
+        Assert.Contains("Horn.L", hornFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingTip.L", "winged-humanoid", out var wingFallbacks));
+        Assert.Contains("Wing.L", wingFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
         Assert.Equal("tail", groupName);
     }
@@ -6355,7 +6368,13 @@ public sealed class ExpandedPresetTests
     [InlineData("UBE Zeroed",    "UBE")]
     [InlineData("Vanilla Zeroed","Vanilla")]
     [InlineData("Vanilla Balanced", "Vanilla")]
+    [InlineData("Goat Humanoid Balanced", "Goat Humanoid")]
+    [InlineData("Hagraven Balanced", "Hagraven")]
+    [InlineData("Spriggan Balanced", "Spriggan")]
     [InlineData("Vanilla to TNG","TNG")]
+    [InlineData("Vanilla to Goat Humanoid","Goat Humanoid")]
+    [InlineData("Vanilla to Hagraven","Hagraven")]
+    [InlineData("Vanilla to Spriggan","Spriggan")]
     [InlineData("HIMBO Athletic","HIMBO")]
     public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)
     {
@@ -6364,9 +6383,9 @@ public sealed class ExpandedPresetTests
     }
 
     [Fact]
-    public void PresetCatalog_AllCount_AtLeast27()
+    public void PresetCatalog_AllCount_AtLeast36()
     {
-        Assert.True(PresetCatalog.All.Count >= 27, $"Expected >= 27 presets, got {PresetCatalog.All.Count}");
+        Assert.True(PresetCatalog.All.Count >= 36, $"Expected >= 36 presets, got {PresetCatalog.All.Count}");
     }
 }
 
@@ -6384,6 +6403,10 @@ public sealed class BodyTransformationFieldTests
     [InlineData("SOS")]
     [InlineData("TNG")]
     [InlineData("Vanilla")]
+    [InlineData("Vanilla Beast")]
+    [InlineData("Goat Humanoid")]
+    [InlineData("Hagraven")]
+    [InlineData("Spriggan")]
     public void BodyTransformationFieldCatalog_AllBodyTypes_Have11Regions(string body)
     {
         var fields = BodyTransformationFieldCatalog.Resolve(body);
@@ -6506,7 +6529,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.Contains(expected, names);
         }
@@ -6524,7 +6547,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -6591,7 +6614,7 @@ public sealed class BodyTypeCatalogTests
         }
 
         // Bodies without built-in physics must report DefaultPhysics = "none".
-        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast" })
+        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
                 $"No profile for {bodyName}");
@@ -6617,6 +6640,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Schlongs of Skyrim", "SOS")]
     [InlineData("The New Gentleman", "TNG")]
     [InlineData("Ultimate Body Enhancer", "UBE")]
+    [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
+    [InlineData("Hag Raven", "Hagraven")]
     public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
     {
         Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));
@@ -6632,6 +6657,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("7BO", "UUNP")]
     [InlineData("TNG Extended", "TNG")]
     [InlineData("Vanilla Body", "Vanilla")]
+    [InlineData("Goat Reborn", "Goat Humanoid")]
+    [InlineData("Spriggan Body", "Spriggan")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
         Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
@@ -14150,6 +14177,22 @@ public sealed class CustomBodyProfileSupportTests
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Tail1", "Tail2", "NPC Spine"]);
 
         Assert.Equal("beast-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_HornBonesYieldHornedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Horn.L", "Horn.R", "NPC Spine"]);
+
+        Assert.Equal("horned-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_WingBonesYieldWingedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Wing.L", "Wing.R", "NPC Spine"]);
+
+        Assert.Equal("winged-humanoid", label);
     }
 
     [Fact]

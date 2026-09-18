@@ -3,7 +3,7 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast + CUSTOM fallback); bone-name scoring from physics XML
+- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast, Goat Humanoid, Hagraven, Spriggan + CUSTOM fallback); bone-name scoring from physics XML
 - built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `TNG Extended` → `TNG`, `Touched By Dibella` → `TBD`, `Shape Atlas for Men` → `SAM`, and `Beast Vanilla` → `Vanilla Beast`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
@@ -22,7 +22,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
 - topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
-- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
+- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - real 3D preview/workbench output (`preview-workbench.html`) rendered from converted mesh vertices, plus diagnostics report (`preview.html`)
