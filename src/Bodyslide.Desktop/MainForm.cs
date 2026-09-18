@@ -24,6 +24,7 @@ public sealed class MainForm : Form
     private readonly ComboBox _sourceComboBox;
     private readonly ComboBox _physicsComboBox;
     private readonly ComboBox _worldModeComboBox;
+    private readonly ComboBox _themeComboBox;
     private readonly TextBox _logTextBox;
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
@@ -78,6 +79,7 @@ public sealed class MainForm : Form
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
+    private UiTheme _currentTheme;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -90,6 +92,23 @@ public sealed class MainForm : Form
         "world-physics.json",
         "plugin-patches.json",
     ];
+
+    private enum UiTheme
+    {
+        Light,
+        Dark,
+    }
+
+    private sealed record UiThemePalette(
+        Color AppBackground,
+        Color SurfaceBackground,
+        Color InputBackground,
+        Color Foreground,
+        Color SecondaryForeground,
+        Color Accent,
+        Color Border,
+        Color WarningBackground,
+        Color WarningForeground);
 
     public MainForm()
     {
@@ -140,7 +159,7 @@ public sealed class MainForm : Form
             Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
-        layout.Controls.Add(dropPanel, 0, 0);
+        layout.Controls.Add(CreateSection("Quick import", dropPanel), 0, 0);
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
         _inputTextBox.AllowDrop = true;
@@ -313,7 +332,7 @@ public sealed class MainForm : Form
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
+        conversionOptionsPanel.Controls.Add(CreateSection("Destination setup", leftOptions), 0, 0);
 
         var rightOptions = new TableLayoutPanel
         {
@@ -411,8 +430,8 @@ public sealed class MainForm : Form
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
         rightOptions.Controls.Add(skeletonNifPanel, 1, 4);
 
-        conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
-        layout.Controls.Add(conversionOptionsPanel, 0, 3);
+        conversionOptionsPanel.Controls.Add(CreateSection("Overrides and support files", rightOptions), 1, 0);
+        layout.Controls.Add(CreateSection("Conversion setup", conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
@@ -480,7 +499,7 @@ public sealed class MainForm : Form
         customProfileActions.Controls.Add(_removeCustomProfileButton);
         customProfileActions.Controls.Add(_clearCustomProfilesButton);
         customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
-        layout.Controls.Add(customProfilesPanel, 0, 6);
+        layout.Controls.Add(CreateSection("Custom profiles", customProfilesPanel), 0, 6);
 
         var actionRow = new FlowLayoutPanel
         {
@@ -611,6 +630,21 @@ public sealed class MainForm : Form
             Margin = new Padding(8, 0, 0, 0),
         };
         _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
+        var themeLabel = new Label
+        {
+            Text = "Theme",
+            AutoSize = true,
+            Margin = new Padding(16, 8, 4, 0),
+        };
+        _themeComboBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 110,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        _themeComboBox.Items.Add(UiTheme.Light.ToString());
+        _themeComboBox.Items.Add(UiTheme.Dark.ToString());
+        _themeComboBox.SelectedIndexChanged += (_, _) => OnThemeSelectionChanged();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
@@ -626,7 +660,9 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_saveProfileButton);
         actionRow.Controls.Add(_inspectCacheButton);
         actionRow.Controls.Add(_runSelfCheckButton);
-        layout.Controls.Add(actionRow, 0, 7);
+        actionRow.Controls.Add(themeLabel);
+        actionRow.Controls.Add(_themeComboBox);
+        layout.Controls.Add(CreateSection("Actions", actionRow), 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -784,7 +820,7 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        layout.Controls.Add(bottomPanel, 0, 8);
+        layout.Controls.Add(CreateSection("Results and diagnostics", bottomPanel), 0, 8);
 
         RefreshModeState();
         UpdatePresetDetails();
@@ -796,8 +832,199 @@ public sealed class MainForm : Form
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
+        _currentTheme = LoadThemePreference();
+        _themeComboBox.SelectedItem = _currentTheme.ToString();
+        ApplyTheme(_currentTheme);
         AppendLog("Ready. Choose armor/clothing input, set FROM (source, optional) and TO (destination), then click Convert.");
     }
+
+    private static GroupBox CreateSection(string title, Control content)
+    {
+        content.Dock = DockStyle.Fill;
+        return new GroupBox
+        {
+            Text = title,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(10),
+            Margin = new Padding(0, 8, 0, 0),
+            Controls = { content }
+        };
+    }
+
+    private void OnThemeSelectionChanged()
+    {
+        if (_themeComboBox.SelectedItem is not string selectedTheme ||
+            !Enum.TryParse<UiTheme>(selectedTheme, ignoreCase: true, out var theme))
+        {
+            return;
+        }
+
+        _currentTheme = theme;
+        ApplyTheme(theme);
+        SaveThemePreference(theme);
+        AppendLog($"Theme switched to {theme} mode.");
+    }
+
+    private void ApplyTheme(UiTheme theme)
+    {
+        var palette = CreateThemePalette(theme);
+        SuspendLayout();
+        ApplyThemeToControl(this, palette);
+        ResumeLayout(performLayout: true);
+        Invalidate(true);
+    }
+
+    private static UiThemePalette CreateThemePalette(UiTheme theme) =>
+        theme == UiTheme.Dark
+            ? new UiThemePalette(
+                AppBackground: Color.FromArgb(30, 34, 40),
+                SurfaceBackground: Color.FromArgb(44, 49, 58),
+                InputBackground: Color.FromArgb(22, 27, 34),
+                Foreground: Color.FromArgb(236, 239, 244),
+                SecondaryForeground: Color.FromArgb(185, 192, 203),
+                Accent: Color.FromArgb(88, 166, 255),
+                Border: Color.FromArgb(90, 98, 110),
+                WarningBackground: Color.FromArgb(87, 63, 18),
+                WarningForeground: Color.FromArgb(255, 235, 150))
+            : new UiThemePalette(
+                AppBackground: Color.FromArgb(244, 246, 249),
+                SurfaceBackground: Color.White,
+                InputBackground: Color.White,
+                Foreground: Color.FromArgb(32, 37, 43),
+                SecondaryForeground: Color.FromArgb(90, 98, 110),
+                Accent: Color.FromArgb(0, 120, 215),
+                Border: Color.FromArgb(201, 209, 217),
+                WarningBackground: Color.FromArgb(255, 248, 196),
+                WarningForeground: Color.FromArgb(120, 60, 0));
+
+    private void ApplyThemeToControl(Control control, UiThemePalette palette)
+    {
+        switch (control)
+        {
+            case Form:
+            case Panel:
+            case FlowLayoutPanel:
+            case TableLayoutPanel:
+                control.BackColor = palette.AppBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+            case GroupBox:
+            case TabPage:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+            case Label label:
+                label.BackColor = Color.Transparent;
+                label.ForeColor = ReferenceEquals(label, _statusLabel) || ReferenceEquals(label, _presetDetailsLabel)
+                    ? palette.SecondaryForeground
+                    : palette.Foreground;
+                break;
+            case TextBox textBox:
+                textBox.BorderStyle = BorderStyle.FixedSingle;
+                textBox.BackColor = textBox.ReadOnly ? palette.SurfaceBackground : palette.InputBackground;
+                textBox.ForeColor = palette.Foreground;
+                break;
+            case ComboBox comboBox:
+                comboBox.BackColor = palette.InputBackground;
+                comboBox.ForeColor = palette.Foreground;
+                break;
+            case ListView listView:
+                listView.BackColor = palette.SurfaceBackground;
+                listView.ForeColor = palette.Foreground;
+                break;
+            case Button button:
+                button.UseVisualStyleBackColor = false;
+                button.FlatStyle = FlatStyle.Flat;
+                button.FlatAppearance.BorderColor = palette.Border;
+                button.FlatAppearance.MouseDownBackColor = palette.Accent;
+                button.FlatAppearance.MouseOverBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.18);
+                button.BackColor = palette.SurfaceBackground;
+                button.ForeColor = palette.Foreground;
+                break;
+            case CheckBox checkBox:
+                checkBox.BackColor = Color.Transparent;
+                checkBox.ForeColor = palette.Foreground;
+                break;
+            case RadioButton radioButton:
+                radioButton.BackColor = Color.Transparent;
+                radioButton.ForeColor = palette.Foreground;
+                break;
+            case ProgressBar:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Accent;
+                break;
+            default:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            ApplyThemeToControl(child, palette);
+        }
+    }
+
+    private static Color BlendColors(Color background, Color accent, double amount)
+    {
+        amount = Math.Clamp(amount, 0d, 1d);
+        return Color.FromArgb(
+            (int)Math.Round(background.R + ((accent.R - background.R) * amount)),
+            (int)Math.Round(background.G + ((accent.G - background.G) * amount)),
+            (int)Math.Round(background.B + ((accent.B - background.B) * amount)));
+    }
+
+    private UiTheme LoadThemePreference()
+    {
+        try
+        {
+            var settingsPath = GetThemeSettingsPath();
+            if (!File.Exists(settingsPath))
+            {
+                return UiTheme.Dark;
+            }
+
+            var json = File.ReadAllText(settingsPath);
+            var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            if (settings is not null &&
+                settings.TryGetValue("theme", out var themeValue) &&
+                Enum.TryParse<UiTheme>(themeValue, ignoreCase: true, out var theme))
+            {
+                return theme;
+            }
+        }
+        catch
+        {
+        }
+
+        return UiTheme.Dark;
+    }
+
+    private void SaveThemePreference(UiTheme theme)
+    {
+        try
+        {
+            var settingsPath = GetThemeSettingsPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            var json = JsonSerializer.Serialize(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["theme"] = theme.ToString()
+                },
+                new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(settingsPath, json);
+        }
+        catch
+        {
+        }
+    }
+
+    private static string GetThemeSettingsPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlideSmith",
+            "ui-settings.json");
 
     private void PopulateCatalogTab()
     {
@@ -1545,10 +1772,11 @@ public sealed class MainForm : Form
 
         void AddWarning(string property, string value)
         {
+            var palette = CreateThemePalette(_currentTheme);
             var item = new ListViewItem([property, value])
             {
-                BackColor = System.Drawing.Color.FromArgb(255, 255, 180),
-                ForeColor = System.Drawing.Color.FromArgb(120, 60, 0)
+                BackColor = palette.WarningBackground,
+                ForeColor = palette.WarningForeground
             };
             _summaryListView.Items.Add(item);
         }

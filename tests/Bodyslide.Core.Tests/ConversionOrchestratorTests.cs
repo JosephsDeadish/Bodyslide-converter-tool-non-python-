@@ -5142,12 +5142,116 @@ public sealed class PluginPatchGuidanceTests
         }
     }
 
+    [Fact]
+    public async Task PluginPatches_VerifiesLinkedArmoToArmaRewriteCoverage()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var pluginPath = Path.Combine(workingDirectory, "LinkedArmor.esp");
+        await File.WriteAllBytesAsync(
+            pluginPath,
+            BuildMinimalSsePluginWithLinkedArmoAndArma(
+                armoEditorId: "LinkedArmor",
+                armoFormId: 0x00000801u,
+                linkedArmaFormId: 0x00000802u,
+                armaEditorId: "LinkedAddon",
+                armaMeshPath: "meshes/armor/iron/ironarmor_0.nif"));
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedStagedMeshes\": []", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_ReportsMissingLinkedArmaRecord()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var pluginPath = Path.Combine(workingDirectory, "BrokenLinkedArmor.esp");
+        await File.WriteAllBytesAsync(
+            pluginPath,
+            BuildMinimalSsePluginWithLinkedArmoAndArma(
+                armoEditorId: "BrokenArmor",
+                armoFormId: 0x00000801u,
+                linkedArmaFormId: 0x00009999u,
+                armaEditorId: "UnusedAddon",
+                armaMeshPath: "meshes/armor/iron/ironarmor_0.nif",
+                includeArmaRecord: false));
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("BrokenArmor (0x00000801) -> 0x00009999", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-link-missing-arma-record", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
     {
         var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
         var tes4 = BuildSseRecord("TES4", []);
         var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
         return [..tes4, ..arma];
+    }
+
+    private static byte[] BuildMinimalSsePluginWithLinkedArmoAndArma(
+        string armoEditorId,
+        uint armoFormId,
+        uint linkedArmaFormId,
+        string armaEditorId,
+        string armaMeshPath,
+        bool includeArmaRecord = true)
+    {
+        var tes4 = BuildSseRecord("TES4", []);
+        var armoEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armoEditorId + "\0"));
+        var armoLinkData = BuildSubrecord("ARMA", BitConverter.GetBytes(linkedArmaFormId));
+        var armoData = [.. armoEditorData, .. armoLinkData];
+        var armo = BuildSseRecord("ARMO", armoData, formId: armoFormId);
+        if (!includeArmaRecord)
+        {
+            return [..tes4, ..armo];
+        }
+
+        var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
+        var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));
+        var armaData = [.. armaEditorData, .. armaMeshData];
+        var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
+        return [..tes4, ..armo, ..arma];
     }
 
     private static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
@@ -6182,6 +6286,44 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "world", "variant", "nordic", "nordic_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "nordic_cuirass_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputFile = Path.Combine(workingDirectory, "single_armor.nif");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(inputFile, "mesh");
+        var updates = new System.Collections.Concurrent.ConcurrentQueue<BatchProgressUpdate>();
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var progress = new Progress<BatchProgressUpdate>(updates.Enqueue);
+
+            var results = await runner.ConvertAsync(
+                new ConversionRequest(inputFile, "CBBE", outputDirectory),
+                progress: progress);
+
+            Assert.Single(results);
+            Assert.Contains(updates, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Importing input", StringComparison.Ordinal));
+            Assert.Contains(updates, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Exporting outputs", StringComparison.Ordinal));
+            Assert.Contains(updates, update =>
+                update.IsItemCompleted &&
+                update.Completed == 1 &&
+                update.Total == 1);
         }
         finally
         {

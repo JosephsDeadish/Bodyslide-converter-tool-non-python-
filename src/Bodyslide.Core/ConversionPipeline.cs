@@ -12460,6 +12460,30 @@ internal sealed class LocalExportService(
                     "medium",
                     $"Some generated plugin patches could not be re-verified for rewritten mesh paths: {string.Join(", ", pluginRewriteVerification.UnverifiedPatchedPlugins.Take(4))}."));
             }
+
+            if (pluginRewriteVerification.MissingLinkedArmorAddonRecords is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-arma-record",
+                    "high",
+                    $"Some ARMO records referenced ARMA FormIDs that could not be correlated during verification: {string.Join(", ", pluginRewriteVerification.MissingLinkedArmorAddonRecords.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingLinkedConvertedMatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-converted-match",
+                    "medium",
+                    $"Some ARMO→ARMA links did not resolve to fully rewritten mesh outputs: {string.Join(", ", pluginRewriteVerification.MissingLinkedConvertedMatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingLinkedStagedMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-staged-mesh",
+                    "high",
+                    $"Some ARMO→ARMA linked mesh outputs were not staged into the package: {string.Join(", ", pluginRewriteVerification.MissingLinkedStagedMeshes.Take(4))}."));
+            }
         }
 
         var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
@@ -12966,8 +12990,16 @@ internal sealed class LocalExportService(
         return missing;
     }
 
+    private sealed record LinkedArmorAddonVerificationSummary(
+        int LinkedArmorReferenceCount,
+        int VerifiedLinkedArmorReferenceCount,
+        IReadOnlyList<string> MissingLinkedArmorAddonRecords,
+        IReadOnlyList<string> MissingLinkedConvertedMatches,
+        IReadOnlyList<string> MissingLinkedStagedMeshes);
+
     private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
         PluginRewritePlan pluginRewritePlan,
+        PluginAnalysisResult pluginAnalysis,
         string outputDirectory,
         IReadOnlySet<string> stagedPluginMeshes,
         IReadOnlyList<string> patchedPluginPaths,
@@ -12977,6 +13009,7 @@ internal sealed class LocalExportService(
             .Select(NormalizePluginMeshPath)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingStagedMeshes = BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes);
         var verifiedPluginPathCount = 0;
         var unverifiedPatchedPlugins = new List<string>();
 
@@ -13010,17 +13043,131 @@ internal sealed class LocalExportService(
             }
         }
 
+        var linkedArmorVerification = BuildLinkedArmorAddonVerificationSummary(
+            pluginAnalysis,
+            pluginRewritePlan,
+            missingStagedMeshes);
+
         return new PluginRewriteVerificationReport(
             DetectedMeshPathCount: pluginRewritePlan.DetectedMeshPathCount,
             RewriteReadyCount: pluginRewritePlan.RewriteMap.Count,
             VerifiedPluginPathCount: verifiedPluginPathCount,
             StagedMeshCount: stagedPluginMeshes.Count,
+            LinkedArmorReferenceCount: linkedArmorVerification.LinkedArmorReferenceCount,
+            VerifiedLinkedArmorReferenceCount: linkedArmorVerification.VerifiedLinkedArmorReferenceCount,
             MissingConvertedMatches: pluginRewritePlan.MissingConvertedMatches,
             AmbiguousConvertedMatches: pluginRewritePlan.AmbiguousConvertedMatches,
-            MissingStagedMeshes: BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes),
+            MissingStagedMeshes: missingStagedMeshes,
+            MissingLinkedArmorAddonRecords: linkedArmorVerification.MissingLinkedArmorAddonRecords,
+            MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
+            MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
             Warnings: warnings);
     }
+
+    private static LinkedArmorAddonVerificationSummary BuildLinkedArmorAddonVerificationSummary(
+        PluginAnalysisResult pluginAnalysis,
+        PluginRewritePlan pluginRewritePlan,
+        IReadOnlyList<string> missingStagedMeshes)
+    {
+        var linkedReferenceCount = 0;
+        var verifiedLinkedReferenceCount = 0;
+        var missingLinkedArmorAddons = new List<string>();
+        var missingLinkedConvertedMatches = new List<string>();
+        var missingLinkedStagedMeshes = new List<string>();
+        var addonByFormId = pluginAnalysis.ArmorAddons
+            .Where(static addon => addon.FormId != 0)
+            .GroupBy(static addon => addon.FormId)
+            .ToDictionary(static group => group.Key, static group => group.First());
+        var missingStagedSet = missingStagedMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            if (armorRecord.LinkedArmorAddonFormIds is not { Count: > 0 } linkedFormIds)
+            {
+                continue;
+            }
+
+            var armorLabel = DescribePluginRecord(armorRecord.EditorId, armorRecord.FormId);
+            foreach (var linkedFormId in linkedFormIds.Distinct())
+            {
+                linkedReferenceCount++;
+                if (!addonByFormId.TryGetValue(linkedFormId, out var linkedAddon))
+                {
+                    missingLinkedArmorAddons.Add($"{armorLabel} -> {FormatPluginFormId(linkedFormId)}");
+                    continue;
+                }
+
+                var linkedAddonLabel = DescribePluginRecord(linkedAddon.EditorId, linkedAddon.FormId);
+                var normalizedPaths = linkedAddon.DetectedMeshPaths
+                    .Select(NormalizePluginMeshPath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (normalizedPaths.Count == 0)
+                {
+                    missingLinkedConvertedMatches.Add($"{armorLabel} -> {linkedAddonLabel} (no ARMA mesh paths)");
+                    continue;
+                }
+
+                var missingLinkedRewrites = normalizedPaths
+                    .Where(path => !pluginRewritePlan.RewriteMap.ContainsKey(path))
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (missingLinkedRewrites.Count > 0)
+                {
+                    missingLinkedConvertedMatches.Add(
+                        $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}");
+                    continue;
+                }
+
+                var missingLinkedStagePaths = normalizedPaths
+                    .Select(path => NormalizePluginMeshPath(pluginRewritePlan.RewriteMap[path]))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(missingStagedSet.Contains)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (missingLinkedStagePaths.Count > 0)
+                {
+                    missingLinkedStagedMeshes.Add(
+                        $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedStagePaths)}");
+                    continue;
+                }
+
+                verifiedLinkedReferenceCount++;
+            }
+        }
+
+        return new LinkedArmorAddonVerificationSummary(
+            LinkedArmorReferenceCount: linkedReferenceCount,
+            VerifiedLinkedArmorReferenceCount: verifiedLinkedReferenceCount,
+            MissingLinkedArmorAddonRecords: missingLinkedArmorAddons
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            MissingLinkedConvertedMatches: missingLinkedConvertedMatches
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            MissingLinkedStagedMeshes: missingLinkedStagedMeshes
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList());
+    }
+
+    private static string DescribePluginRecord(string? editorId, uint formId)
+    {
+        if (!string.IsNullOrWhiteSpace(editorId))
+        {
+            return formId != 0
+                ? $"{editorId} ({FormatPluginFormId(formId)})"
+                : editorId;
+        }
+
+        return formId != 0 ? FormatPluginFormId(formId) : "unnamed-record";
+    }
+
+    private static string FormatPluginFormId(uint formId) => $"0x{formId:X8}";
 
     private static PartitionSignalReport? BuildPartitionSignalReport(IReadOnlyList<string> steps)
     {
