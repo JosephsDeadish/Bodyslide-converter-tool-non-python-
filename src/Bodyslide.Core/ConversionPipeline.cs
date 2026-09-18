@@ -1656,13 +1656,20 @@ internal static class NifGeometrySignatureReader
     private const float MaxPlausibleCoordinateValue = 8192f;
     private const float MaxPlausibleUvValue = 4f;
     private const int HeuristicScanByteLimit = 64 * 1024;
+    private const int GeometryTokenScanByteLimit = 192 * 1024;
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
     private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+    private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
+    [
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
+    ];
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
-    private const int MaxFloatVertexStride = 96;
-    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40];
+    private const int MaxFloatVertexStride = 160;
+    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96];
     private static readonly string[] FootwearKeywords = ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "footwear", "heel", "heels"];
     private static readonly string[] HighHeelKeywords = ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
     private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
@@ -1933,6 +1940,13 @@ internal static class NifGeometrySignatureReader
         {
             vertexDataOffset = graphVertexDataOffset;
             vertexCount = graphVertexCount;
+            return true;
+        }
+
+        if (TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var tokenVertexDataOffset, out var tokenVertexCount))
+        {
+            vertexDataOffset = tokenVertexDataOffset;
+            vertexCount = tokenVertexCount;
             return true;
         }
 
@@ -2484,6 +2498,100 @@ internal static class NifGeometrySignatureReader
         return best;
     }
 
+    private static MeshGeometrySignature? TryReadKnownGeometryTokenVertexBlock(byte[] bytes)
+    {
+        if (!TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return null;
+        }
+
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+    }
+
+    private static bool TryLocateVertexBlockNearKnownGeometryTokens(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var bestScore = int.MinValue;
+        var bestCount = 0;
+        var bestOffset = -1;
+        var bestDistance = int.MaxValue;
+
+        foreach (var (tokenBytes, typeName) in KnownFloatGeometryTokens)
+        {
+            var tokenSearchStart = 0;
+            var tokenScore = GetBlockVertexCandidateScore(typeName);
+            while (tokenSearchStart <= bytes.Length - tokenBytes.Length)
+            {
+                var relativeIndex = bytes.AsSpan(tokenSearchStart).IndexOf(tokenBytes);
+                if (relativeIndex < 0)
+                {
+                    break;
+                }
+
+                var tokenOffset = tokenSearchStart + relativeIndex;
+                var scanStart = tokenOffset + tokenBytes.Length;
+                var scanEnd = Math.Min(bytes.Length - sizeof(int), scanStart + GeometryTokenScanByteLimit);
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                    {
+                        var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                        var candidate = BuildSignature(bytes, candidateOffset, candidateVertexCount);
+                        if (candidate is null)
+                        {
+                            continue;
+                        }
+
+                        var distance = Math.Max(0, candidateOffset - tokenOffset);
+                        var score = tokenScore * 1000 - distance - paddingIndex;
+                        if (score > bestScore ||
+                            (score == bestScore && candidate.VertexCount > bestCount) ||
+                            (score == bestScore && candidate.VertexCount == bestCount && distance < bestDistance))
+                        {
+                            bestScore = score;
+                            bestCount = candidate.VertexCount;
+                            bestOffset = candidateOffset;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+
+                tokenSearchStart = tokenOffset + tokenBytes.Length;
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
     private static NifSupportReport Inspect(byte[] bytes, string? meshPath)
     {
         var path = string.IsNullOrWhiteSpace(meshPath) ? "(in-memory)" : meshPath;
@@ -2770,6 +2878,12 @@ internal static class NifGeometrySignatureReader
         if (graphSignature is not null)
         {
             return (graphSignature, "block-graph-float");
+        }
+
+        var tokenGuidedSignature = TryReadKnownGeometryTokenVertexBlock(bytes);
+        if (tokenGuidedSignature is not null)
+        {
+            return (tokenGuidedSignature, "geometry-token-float");
         }
 
         if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
