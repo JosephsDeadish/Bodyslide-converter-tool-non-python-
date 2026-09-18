@@ -902,16 +902,14 @@ public sealed class MainForm : Form
     {
         switch (control)
         {
-            case Form:
-            case Panel:
-            case FlowLayoutPanel:
-            case TableLayoutPanel:
-                control.BackColor = palette.AppBackground;
-                control.ForeColor = palette.Foreground;
-                break;
             case GroupBox:
             case TabPage:
                 control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+            case Form:
+            case Panel:
+                control.BackColor = palette.AppBackground;
                 control.ForeColor = palette.Foreground;
                 break;
             case Label label:
@@ -1769,17 +1767,6 @@ public sealed class MainForm : Form
 
         void Add(string property, string value) =>
             _summaryListView.Items.Add(new ListViewItem([property, value]));
-
-        void AddWarning(string property, string value)
-        {
-            var palette = CreateThemePalette(_currentTheme);
-            var item = new ListViewItem([property, value])
-            {
-                BackColor = palette.WarningBackground,
-                ForeColor = palette.WarningForeground
-            };
-            _summaryListView.Items.Add(item);
-        }
 
         Add("Items converted", results.Count.ToString());
 

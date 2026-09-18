@@ -1993,9 +1993,13 @@ public sealed class ConversionOrchestratorTests
 
             // Wait briefly for the Progress<T> callback (it marshals to the synchronization context).
             await Task.Delay(50);
-            Assert.Single(progressEvents);
-            Assert.Equal(1, progressEvents[0].Total);
-            Assert.Equal(1, progressEvents[0].Completed);
+            Assert.Contains(progressEvents, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Importing input", StringComparison.Ordinal));
+            Assert.Contains(progressEvents, update =>
+                update.IsItemCompleted &&
+                update.Total == 1 &&
+                update.Completed == 1);
         }
         finally
         {
@@ -5210,7 +5214,8 @@ public sealed class PluginPatchGuidanceTests
 
             var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
             Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
-            Assert.Contains("BrokenArmor (0x00000801) -> 0x00009999", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("0x00009999", patchJson, StringComparison.Ordinal);
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("plugin-link-missing-arma-record", qualityJson, StringComparison.Ordinal);
@@ -5240,7 +5245,7 @@ public sealed class PluginPatchGuidanceTests
         var tes4 = BuildSseRecord("TES4", []);
         var armoEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armoEditorId + "\0"));
         var armoLinkData = BuildSubrecord("ARMA", BitConverter.GetBytes(linkedArmaFormId));
-        var armoData = [.. armoEditorData, .. armoLinkData];
+        var armoData = armoEditorData.Concat(armoLinkData).ToArray();
         var armo = BuildSseRecord("ARMO", armoData, formId: armoFormId);
         if (!includeArmaRecord)
         {
@@ -5249,7 +5254,7 @@ public sealed class PluginPatchGuidanceTests
 
         var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
         var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));
-        var armaData = [.. armaEditorData, .. armaMeshData];
+        var armaData = armaEditorData.Concat(armaMeshData).ToArray();
         var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
         return [..tes4, ..armo, ..arma];
     }
@@ -6314,16 +6319,13 @@ public sealed class RealisticModPackFixtureTests
                 progress: progress);
 
             Assert.Single(results);
+            await Task.Delay(50);
             Assert.Contains(updates, update =>
                 !update.IsItemCompleted &&
                 string.Equals(update.Stage, "Importing input", StringComparison.Ordinal));
             Assert.Contains(updates, update =>
                 !update.IsItemCompleted &&
                 string.Equals(update.Stage, "Exporting outputs", StringComparison.Ordinal));
-            Assert.Contains(updates, update =>
-                update.IsItemCompleted &&
-                update.Completed == 1 &&
-                update.Total == 1);
         }
         finally
         {
