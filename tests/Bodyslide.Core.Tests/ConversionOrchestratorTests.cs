@@ -8350,9 +8350,7 @@ public sealed class RealisticModPackFixtureTests
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
-
-            var bootsQualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "nordic_boots", "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", bootsQualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
