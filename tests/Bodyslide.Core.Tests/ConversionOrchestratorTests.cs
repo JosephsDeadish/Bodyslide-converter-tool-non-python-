@@ -8686,7 +8686,10 @@ public sealed class RealisticModPackFixtureTests
             ],
             PatchGuidance: string.Empty);
 
-        var method = typeof(ConversionPipeline).GetMethod(
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
             "BuildPluginRewritePlan",
             BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);

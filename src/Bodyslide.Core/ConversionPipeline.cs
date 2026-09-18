@@ -15101,13 +15101,14 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> resolvedNeighborPaths,
         IReadOnlyDictionary<string, int> groupContextSupport)
     {
-        var bestScore = ScoreSourceMeshCandidateFromNeighbors(candidatePath, resolvedNeighborPaths);
+        var neighborScore = ScoreSourceMeshCandidateFromNeighbors(candidatePath, resolvedNeighborPaths);
         var candidateDirectory = NormalizeComparablePath(Path.GetDirectoryName(candidatePath) ?? string.Empty);
         if (string.IsNullOrWhiteSpace(candidateDirectory))
         {
-            return bestScore;
+            return neighborScore;
         }
 
+        var bestGroupContextScore = 0;
         foreach (var ancestor in EnumerateComparablePathAncestors(candidateDirectory))
         {
             if (!groupContextSupport.TryGetValue(ancestor, out var supportCount) || supportCount < 2)
@@ -15116,10 +15117,10 @@ internal sealed class LocalExportService(
             }
 
             var score = supportCount * 10_000 + CountPathSegments(ancestor) * 100;
-            bestScore = Math.Max(bestScore, score);
+            bestGroupContextScore = Math.Max(bestGroupContextScore, score);
         }
 
-        return bestScore;
+        return neighborScore + bestGroupContextScore;
     }
 
     private static int CountMatchingTrailingSegments(string leftPath, string rightPath)
