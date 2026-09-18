@@ -8715,6 +8715,40 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticModularStandaloneAddonModPackDirectory_ResolvesStandaloneArmaFamilyContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModularStandaloneAddonModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/devious_panel_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            using var patchReport = JsonDocument.Parse(patchJson);
+            Assert.Equal(0, patchReport.RootElement.GetProperty("UnresolvedTieGroups").GetArrayLength());
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "devious_panel_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

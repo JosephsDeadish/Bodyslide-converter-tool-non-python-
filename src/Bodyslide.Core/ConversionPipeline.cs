@@ -14764,6 +14764,21 @@ internal sealed class LocalExportService(
             AddRelatedGroup(relatedPathsByMeshPath, addon.DetectedMeshPaths);
         }
 
+        foreach (var standaloneAddonFamily in pluginAnalysis.ArmorAddons
+                     .Select(addon => new
+                     {
+                         Addon = addon,
+                         FamilyKey = BuildStandaloneArmorAddonFamilyKey(addon)
+                     })
+                     .Where(static entry => !string.IsNullOrWhiteSpace(entry.FamilyKey))
+                     .GroupBy(static entry => entry.FamilyKey!, StringComparer.OrdinalIgnoreCase)
+                     .Where(static group => group.Count() > 1))
+        {
+            AddRelatedGroup(
+                relatedPathsByMeshPath,
+                standaloneAddonFamily.SelectMany(static entry => entry.Addon.DetectedMeshPaths));
+        }
+
         foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
         {
             var relatedPaths = new List<string>();
@@ -14792,6 +14807,101 @@ internal sealed class LocalExportService(
         string.IsNullOrWhiteSpace(pluginPath)
             ? string.Empty
             : pluginPath.Replace('\\', '/').Trim().TrimStart('/');
+
+    private static string? BuildStandaloneArmorAddonFamilyKey(PluginArmorAddon addon)
+    {
+        var pluginFileName = NormalizeResolvedPluginFileNameOrNull(addon.OwningPluginFileName);
+        var editorFamily = ExtractStandaloneArmorAddonEditorFamily(addon.EditorId);
+        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(editorFamily))
+        {
+            return null;
+        }
+
+        return $"{pluginFileName}|{editorFamily}";
+    }
+
+    private static string? ExtractStandaloneArmorAddonEditorFamily(string? editorId)
+    {
+        if (string.IsNullOrWhiteSpace(editorId))
+        {
+            return null;
+        }
+
+        var separatedTokens = editorId
+            .Split(['_', '-', ':', '/', '\\', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeStandaloneArmorAddonEditorToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        var separatedFamily = BuildStandaloneArmorAddonEditorFamilyFromTokens(separatedTokens);
+        if (!string.IsNullOrWhiteSpace(separatedFamily))
+        {
+            return separatedFamily;
+        }
+
+        var camelTokens = System.Text.RegularExpressions.Regex.Matches(editorId.Trim(), "[A-Z]+(?=$|[A-Z][a-z0-9])|[A-Z]?[a-z0-9]+")
+            .Select(static match => NormalizeStandaloneArmorAddonEditorToken(match.Value))
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        return BuildStandaloneArmorAddonEditorFamilyFromTokens(camelTokens);
+    }
+
+    private static string? BuildStandaloneArmorAddonEditorFamilyFromTokens(IReadOnlyList<string> tokens)
+    {
+        if (tokens.Count < 2)
+        {
+            return null;
+        }
+
+        var trimmedTokens = tokens.ToList();
+        while (trimmedTokens.Count > 1 && IsStandaloneArmorAddonSpecificToken(trimmedTokens[^1]))
+        {
+            trimmedTokens.RemoveAt(trimmedTokens.Count - 1);
+        }
+
+        while (trimmedTokens.Count > 1 && IsStandaloneArmorAddonGenericToken(trimmedTokens[^1]))
+        {
+            trimmedTokens.RemoveAt(trimmedTokens.Count - 1);
+        }
+
+        if (trimmedTokens.Count < 2)
+        {
+            return null;
+        }
+
+        var familyTokens = trimmedTokens.Take(trimmedTokens.Count - 1).ToList();
+        while (familyTokens.Count > 1 && IsStandaloneArmorAddonGenericToken(familyTokens[^1]))
+        {
+            familyTokens.RemoveAt(familyTokens.Count - 1);
+        }
+
+        if (familyTokens.Count == 0)
+        {
+            return null;
+        }
+
+        var normalizedFamily = string.Join("-", familyTokens);
+        return normalizedFamily.Length >= 6 ? normalizedFamily : null;
+    }
+
+    private static string NormalizeStandaloneArmorAddonEditorToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return new string(token
+                .Where(char.IsLetterOrDigit)
+                .ToArray())
+            .ToLowerInvariant();
+    }
+
+    private static bool IsStandaloneArmorAddonSpecificToken(string token) =>
+        token is "0" or "1" or "male" or "female" or "firstperson" or "first" or "fp" or
+            "world" or "ground" or "gnd" or "addon" or "aa" or "arma" or "armo";
+
+    private static bool IsStandaloneArmorAddonGenericToken(string token) =>
+        token is "addon" or "aa" or "arma" or "armo" or "armor" or "piece" or "part" or "device";
 
     private static bool TryResolveSourceMeshForPluginPath(
         string pluginMeshPath,

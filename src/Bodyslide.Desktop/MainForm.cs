@@ -121,7 +121,7 @@ public sealed class MainForm : Form
         var appVersion = Assembly
             .GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "1.0";
+            ?.InformationalVersion ?? "0.9";
         Text = $"SlideSmith v{appVersion}";
         Width = 960;
         Height = 760;
