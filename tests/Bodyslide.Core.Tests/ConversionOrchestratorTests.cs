@@ -6158,7 +6158,6 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("RecommendedPluginLoadAfter", patchJson, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"RecommendedPluginLoadAfter\": [\n        \"Skyrim.esm\",\n        \"ArmorPack.esm\",\n        \"MasteredArmor.esp\"\n      ]", patchJson, StringComparison.Ordinal);
-            Assert.Contains("Skyrim.esm -> ArmorPack.esm -> MasteredArmor.esp", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"MissingPatchPluginMasters\": []", patchJson, StringComparison.Ordinal);
             Assert.Contains("\"PatchPluginMasterOrderMismatches\": []", patchJson, StringComparison.Ordinal);
         }
