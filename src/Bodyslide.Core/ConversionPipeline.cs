@@ -1604,6 +1604,8 @@ internal static class NifGeometrySignatureReader
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
     private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+    private static readonly int[] CommonFloatVertexStrides = [16, 20, 24, 28, 32, 36, 40, 48, 64];
+    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24];
     private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
     {
         30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56
@@ -1792,6 +1794,15 @@ internal static class NifGeometrySignatureReader
             }
         }
 
+        if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
+        {
+            var interleavedVertices = ReadFloatStrideVertices(bytes, interleavedDataOffset, interleavedVertexCount, interleavedVertexStride);
+            if (interleavedVertices is not null)
+            {
+                return interleavedVertices;
+            }
+        }
+
         if (TryLocateVertexBlock(bytes, out var vertexDataOffset, out var vertexCount))
         {
             return ReadFloatVertices(bytes, vertexDataOffset, vertexCount);
@@ -1816,6 +1827,11 @@ internal static class NifGeometrySignatureReader
         if (Inspect(CreateBsTriShapeProbeBytes(), "bstri-probe").Status is "supported" or "degraded")
         {
             supportedModes.Add("bstri-half-float");
+        }
+
+        if (Inspect(CreateInterleavedFloatProbeBytes(), "interleaved-float-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("interleaved-float");
         }
 
         return supportedModes.Count == 0
@@ -1885,6 +1901,87 @@ internal static class NifGeometrySignatureReader
 
         vertexDataOffset = bestOffset;
         vertexCount = bestCount;
+        return true;
+    }
+
+    public static bool TryLocateInterleavedFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        {
+            return false;
+        }
+
+        var bestNodeScore = int.MinValue;
+        var bestVertexCount = 0;
+        var bestOffset = -1;
+        var bestStride = 0;
+        var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
+
+        foreach (var node in preferredNodes)
+        {
+            var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+            if (nodeScore <= 0)
+            {
+                continue;
+            }
+
+            var scanStart = Math.Max(node.StartOffset, 0);
+            var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
+
+            for (var offset = scanStart; offset <= scanEnd; offset++)
+            {
+                var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+                {
+                    continue;
+                }
+
+                foreach (var prefixPadding in CommonFloatVertexPrefixPaddings)
+                {
+                    var candidateDataOffset = offset + sizeof(int) + prefixPadding;
+                    foreach (var stride in CommonFloatVertexStrides)
+                    {
+                        var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
+                        if (candidate is null)
+                        {
+                            continue;
+                        }
+
+                        if (nodeScore > bestNodeScore ||
+                            (nodeScore == bestNodeScore && candidate.VertexCount > bestVertexCount) ||
+                            (nodeScore == bestNodeScore && candidate.VertexCount == bestVertexCount && (bestStride == 0 || stride < bestStride)))
+                        {
+                            bestNodeScore = nodeScore;
+                            bestVertexCount = candidate.VertexCount;
+                            bestOffset = candidateDataOffset;
+                            bestStride = stride;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestVertexCount;
+        vertexStride = bestStride;
         return true;
     }
 
@@ -2342,6 +2439,15 @@ internal static class NifGeometrySignatureReader
             return (graphSignature, "block-graph-float");
         }
 
+        if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
+        {
+            var interleavedSignature = BuildFloatStrideSignature(bytes, interleavedDataOffset, interleavedVertexCount, interleavedVertexStride);
+            if (interleavedSignature is not null)
+            {
+                return (interleavedSignature, "interleaved-float");
+            }
+        }
+
         var heuristicSignature = TryReadHeuristicVertexBlock(bytes);
         if (heuristicSignature is not null)
         {
@@ -2435,6 +2541,32 @@ internal static class NifGeometrySignatureReader
         return stream.ToArray();
     }
 
+    private static byte[] CreateInterleavedFloatProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(256);
+        writer.Write(new byte[16]);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+            writer.Write(float.NaN);
+            writer.Write(float.PositiveInfinity);
+            writer.Write(float.NegativeInfinity);
+            writer.Write(float.MaxValue);
+            writer.Write(float.MinValue);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
     private static MeshGeometrySignature? BuildSignature(byte[] bytes, int vertexDataOffset, int vertexCount)
     {
         if (vertexCount <= 0)
@@ -2521,6 +2653,37 @@ internal static class NifGeometrySignatureReader
         return vertices;
     }
 
+    private static IReadOnlyList<MeshVertex>? ReadFloatStrideVertices(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        if (vertexCount <= 0 || vertexStride < 12)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPlausibleCoordinate(x) || !IsPlausibleCoordinate(y) || !IsPlausibleCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
+    }
+
     private static IReadOnlyList<MeshVertex>? ReadHalfFloatVertices(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
     {
         if (vertexCount <= 0 || vertexStride < 6)
@@ -2554,6 +2717,49 @@ internal static class NifGeometrySignatureReader
 
     private static bool IsPlausibleCoordinate(float value) =>
         float.IsFinite(value) && Math.Abs(value) <= MaxPlausibleCoordinateValue;
+
+    private static MeshGeometrySignature? BuildFloatStrideSignature(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        var vertices = ReadFloatStrideVertices(bytes, vertexDataOffset, vertexCount, vertexStride);
+        if (vertices is null || vertices.Count == 0)
+        {
+            return null;
+        }
+
+        var sampleVertices = vertices.Count > 256
+            ? vertices.Where((_, index) => index % Math.Max(1, vertices.Count / 256) == 0).Take(256).ToList()
+            : vertices.ToList();
+        var minX = vertices.Min(static vertex => vertex.X);
+        var minY = vertices.Min(static vertex => vertex.Y);
+        var minZ = vertices.Min(static vertex => vertex.Z);
+        var maxX = vertices.Max(static vertex => vertex.X);
+        var maxY = vertices.Max(static vertex => vertex.Y);
+        var maxZ = vertices.Max(static vertex => vertex.Z);
+        if ((maxX - minX) < 0.001f || (maxZ - minZ) < 0.001f)
+        {
+            return null;
+        }
+
+        var geometry = new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ, null);
+        return AttachUvSignatureForFloatStride(bytes, vertexDataOffset, vertexCount, vertexStride, geometry);
+    }
+
+    private static MeshGeometrySignature AttachUvSignatureForFloatStride(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        MeshGeometrySignature geometry)
+    {
+        if (vertexStride < 20)
+        {
+            return geometry;
+        }
+
+        return TryReadUvSignatureFromLayout(bytes, vertexDataOffset + 12, vertexStride, vertexCount, out var interleaved)
+            ? geometry with { UvSignature = interleaved }
+            : geometry;
+    }
 
     private static MeshGeometrySignature AttachUvSignature(
         byte[] bytes,
@@ -11741,6 +11947,12 @@ internal sealed class LocalExportService(
     {
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
+            var floatStrideTransformed = TryApplyNifInterleavedFloatVertexTransform(sourceBytes, regionalMorphing, deformationCage);
+            if (!ReferenceEquals(floatStrideTransformed, sourceBytes))
+            {
+                return floatStrideTransformed;
+            }
+
             // SSE NIFs use BSTriShape with half-precision (16-bit) float vertices — try that path.
             return TryApplyNifHalfFloatVertexTransform(sourceBytes, regionalMorphing, deformationCage);
         }
@@ -11836,6 +12048,122 @@ internal sealed class LocalExportService(
             // Shrinkwrap/collision-aware projection: ensure vertices sit outside the body
             // envelope with a small clearance, even if the animation-driven pass reports
             // little or no penetration for this region.
+            if (regionalMorphing.Count > 0)
+            {
+                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
+                ApplyShrinkwrapProjection(
+                    centerX,
+                    centerY,
+                    normScale,
+                    shrinkRegion,
+                    regionalMorphing,
+                    clearanceNorm,
+                    ref transformedX,
+                    ref transformedY);
+            }
+
+            Array.Copy(BitConverter.GetBytes(transformedX), 0, transformed, offset, 4);
+            Array.Copy(BitConverter.GetBytes(transformedY), 0, transformed, offset + 4, 4);
+            Array.Copy(BitConverter.GetBytes(transformedZ), 0, transformed, offset + 8, 4);
+        }
+
+        return transformed;
+    }
+
+    private static byte[] TryApplyNifInterleavedFloatVertexTransform(
+        byte[] sourceBytes,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage? deformationCage)
+    {
+        if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
+                sourceBytes,
+                out var vertexDataOffset,
+                out var vertexCount,
+                out var vertexStride))
+        {
+            return sourceBytes;
+        }
+
+        if (vertexCount <= 0 || vertexStride < 12)
+        {
+            return sourceBytes;
+        }
+
+        var transformed = sourceBytes.ToArray();
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
+        {
+            return sourceBytes;
+        }
+
+        var minX = float.MaxValue;
+        var maxX = float.MinValue;
+        var minY = float.MaxValue;
+        var maxY = float.MinValue;
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+
+        var rawVertices = new (float X, float Y, float Z)[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            rawVertices[index] = (x, y, z);
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y);
+            maxY = Math.Max(maxY, y);
+            minZ = Math.Min(minZ, z);
+            maxZ = Math.Max(maxZ, z);
+        }
+
+        var zRange = Math.Max(0.0001f, maxZ - minZ);
+        var centerX = (minX + maxX) / 2f;
+        var centerY = (minY + maxY) / 2f;
+        var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
+        var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
+        var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
+        var pushOut = solverResult.MaxPushOutPerRegion;
+        var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            var normalizedHeight = (z - minZ) / zRange;
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
+                normalizedHeight,
+                lateralPosition,
+                depthPosition,
+                regionalMorphing,
+                effectiveCage);
+
+            var transformedX = centerX + ((x - centerX) * (float)widthScale);
+            var transformedY = centerY + ((y - centerY) * (float)depthScale);
+            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
+
+            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            if (pushOut.TryGetValue(region, out var depth) && depth > 0)
+            {
+                var dx = transformedX - centerX;
+                var dy = transformedY - centerY;
+                var xyDist = MathF.Sqrt(dx * dx + dy * dy);
+                if (xyDist > 0.0001f)
+                {
+                    var pushOutModelSpace = (float)(depth * normScale);
+                    transformedX += (dx / xyDist) * pushOutModelSpace;
+                    transformedY += (dy / xyDist) * pushOutModelSpace;
+                }
+            }
+
             if (regionalMorphing.Count > 0)
             {
                 var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);

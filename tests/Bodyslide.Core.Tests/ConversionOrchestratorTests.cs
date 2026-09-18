@@ -3140,6 +3140,32 @@ internal static class SyntheticNifTestData
         }
     }
 
+    public static async Task WriteInterleavedFloatStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(vertices.Count);
+        writer.Write(new byte[16]);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            writer.Write(float.NaN);
+            writer.Write(float.PositiveInfinity);
+            writer.Write(float.NegativeInfinity);
+            writer.Write(float.MaxValue);
+            writer.Write(float.MinValue);
+        }
+    }
+
     public static async Task WriteBlockGraphStyleWithSkinPartitionsAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -3291,6 +3317,31 @@ public sealed class NifOutputAndSourceOverrideTests
         return vertices;
     }
 
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadInterleavedFloatVertices(byte[] bytes)
+    {
+        var token = System.Text.Encoding.ASCII.GetBytes("NiTriShapeData");
+        var tokenIndex = bytes.AsSpan().IndexOf(token);
+        Assert.True(tokenIndex >= 0, "Synthetic NIF data should contain NiTriShapeData block.");
+
+        var vertexCountOffset = tokenIndex + token.Length + 8;
+        var vertexCount = BitConverter.ToInt32(bytes, vertexCountOffset);
+        Assert.True(vertexCount > 0, "Synthetic NIF should contain at least one vertex.");
+
+        const int stride = 32;
+        var cursor = vertexCountOffset + sizeof(int) + 16;
+        var vertices = new List<(float X, float Y, float Z)>(vertexCount);
+        for (var index = 0; index < vertexCount; index++)
+        {
+            vertices.Add((
+                BitConverter.ToSingle(bytes, cursor),
+                BitConverter.ToSingle(bytes, cursor + 4),
+                BitConverter.ToSingle(bytes, cursor + 8)));
+            cursor += stride;
+        }
+
+        return vertices;
+    }
+
     // ── NIF output ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -3420,6 +3471,48 @@ public sealed class NifOutputAndSourceOverrideTests
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
             var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
             Assert.NotEqual(sourceBytes, writtenBytes);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithInterleavedFloatStyleNif_AppliesVertexTransform()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "interleaved_float_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "interleaved_float_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one interleaved float vertex to be transformed.");
         }
         finally
         {
