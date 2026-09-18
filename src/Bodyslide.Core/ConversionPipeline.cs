@@ -1610,7 +1610,8 @@ internal static class SkeletonNifBoneParser
 internal static class NifGeometrySignatureReader
 {
     // Lightweight heuristics for plausible body/armor meshes.
-    private const int MinPlausibleVertexCount = 256;
+    private const int MinPlausibleExplicitVertexCount = 24;
+    private const int MinPlausibleHeuristicVertexCount = 256;
     private const int MaxPlausibleVertexCount = 250_000;
     private const float MaxPlausibleCoordinateValue = 8192f;
     private const float MaxPlausibleUvValue = 4f;
@@ -1899,7 +1900,7 @@ internal static class NifGeometrySignatureReader
         for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+            if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
             {
                 continue;
             }
@@ -1964,7 +1965,7 @@ internal static class NifGeometrySignatureReader
             for (var offset = scanStart; offset <= scanEnd; offset++)
             {
                 var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-                if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
                 {
                     continue;
                 }
@@ -2064,7 +2065,7 @@ internal static class NifGeometrySignatureReader
                 continue;
 
             var numVertices = (int)BitConverter.ToUInt16(bytes, offset + 12);
-            if (numVertices < MinPlausibleVertexCount)
+            if (numVertices < MinPlausibleExplicitVertexCount)
                 continue;
 
             var vertStart = offset + 14 + numTriangles * 6;
@@ -2217,7 +2218,7 @@ internal static class NifGeometrySignatureReader
             for (var offset = scanStart; offset <= scanEnd; offset++)
             {
                 var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-                if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+                if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
                 {
                     continue;
                 }
@@ -2290,7 +2291,7 @@ internal static class NifGeometrySignatureReader
         for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+            if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
             {
                 continue;
             }
