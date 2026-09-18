@@ -284,7 +284,8 @@ public sealed record PluginRewriteVerificationReport(
     IReadOnlyList<string>? MissingPatchPluginMasters = null,
     IReadOnlyList<string>? PatchPluginMasterOrderMismatches = null,
     IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
-    IReadOnlyList<string>? Warnings = null);
+    IReadOnlyList<string>? Warnings = null,
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
 
 internal sealed record PluginInstallHint(
     string SourcePlugin,
@@ -580,7 +581,21 @@ internal sealed record PluginRewritePlan(
     IReadOnlyDictionary<string, string> SourceMeshMap,
     IReadOnlyList<string> MissingConvertedMatches,
     IReadOnlyList<string> AmbiguousConvertedMatches,
-    int DetectedMeshPathCount);
+    int DetectedMeshPathCount,
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
+
+public sealed record PluginTieFamilyHint(
+    string FamilyPath,
+    int SupportCount);
+
+public sealed record UnresolvedPluginTieGroup(
+    string PluginMeshPath,
+    IReadOnlyList<string> CandidateSourceMeshPaths,
+    IReadOnlyList<string> CandidateSourceFamilies,
+    IReadOnlyList<string> RelatedPluginMeshPaths,
+    IReadOnlyList<string> ResolvedNeighborSourceMeshPaths,
+    IReadOnlyList<PluginTieFamilyHint> SharedCandidateFamilies,
+    string ManualReviewReason);
 
 internal sealed record ConvertedNifWriteResult(
     IReadOnlyList<string> WrittenPaths,
@@ -1765,6 +1780,21 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
         (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
     ];
+    private static readonly (byte[] TokenBytes, string TypeName)[] GeometryFamilyHintTokens =
+    [
+        (System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"), "BSSubIndexTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSTriShape"), "BSTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"), "BSDynamicTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"), "BSLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"), "BSMeshLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
+        (System.Text.Encoding.ASCII.GetBytes("NiLinesData"), "NiLinesData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiLines"), "NiLines"),
+    ];
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
     private const int MaxFloatVertexStride = 160;
     private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96];
@@ -2748,12 +2778,13 @@ internal static class NifGeometrySignatureReader
         }
 
         var unsupportedMessages = new List<string>();
+        NifBlockGraph? graph = null;
         if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
         {
             unsupportedMessages.Add("bstri-layout-unreadable");
         }
 
-        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        if (NifBlockGraphParser.TryParse(bytes, out graph) && graph is not null)
         {
             unsupportedMessages.Add($"graph-blocks:{graph.Nodes.Count}");
             if (graph.GeometryCandidates.Count == 0)
@@ -2761,6 +2792,8 @@ internal static class NifGeometrySignatureReader
                 unsupportedMessages.Add("no-geometry-block-candidates");
             }
         }
+
+        unsupportedMessages.AddRange(ExtractUnsupportedGeometryFamilyMessages(bytes, graph));
 
         if (unsupportedMessages.Count == 0)
         {
@@ -2808,6 +2841,42 @@ internal static class NifGeometrySignatureReader
 
         return messages;
     }
+
+    private static IReadOnlyList<string> ExtractUnsupportedGeometryFamilyMessages(byte[] bytes, NifBlockGraph? graph)
+    {
+        var families = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (graph is not null)
+        {
+            foreach (var node in graph.GeometryCandidates.Concat(graph.Nodes))
+            {
+                if (LooksLikeGeometryFamily(node.TypeName))
+                {
+                    families.Add(node.TypeName);
+                }
+            }
+        }
+
+        foreach (var (tokenBytes, typeName) in GeometryFamilyHintTokens)
+        {
+            if (bytes.AsSpan().IndexOf(tokenBytes) >= 0)
+            {
+                families.Add(typeName);
+            }
+        }
+
+        return families
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .Select(static family => $"geometry-family:{family}")
+            .ToList();
+    }
+
+    private static bool LooksLikeGeometryFamily(string typeName) =>
+        !string.IsNullOrWhiteSpace(typeName) &&
+        (typeName.Contains("TriShape", StringComparison.Ordinal) ||
+         typeName.Contains("TriStrips", StringComparison.Ordinal) ||
+         typeName.Contains("Geometry", StringComparison.Ordinal) ||
+         typeName.Contains("Mesh", StringComparison.Ordinal) ||
+         typeName.Contains("Lines", StringComparison.Ordinal));
 
     private static HeelAnalysisReport? AnalyzeHeelProfile(
         string meshPath,
@@ -11970,7 +12039,7 @@ internal sealed class LocalExportService(
                 sourceNifSupport);
 
             var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
-            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
+            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewritePlan);
             var patchOutput = new
             {
                 pluginAnalysis.ScannedPlugins,
@@ -11978,6 +12047,7 @@ internal sealed class LocalExportService(
                 pluginAnalysis.PatchGuidance,
                 AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
                 PluginInstallHints = pluginInstallHints,
+                UnresolvedTieGroups = pluginRewritePlan.UnresolvedTieGroups ?? [],
                 RewriteMappings = pluginRewriteMap
                     .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
                     .ToList(),
@@ -13766,7 +13836,7 @@ internal sealed class LocalExportService(
         {
             var unsupported = nifSupport
                 .Where(report => report.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
-                .Select(report => Path.GetFileName(report.MeshPath))
+                .Select(DescribeUnsupportedNifReport)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (unsupported.Count > 0)
@@ -13897,10 +13967,13 @@ internal sealed class LocalExportService(
         {
             if (pluginRewriteVerification.AmbiguousConvertedMatches is { Count: > 0 })
             {
+                var tieGroupSummary = pluginRewriteVerification.UnresolvedTieGroups is { Count: > 0 }
+                    ? $" Review tie groups in plugin-patches.json for families such as {string.Join(", ", pluginRewriteVerification.UnresolvedTieGroups.SelectMany(static group => group.CandidateSourceFamilies).Distinct(StringComparer.OrdinalIgnoreCase).Take(3))}."
+                    : string.Empty;
                 issues.Add(new ConversionValidationIssue(
                     "plugin-rewrite-ambiguous-filename",
                     "high",
-                    $"Some plugin mesh paths matched multiple converted NIF candidates and were left for manual review: {string.Join(", ", pluginRewriteVerification.AmbiguousConvertedMatches.Take(4))}."));
+                    $"Some plugin mesh paths matched multiple converted NIF candidates and were left for manual review: {string.Join(", ", pluginRewriteVerification.AmbiguousConvertedMatches.Take(4))}.{tieGroupSummary}"));
             }
 
             if (pluginRewriteVerification.MissingConvertedMatches is { Count: > 0 })
@@ -14446,6 +14519,19 @@ internal sealed class LocalExportService(
             .ToList();
     }
 
+    private static string DescribeUnsupportedNifReport(NifSupportReport report)
+    {
+        var fileName = Path.GetFileName(report.MeshPath);
+        var family = report.Messages
+            .FirstOrDefault(static message => message.StartsWith("geometry-family:", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            return fileName;
+        }
+
+        return $"{fileName} [{family["geometry-family:".Length..]}]";
+    }
+
     // ── Preview helpers ──────────────────────────────────────────────────────
 
     /// <summary>
@@ -14597,12 +14683,23 @@ internal sealed class LocalExportService(
             ambiguous.Add($"{originalPath} => {string.Join(" | ", ambiguousMatches.Select(Path.GetFileName))}");
         }
 
+        var unresolvedTieGroups = pendingAmbiguous
+            .Select(pair => BuildUnresolvedPluginTieGroup(
+                pair.Key,
+                pair.Value,
+                sourceMeshMap,
+                relatedPluginMeshPaths,
+                pendingAmbiguous))
+            .OrderBy(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         return new PluginRewritePlan(
             rewrites,
             sourceMeshMap,
             missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
             ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
-            allPaths.Count);
+            allPaths.Count,
+            unresolvedTieGroups);
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildRelatedPluginMeshPathMap(PluginAnalysisResult pluginAnalysis)
@@ -14856,6 +14953,55 @@ internal sealed class LocalExportService(
         }
 
         return support;
+    }
+
+    private static UnresolvedPluginTieGroup BuildUnresolvedPluginTieGroup(
+        string pluginMeshPath,
+        IReadOnlyList<string> candidatePaths,
+        IReadOnlyDictionary<string, string> resolvedSourceMeshByPluginPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths)
+    {
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        var relatedGroup = CollectRelatedPluginMeshPathGroup(normalizedPluginMeshPath, relatedPluginMeshPaths);
+        var resolvedNeighborPaths = relatedGroup
+            .Select(path => resolvedSourceMeshByPluginPath.TryGetValue(path, out var resolvedPath) ? resolvedPath : null)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var pendingGroupPaths = relatedGroup
+            .Where(pendingAmbiguousCandidatePaths.ContainsKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var sharedCandidateFamilies = BuildGroupContextSupportMap(pendingGroupPaths, pendingAmbiguousCandidatePaths)
+            .Where(static pair => pair.Value >= 2)
+            .OrderByDescending(static pair => pair.Value)
+            .ThenByDescending(static pair => CountPathSegments(pair.Key))
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(static pair => new PluginTieFamilyHint(pair.Key, pair.Value))
+            .ToList();
+        var candidateFamilies = candidatePaths
+            .Select(path => NormalizeComparablePath(Path.GetDirectoryName(path) ?? string.Empty))
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var manualReviewReason = resolvedNeighborPaths.Count == 0
+            ? "No linked ARMO/ARMA neighbor produced a unique source-family match."
+            : "Linked ARMO/ARMA context still left multiple equally plausible source families.";
+
+        return new UnresolvedPluginTieGroup(
+            normalizedPluginMeshPath,
+            candidatePaths.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            candidateFamilies,
+            relatedGroup.Where(path => !path.Equals(normalizedPluginMeshPath, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            resolvedNeighborPaths,
+            sharedCandidateFamilies,
+            manualReviewReason);
     }
 
     private static int ScoreSourceMeshCandidate(
@@ -15385,7 +15531,8 @@ internal sealed class LocalExportService(
             MissingPatchPluginMasters: missingPatchPluginMasters,
             PatchPluginMasterOrderMismatches: patchPluginMasterOrderMismatches,
             UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
-            Warnings: warnings);
+            Warnings: warnings,
+            UnresolvedTieGroups: pluginRewritePlan.UnresolvedTieGroups);
     }
 
     private static LinkedArmorAddonVerificationSummary BuildLinkedArmorAddonVerificationSummary(
@@ -15893,16 +16040,19 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<object> BuildProposedPatchSteps(
         PluginAnalysisResult pluginAnalysis,
         string targetBody,
-        IReadOnlyDictionary<string, string> pluginRewriteMap)
+        PluginRewritePlan pluginRewritePlan)
     {
         var steps = new List<object>();
+        var unresolvedTieLookup = (pluginRewritePlan.UnresolvedTieGroups ?? [])
+            .ToDictionary(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase);
 
         foreach (var addon in pluginAnalysis.ArmorAddons)
         {
             foreach (var meshPath in addon.DetectedMeshPaths)
             {
                 var normalised = NormalizePluginMeshPath(meshPath);
-                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                var hasRewrite = pluginRewritePlan.RewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                unresolvedTieLookup.TryGetValue(normalised, out var unresolvedTieGroup);
                 steps.Add(new
                 {
                     Plugin = addon.RecordType,
@@ -15912,11 +16062,21 @@ internal sealed class LocalExportService(
                     RewriteReady = hasRewrite,
                     PlacementNote = hasRewrite
                         ? $"Use patch-armor.pas to rewrite ARMA path to {rewrittenPath} and keep the converted NIF at that path."
+                        : unresolvedTieGroup is not null
+                            ? $"Multiple source mesh families remain plausible for this ARMA path ({string.Join(", ", unresolvedTieGroup.CandidateSourceFamilies.Take(3))}). Review the unresolved tie group before patching for {targetBody}."
                         : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
                     XEditAction = hasRewrite
                         ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMA mesh paths."
+                        : unresolvedTieGroup is not null
+                            ? "Open plugin-patches.json unresolved tie details, choose the correct source family in xEdit, and patch this ARMA mesh path manually."
                         : "Open in xEdit and patch this ARMA mesh path manually.",
-                    Tool = "xEdit"
+                    Tool = "xEdit",
+                    ManualReviewReason = unresolvedTieGroup?.ManualReviewReason,
+                    CandidateSourceMeshPaths = unresolvedTieGroup?.CandidateSourceMeshPaths ?? [],
+                    CandidateSourceFamilies = unresolvedTieGroup?.CandidateSourceFamilies ?? [],
+                    RelatedPluginMeshPaths = unresolvedTieGroup?.RelatedPluginMeshPaths ?? [],
+                    ResolvedNeighborSourceMeshPaths = unresolvedTieGroup?.ResolvedNeighborSourceMeshPaths ?? [],
+                    SharedCandidateFamilies = unresolvedTieGroup?.SharedCandidateFamilies ?? []
                 });
             }
         }
@@ -15926,7 +16086,8 @@ internal sealed class LocalExportService(
             foreach (var meshPath in record.DetectedMeshPaths)
             {
                 var normalised = NormalizePluginMeshPath(meshPath);
-                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                var hasRewrite = pluginRewritePlan.RewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                unresolvedTieLookup.TryGetValue(normalised, out var unresolvedTieGroup);
                 steps.Add(new
                 {
                     Plugin = record.RecordType,
@@ -15936,11 +16097,21 @@ internal sealed class LocalExportService(
                     RewriteReady = hasRewrite,
                     PlacementNote = hasRewrite
                         ? $"Use patch-armor.pas to rewrite ARMO path to {rewrittenPath} and keep the converted NIF at that path."
+                        : unresolvedTieGroup is not null
+                            ? $"Multiple source mesh families remain plausible for this ARMO path ({string.Join(", ", unresolvedTieGroup.CandidateSourceFamilies.Take(3))}). Review the unresolved tie group before patching for {targetBody}."
                         : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
                     XEditAction = hasRewrite
                         ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMO mesh paths."
+                        : unresolvedTieGroup is not null
+                            ? "Open plugin-patches.json unresolved tie details, choose the correct source family in xEdit, and patch this ARMO mesh path manually."
                         : "Open in xEdit and patch this ARMO mesh path manually.",
-                    Tool = "xEdit"
+                    Tool = "xEdit",
+                    ManualReviewReason = unresolvedTieGroup?.ManualReviewReason,
+                    CandidateSourceMeshPaths = unresolvedTieGroup?.CandidateSourceMeshPaths ?? [],
+                    CandidateSourceFamilies = unresolvedTieGroup?.CandidateSourceFamilies ?? [],
+                    RelatedPluginMeshPaths = unresolvedTieGroup?.RelatedPluginMeshPaths ?? [],
+                    ResolvedNeighborSourceMeshPaths = unresolvedTieGroup?.ResolvedNeighborSourceMeshPaths ?? [],
+                    SharedCandidateFamilies = unresolvedTieGroup?.SharedCandidateFamilies ?? []
                 });
             }
         }

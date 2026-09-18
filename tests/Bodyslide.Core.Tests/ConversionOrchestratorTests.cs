@@ -8569,6 +8569,103 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("BSSubIndexTriShape", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("BSSubIndexTriShape", previewHtml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureCrossPluginLinkedTieModPackDirectory_EmitsUnresolvedTieGroupDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginLinkedTieModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var tieGroups = patchJson.RootElement.GetProperty("UnresolvedTieGroups");
+            Assert.True(tieGroups.GetArrayLength() >= 2);
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                string.Equals(element.GetProperty("PluginMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-a", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-b", StringComparison.OrdinalIgnoreCase)));
+
+            var proposedSteps = patchJson.RootElement.GetProperty("ProposedPatchSteps");
+            var tiedStep = proposedSteps.EnumerateArray().First(element =>
+                string.Equals(element.GetProperty("OriginalMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(
+                "Linked ARMO/ARMA context still left multiple equally plausible source families.",
+                tiedStep.GetProperty("ManualReviewReason").GetString());
+            Assert.True(tiedStep.GetProperty("SharedCandidateFamilies").GetArrayLength() > 0);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/pack-a", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureCrossPluginUnscannedMasterModPackDirectory_ReportsLinkedMasterGap()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginUnscannedMasterModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"UnscannedLinkedArmorAddonReferences\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("MissingLinkedMaster.esp", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-link-unscanned-master-reference", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
