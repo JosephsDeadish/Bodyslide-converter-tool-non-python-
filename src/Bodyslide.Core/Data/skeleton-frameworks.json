@@ -31,7 +31,7 @@
     "label": "horned-humanoid",
     "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn", "HornTip", "RamHorn", "Cloven"],
     "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof", "HornTip", "Cloven", "Ramhorn"],
-    "distinctiveSignatures": ["Horn.L", "Horn.R", "Hock.L", "Hock.R"],
+    "distinctiveSignatures": ["Horn.L", "Horn.R", "HornTip.L", "HornTip.R", "GoatHorn.L", "GoatHorn.R"],
     "minimumSignatureMatches": 2
   },
   {
