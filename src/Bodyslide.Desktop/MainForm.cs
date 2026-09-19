@@ -2110,10 +2110,26 @@ public sealed class MainForm : Form
 
             foreach (var outputDirectory in outputDirectories)
             {
+                AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
+            }
+
+            if (entries.Count > 0)
+            {
+                var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
+                    ? previewPath
+                    : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
+                Add(
+                    "Overall status",
+                    requiresReview ? "Warning" : "Info",
+                    BuildGuidanceOverview(entries, requiresReview),
+                    guidanceTarget);
             }
 
             if (requiresReview &&
@@ -3416,6 +3432,71 @@ public sealed class MainForm : Form
             issues);
     }
 
+    private static void AppendGuidanceFromBatchReport(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "batch-report.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var totalCount = TryReadIntValue(root, "TotalCount") ?? 0;
+            var successCount = TryReadIntValue(root, "SuccessCount") ?? 0;
+            var failedCount = TryReadIntValue(root, "FailedCount") ?? 0;
+            var needsReviewCount = TryReadIntValue(root, "NeedsReviewCount") ?? 0;
+            var highRiskCount = TryReadIntValue(root, "HighRiskCount") ?? 0;
+            var missingQualityCount = TryReadIntValue(root, "MissingQualityReportCount") ?? 0;
+            var packStatus = TryReadString(root, "PackReadinessStatus") ?? "Unknown";
+
+            if (totalCount <= 0)
+            {
+                return;
+            }
+
+            if (failedCount > 0 || needsReviewCount > 0 || highRiskCount > 0 || missingQualityCount > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Batch results",
+                failedCount > 0 || highRiskCount > 0 ? "Warning" : "Info",
+                $"Batch summary: {successCount}/{totalCount} succeeded, {failedCount} failed, {needsReviewCount} need review, {highRiskCount} are high risk. Pack status: {packStatus}.",
+                reportPath);
+
+            if (failedCount > 0)
+            {
+                add(
+                    "Batch follow-up",
+                    "Action",
+                    $"Open batch-report.json and re-run or isolate the {failedCount} failed item(s) before publishing the pack.",
+                    reportPath);
+            }
+
+            if (missingQualityCount > 0)
+            {
+                add(
+                    "Batch follow-up",
+                    "Action",
+                    $"Some outputs are missing conversion-quality.json ({missingQualityCount} item(s)). Re-run those conversions before installing or sharing the results.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-conversion-quality-report", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Batch results", "Warning", $"Could not read batch-report.json: {ex.Message}", reportPath);
+        }
+    }
+
     private static void AppendGuidanceFromConversionQuality(
         string outputDirectory,
         string? previewPath,
@@ -3479,6 +3560,151 @@ public sealed class MainForm : Form
         {
             requiresReview = true;
             add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
+        }
+    }
+
+    private static void AppendGuidanceFromSkeletonCompatibility(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var sourceSkeleton = TryReadString(root, "SourceSkeleton") ?? "unknown";
+            var targetSkeleton = TryReadString(root, "TargetSkeleton") ?? "unknown";
+            var unsupportedBones = ReadArrayValues(root, "UnsupportedBones");
+            if (unsupportedBones.Count == 0)
+            {
+                add(
+                    "Skeleton review",
+                    "Info",
+                    $"Skeleton mapping looks clean: {sourceSkeleton} → {targetSkeleton}. No unsupported bones were reported.",
+                    reportPath);
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Skeleton review",
+                "Warning",
+                $"{unsupportedBones.Count} unsupported bone(s) were reported while mapping {sourceSkeleton} → {targetSkeleton}: {BuildListPreview(unsupportedBones)}.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+            add(
+                "Skeleton next step",
+                "Action",
+                "Open skeleton-compatibility.json and verify follower/custom/beast bones plus any required physics chains before installing the converted mesh in-game.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Skeleton review", "Warning", $"Could not read skeleton-compatibility.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromTextureSummary(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "texture-summary.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var missingNormals = ReadArrayValues(root, "MissingNormals");
+            if (missingNormals.Count == 0)
+            {
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Texture review",
+                "Warning",
+                $"{missingNormals.Count} texture set(s) are missing normal maps: {BuildListPreview(missingNormals)}.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-normal-maps", reportPath));
+            add(
+                "Texture next step",
+                "Action",
+                "Copy or generate the missing normal maps before packaging so the converted armor does not lose surface detail or look flat in-game.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-normal-maps", reportPath));
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Texture review", "Warning", $"Could not read texture-summary.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromDependencyMap(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "dependency-map.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var sourceBodies = ReadDistinctArrayPropertyValues(root, "DetectedSourceBody");
+            var sourceSkeletons = ReadDistinctArrayPropertyValues(root, "SourceSkeleton");
+            var linkedArmorFamilies = SumNestedArrayInt(root, "LinkedArmaFormIds");
+
+            if (sourceBodies.Count > 1)
+            {
+                requiresReview = true;
+                add(
+                    "Ecosystem mix",
+                    "Action",
+                    $"The output references multiple detected source body ecosystems ({BuildListPreview(sourceBodies)}). Smoke-test the converted pack in your mod manager before release.",
+                    reportPath);
+            }
+
+            if (sourceSkeletons.Count > 1)
+            {
+                requiresReview = true;
+                add(
+                    "Ecosystem mix",
+                    "Warning",
+                    $"Multiple source skeleton families were detected ({BuildListPreview(sourceSkeletons)}). Recheck race/follower coverage and plugin load order before publishing.",
+                    reportPath);
+            }
+
+            if (linkedArmorFamilies > 0)
+            {
+                add(
+                    "Plugin context",
+                    "Info",
+                    $"Dependency map includes {linkedArmorFamilies} linked ARMA reference(s). Keep plugin-patches.json with the packaged output so install/load-order guidance ships with the conversion.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Dependency review", "Warning", $"Could not read dependency-map.json: {ex.Message}", reportPath);
         }
     }
 
@@ -3857,6 +4083,19 @@ public sealed class MainForm : Form
         return null;
     }
 
+    private static string BuildGuidanceOverview(IReadOnlyList<GuidanceEntry> entries, bool requiresReview)
+    {
+        var highCount = entries.Count(static entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
+        var warningCount = entries.Count(static entry => entry.Priority.Equals("Warning", StringComparison.OrdinalIgnoreCase));
+        var actionCount = entries.Count(static entry => entry.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase));
+        if (requiresReview)
+        {
+            return $"Review before install/share: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
+        }
+
+        return "Output looks ready for a final preview pass. If the mesh looks right in Preview, the generated files and install artifacts are ready for normal smoke testing.";
+    }
+
     private static int GetGuidancePriorityRank(string priority) =>
         priority.Equals("High", StringComparison.OrdinalIgnoreCase) ? 4
         : priority.Equals("Warning", StringComparison.OrdinalIgnoreCase) ? 3
@@ -3960,6 +4199,62 @@ public sealed class MainForm : Form
         return items.Length <= previewCount
             ? string.Join(", ", items)
             : $"{string.Join(", ", items.Take(previewCount))} (+{items.Length - previewCount} more)";
+    }
+
+    private static IReadOnlyList<string> ReadArrayValues(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return value
+            .EnumerateArray()
+            .Select(FormatJsonValue)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadDistinctArrayPropertyValues(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return element
+            .EnumerateArray()
+            .Select(item => TryReadString(item, propertyName))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static int SumNestedArrayInt(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        return element
+            .EnumerateArray()
+            .Sum(item => TryReadArrayCount(item, propertyName));
+    }
+
+    private static string BuildListPreview(IReadOnlyList<string> values)
+    {
+        if (values.Count == 0)
+        {
+            return "none";
+        }
+
+        return values.Count <= 3
+            ? string.Join(", ", values)
+            : $"{string.Join(", ", values.Take(3))} (+{values.Count - 3} more)";
     }
 
     private static string CountNestedArray(JsonElement element, string propertyName) =>
