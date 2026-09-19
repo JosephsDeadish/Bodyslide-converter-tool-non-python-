@@ -236,23 +236,23 @@ internal static class ConversionValidationGuidance
         code switch
         {
             "unsupported-nif-layout" =>
-                "Open the listed mesh in NifSkope or Outfit Studio, re-save/export it in a supported Skyrim NIF layout, then re-run the conversion.",
+                "Open preview-workbench.html and conversion-quality.json to identify the listed mesh, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "heuristic-nif-read" =>
-                "Inspect the converted mesh in NifSkope to confirm vertex order, skinning, and partitions were preserved by the heuristic reader.",
+                "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
-                "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit and re-run the conversion so it can reuse the real source sliders.",
+                "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit, place them beside the mod or under BodySlide/ShapeData, then re-run so conversion-quality.json no longer reports source-asset fallback.",
             "synthetic-morph-fallback" =>
-                "Build the generated project in BodySlide at low and high weights, then inspect extreme sliders in Outfit Studio for shape drift.",
+                "Build the generated project in BodySlide at low and high weights, then compare the results in preview-workbench.html or Outfit Studio for slider drift before release.",
             "topology-mismatch-risk" =>
-                "Inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits before shipping the package.",
+                "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
             "clipping-detected" or "voxel-penetration" or "pose-risk" =>
-                $"Test the output on the {targetBody} body in Outfit Studio and in-game, focusing on the flagged regions and stressed animation poses.",
+                $"Review preview-workbench.html and pose-simulation-report.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
             "heel-offset-review" =>
-                "Check ankle height, toe angle, and ground contact on the converted footwear, especially during idle and walk animations.",
+                "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
-                "Install the skeleton expected by the target body or patch the outfit weights/bone names so the missing bones are covered.",
+                "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
             "race-compatibility-warning" =>
-                "Review race-specific ARMO/ARMA entries and confirm beast/custom races have matching body meshes or dedicated addon records.",
+                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm beast/custom races have matching body meshes or dedicated addon records before release.",
             "plugin-rewrite-ambiguous-filename" or
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
@@ -262,7 +262,7 @@ internal static class ConversionValidationGuidance
             "plugin-link-unscanned-master-reference" or
             "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" =>
-                "Open plugin-patches.json in xEdit context, verify each ARMO/ARMA mesh path, and patch unresolved records before release.",
+                "Open plugin-patches.json and patch-armor.pas in xEdit context, verify each ARMO/ARMA mesh path and master-chain warning, and ensure any generated *_SlidesmithPatch.esp loads after the source plugin before release.",
             _ => null
         };
 }

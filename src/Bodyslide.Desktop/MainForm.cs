@@ -2038,6 +2038,7 @@ public sealed class MainForm : Form
                 AppendGuidanceFromConversionQuality(outputDirectory, Add, ref requiresReview);
                 AppendGuidanceFromPackValidation(outputDirectory, Add, ref requiresReview);
                 AppendGuidanceFromPluginPatches(outputDirectory, Add, ref requiresReview);
+                AppendGuidanceFromWorldPhysics(outputDirectory, Add, ref requiresReview);
             }
 
             if (_guidanceListView.Items.Count == 0)
@@ -3342,6 +3343,22 @@ public sealed class MainForm : Form
                 "Packaging",
                 status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
                 $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.");
+
+            if (TryGetProperty(root, "TopIssueCodes", out var topIssueCodes) && topIssueCodes.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var issue in topIssueCodes.EnumerateArray().Take(3))
+                {
+                    var code = TryReadString(issue, "Code");
+                    var count = TryReadIntValue(issue, "Count") ?? 0;
+                    var guidance = BuildPackIssueGuidance(code, count);
+                    if (string.IsNullOrWhiteSpace(guidance))
+                    {
+                        continue;
+                    }
+
+                    add("Packaging review", count > 0 ? "Action" : "Info", guidance);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -3377,6 +3394,57 @@ public sealed class MainForm : Form
                 "Plugin patching",
                 "Action",
                 $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.");
+
+            if (TryGetProperty(root, "PluginInstallHints", out var pluginInstallHints) && pluginInstallHints.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var hint in pluginInstallHints.EnumerateArray().Take(2))
+                {
+                    var sourcePlugin = TryReadString(hint, "SourcePlugin") ?? "plugin";
+                    var generatedPatch = TryReadString(hint, "GeneratedPatchPlugin");
+                    var manualReview = TryReadBool(hint, "ManualReviewRequired");
+                    var loadAfter = TryReadArray(hint, "RecommendedPluginLoadAfter");
+                    var placement = TryReadString(hint, "RecommendedModManagerPlacement");
+                    var notes = TryReadArray(hint, "Notes");
+
+                    if (!string.IsNullOrWhiteSpace(generatedPatch))
+                    {
+                        add(
+                            "Plugin install",
+                            "Action",
+                            $"{generatedPatch} should load after {sourcePlugin}{(string.IsNullOrWhiteSpace(loadAfter) || string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : $" ({loadAfter})")}. {placement}");
+                    }
+
+                    if (string.Equals(manualReview, "Yes", StringComparison.OrdinalIgnoreCase))
+                    {
+                        add(
+                            "Plugin review",
+                            "Warning",
+                            $"{sourcePlugin} still needs manual xEdit review before release. {notes}");
+                    }
+                    else if (!string.IsNullOrWhiteSpace(notes) &&
+                             !string.Equals(notes, "None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        add("Plugin notes", "Info", $"{sourcePlugin}: {notes}");
+                    }
+                }
+            }
+
+            if (TryGetProperty(root, "LinkedArmorFamilyReviewSteps", out var linkedReviewSteps) && linkedReviewSteps.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var step in linkedReviewSteps.EnumerateArray().Take(2))
+                {
+                    var armorRecord = TryReadString(step, "ArmorRecord") ?? "linked armor family";
+                    var sourcePlugin = TryReadString(step, "OwningPluginFileName") ?? "plugin";
+                    var reason = TryReadString(step, "ManualReviewReason");
+                    var action = TryReadString(step, "SuggestedXEditAction");
+                    var priority = TryReadString(step, "ReviewPriority");
+
+                    add(
+                        "Linked armor family",
+                        string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                        $"{armorRecord} ({sourcePlugin}): {action ?? reason ?? "Review linked ARMA members in xEdit before release."}");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -3385,11 +3453,124 @@ public sealed class MainForm : Form
         }
     }
 
+    private static void AppendGuidanceFromWorldPhysics(
+        string outputDirectory,
+        Action<string, string, string> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var mode = TryReadString(root, "Mode");
+            var groundMeshAvailable = TryReadBool(root, "GroundMeshAvailable");
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                add(
+                    "World / ground mesh",
+                    "Info",
+                    $"World-object mode: {mode}. Ground mesh available: {groundMeshAvailable ?? "Unknown"}. Open world-physics.json if you need exact dropped-item recommendations.");
+            }
+
+            if (TryGetProperty(root, "Recommendations", out var recommendations) && recommendations.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var recommendation in recommendations.EnumerateArray()
+                             .Select(FormatJsonValue)
+                             .Where(static value => !string.IsNullOrWhiteSpace(value))
+                             .Take(3))
+                {
+                    var priority = recommendation.Contains("manually verify", StringComparison.OrdinalIgnoreCase) ||
+                                   recommendation.Contains("fallback", StringComparison.OrdinalIgnoreCase)
+                        ? "Action"
+                        : "Info";
+                    if (priority == "Action")
+                    {
+                        requiresReview = true;
+                    }
+
+                    add("World / ground mesh", priority, recommendation);
+                }
+            }
+
+            var heelProfile = TryReadNestedString(root, "HeelAnalysis", "Profile");
+            if (heelProfile is "high-heel" or "raised-heel")
+            {
+                requiresReview = true;
+                add(
+                    "Footwear",
+                    "High",
+                    $"Detected {heelProfile} footwear. Validate heel height, toe angle, and ground contact in preview-workbench.html and world-physics.json before shipping.");
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}");
+        }
+    }
+
     private static string ToDisplayPriority(string severity) =>
         severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? "High"
         : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? "Medium"
         : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? "Low"
         : "Info";
+
+    private static string? BuildPackIssueGuidance(string? code, int count)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        var normalized = code.Trim();
+        var issueCountLabel = count > 1 ? $" ({count} cases)" : string.Empty;
+        if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Rebuild the distributable zip and confirm it contains {DescribePackArtifact(normalized["zip-missing-".Length..])}{issueCountLabel}.";
+        }
+
+        if (normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Regenerate or copy {DescribePackArtifact(normalized["missing-".Length..])} into the output folder before publishing{issueCountLabel}.";
+        }
+
+        if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open fomod/ModuleConfig.xml and fix the installer entries for {normalized["fomod-".Length..].Replace('-', ' ')}{issueCountLabel}.";
+        }
+
+        return $"Review armor-pack-validation.json for {normalized.Replace('-', ' ')}{issueCountLabel}.";
+    }
+
+    private static string DescribePackArtifact(string suffix) =>
+        suffix.ToLowerInvariant() switch
+        {
+            "readme" => "README.txt",
+            "dependency-map" => "dependency-map.json",
+            "preview-html" => "preview.html",
+            "preview-workbench" => "preview-workbench.html",
+            "fomod-module-config" => "fomod/ModuleConfig.xml",
+            "fomod-info" => "fomod/info.xml",
+            "staged-mesh-output" => "the generated meshes/slidesmith output",
+            "xedit-script" => "patch-armor.pas",
+            "plugin-patch-report" => "plugin-patches.json",
+            "output-zip" => "the final distributable zip",
+            "bodyslide-osp" => "the generated BodySlide SliderSets .osp file",
+            "bodyslide-shape-data" => "the generated BodySlide ShapeData payloads",
+            "bodyslide-reference-nif" => "the BodySlide reference NIF",
+            "bodyslide-slider-payload" => "the generated BSD/TRI slider payloads",
+            "root-plugin" => "the copied/generated plugin file at the package root",
+            "root-plugin-entry" => "the plugin root-file FOMOD entry",
+            "staged-cbpc-config" => "the staged CBPC config",
+            "staged-smp-config" => "the staged SMP config",
+            _ => suffix.Replace('-', ' ')
+        };
 
     private static string? TryReadArray(JsonElement element, string propertyName)
     {

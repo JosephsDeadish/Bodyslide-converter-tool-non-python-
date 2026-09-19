@@ -12314,9 +12314,12 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("Validation summary:", readme);
         Assert.Contains("Status: needs-review (score 72)", readme);
         Assert.Contains("[HIGH] unsupported-nif-layout", readme);
-        Assert.Contains("re-save/export it in a supported Skyrim NIF layout", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("supported Skyrim NIF layout", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[HIGH] plugin-link-missing-converted-match", readme);
         Assert.Contains("Open plugin-patches.json in xEdit context", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("patch-armor.pas", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -12371,6 +12374,40 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("Generated patch: none", readme);
         Assert.Contains("Manual review required: yes", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ambiguous ESL/ESPFE layout", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithFootwearPoseAndSkeletonIssues_ReferencesExactFollowUpReports()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            68,
+            2,
+            1,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "pose-risk",
+                    "high",
+                    "Stress poses showed elevated collision risk in calf and foot regions."),
+                new ConversionValidationIssue(
+                    "heel-offset-review",
+                    "medium",
+                    "Raised-heel footwear should be checked after conversion."),
+                new ConversionValidationIssue(
+                    "unsupported-bones",
+                    "high",
+                    "The target rig is missing custom follower heel bones.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("pose-simulation-report.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("world-physics.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("heel offset", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skeleton-compatibility.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unsupported custom-rig bones", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
