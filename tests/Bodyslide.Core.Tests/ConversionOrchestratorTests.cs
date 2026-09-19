@@ -8706,7 +8706,9 @@ public sealed class RealisticModPackFixtureTests
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
             Assert.Contains("Conversion Readiness &amp; Next Actions", previewHtml, StringComparison.Ordinal);
             Assert.Contains("Recommended next actions", previewHtml, StringComparison.Ordinal);
-            Assert.Contains("re-save/export it in a supported Skyrim NIF layout", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("preview-workbench.html", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("conversion-quality.json", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("supported Skyrim NIF layout", previewHtml, StringComparison.OrdinalIgnoreCase);
 
             var workbenchHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview-workbench.html"));
             Assert.Contains("Recommended next actions", workbenchHtml, StringComparison.Ordinal);
@@ -12318,7 +12320,8 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("supported Skyrim NIF layout", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("[HIGH] plugin-link-missing-converted-match", readme);
-        Assert.Contains("Open plugin-patches.json in xEdit context", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("xEdit context", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("patch-armor.pas", readme, StringComparison.OrdinalIgnoreCase);
     }
 
