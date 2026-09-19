@@ -15272,6 +15272,8 @@ public sealed class OutputCompletenessTests
             var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
             Assert.Contains("missing-readme", codes);
             Assert.Contains("missing-dependency-map", codes);
+            Assert.Contains("missing-conversion-quality-report", codes);
+            Assert.Contains("missing-skeleton-compatibility-report", codes);
             Assert.Contains("missing-preview-html", codes);
             Assert.Contains("missing-preview-workbench", codes);
             Assert.Contains("missing-fomod-module-config", codes);
@@ -15401,6 +15403,14 @@ public sealed class OutputCompletenessTests
             Assert.Contains("fomod-missing-root-plugin-entry", codes);
             Assert.Contains("missing-bodyslide-reference-nif", codes);
             Assert.Contains("zip-missing-readme", codes);
+            Assert.Contains("zip-missing-dependency-map", codes);
+            Assert.Contains("zip-missing-conversion-quality-report", codes);
+            Assert.Contains("zip-missing-skeleton-compatibility-report", codes);
+            Assert.Contains("zip-missing-pose-report", codes);
+            Assert.Contains("zip-missing-world-physics-report", codes);
+            Assert.Contains("zip-missing-preview-svg", codes);
+            Assert.Contains("zip-missing-preview-html", codes);
+            Assert.Contains("zip-missing-preview-workbench", codes);
             Assert.Contains("zip-missing-fomod-module-config", codes);
             Assert.Contains("zip-missing-fomod-info", codes);
             Assert.Contains("zip-missing-staged-mesh-output", codes);

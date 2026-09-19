@@ -300,6 +300,10 @@ internal static class ConversionValidationGuidance
                 "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
             "plugin-link-unsupported-nif-layout" =>
                 "Identify the linked ARMA meshes called out in conversion-quality.json or plugin-patches.json, compare the whole linked family (world, first-person, female/male, and addon variants) in preview-workbench.html, then re-save those source NIFs into a supported Skyrim layout before re-running so linked armor families stop falling back on unsupported geometry reads.",
+            "missing-conversion-quality-report" =>
+                "Re-run the conversion and confirm conversion-quality.json is present before release so the validation score, issue list, and next-action guidance remain available outside the app.",
+            "missing-skeleton-compatibility-report" =>
+                "Re-run the conversion and confirm skeleton-compatibility.json is present before release so skeleton requirements and unsupported-bone warnings remain reviewable.",
             "missing-staged-cbpc-config" =>
                 "Re-run the conversion or copy the generated cbpc-config.xml into SKSE/Plugins/CBPCSystem, then confirm the staged mod output contains the expected CBPC config before packaging.",
             "missing-staged-smp-config" =>
@@ -328,6 +332,14 @@ internal static class ConversionValidationGuidance
             "zip-missing-readme" or
             "zip-missing-fomod-module-config" or
             "zip-missing-fomod-info" or
+            "zip-missing-dependency-map" or
+            "zip-missing-conversion-quality-report" or
+            "zip-missing-skeleton-compatibility-report" or
+            "zip-missing-pose-report" or
+            "zip-missing-world-physics-report" or
+            "zip-missing-preview-svg" or
+            "zip-missing-preview-html" or
+            "zip-missing-preview-workbench" or
             "zip-missing-staged-cbpc-config" or
             "zip-missing-staged-smp-config" or
             "zip-missing-root-plugin" or
@@ -14719,6 +14731,10 @@ internal sealed class LocalExportService(
             "README.txt was not generated, so install guidance and manual follow-up notes are missing.");
         AddMissingFileIssue("dependency-map.json", "missing-dependency-map", "medium",
             "dependency-map.json was not generated, so required source assets and plugin dependencies are not summarized.");
+        AddMissingFileIssue("conversion-quality.json", "missing-conversion-quality-report", "medium",
+            "conversion-quality.json was not generated, so the validation score, issue list, and machine-readable review data are missing.");
+        AddMissingFileIssue("skeleton-compatibility.json", "missing-skeleton-compatibility-report", "medium",
+            "skeleton-compatibility.json was not generated, so skeleton requirements and unsupported-bone diagnostics are missing.");
         AddMissingFileIssue("pose-simulation-report.json", "missing-pose-report", "low",
             "pose-simulation-report.json was not generated, so post-conversion pose-risk review data is missing.");
         AddMissingFileIssue("world-physics.json", "missing-world-physics-report", "low",
@@ -14881,6 +14897,70 @@ internal sealed class LocalExportService(
                             "zip-missing-readme",
                             "medium",
                             "The distributable ZIP is missing README.txt, so install guidance is absent from the packaged archive."));
+                    }
+
+                    if (!ZipContains("dependency-map.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-dependency-map",
+                            "medium",
+                            "The distributable ZIP is missing dependency-map.json, so required source assets and plugin dependencies are not summarized in the packaged archive."));
+                    }
+
+                    if (!ZipContains("conversion-quality.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-conversion-quality-report",
+                            "medium",
+                            "The distributable ZIP is missing conversion-quality.json, so packaged validation scores and issue details are unavailable."));
+                    }
+
+                    if (!ZipContains("skeleton-compatibility.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-skeleton-compatibility-report",
+                            "medium",
+                            "The distributable ZIP is missing skeleton-compatibility.json, so packaged skeleton requirements and unsupported-bone diagnostics are unavailable."));
+                    }
+
+                    if (!ZipContains("pose-simulation-report.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-pose-report",
+                            "low",
+                            "The distributable ZIP is missing pose-simulation-report.json, so packaged pose-risk review data is unavailable."));
+                    }
+
+                    if (!ZipContains("world-physics.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-world-physics-report",
+                            "low",
+                            "The distributable ZIP is missing world-physics.json, so packaged world/drop guidance is unavailable."));
+                    }
+
+                    if (!ZipContains("preview.svg"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-svg",
+                            "low",
+                            "The distributable ZIP is missing preview.svg, so the packaged static preview render is unavailable."));
+                    }
+
+                    if (!ZipContains("preview.html"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-html",
+                            "low",
+                            "The distributable ZIP is missing preview.html, so the packaged interactive preview is unavailable."));
+                    }
+
+                    if (!ZipContains("preview-workbench.html"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-workbench",
+                            "low",
+                            "The distributable ZIP is missing preview-workbench.html, so the packaged side-by-side review workbench is unavailable."));
                     }
 
                     if (!ZipContains("fomod/ModuleConfig.xml"))
