@@ -5781,12 +5781,15 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         string targetBody,
         CancellationToken cancellationToken)
     {
+        static string BuildResolvedFormKey(string? pluginFileName, uint localFormId) =>
+            $"{Path.GetFileName(pluginFileName)?.Trim() ?? string.Empty}|{localFormId:X8}";
+
         var addonByResolvedKey = pluginAnalysis.ArmorAddons
             .Where(static addon => addon.FormId != 0)
             .Select(addon => new
             {
                 Addon = addon,
-                Key = BuildResolvedPluginFormKey(
+                Key = BuildResolvedFormKey(
                     addon.OwningPluginFileName,
                     addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
             })
@@ -5837,7 +5840,7 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             var linkedAddons = new List<PluginArmorAddon>();
             foreach (var linkedReference in GetLinkedReferences(armorRecord))
             {
-                var linkedKey = BuildResolvedPluginFormKey(
+                var linkedKey = BuildResolvedFormKey(
                     linkedReference.OwningPluginFileName,
                     linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
                 if (addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
