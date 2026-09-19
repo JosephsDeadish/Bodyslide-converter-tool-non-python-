@@ -2384,6 +2384,58 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains(report.Warnings, warning => warning.Contains("Argonian variant", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Theory]
+    [InlineData("Goat Humanoid", "NamiraGoatFollowerAddon", "meshes/armor/goat/horn_collar_0.nif", "Goat variant")]
+    [InlineData("Hagraven", "HagravenWingHarnessAddon", "meshes/armor/hagraven/feather_wrap_0.nif", "Hagraven variant")]
+    [InlineData("Spriggan", "SprigganRootsArmorAddon", "meshes/armor/spriggan/bark_wrap_0.nif", "Spriggan variant")]
+    public async Task BasicRaceCompatibilityService_AllowsUncommonCreatureVariantOnMatchingBody(
+        string targetBody,
+        string editorId,
+        string meshPath,
+        string expectedVariant)
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["creature-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [meshPath], 0x100, editorId, [32, 40]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, targetBody, CancellationToken.None);
+
+        Assert.True(RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, [meshPath], out var inferredRace));
+        Assert.Equal(expectedVariant, inferredRace.Name);
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+        Assert.Empty(report.Warnings);
+    }
+
+    [Theory]
+    [InlineData("HorseFollowerArmorAddon", "meshes/armor/horse/hoof_boots_0.nif", "Equine variant")]
+    [InlineData("AvianWingedFollowerAddon", "meshes/armor/avian/feather_wrap_0.nif", "Avian variant")]
+    public async Task BasicRaceCompatibilityService_WarnsForUncommonVariantInferenceOnVanillaBeastBody(
+        string editorId,
+        string meshPath,
+        string expectedVariant)
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["beast-follower.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [meshPath], 0x100, editorId, [32, 40]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+        Assert.Contains(report.Warnings, warning => warning.Contains(expectedVariant, StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public async Task BasicRaceCompatibilityService_ReturnsCompatibleWhenNoRaceFormIds()
     {

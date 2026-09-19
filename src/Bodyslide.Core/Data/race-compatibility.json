@@ -31,9 +31,9 @@
     { "body": "Vanilla", "compatibleGroups": ["humanoid", "beast"], "warningGroups": [] },
     {
       "body": "Vanilla Beast",
-      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
-      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
-      "warningMessage": "tail, paw/foot, and race-variant rigging should still be verified in-game."
+      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed"],
+      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed"],
+      "warningMessage": "tail, paw/foot, hoof, wing, horn, and race-variant rigging should still be verified in-game."
     },
     {
       "body": "Goat Humanoid",
@@ -63,6 +63,36 @@
       "groups": ["beast", "argonian", "reptile", "tail"],
       "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard"],
       "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "tail"]
+    },
+    {
+      "name": "Goat variant",
+      "groups": ["beast", "goat", "horned", "hoofed"],
+      "editorIdHints": ["goat", "satyr", "faun", "ramhorn", "cloven"],
+      "meshPathHints": ["goat", "satyr", "faun", "horn", "hoof", "cloven"]
+    },
+    {
+      "name": "Hagraven variant",
+      "groups": ["beast", "hagraven", "winged", "avian"],
+      "editorIdHints": ["hagraven", "hagravenrace", "hag raven"],
+      "meshPathHints": ["hagraven", "wing", "feather", "pinion"]
+    },
+    {
+      "name": "Spriggan variant",
+      "groups": ["beast", "spriggan", "horned"],
+      "editorIdHints": ["spriggan", "briar", "nature spirit", "treefolk"],
+      "meshPathHints": ["spriggan", "briar", "roots", "bark", "branches"]
+    },
+    {
+      "name": "Equine variant",
+      "groups": ["beast", "equine", "hoofed"],
+      "editorIdHints": ["horse", "mare", "pony", "equine", "centaur"],
+      "meshPathHints": ["horse", "mane", "hoof", "equine", "centaur"]
+    },
+    {
+      "name": "Avian variant",
+      "groups": ["beast", "avian", "winged"],
+      "editorIdHints": ["avian", "harpy", "bird", "ravenwing"],
+      "meshPathHints": ["avian", "wing", "feather", "bird", "pinion"]
     }
   ]
 }
