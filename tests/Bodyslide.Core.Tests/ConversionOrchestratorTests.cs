@@ -421,6 +421,30 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task NifGeometrySignatureReader_UnsupportedNiLinesTokenStub_ReportsGeometryFamily()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "nilines_stub.nif");
+        await SyntheticNifTestData.WriteUnsupportedGeometryTokenStubAsync(inputFile, "NiLinesData", prefixPadding: 32);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("unsupported", report.Status);
+            Assert.Equal("unreadable-geometry", report.ParseMode);
+            Assert.Contains("geometry-family:NiLinesData", report.Warnings ?? []);
+            Assert.Contains("manual-review-required", report.Warnings ?? []);
+            Assert.Null(NifGeometrySignatureReader.TryRead(inputFile));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInTarGzArchive()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2311,6 +2335,53 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForKhajiitVariantInferredFromEditorId()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-vampire-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/khajiit/boots_0.nif"],
+                    0x100,
+                    "KhajiitRaceVampireBootsAddon",
+                    [37]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("Khajiit variant", report.IncompatibleRaces);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Khajiit variant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForArgonianVariantInferenceOnVanillaBeastBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["argonian-follower.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/argonian/scales_0.nif"],
+                    0x100,
+                    "ArgonianRaceVampireFollowerAddon",
+                    [32, 40]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Argonian variant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BasicRaceCompatibilityService_ReturnsCompatibleWhenNoRaceFormIds()
     {
         var service = new BasicRaceCompatibilityService();
@@ -3562,6 +3633,20 @@ internal static class SyntheticNifTestData
             writer.Write(u);
             writer.Write(v);
         }
+    }
+
+    public static async Task WriteUnsupportedGeometryTokenStubAsync(
+        string path,
+        string geometryToken,
+        int prefixPadding = 24)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[Math.Max(24, prefixPadding)]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        writer.Write(new byte[32]);
     }
 
     public static async Task WriteBlockGraphStyleAsync(
@@ -8975,6 +9060,38 @@ public sealed class RealisticModPackFixtureTests
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
             Assert.Contains("BSSubIndexTriShape", previewHtml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureNiLinesModPackDirectory_FlagsUnsupportedLineFamilyInDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureNiLinesModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("NiLinesData", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("NiLinesData", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("geometry-family", previewHtml, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

@@ -257,7 +257,7 @@ internal static class ConversionValidationGuidance
             "bodyslide-incompatible" =>
                 "Open conversion-quality.json, verify the target body has compatible BodySlide slider support for this outfit, and re-run with slider export disabled or with matching BodySlide OSP/TRI/BSD/reference assets before release.",
             "unsupported-nif-layout" =>
-                "Open preview-workbench.html and conversion-quality.json to identify the listed mesh, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
+                "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "heuristic-nif-read" =>
                 "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
             "incomplete-source-fallback" =>
@@ -281,7 +281,7 @@ internal static class ConversionValidationGuidance
             "missing-normal-maps" =>
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
-                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/beast races have matching body meshes, skeleton variants, and dedicated addon records before release.",
+                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
             "plugin-rewrite-ambiguous-filename" or
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
@@ -299,7 +299,7 @@ internal static class ConversionValidationGuidance
             "plugin-patch-master-order-mismatch" =>
                 "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
             "plugin-link-unsupported-nif-layout" =>
-                "Identify the linked ARMA meshes called out in conversion-quality.json or plugin-patches.json, re-save those source NIFs into a supported Skyrim layout, then re-run so linked armor families stop falling back on unsupported geometry reads.",
+                "Identify the linked ARMA meshes called out in conversion-quality.json or plugin-patches.json, compare the whole linked family (world, first-person, female/male, and addon variants) in preview-workbench.html, then re-save those source NIFs into a supported Skyrim layout before re-running so linked armor families stop falling back on unsupported geometry reads.",
             "missing-staged-cbpc-config" =>
                 "Re-run the conversion or copy the generated cbpc-config.xml into SKSE/Plugins/CBPCSystem, then confirm the staged mod output contains the expected CBPC config before packaging.",
             "missing-staged-smp-config" =>
@@ -5503,18 +5503,38 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         string targetBody,
         CancellationToken cancellationToken)
     {
-        // Collect all race FormIDs referenced by ARMA or ARMO records.
-        var referencedFormIds = pluginAnalysis.ArmorAddons
-            .Where(a => a.RaceFormId is not null)
-            .Select(a => a.RaceFormId!.Value)
-            .Concat(
-                (pluginAnalysis.ArmorRecords ?? [])
-                    .Where(r => r.RaceFormId is not null)
-                    .Select(r => r.RaceFormId!.Value))
-            .Distinct()
-            .ToList();
+        var referencedRaces = new List<RaceCompatibilityRace>();
+        var seenRaceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (referencedFormIds.Count == 0)
+        void AddReferencedRace(uint? formId, string? editorId, IReadOnlyList<string>? meshPaths)
+        {
+            RaceCompatibilityRace? race = null;
+            if (formId is uint rawFormId && RaceCompatibilityCatalog.TryGetRace(rawFormId, out var explicitRace))
+            {
+                race = explicitRace;
+            }
+            else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, out var inferredRace))
+            {
+                race = inferredRace;
+            }
+
+            if (race is not null && seenRaceNames.Add(race.Name))
+            {
+                referencedRaces.Add(race);
+            }
+        }
+
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            AddReferencedRace(addon.RaceFormId, addon.EditorId, addon.DetectedMeshPaths);
+        }
+
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            AddReferencedRace(armorRecord.RaceFormId, armorRecord.EditorId, armorRecord.DetectedMeshPaths);
+        }
+
+        if (referencedRaces.Count == 0)
         {
             return Task.FromResult(new RaceCompatibilityReport(true, [], []));
         }
@@ -5523,13 +5543,8 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         var warnings = new List<string>();
         var hasRule = RaceCompatibilityCatalog.TryGetBodyRule(targetBody, out var targetRule);
 
-        foreach (var formId in referencedFormIds)
+        foreach (var race in referencedRaces)
         {
-            if (!RaceCompatibilityCatalog.TryGetRace(formId, out var race))
-            {
-                continue;
-            }
-
             if (!hasRule)
             {
                 continue;

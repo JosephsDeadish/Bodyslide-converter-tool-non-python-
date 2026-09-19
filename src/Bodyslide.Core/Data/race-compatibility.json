@@ -9,8 +9,8 @@
     { "name": "BosmerRace", "formId": "0x00013748", "groups": ["humanoid"] },
     { "name": "DunmerRace", "formId": "0x00013749", "groups": ["humanoid"] },
     { "name": "OrcRace", "formId": "0x0001397A", "groups": ["humanoid"] },
-    { "name": "KhajiitRace", "formId": "0x00023FE9", "groups": ["beast"] },
-    { "name": "ArgonianRace", "formId": "0x00013BB9", "groups": ["beast"] }
+    { "name": "KhajiitRace", "formId": "0x00023FE9", "groups": ["beast", "khajiit", "feline", "digitigrade"] },
+    { "name": "ArgonianRace", "formId": "0x00013BB9", "groups": ["beast", "argonian", "reptile", "tail"] }
   ],
   "bodyRules": [
     { "body": "CBBE", "compatibleGroups": ["humanoid"], "warningGroups": [] },
@@ -31,24 +31,38 @@
     { "body": "Vanilla", "compatibleGroups": ["humanoid", "beast"], "warningGroups": [] },
     {
       "body": "Vanilla Beast",
-      "compatibleGroups": ["humanoid", "beast"],
-      "warningGroups": ["beast"],
-      "warningMessage": "tail and paw/foot rigging should still be verified in-game."
+      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
+      "warningGroups": ["beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
+      "warningMessage": "tail, paw/foot, and race-variant rigging should still be verified in-game."
     },
     {
       "body": "Goat Humanoid",
-      "compatibleGroups": ["humanoid", "beast"],
+      "compatibleGroups": ["humanoid", "beast", "goat", "horned"],
       "warningGroups": []
     },
     {
       "body": "Hagraven",
-      "compatibleGroups": ["humanoid", "beast"],
+      "compatibleGroups": ["humanoid", "beast", "hagraven", "winged"],
       "warningGroups": []
     },
     {
       "body": "Spriggan",
-      "compatibleGroups": ["humanoid", "beast"],
+      "compatibleGroups": ["humanoid", "beast", "spriggan", "horned"],
       "warningGroups": []
+    }
+  ],
+  "inferenceRules": [
+    {
+      "name": "Khajiit variant",
+      "groups": ["beast", "khajiit", "feline", "digitigrade"],
+      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay"],
+      "meshPathHints": ["khajiit", "senche", "cathay", "feline", "digitigrade"]
+    },
+    {
+      "name": "Argonian variant",
+      "groups": ["beast", "argonian", "reptile", "tail"],
+      "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard"],
+      "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "tail"]
     }
   ]
 }

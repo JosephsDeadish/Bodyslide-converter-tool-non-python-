@@ -10,6 +10,11 @@ internal sealed record RaceCompatibilityBodyRule(
     IReadOnlyList<string> CompatibleGroups,
     IReadOnlyList<string> WarningGroups,
     string? WarningMessage);
+internal sealed record RaceCompatibilityInferenceRule(
+    string Name,
+    IReadOnlyList<string> Groups,
+    IReadOnlyList<string> EditorIdHints,
+    IReadOnlyList<string> MeshPathHints);
 
 internal static class RaceCompatibilityCatalog
 {
@@ -42,6 +47,48 @@ internal static class RaceCompatibilityCatalog
         return Data.Value.BodyRules.TryGetValue(canonicalBody, out rule!);
     }
 
+    public static bool TryInferRaceFromContext(
+        string? editorId,
+        IReadOnlyList<string>? meshPaths,
+        out RaceCompatibilityRace race)
+    {
+        race = default!;
+        var normalizedEditorId = NormalizeHintSource(editorId);
+        var normalizedMeshPaths = meshPaths?
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeHintSource)
+            .ToArray() ?? [];
+
+        if (string.IsNullOrWhiteSpace(normalizedEditorId) && normalizedMeshPaths.Length == 0)
+        {
+            return false;
+        }
+
+        RaceCompatibilityInferenceRule? bestRule = null;
+        var bestScore = 0;
+        foreach (var rule in Data.Value.InferenceRules)
+        {
+            var score = ScoreInferenceRule(rule, normalizedEditorId, normalizedMeshPaths);
+            if (score > bestScore)
+            {
+                bestRule = rule;
+                bestScore = score;
+            }
+            else if (score > 0 && score == bestScore)
+            {
+                bestRule = null;
+            }
+        }
+
+        if (bestRule is null || bestScore <= 0)
+        {
+            return false;
+        }
+
+        race = new RaceCompatibilityRace(bestRule.Name, 0u, bestRule.Groups);
+        return true;
+    }
+
     private static RaceCompatibilityCatalogData Load()
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName)
@@ -57,11 +104,15 @@ internal static class RaceCompatibilityCatalog
         var bodyRules = (dto.BodyRules ?? [])
             .Select(NormalizeBodyRule)
             .ToDictionary(static rule => rule.Body, StringComparer.OrdinalIgnoreCase);
+        var inferenceRules = (dto.InferenceRules ?? [])
+            .Select(NormalizeInferenceRule)
+            .ToArray();
 
         return new RaceCompatibilityCatalogData(
             races.ToDictionary(static race => race.FormId),
             races.ToDictionary(static race => race.Name, StringComparer.OrdinalIgnoreCase),
-            bodyRules);
+            bodyRules,
+            inferenceRules);
     }
 
     private static RaceCompatibilityRace NormalizeRace(RaceCompatibilityRaceDto dto)
@@ -96,6 +147,20 @@ internal static class RaceCompatibilityCatalog
             string.IsNullOrWhiteSpace(dto.WarningMessage) ? null : dto.WarningMessage.Trim());
     }
 
+    private static RaceCompatibilityInferenceRule NormalizeInferenceRule(RaceCompatibilityInferenceRuleDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new InvalidOperationException("Race compatibility metadata contained an inference rule without a name.");
+        }
+
+        return new RaceCompatibilityInferenceRule(
+            dto.Name.Trim(),
+            NormalizeStringList(dto.Groups),
+            NormalizeStringList(dto.EditorIdHints),
+            NormalizeStringList(dto.MeshPathHints));
+    }
+
     private static uint ParseFormId(string value)
     {
         var trimmed = value.Trim();
@@ -114,15 +179,47 @@ internal static class RaceCompatibilityCatalog
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray() ?? [];
 
+    private static int ScoreInferenceRule(
+        RaceCompatibilityInferenceRule rule,
+        string? normalizedEditorId,
+        IReadOnlyList<string> normalizedMeshPaths)
+    {
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(normalizedEditorId))
+        {
+            score += rule.EditorIdHints
+                .Where(hint => normalizedEditorId.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() * 4;
+        }
+
+        foreach (var meshPath in normalizedMeshPaths)
+        {
+            score += rule.MeshPathHints
+                .Where(hint => meshPath.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+        }
+
+        return score;
+    }
+
+    private static string NormalizeHintSource(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().Replace('\\', '/');
+
     private sealed record RaceCompatibilityCatalogData(
         IReadOnlyDictionary<uint, RaceCompatibilityRace> RacesByFormId,
         IReadOnlyDictionary<string, RaceCompatibilityRace> RacesByName,
-        IReadOnlyDictionary<string, RaceCompatibilityBodyRule> BodyRules);
+        IReadOnlyDictionary<string, RaceCompatibilityBodyRule> BodyRules,
+        IReadOnlyList<RaceCompatibilityInferenceRule> InferenceRules);
 
     private sealed class RaceCompatibilityCatalogDto
     {
         public RaceCompatibilityRaceDto[]? Races { get; init; }
         public RaceCompatibilityBodyRuleDto[]? BodyRules { get; init; }
+        public RaceCompatibilityInferenceRuleDto[]? InferenceRules { get; init; }
     }
 
     private sealed class RaceCompatibilityRaceDto
@@ -138,5 +235,13 @@ internal static class RaceCompatibilityCatalog
         public string[]? CompatibleGroups { get; init; }
         public string[]? WarningGroups { get; init; }
         public string? WarningMessage { get; init; }
+    }
+
+    private sealed class RaceCompatibilityInferenceRuleDto
+    {
+        public string? Name { get; init; }
+        public string[]? Groups { get; init; }
+        public string[]? EditorIdHints { get; init; }
+        public string[]? MeshPathHints { get; init; }
     }
 }

@@ -89,6 +89,28 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_DeepensRaceAndUnsupportedNifGuidance()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            39,
+            3,
+            0,
+            0,
+            [
+                new ConversionValidationIssue("unsupported-nif-layout", "high", "Source mesh used an unsupported NIF layout."),
+                new ConversionValidationIssue("race-compatibility-warning", "high", "Race-specific compatibility needs review."),
+                new ConversionValidationIssue("plugin-link-unsupported-nif-layout", "high", "Linked ARMA mesh used an unsupported NIF layout."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Vanilla Beast", maxActions: 6);
+
+        Assert.Contains(actions, action => action.Contains("geometry-family", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("vampire/child", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("world, first-person, female/male", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPartialOutputAndMasterChainCases()
     {
         var summary = new ConversionValidationSummary(
