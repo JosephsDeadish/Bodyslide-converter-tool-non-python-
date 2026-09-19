@@ -1084,7 +1084,7 @@ public sealed class MainForm : Form
             var settingsPath = GetThemeSettingsPath();
             if (!File.Exists(settingsPath))
             {
-                return UiTheme.Dark;
+                return GetSystemPreferredTheme();
             }
 
             var json = File.ReadAllText(settingsPath);
@@ -1100,7 +1100,7 @@ public sealed class MainForm : Form
         {
         }
 
-        return UiTheme.Dark;
+        return GetSystemPreferredTheme();
     }
 
     private void SaveThemePreference(UiTheme theme)
@@ -1128,6 +1128,13 @@ public sealed class MainForm : Form
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SlideSmith",
             "ui-settings.json");
+
+    private static UiTheme GetSystemPreferredTheme()
+    {
+        var background = SystemColors.Window;
+        var luminance = ((background.R * 0.2126) + (background.G * 0.7152) + (background.B * 0.0722)) / 255d;
+        return luminance < 0.5d ? UiTheme.Dark : UiTheme.Light;
+    }
 
     private void PopulateCatalogTab()
     {

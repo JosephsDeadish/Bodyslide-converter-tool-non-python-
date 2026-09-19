@@ -653,8 +653,19 @@ static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult 
                 PropertyNameCaseInsensitive = true,
             });
     }
-    catch
+    catch (JsonException ex)
     {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
         return null;
     }
 }

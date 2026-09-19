@@ -5516,12 +5516,13 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         string targetBody,
         CancellationToken cancellationToken)
     {
-        var referencedRaces = new List<RaceCompatibilityRace>();
+        var referencedRaces = new List<(RaceCompatibilityRace Race, bool IsInferred)>();
         var seenRaceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void AddReferencedRace(uint? formId, string? editorId, IReadOnlyList<string>? meshPaths)
         {
             RaceCompatibilityRace? race = null;
+            var isInferred = false;
             if (formId is uint rawFormId && RaceCompatibilityCatalog.TryGetRace(rawFormId, out var explicitRace))
             {
                 race = explicitRace;
@@ -5529,11 +5530,12 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, out var inferredRace))
             {
                 race = inferredRace;
+                isInferred = true;
             }
 
             if (race is not null && seenRaceNames.Add(race.Name))
             {
-                referencedRaces.Add(race);
+                referencedRaces.Add((race, isInferred));
             }
         }
 
@@ -5556,8 +5558,9 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         var warnings = new List<string>();
         var hasRule = RaceCompatibilityCatalog.TryGetBodyRule(targetBody, out var targetRule);
 
-        foreach (var race in referencedRaces)
+        foreach (var referencedRace in referencedRaces)
         {
+            var race = referencedRace.Race;
             if (!hasRule)
             {
                 continue;
@@ -5571,7 +5574,8 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
                 continue;
             }
 
-            var shouldWarn = !string.IsNullOrWhiteSpace(targetRule.WarningMessage) &&
+            var shouldWarn = referencedRace.IsInferred &&
+                !string.IsNullOrWhiteSpace(targetRule.WarningMessage) &&
                 race.Groups.Any(group => targetRule.WarningGroups.Contains(group, StringComparer.OrdinalIgnoreCase));
             if (shouldWarn)
             {

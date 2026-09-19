@@ -7,14 +7,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        RegisterGlobalExceptionHandlers();
+
         if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
         {
             return RunSmokeTest();
         }
-
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += OnThreadException;
-        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
 
         try
         {
@@ -27,6 +25,13 @@ internal static class Program
             ShowFatalError(ex);
             return 1;
         }
+    }
+
+    private static void RegisterGlobalExceptionHandlers()
+    {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += OnThreadException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
     }
 
     private static int RunSmokeTest()

@@ -2434,7 +2434,7 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
-        Assert.NotEmpty(report.Warnings);
+        Assert.Empty(report.Warnings);
     }
 
     // ── Gap 3: Parallel batch conversion ─────────────────────────────────────

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 
 namespace Bodyslide.Core;
@@ -87,21 +88,21 @@ internal static class BsdMorphReader
         }
 
         var offset = 4;
-        var version = BitConverter.ToUInt16(bytes[offset..(offset + 2)]); offset += 2;
+        var version = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]); offset += 2;
         if (version == 0)
         {
             return false;
         }
 
         var isHighWeight = bytes[offset++] != 0;
-        var nameLength = BitConverter.ToUInt16(bytes[offset..(offset + 2)]); offset += 2;
+        var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]); offset += 2;
         if (offset + nameLength + 4 > bytes.Length)
         {
             return false;
         }
 
         var sliderName = Encoding.UTF8.GetString(bytes[offset..(offset + nameLength)]); offset += nameLength;
-        var vertexCount = (int)BitConverter.ToUInt32(bytes[offset..(offset + 4)]); offset += 4;
+        var vertexCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
         if (vertexCount <= 0 || vertexCount > 250_000)
         {
             return false;
@@ -116,9 +117,9 @@ internal static class BsdMorphReader
         var deltas = new (float X, float Y, float Z)[vertexCount];
         for (var i = 0; i < vertexCount; i++)
         {
-            var x = BitConverter.ToSingle(bytes[offset..(offset + 4)]); offset += 4;
-            var y = BitConverter.ToSingle(bytes[offset..(offset + 4)]); offset += 4;
-            var z = BitConverter.ToSingle(bytes[offset..(offset + 4)]); offset += 4;
+            var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+            var y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+            var z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
             deltas[i] = (x, y, z);
         }
 
@@ -168,8 +169,8 @@ internal static class TriMorphReader
         }
 
         var offset = 8;
-        var vertexCount = (int)BitConverter.ToUInt32(bytes[offset..(offset + 4)]); offset += 4;
-        var morphCount = (int)BitConverter.ToUInt32(bytes[offset..(offset + 4)]); offset += 4;
+        var vertexCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
+        var morphCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
         if (vertexCount <= 0 || vertexCount > 250_000 || morphCount <= 0 || morphCount > 10_000)
         {
             return false;
@@ -184,7 +185,7 @@ internal static class TriMorphReader
                 return false;
             }
 
-            var nameLength = BitConverter.ToUInt16(bytes[offset..(offset + 2)]); offset += 2;
+            var nameLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]); offset += 2;
             if (offset + nameLength + 4 > bytes.Length)
             {
                 return false;
@@ -192,7 +193,7 @@ internal static class TriMorphReader
 
             names.Add(Encoding.UTF8.GetString(bytes[offset..(offset + nameLength)]));
             offset += nameLength;
-            counts.Add((int)BitConverter.ToUInt32(bytes[offset..(offset + 4)]));
+            counts.Add((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]));
             offset += 4;
         }
 
@@ -214,9 +215,9 @@ internal static class TriMorphReader
             var deltas = new (float X, float Y, float Z)[deltaCount];
             for (var j = 0; j < deltaCount; j++)
             {
-                var x = BitConverter.ToInt16(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
-                var y = BitConverter.ToInt16(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
-                var z = BitConverter.ToInt16(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                var z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
                 deltas[j] = (x, y, z);
             }
 

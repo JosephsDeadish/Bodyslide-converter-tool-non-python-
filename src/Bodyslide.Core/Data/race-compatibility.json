@@ -32,7 +32,7 @@
     {
       "body": "Vanilla Beast",
       "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
-      "warningGroups": ["beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
+      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
       "warningMessage": "tail, paw/foot, and race-variant rigging should still be verified in-game."
     },
     {
