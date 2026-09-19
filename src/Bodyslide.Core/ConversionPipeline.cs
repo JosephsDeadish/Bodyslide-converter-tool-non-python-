@@ -18795,6 +18795,11 @@ internal sealed class LocalExportService(
                         continue;
                     }
 
+                    if (morphTransferContext.TargetTransferAmbiguity[neighborIndex] + 0.05f >= ambiguity)
+                    {
+                        continue;
+                    }
+
                     var delta = retargetedDeltas[neighborIndex];
                     averageX += delta.X;
                     averageY += delta.Y;
@@ -18804,7 +18809,24 @@ internal sealed class LocalExportService(
 
                 if (sampleCount == 0)
                 {
-                    continue;
+                    foreach (var neighborIndex in neighbors)
+                    {
+                        if (neighborIndex < 0 || neighborIndex >= retargetedDeltas.Count)
+                        {
+                            continue;
+                        }
+
+                        var delta = retargetedDeltas[neighborIndex];
+                        averageX += delta.X;
+                        averageY += delta.Y;
+                        averageZ += delta.Z;
+                        sampleCount++;
+                    }
+
+                    if (sampleCount == 0)
+                    {
+                        continue;
+                    }
                 }
 
                 averageX /= sampleCount;

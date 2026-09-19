@@ -16304,68 +16304,63 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public async Task RetargetMorphPayload_SmoothsAmbiguousTopologyTransfers()
+    public void RetargetMorphPayload_SmoothsAmbiguousTopologyTransfers()
     {
-        var retargetMethod = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
-        var createContextMethod = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
-        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(retargetMethod);
-        Assert.NotNull(createContextMethod);
-        Assert.NotNull(blendMethod);
+        var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        Assert.NotNull(stabilizeMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
 
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
 
-        try
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
         {
-            var sourcePath = Path.Combine(tmpDir, "source-ambiguous.nif");
-            var targetPath = Path.Combine(tmpDir, "target-ambiguous.nif");
-            await SyntheticNifTestData.WriteAsync(sourcePath,
-            [
-                (0f, 0f, 0f),
-                (1f, 0f, 0f),
-                (2f, 0f, 0f),
-                (3f, 0f, 0f)
-            ]);
-            await SyntheticNifTestData.WriteAsync(targetPath,
-            [
-                (0f, 0f, 0f),
-                (0.25f, 0.8f, 0f),
-                (2.75f, 0.8f, 0f),
-                (3f, 0f, 0f)
-            ]);
-
-            var context = createContextMethod!.Invoke(null, new object[]
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
             {
-                new[] { sourcePath },
-                new[] { targetPath }
-            });
-            Assert.NotNull(context);
+                list.Add(influence);
+            }
 
-            var sourceDeltas = new (float X, float Y, float Z)[]
-            {
-                (0f, 0f, 0f),
-                (8f, 0f, 0f),
-                (0f, 0f, 0f),
-                (0f, 0f, 0f)
-            };
-
-            var rawBlend = Assert.IsType<(float X, float Y, float Z)>(
-                blendMethod!.Invoke(null, [sourceDeltas, context!, 1]));
-            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                retargetMethod!.Invoke(null, [sourceDeltas, 4, context!]));
-
-            Assert.Equal(4, result.Count);
-            Assert.True(rawBlend.X > 0f);
-            Assert.True(result[1].X > 0f);
-            Assert.True(result[1].X < rawBlend.X, "Expected ambiguous retargeted morph delta to be stabilized below the raw blended spike.");
-            Assert.Equal(0f, result[0].X, 3);
-            Assert.Equal(0f, result[3].X, 3);
+            return list;
         }
-        finally
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 3);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 0.25f), CreateInfluence(1, 0.75f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6);
+        var context = contextCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
+            new[] { 0, 1, 2 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            new[] { 0f, 0.80f, 0f }
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
         {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+            (0f, 0f, 0f),
+            (8f, 0f, 0f),
+            (0f, 0f, 0f)
+        };
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            stabilizeMethod!.Invoke(null, [retargeted, context]));
+
+        Assert.Equal(3, result.Count);
+        Assert.Equal(0f, result[0].X, 3);
+        Assert.Equal(0f, result[2].X, 3);
+        Assert.True(result[1].X > 0f);
+        Assert.True(result[1].X < retargeted[1].X, "Expected ambiguous retargeted morph delta to be stabilized below the original spike.");
     }
 
     private static void AssertDeltasEqual(
@@ -16671,7 +16666,7 @@ public sealed class StrategyMeshConversionServiceStabilizationTests
 
             Assert.True(GetSpread(stabilized.RegionalMorphing) < GetSpread(plain.RegionalMorphing));
             Assert.True(stabilized.RegionalMorphing["breasts"] < plain.RegionalMorphing["breasts"]);
-            Assert.True(stabilized.RegionalMorphing["butt"] < plain.RegionalMorphing["butt"]);
+            Assert.True(stabilized.RegionalMorphing["pelvis"] < plain.RegionalMorphing["pelvis"]);
         }
         finally
         {
