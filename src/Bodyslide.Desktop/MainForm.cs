@@ -36,6 +36,7 @@ public sealed class MainForm : Form
     private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
     private readonly Button _openReportButton;
+    private readonly Button _openGuidanceTargetButton;
     private readonly Button _openArtifactButton;
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
@@ -115,6 +116,8 @@ public sealed class MainForm : Form
         Color Border,
         Color WarningBackground,
         Color WarningForeground);
+
+    private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
 
     public MainForm()
     {
@@ -645,6 +648,15 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 0, 8, 0),
         };
         _openReportButton.Click += (_, _) => OpenSelectedReport();
+        _openGuidanceTargetButton = new Button
+        {
+            Text = "Open next action",
+            Width = 125,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _openGuidanceTargetButton.Click += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _openArtifactButton = new Button
         {
             Text = "Open file",
@@ -710,6 +722,7 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
         actionRow.Controls.Add(_openReportButton);
+        actionRow.Controls.Add(_openGuidanceTargetButton);
         actionRow.Controls.Add(_openArtifactButton);
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
@@ -803,10 +816,15 @@ public sealed class MainForm : Form
             FullRowSelect = true,
             GridLines = true,
             HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            ShowItemToolTips = true,
         };
         _guidanceListView.Columns.Add("Area", 150);
         _guidanceListView.Columns.Add("Priority", 90);
         _guidanceListView.Columns.Add("Guidance", -2);
+        _guidanceListView.SelectedIndexChanged += (_, _) => _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string targetPath &&
+            (File.Exists(targetPath) || Directory.Exists(targetPath));
+        _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
         _resultsTabControl.TabPages.Add(_guidanceTabPage);
         _reportsTabPage = new TabPage("Reports");
@@ -1012,6 +1030,10 @@ public sealed class MainForm : Form
             case ListView listView:
                 listView.BackColor = palette.SurfaceBackground;
                 listView.ForeColor = palette.Foreground;
+                if (ReferenceEquals(listView, _guidanceListView))
+                {
+                    ApplyGuidanceItemStyles(palette);
+                }
                 break;
             case Button button:
                 button.UseVisualStyleBackColor = false;
@@ -1664,6 +1686,9 @@ public sealed class MainForm : Form
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
+        _openGuidanceTargetButton.Enabled = !isBusy && _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedGuidanceTarget &&
+            (File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget));
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
         UseWaitCursor = isBusy;
         if (!isBusy)
@@ -1970,6 +1995,30 @@ public sealed class MainForm : Form
         }
     }
 
+    private void ApplyGuidanceItemStyles(UiThemePalette palette)
+    {
+        foreach (ListViewItem item in _guidanceListView.Items)
+        {
+            var priority = item.SubItems.Count > 1 ? item.SubItems[1].Text : string.Empty;
+            var severity = GetGuidancePriorityRank(priority);
+            if (severity <= 0)
+            {
+                item.BackColor = palette.SurfaceBackground;
+                item.ForeColor = palette.Foreground;
+            }
+            else if (severity >= 3)
+            {
+                item.BackColor = BlendColors(palette.WarningBackground, palette.Accent, 0.12);
+                item.ForeColor = palette.WarningForeground;
+            }
+            else
+            {
+                item.BackColor = BlendColors(palette.WarningBackground, palette.SurfaceBackground, 0.35);
+                item.ForeColor = palette.Foreground;
+            }
+        }
+    }
+
     private bool PopulateGuidanceTab(IReadOnlyList<ConversionResult> results, string? previewPath)
     {
         var outputDirectories = results
@@ -1994,13 +2043,14 @@ public sealed class MainForm : Form
     {
         var requiresReview = false;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<GuidanceEntry>();
 
         _guidanceListView.BeginUpdate();
         try
         {
             _guidanceListView.Items.Clear();
 
-            void Add(string area, string priority, string guidance)
+            void Add(string area, string priority, string guidance, string? targetPath = null)
             {
                 if (string.IsNullOrWhiteSpace(guidance) ||
                     !seen.Add($"{area}|{priority}|{guidance}"))
@@ -2008,7 +2058,7 @@ public sealed class MainForm : Form
                     return;
                 }
 
-                _guidanceListView.Items.Add(new ListViewItem([area, priority, guidance]));
+                entries.Add(new GuidanceEntry(area, priority, guidance, targetPath));
             }
 
             if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
@@ -2022,7 +2072,8 @@ public sealed class MainForm : Form
                 Add(
                     "Preview",
                     "Info",
-                    "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.");
+                    "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.",
+                    previewPath);
             }
             else
             {
@@ -2030,7 +2081,8 @@ public sealed class MainForm : Form
                 Add(
                     "Preview",
                     "Warning",
-                    "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.");
+                    "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.",
+                    outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory)));
             }
 
             foreach (var outputDirectory in outputDirectories)
@@ -2041,15 +2093,36 @@ public sealed class MainForm : Form
                 AppendGuidanceFromWorldPhysics(outputDirectory, Add, ref requiresReview);
             }
 
-            if (_guidanceListView.Items.Count == 0)
+            if (entries.Count == 0)
             {
                 Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
             }
+
+            foreach (var entry in entries
+                         .OrderByDescending(entry => GetGuidancePriorityRank(entry.Priority))
+                         .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase))
+            {
+                var item = new ListViewItem([entry.Area, entry.Priority, entry.Guidance])
+                {
+                    Tag = entry.TargetPath,
+                    ToolTipText = string.IsNullOrWhiteSpace(entry.TargetPath)
+                        ? entry.Guidance
+                        : $"{entry.Guidance}{Environment.NewLine}{entry.TargetPath}"
+                };
+                _guidanceListView.Items.Add(item);
+            }
+
+            ApplyGuidanceItemStyles(CreateThemePalette(_currentTheme));
         }
         finally
         {
             _guidanceListView.EndUpdate();
         }
+
+        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedTargetPath &&
+            (File.Exists(selectedTargetPath) || Directory.Exists(selectedTargetPath));
 
         return requiresReview;
     }
@@ -2200,6 +2273,53 @@ public sealed class MainForm : Form
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = filePath,
+            UseShellExecute = true,
+        });
+    }
+
+    private async Task OpenSelectedGuidanceTargetAsync()
+    {
+        if (_guidanceListView.SelectedItems.Count == 0)
+        {
+            return;
+        }
+
+        if (_guidanceListView.SelectedItems[0].Tag is not string targetPath ||
+            string.IsNullOrWhiteSpace(targetPath))
+        {
+            MessageBox.Show(this, "This next-action item does not have a direct file or folder to open.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (Directory.Exists(targetPath))
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = targetPath,
+                UseShellExecute = true,
+            });
+            return;
+        }
+
+        if (!File.Exists(targetPath))
+        {
+            MessageBox.Show(this, "The file for this next-action item was not found.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            PopulateGuidanceTab(GetPreferredOutputDirectoryForOpen(), _lastPreviewPath);
+            return;
+        }
+
+        if (PreviewFileCandidates.Contains(Path.GetFileName(targetPath), StringComparer.OrdinalIgnoreCase))
+        {
+            _lastPreviewPath = targetPath;
+            UpdatePathActionStates();
+            await LoadPreviewInAppAsync(targetPath);
+            _resultsTabControl.SelectedTab = _previewTabPage;
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = targetPath,
             UseShellExecute = true,
         });
     }
@@ -2526,6 +2646,9 @@ public sealed class MainForm : Form
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
+        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedGuidanceTarget &&
+            (File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget));
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
         _openCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count == 1;
         _removeCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count > 0;
@@ -3261,7 +3384,7 @@ public sealed class MainForm : Form
 
     private static void AppendGuidanceFromConversionQuality(
         string outputDirectory,
-        Action<string, string, string> add,
+        Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
@@ -3290,28 +3413,29 @@ public sealed class MainForm : Form
             add(
                 "Validation",
                 validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
-                $"Validation status: {validationSummary.Status} (score {validationSummary.Score}). Open conversion-quality.json for the full breakdown.");
+                $"Validation status: {validationSummary.Status} (score {validationSummary.Score}). Open conversion-quality.json for the full breakdown.",
+                qualityPath);
 
             foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
             {
-                add("Warning", ToDisplayPriority(issue.Severity), issue.Message);
+                add("Warning", ToDisplayPriority(issue.Severity), issue.Message, qualityPath);
             }
 
             foreach (var action in ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody, maxActions: 4))
             {
-                add("Next action", "Action", action);
+                add("Next action", "Action", action, qualityPath);
             }
         }
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}");
+            add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
         }
     }
 
     private static void AppendGuidanceFromPackValidation(
         string outputDirectory,
-        Action<string, string, string> add,
+        Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
         var reportPath = Path.Combine(outputDirectory, "armor-pack-validation.json");
@@ -3342,7 +3466,8 @@ public sealed class MainForm : Form
             add(
                 "Packaging",
                 status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
-                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.");
+                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.",
+                reportPath);
 
             if (TryGetProperty(root, "TopIssueCodes", out var topIssueCodes) && topIssueCodes.ValueKind == JsonValueKind.Array)
             {
@@ -3356,20 +3481,20 @@ public sealed class MainForm : Form
                         continue;
                     }
 
-                    add("Packaging review", count > 0 ? "Action" : "Info", guidance);
+                    add("Packaging review", count > 0 ? "Action" : "Info", guidance, reportPath);
                 }
             }
         }
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}");
+            add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}", reportPath);
         }
     }
 
     private static void AppendGuidanceFromPluginPatches(
         string outputDirectory,
-        Action<string, string, string> add,
+        Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
         var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
@@ -3393,7 +3518,8 @@ public sealed class MainForm : Form
             add(
                 "Plugin patching",
                 "Action",
-                $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.");
+                $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
+                patchPath);
 
             if (TryGetProperty(root, "PluginInstallHints", out var pluginInstallHints) && pluginInstallHints.ValueKind == JsonValueKind.Array)
             {
@@ -3411,7 +3537,8 @@ public sealed class MainForm : Form
                         add(
                             "Plugin install",
                             "Action",
-                            $"{generatedPatch} should load after {sourcePlugin}{(string.IsNullOrWhiteSpace(loadAfter) || string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : $" ({loadAfter})")}. {placement}");
+                            $"{generatedPatch} should load after {sourcePlugin}{(string.IsNullOrWhiteSpace(loadAfter) || string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : $" ({loadAfter})")}. {placement}",
+                            patchPath);
                     }
 
                     if (string.Equals(manualReview, "Yes", StringComparison.OrdinalIgnoreCase))
@@ -3419,12 +3546,13 @@ public sealed class MainForm : Form
                         add(
                             "Plugin review",
                             "Warning",
-                            $"{sourcePlugin} still needs manual xEdit review before release. {notes}");
+                            $"{sourcePlugin} still needs manual xEdit review before release. {notes}",
+                            patchPath);
                     }
                     else if (!string.IsNullOrWhiteSpace(notes) &&
                              !string.Equals(notes, "None", StringComparison.OrdinalIgnoreCase))
                     {
-                        add("Plugin notes", "Info", $"{sourcePlugin}: {notes}");
+                        add("Plugin notes", "Info", $"{sourcePlugin}: {notes}", patchPath);
                     }
                 }
             }
@@ -3442,20 +3570,21 @@ public sealed class MainForm : Form
                     add(
                         "Linked armor family",
                         string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
-                        $"{armorRecord} ({sourcePlugin}): {action ?? reason ?? "Review linked ARMA members in xEdit before release."}");
+                        $"{armorRecord} ({sourcePlugin}): {action ?? reason ?? "Review linked ARMA members in xEdit before release."}",
+                        patchPath);
                 }
             }
         }
         catch (Exception ex)
         {
             requiresReview = true;
-            add("Plugin patching", "Warning", $"Could not read plugin-patches.json: {ex.Message}");
+            add("Plugin patching", "Warning", $"Could not read plugin-patches.json: {ex.Message}", patchPath);
         }
     }
 
     private static void AppendGuidanceFromWorldPhysics(
         string outputDirectory,
-        Action<string, string, string> add,
+        Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
         var reportPath = Path.Combine(outputDirectory, "world-physics.json");
@@ -3475,7 +3604,8 @@ public sealed class MainForm : Form
                 add(
                     "World / ground mesh",
                     "Info",
-                    $"World-object mode: {mode}. Ground mesh available: {groundMeshAvailable ?? "Unknown"}. Open world-physics.json if you need exact dropped-item recommendations.");
+                    $"World-object mode: {mode}. Ground mesh available: {groundMeshAvailable ?? "Unknown"}. Open world-physics.json if you need exact dropped-item recommendations.",
+                    reportPath);
             }
 
             if (TryGetProperty(root, "Recommendations", out var recommendations) && recommendations.ValueKind == JsonValueKind.Array)
@@ -3494,7 +3624,7 @@ public sealed class MainForm : Form
                         requiresReview = true;
                     }
 
-                    add("World / ground mesh", priority, recommendation);
+                    add("World / ground mesh", priority, recommendation, reportPath);
                 }
             }
 
@@ -3505,15 +3635,24 @@ public sealed class MainForm : Form
                 add(
                     "Footwear",
                     "High",
-                    $"Detected {heelProfile} footwear. Validate heel height, toe angle, and ground contact in preview-workbench.html and world-physics.json before shipping.");
+                    $"Detected {heelProfile} footwear. Validate heel height, toe angle, and ground contact in preview-workbench.html and world-physics.json before shipping.",
+                    reportPath);
             }
         }
         catch (Exception ex)
         {
             requiresReview = true;
-            add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}");
+            add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}", reportPath);
         }
     }
+
+    private static int GetGuidancePriorityRank(string priority) =>
+        priority.Equals("High", StringComparison.OrdinalIgnoreCase) ? 4
+        : priority.Equals("Warning", StringComparison.OrdinalIgnoreCase) ? 3
+        : priority.Equals("Action", StringComparison.OrdinalIgnoreCase) ? 2
+        : priority.Equals("Medium", StringComparison.OrdinalIgnoreCase) ? 2
+        : priority.Equals("Low", StringComparison.OrdinalIgnoreCase) ? 1
+        : 0;
 
     private static string ToDisplayPriority(string severity) =>
         severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? "High"
