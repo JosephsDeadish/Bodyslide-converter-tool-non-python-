@@ -1081,9 +1081,9 @@ public sealed class MainForm : Form
 
     private UiTheme LoadThemePreference()
     {
+        var settingsPath = GetThemeSettingsPath();
         try
         {
-            var settingsPath = GetThemeSettingsPath();
             if (!File.Exists(settingsPath))
             {
                 return GetSystemPreferredTheme();
@@ -1098,8 +1098,17 @@ public sealed class MainForm : Form
                 return theme;
             }
         }
-        catch
+        catch (IOException ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"Failed to read theme preference from '{settingsPath}': {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Failed to access theme preference at '{settingsPath}': {ex.Message}");
+        }
+        catch (JsonException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Failed to parse theme preference from '{settingsPath}': {ex.Message}");
         }
 
         return GetSystemPreferredTheme();
@@ -1110,7 +1119,11 @@ public sealed class MainForm : Form
         try
         {
             var settingsPath = GetThemeSettingsPath();
-            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            var settingsDirectory = Path.GetDirectoryName(settingsPath);
+            if (!string.IsNullOrWhiteSpace(settingsDirectory))
+            {
+                Directory.CreateDirectory(settingsDirectory);
+            }
             var json = JsonSerializer.Serialize(
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
