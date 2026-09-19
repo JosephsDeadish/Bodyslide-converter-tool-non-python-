@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
@@ -197,6 +198,9 @@ try
         {
             Console.WriteLine($" - {step}");
         }
+
+        WritePostConversionGuidance(result);
+        Console.WriteLine();
     }
 }
 catch (Exception ex)
@@ -221,6 +225,76 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     {
         request = new ConversionRequest(args[0], args[1], args.Length > 2 ? args[2] : null);
         return true;
+    }
+
+    static void WritePostConversionGuidance(ConversionResult result)
+    {
+        var qualityReport = TryReadConversionQualityReport(result);
+        var validationSummary = qualityReport?.ValidationSummary;
+        if (validationSummary is null)
+        {
+            return;
+        }
+
+        Console.WriteLine(
+            $"Validation: {validationSummary.Status} " +
+            $"(score {validationSummary.Score}; " +
+            $"high {validationSummary.HighSeverityCount}, " +
+            $"medium {validationSummary.MediumSeverityCount}, " +
+            $"low {validationSummary.LowSeverityCount})");
+
+        var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3);
+        if (prioritizedIssues.Count > 0)
+        {
+            Console.WriteLine("Warnings:");
+            foreach (var issue in prioritizedIssues)
+            {
+                Console.WriteLine($" ! [{issue.Severity.ToUpperInvariant()}] {issue.Message}");
+            }
+        }
+        else if (validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("No immediate follow-up actions detected.");
+        }
+
+        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
+            validationSummary,
+            qualityReport?.TargetBody ?? "target body",
+            maxActions: 4);
+        if (followUpActions.Count > 0)
+        {
+            Console.WriteLine("Next actions:");
+            foreach (var action in followUpActions)
+            {
+                Console.WriteLine($" -> {action}");
+            }
+        }
+    }
+
+    static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
+    {
+        var qualityPath = result.OutputFiles.FirstOrDefault(path =>
+            path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase))
+            ?? Path.Combine(result.OutputDirectory, "conversion-quality.json");
+
+        if (string.IsNullOrWhiteSpace(qualityPath) || !File.Exists(qualityPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ConversionQualityReport>(
+                File.ReadAllText(qualityPath),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     var parsed = ParseNamedArguments(args);

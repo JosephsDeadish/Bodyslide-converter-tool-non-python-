@@ -65,4 +65,26 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(actions, action => action.Contains("output-zip enabled", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("armor-pack-validation.json", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void BuildFollowUpActions_CoversTopologyHeelAndLinkedPluginFailureCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            47,
+            2,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("topology-mismatch-risk", "high", "Source and target topology differ too much."),
+                new ConversionValidationIssue("heel-offset-review", "medium", "Heel offset needs review."),
+                new ConversionValidationIssue("plugin-link-unsupported-nif-layout", "high", "Linked ARMA mesh used an unsupported NIF layout."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "BHUNP");
+
+        Assert.Contains(actions, action => action.Contains("Outfit Studio", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("ground contact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("linked ARMA meshes", StringComparison.OrdinalIgnoreCase));
+    }
 }
