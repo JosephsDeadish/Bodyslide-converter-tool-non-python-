@@ -310,7 +310,7 @@ internal static class ConversionValidationGuidance
             "missing-bodyslide-slider-payload" =>
                 "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
             "missing-preview-workbench" =>
-                "Re-run the conversion to regenerate preview-workbench.html, then open it before release to verify the converted mesh, ground mesh, and flagged risk regions are reviewable outside the app.",
+                "Re-run the conversion to regenerate preview-workbench.html, then confirm preview.html and preview.svg are also present so the converted mesh, ground mesh, and flagged risk regions remain reviewable outside the app before release.",
             "missing-preview-html" or
             "missing-preview-svg" =>
                 "Re-run the conversion to regenerate preview.html and preview.svg, then confirm the visual review bundle opens before release.",
