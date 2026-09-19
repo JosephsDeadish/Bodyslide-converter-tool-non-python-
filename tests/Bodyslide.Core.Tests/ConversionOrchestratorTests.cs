@@ -9362,6 +9362,58 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticHeadgearFullHelmetModPackDirectory_PreservesHeadgearPartitionsAndGroundMesh()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHeadgearFullHelmetModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "HeadgearAddon.esp"),
+            BuildFixtureArmaPlugin("meshes/armor/daedric/daedric_greathelm_0.nif"));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "HeadgearWorld.esp"),
+            BuildFixtureArmoPlugin("meshes/armor/daedric/daedric_greathelm_ground.nif"));
+
+        try
+        {
+            var inspector = StandaloneConversionModules.CreateInspector();
+            var inspection = await inspector.InspectAsync(workingDirectory, "CBBE");
+            Assert.Equal("headgear", inspection.Analysis.MeshType);
+            Assert.Equal(HeadgearSubTypes.FullHelmet, inspection.Analysis.HeadgearSubType);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            var result = Assert.Single(results);
+            Assert.True(result.Success);
+
+            var partitionsStep = Assert.Single(result.Steps.Where(step => step.StartsWith("partitions:", StringComparison.Ordinal)));
+            Assert.Contains("30:Head", partitionsStep, StringComparison.Ordinal);
+            Assert.Contains("31:Hair", partitionsStep, StringComparison.Ordinal);
+            Assert.DoesNotContain("42:Circlet", partitionsStep, StringComparison.Ordinal);
+
+            var stagedHelmet0 = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_0.nif");
+            var stagedHelmet1 = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_1.nif");
+            var stagedGround = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_ground.nif");
+            Assert.True(File.Exists(stagedHelmet0));
+            Assert.True(File.Exists(stagedHelmet1));
+            Assert.True(File.Exists(stagedGround));
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/cbbe/armor/daedric/daedric_greathelm_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/daedric/daedric_greathelm_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("missing-plugin-partitions", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("unknown-export-partitions", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
