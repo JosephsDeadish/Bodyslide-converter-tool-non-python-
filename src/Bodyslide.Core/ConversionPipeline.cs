@@ -16213,9 +16213,9 @@ internal sealed class LocalExportService(
         return new MeshPathVariantSignals(
             IsFirstPerson: tokens.Any(IsFirstPersonVariantToken),
             IsWorld: tokens.Any(IsWorldVariantToken),
-            IsFemale: tokens.Any(static token => token.Equals("female", StringComparison.OrdinalIgnoreCase))
+            IsFemale: tokens.Any(IsFemaleVariantToken)
                 || fileStemTokens.Any(IsFemaleVariantToken),
-            IsMale: tokens.Any(static token => token.Equals("male", StringComparison.OrdinalIgnoreCase))
+            IsMale: tokens.Any(IsMaleVariantToken)
                 || fileStemTokens.Any(IsMaleVariantToken),
             IsLowWeight: HasLowWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path),
             IsHighWeight: HasHighWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path));
@@ -16405,27 +16405,51 @@ internal sealed class LocalExportService(
         return stem.Split(['_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static bool IsFirstPersonVariantToken(string token) =>
-        token.Equals("1stperson", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("firstperson", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("first", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("1st", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("fp", StringComparison.OrdinalIgnoreCase);
+    private static bool IsFirstPersonVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "1stperson" or "firstperson" or "first" or "1st" or "fp" or "1person"
+            || normalizedToken.Contains("firstperson", StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static bool IsWorldVariantToken(string token) =>
-        token.Equals("world", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("ground", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("gnd", StringComparison.OrdinalIgnoreCase);
+    private static bool IsWorldVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "world" or "ground" or "gnd"
+            || normalizedToken.Contains("world", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.Contains("ground", StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static bool IsFemaleVariantToken(string token) =>
-        token.Equals("female", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("fem", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("f", StringComparison.OrdinalIgnoreCase);
+    private static bool IsFemaleVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "female" or "fem" or "f"
+            || normalizedToken.StartsWith("female", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.EndsWith("female", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.StartsWith("fembody", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.EndsWith("fembody", StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static bool IsMaleVariantToken(string token) =>
-        token.Equals("male", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("masc", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("m", StringComparison.OrdinalIgnoreCase);
+    private static bool IsMaleVariantToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken is "male" or "masc" or "m"
+            || normalizedToken.StartsWith("male", StringComparison.OrdinalIgnoreCase)
+            || normalizedToken.EndsWith("male", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeVariantSignalToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return new string(token
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+    }
 
     private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath, string? sourceMeshPath = null)
     {

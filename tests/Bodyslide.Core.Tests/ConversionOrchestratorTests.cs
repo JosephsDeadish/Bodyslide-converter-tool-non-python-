@@ -9067,6 +9067,92 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersCompoundBodyLayoutSourceMesh_WhenPluginUsesShortAlias()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/messy/femalebody/nordic/nordic_cuirass_0.nif",
+            "/tmp/meshes/messy/malebody/nordic/nordic_cuirass_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["NordicFemaleLayout.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/f/nordic/nordic_cuirass_0.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "NordicFemaleLayoutAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal(
+            "/tmp/meshes/messy/femalebody/nordic/nordic_cuirass_0.nif",
+            sourceMeshMap["meshes/armor/f/nordic/nordic_cuirass_0.nif"]);
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureMessyBodyLayoutModPackDirectory_ResolvesBodyLayoutAliasesWhileKeepingFailureGuidance()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureMessyBodyLayoutModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "NordicFemaleLayoutLow.esp"),
+            BuildFixtureArmaPlugin("meshes/armor/f/nordic/nordic_cuirass_0.nif"));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "NordicFemaleLayoutHigh.esp"),
+            BuildFixtureArmaPlugin("meshes/armor/f/nordic/nordic_cuirass_1.nif"));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "NordicFemaleLayoutWorld.esp"),
+            BuildFixtureArmoPlugin("meshes/armor/f/gnd/nordic/nordic_cuirass_gnd.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/3ba/armor/f/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/armor/f/nordic/nordic_cuirass_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/armor/f/gnd/nordic/nordic_cuirass_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            using var patchReport = JsonDocument.Parse(patchJson);
+            Assert.Equal(0, patchReport.RootElement.GetProperty("UnresolvedTieGroups").GetArrayLength());
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "f", "nordic", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "f", "nordic", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "f", "gnd", "nordic", "nordic_cuirass_ground.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");
