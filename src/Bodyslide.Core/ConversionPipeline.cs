@@ -746,7 +746,7 @@ public sealed record UnresolvedPluginTieGroup(
     IReadOnlyList<PluginTieFamilyHint> SharedCandidateFamilies,
     string ManualReviewReason);
 
-private readonly record struct MeshPathVariantSignals(
+internal readonly record struct MeshPathVariantSignals(
     bool IsFirstPerson,
     bool IsWorld,
     bool IsFemale,
@@ -16129,7 +16129,7 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<string> ExtractRawPathTokens(string path)
     {
         return NormalizeComparablePath(path)
-            .Split(['/', '\\', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            .Split(['/', '\\', '_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private static bool IsGenericPluginPathToken(string token) =>
