@@ -16389,11 +16389,11 @@ internal sealed class LocalExportService(
 
         return CanonicalizeComparablePathToken(token) switch
         {
-            "1stperson" or "firstperson" or "first" or "fp" => string.Empty,
-            "gnd" => "ground",
-            "f" or "fem" => "female",
-            "m" or "masc" => "male",
-            _ => token.Trim()
+            "firstperson" => string.Empty,
+            "world" => "ground",
+            "female" => "female",
+            "male" => "male",
+            var normalizedToken => normalizedToken
         };
     }
 
@@ -16467,6 +16467,8 @@ internal sealed class LocalExportService(
                 "viewmodel" or "viewmodels" or "fpview" or "1p" or "1stp" => "firstperson",
             "world" or "ground" or "gnd" or "worldmodel" or "worldmodels" or
                 "inventory" or "inv" or "dropmodel" or "dropped" => "world",
+            "f" or "fem" => "female",
+            "m" or "masc" => "male",
             _ => normalizedToken
         };
     }
