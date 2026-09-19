@@ -434,8 +434,8 @@ public sealed class ConversionOrchestratorTests
 
             Assert.Equal("unsupported", report.Status);
             Assert.Equal("unreadable-geometry", report.ParseMode);
-            Assert.Contains("geometry-family:NiLinesData", report.Warnings ?? []);
-            Assert.Contains("manual-review-required", report.Warnings ?? []);
+            Assert.Contains("geometry-family:NiLinesData", report.Messages ?? []);
+            Assert.Contains("manual-review-required", report.Messages ?? []);
             Assert.Null(NifGeometrySignatureReader.TryRead(inputFile));
         }
         finally
@@ -9090,7 +9090,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("NiLinesData", qualityJson, StringComparison.Ordinal);
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
-            Assert.Contains("NiLinesData", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("manual review", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("NiLines", previewHtml, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("geometry-family", previewHtml, StringComparison.OrdinalIgnoreCase);
         }
         finally
