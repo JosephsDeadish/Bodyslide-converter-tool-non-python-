@@ -40,8 +40,18 @@
     "ButtLower": ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
     "TailTip": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
     "TailEnd": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "Tail4": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "Tail5": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
     "WingOuter.L": ["Wing.L", "LeftWing"],
-    "WingOuter.R": ["Wing.R", "RightWing"]
+    "WingOuter.R": ["Wing.R", "RightWing"],
+    "WingMid.L": ["Wing.L", "LeftWing"],
+    "WingMid.R": ["Wing.R", "RightWing"],
+    "Feather01.L": ["WingTip.L", "Wing.L", "LeftWing"],
+    "Feather01.R": ["WingTip.R", "Wing.R", "RightWing"],
+    "Hock.L": ["NPC L Calf", "NPC L Foot"],
+    "Hock.R": ["NPC R Calf", "NPC R Foot"],
+    "Hoof.L": ["NPC L Foot", "NPC L Calf"],
+    "Hoof.R": ["NPC R Foot", "NPC R Calf"]
   },
   "frameworks": [
     {
@@ -185,6 +195,65 @@
       "fallbackMappings": {
         "WingTip.L": ["Wing.L", "LeftWing"],
         "WingTip.R": ["Wing.R", "RightWing"]
+      }
+    },
+    {
+      "id": "digitigrade-beast",
+      "bones": [
+        "NPC Tail",
+        "Tail1",
+        "Tail2",
+        "Tail3",
+        "Hock.L",
+        "Hock.R",
+        "Hoof.L",
+        "Hoof.R"
+      ],
+      "fallbackMappings": {
+        "DigitigradeFoot.L": ["Hoof.L", "NPC L Foot", "NPC L Calf"],
+        "DigitigradeFoot.R": ["Hoof.R", "NPC R Foot", "NPC R Calf"]
+      }
+    },
+    {
+      "id": "equine-humanoid",
+      "bones": [
+        "NPC Tail",
+        "Tail1",
+        "Tail2",
+        "Tail3",
+        "Tail4",
+        "Tail5",
+        "Hock.L",
+        "Hock.R",
+        "Hoof.L",
+        "Hoof.R",
+        "ManeRoot",
+        "Forelock"
+      ],
+      "fallbackMappings": {
+        "TailTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+        "ForelockTip": ["Forelock", "NPC Head"]
+      }
+    },
+    {
+      "id": "avian-humanoid",
+      "bones": [
+        "Wing.L",
+        "Wing.R",
+        "WingMid.L",
+        "WingMid.R",
+        "WingTip.L",
+        "WingTip.R",
+        "Feather01.L",
+        "Feather01.R"
+      ],
+      "fallbackMappings": {
+        "WingMid.L": ["Wing.L", "LeftWing"],
+        "WingMid.R": ["Wing.R", "RightWing"],
+        "WingTip.L": ["WingMid.L", "Wing.L", "LeftWing"],
+        "WingTip.R": ["WingMid.R", "Wing.R", "RightWing"],
+        "Feather01.L": ["WingTip.L", "WingMid.L", "Wing.L", "LeftWing"],
+        "Feather01.R": ["WingTip.R", "WingMid.R", "Wing.R", "RightWing"]
       }
     },
     {

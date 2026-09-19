@@ -40,5 +40,26 @@
     "boneTokens": ["Wing.L", "Wing.R", "LeftWing", "RightWing", "Hagraven", "Spriggan"],
     "distinctiveSignatures": ["Wing.L", "Wing.R"],
     "minimumSignatureMatches": 2
+  },
+  {
+    "label": "digitigrade-beast",
+    "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw"],
+    "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw"],
+    "distinctiveSignatures": ["Hock.L", "Hock.R"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "equine-humanoid",
+    "bonePrefixes": ["Mane", "Forelock", "Tail"],
+    "boneTokens": ["Tail4", "Tail5", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Mane", "Forelock"],
+    "distinctiveSignatures": ["Tail4", "Tail5"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "avian-humanoid",
+    "bonePrefixes": ["WingMid", "WingTip", "Feather"],
+    "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "Feather01", "Feather02", "Pinion"],
+    "distinctiveSignatures": ["WingMid.L", "WingMid.R"],
+    "minimumSignatureMatches": 2
   }
 ]

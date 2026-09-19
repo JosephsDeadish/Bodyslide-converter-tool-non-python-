@@ -7537,6 +7537,25 @@ public sealed class PhysicsMeshTypeTuningTests
     }
 
     [Fact]
+    public async Task BuildAsync_BeastAppendageBones_EmitsTailWingHornAndHairNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "mixed",
+            "default",
+            true,
+            TargetPhysicsBones: ["Tail4", "WingTip.L", "Horn.L", "ManeFront"]);
+
+        var config = await service.BuildAsync(mesh, "Goat Humanoid", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Tail4", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("WingTip.L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Horn.L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("ManeFront", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuiltInBodyCatalog_ExposesUbeAndSosSpecialBones()
     {
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("UBE", out var ube));
@@ -7547,6 +7566,19 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
         Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
         Assert.Contains("SOS Scrotum", sos.AvailablePhysicsBones);
+    }
+
+    [Fact]
+    public void BuiltInBodyCatalog_ExposesBeastAppendageBones()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Goat Humanoid", out var goat));
+        Assert.Contains("Horn.L", goat.AvailablePhysicsBones);
+        Assert.Contains("Hock.L", goat.AvailablePhysicsBones);
+        Assert.Contains("Tail3", goat.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hagraven", out var hagraven));
+        Assert.Contains("WingTip.L", hagraven.AvailablePhysicsBones);
+        Assert.Contains("Feather.L", hagraven.AvailablePhysicsBones);
     }
 
     [Fact]
@@ -7575,6 +7607,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Horn.L", hornFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingTip.L", "winged-humanoid", out var wingFallbacks));
         Assert.Contains("Wing.L", wingFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Tail4", "equine-humanoid", out var equineTailFallbacks));
+        Assert.Contains("Tail3", equineTailFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Hock.L", "digitigrade-beast", out var digitigradeFallbacks));
+        Assert.Contains("NPC L Calf", digitigradeFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
         Assert.Equal("tail", groupName);
     }
@@ -16684,6 +16720,27 @@ public sealed class CustomBodyProfileSupportTests
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["NPC L Breast", "NPC Butt", "SAM Genitals"]);
         Assert.Equal("xpmsse-physics", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_DigitigradeBonesYieldDigitigradeFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Hock.L", "Hock.R", "NPC Spine"]);
+        Assert.Equal("digitigrade-beast", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_EquineBonesYieldEquineFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Tail4", "Tail5", "NPC Spine"]);
+        Assert.Equal("equine-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_AvianBonesYieldAvianFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["WingMid.L", "WingMid.R", "NPC Spine"]);
+        Assert.Equal("avian-humanoid", label);
     }
 
     [Fact]

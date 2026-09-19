@@ -1241,9 +1241,12 @@
     "skeletonFoundation": "Beast-humanoid vanilla skeleton",
     "notes": "Vanilla-aligned beast-race body target for Khajiit and Argonian armor paths, with tail-friendly skeleton expectations. No built-in physics by default.",
     "availablePhysicsBones": [
+      "NPC Tail",
       "NPC Belly",
       "Tail1",
-      "Tail2"
+      "Tail2",
+      "Tail3",
+      "Tail4"
     ],
     "referenceTokens": [
       "beast",
@@ -1291,8 +1294,10 @@
     "depthToWidthRatioMin": 0.28,
     "depthToWidthRatioMax": 0.92,
     "physicsBoneSignatures": [
+      "NPC Tail",
       "Tail1",
-      "Tail2"
+      "Tail2",
+      "Tail3"
     ],
     "skeletonFramework": "beast-humanoid"
   },
@@ -1312,7 +1317,14 @@
       "NPC Belly",
       "NPC Tail",
       "Tail1",
-      "Tail2"
+      "Tail2",
+      "Tail3",
+      "Horn.L",
+      "Horn.R",
+      "GoatHorn.L",
+      "GoatHorn.R",
+      "Hock.L",
+      "Hock.R"
     ],
     "referenceTokens": [
       "goat",
@@ -1357,7 +1369,9 @@
       "tail"
     ],
     "physicsTokens": [
-      "tail"
+      "tail",
+      "horn",
+      "hoof"
     ],
     "vertexCountMin": 4300,
     "vertexCountMax": 6900,
@@ -1368,7 +1382,11 @@
     "physicsBoneSignatures": [
       "NPC Tail",
       "Tail1",
-      "Tail2"
+      "Tail2",
+      "Horn.L",
+      "Horn.R",
+      "Hock.L",
+      "Hock.R"
     ],
     "skeletonFramework": "horned-humanoid"
   },
@@ -1385,7 +1403,11 @@
     "availablePhysicsBones": [
       "NPC Belly",
       "Wing.L",
-      "Wing.R"
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather.L",
+      "Feather.R"
     ],
     "referenceTokens": [
       "hagraven",
@@ -1437,7 +1459,9 @@
     "depthToWidthRatioMax": 0.92,
     "physicsBoneSignatures": [
       "Wing.L",
-      "Wing.R"
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R"
     ],
     "skeletonFramework": "winged-humanoid"
   },
@@ -1454,7 +1478,11 @@
     "availablePhysicsBones": [
       "NPC Belly",
       "Wing.L",
-      "Wing.R"
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather.L",
+      "Feather.R"
     ],
     "referenceTokens": [
       "spriggan",
@@ -1509,7 +1537,9 @@
     "depthToWidthRatioMax": 0.9,
     "physicsBoneSignatures": [
       "Wing.L",
-      "Wing.R"
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R"
     ],
     "skeletonFramework": "winged-humanoid"
   }

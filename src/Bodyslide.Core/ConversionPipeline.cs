@@ -7807,6 +7807,22 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             {
                 AppendBone(extraBone, 2.1, 0.78, 0.56, 16, 0.16);
             }
+            else if (MatchesSemanticAlias(lowered, "hair"))
+            {
+                AppendBone(extraBone, 0.72, 0.68, 0.48, 24, 0.08);
+            }
+            else if (MatchesSemanticAlias(lowered, "tail"))
+            {
+                AppendBone(extraBone, 1.35, 0.81, 0.64, 18, 0.12);
+            }
+            else if (MatchesSemanticAlias(lowered, "wing"))
+            {
+                AppendBone(extraBone, 1.55, 0.83, 0.63, 12, 0.10);
+            }
+            else if (lowered.Contains("horn", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 0.90, 0.96, 0.84, 4, 0.05);
+            }
             else if (MatchesSemanticAlias(lowered, "mouth") ||
                      lowered.Contains("jaw", StringComparison.Ordinal) ||
                      lowered.Contains("tongue", StringComparison.Ordinal) ||

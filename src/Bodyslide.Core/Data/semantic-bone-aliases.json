@@ -73,6 +73,9 @@
   "hair": [
     "hair",
     "bang",
+    "mane",
+    "forelock",
+    "crest",
     "ponytail",
     "tail",
     "strand",
@@ -82,10 +85,16 @@
   "tail": [
     "tail",
     "tails",
-    "pony"
+    "pony",
+    "tassel",
+    "tentacle",
+    "tendril",
+    "plume"
   ],
   "wing": [
     "wing",
-    "feather"
+    "feather",
+    "pinion",
+    "vane"
   ]
 }
