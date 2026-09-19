@@ -200,6 +200,15 @@ public sealed record ConversionValidationSummary(
 
 public static class ConversionValidationPresentation
 {
+    public static int GetGateRank(string? status) =>
+        status?.Trim() switch
+        {
+            var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) => 3,
+            var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) => 1,
+            _ => 0
+        };
+
     public static string GetGateLabel(string? status) =>
         status?.Trim() switch
         {
@@ -221,6 +230,29 @@ public static class ConversionValidationPresentation
             _ =>
                 "Open the preview and generated validation reports before install/share."
         };
+
+    public static string BuildOutcomeSummary(
+        ConversionValidationSummary? summary,
+        bool previewAvailable) =>
+        BuildOutcomeSummary(
+            summary?.Status,
+            summary?.HighSeverityCount ?? 0,
+            summary?.MediumSeverityCount ?? 0,
+            summary?.LowSeverityCount ?? 0,
+            previewAvailable);
+
+    public static string BuildOutcomeSummary(
+        string? status,
+        int highSeverityCount,
+        int mediumSeverityCount,
+        int lowSeverityCount,
+        bool previewAvailable)
+    {
+        var previewMessage = previewAvailable
+            ? "Open Preview for the final visual pass."
+            : "Preview files are missing, so open the generated reports first.";
+        return $"{GetGateLabel(status)} — {GetDispositionMessage(status)} {previewMessage} Validation issues: {highSeverityCount} high, {mediumSeverityCount} medium, {lowSeverityCount} low.";
+    }
 }
 
 internal static class ConversionValidationGuidance
@@ -313,7 +345,6 @@ internal static class ConversionValidationGuidance
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
                 "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
-            "plugin-rewrite-ambiguous-filename" or
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or

@@ -15,6 +15,28 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void ConversionValidationPresentation_BuildOutcomeSummary_UsesGateCountsAndPreviewHint()
+    {
+        var summary = new ConversionValidationSummary(
+            "needs-review",
+            52,
+            1,
+            2,
+            3,
+            []);
+
+        var withPreview = ConversionValidationPresentation.BuildOutcomeSummary(summary, previewAvailable: true);
+        Assert.Contains("REVIEW REQUIRED", withPreview, StringComparison.Ordinal);
+        Assert.Contains("Open Preview for the final visual pass", withPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 high, 2 medium, 3 low", withPreview, StringComparison.OrdinalIgnoreCase);
+
+        var withoutPreview = ConversionValidationPresentation.BuildOutcomeSummary("high-risk", 2, 1, 0, previewAvailable: false);
+        Assert.Contains("FAIL", withoutPreview, StringComparison.Ordinal);
+        Assert.Contains("Preview files are missing", withoutPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2 high, 1 medium, 0 low", withoutPreview, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversBodyDetectionAndBodySlideFailureCases()
     {
         var summary = new ConversionValidationSummary(

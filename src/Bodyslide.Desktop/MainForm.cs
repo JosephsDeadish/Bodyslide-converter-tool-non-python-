@@ -1545,6 +1545,10 @@ public sealed class MainForm : Form
             PopulateReportsTab(results);
             PopulateArtifactsTab(results);
             var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
+            ApplyValidationGatePresentation(
+                results.Select(static result => result.OutputDirectory).ToArray(),
+                _lastPreviewPath,
+                guidanceNeedsReview);
 
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
@@ -1572,16 +1576,10 @@ public sealed class MainForm : Form
                 AppendLog(builder.ToString().TrimEnd());
             }
 
-            if (guidanceNeedsReview)
-            {
-                AppendLog("Review recommended next actions in the Next actions tab before installing or sharing the output.");
-            }
-            else if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
-            {
-                AppendLog("Preview looks ready for review. Open the Preview tab for a final visual pass before installing or sharing.");
-            }
-
-            _statusLabel.Text = "Conversion complete.";
+            AppendLog(BuildValidationOutcomeLogMessage(
+                results.Select(static result => result.OutputDirectory).ToArray(),
+                _lastPreviewPath,
+                guidanceNeedsReview));
             MessageBox.Show(this, "Conversion complete.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (OperationCanceledException)
@@ -1827,8 +1825,10 @@ public sealed class MainForm : Form
         PopulateReportsTab(selectedFolder);
         PopulateArtifactsTab(selectedFolder);
         var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
+        ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
         _resultsTabControl.SelectedTab = guidanceNeedsReview ? _guidanceTabPage : _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
+        AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
     }
 
     private async Task<bool> LoadPreviewInAppAsync(string? previewPath)
@@ -2522,6 +2522,73 @@ public sealed class MainForm : Form
         }
 
         _logTextBox.AppendText(Environment.NewLine + timestamped);
+    }
+
+    private void ApplyValidationGatePresentation(
+        IReadOnlyList<string> outputDirectories,
+        string? previewPath,
+        bool requiresReview)
+    {
+        var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
+        var summary = TryReadWorstValidationSummary(outputDirectories);
+        var effectiveStatus = summary?.Status
+            ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
+        _previewTabPage.Text = BuildResultTabTitle("Preview", effectiveStatus);
+        _guidanceTabPage.Text = BuildResultTabTitle("Next actions", effectiveStatus);
+        _statusLabel.Text = BuildValidationStatusLabel(effectiveStatus, previewAvailable);
+    }
+
+    private static string BuildValidationOutcomeLogMessage(
+        IReadOnlyList<string> outputDirectories,
+        string? previewPath,
+        bool requiresReview)
+    {
+        var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
+        var summary = TryReadWorstValidationSummary(outputDirectories);
+        if (summary is not null)
+        {
+            return ConversionValidationPresentation.BuildOutcomeSummary(summary, previewAvailable);
+        }
+
+        var fallbackStatus = requiresReview ? "needs-review" : previewAvailable ? "ready" : null;
+        return ConversionValidationPresentation.BuildOutcomeSummary(fallbackStatus, 0, 0, 0, previewAvailable);
+    }
+
+    private static string BuildResultTabTitle(string baseTitle, string? status)
+    {
+        var gate = ConversionValidationPresentation.GetGateLabel(status);
+        return gate.Equals("CHECK", StringComparison.OrdinalIgnoreCase)
+            ? baseTitle
+            : $"{baseTitle} ({gate})";
+    }
+
+    private static string BuildValidationStatusLabel(string? status, bool previewAvailable)
+    {
+        var gate = ConversionValidationPresentation.GetGateLabel(status);
+        if (gate.Equals("FAIL", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "FAIL — blocking conversion issues found. Start with Preview, then Next actions."
+                : "FAIL — blocking conversion issues found. Open Next actions and reports before install/share.";
+        }
+
+        if (gate.Equals("REVIEW REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "REVIEW REQUIRED — inspect Preview and Next actions before install/share."
+                : "REVIEW REQUIRED — preview missing; open Next actions and reports before install/share.";
+        }
+
+        if (gate.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "PASS — install-ready after one final Preview pass and smoke test."
+                : "PASS — install-ready, but preview files are missing so open the reports first.";
+        }
+
+        return previewAvailable
+            ? "Conversion complete. Open Preview and Next actions before install/share."
+            : "Conversion complete. Open Next actions and reports before install/share.";
     }
 
     private void UpdatePresetDetails()
@@ -3430,6 +3497,51 @@ public sealed class MainForm : Form
             TryReadIntValue(summary, "MediumSeverityCount") ?? 0,
             TryReadIntValue(summary, "LowSeverityCount") ?? 0,
             issues);
+    }
+
+    private static ConversionValidationSummary? TryReadWorstValidationSummary(IReadOnlyList<string> outputDirectories)
+    {
+        return outputDirectories
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .SelectMany(EnumerateValidationSummaryCandidates)
+            .Select(TryReadValidationSummaryFromReport)
+            .Where(static summary => summary is not null)
+            .Cast<ConversionValidationSummary>()
+            .OrderByDescending(static summary => ConversionValidationPresentation.GetGateRank(summary.Status))
+            .ThenByDescending(static summary => summary.HighSeverityCount)
+            .ThenByDescending(static summary => summary.MediumSeverityCount)
+            .ThenByDescending(static summary => summary.LowSeverityCount)
+            .ThenBy(static summary => summary.Score)
+            .FirstOrDefault();
+    }
+
+    private static IEnumerable<string> EnumerateValidationSummaryCandidates(string outputDirectory)
+    {
+        var conversionQualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        if (File.Exists(conversionQualityPath))
+        {
+            yield return conversionQualityPath;
+        }
+
+        var batchReportPath = Path.Combine(outputDirectory, "batch-report.json");
+        if (File.Exists(batchReportPath))
+        {
+            yield return batchReportPath;
+        }
+    }
+
+    private static ConversionValidationSummary? TryReadValidationSummaryFromReport(string reportPath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            return TryReadValidationSummary(document.RootElement);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void AppendGuidanceFromBatchReport(
