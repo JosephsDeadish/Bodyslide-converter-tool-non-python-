@@ -7,6 +7,12 @@
     { "name": "lat", "tokens": ["lat"] },
     { "name": "genitals", "tokens": ["genital", "schlong", "balls", "scrot", "penis", "sos", "tng"] },
     { "name": "tail", "tokens": ["tail"] },
-    { "name": "thigh", "tokens": ["thigh"] }
+    { "name": "thigh", "tokens": ["thigh"] },
+    { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "feather", "pinion"] },
+    { "name": "horn", "tokens": ["horn", "goathorn", "ramhorn"] },
+    { "name": "hoof", "tokens": ["hoof", "hock", "digitigrade", "paw", "claw"] },
+    { "name": "mane", "tokens": ["mane", "forelock"] },
+    { "name": "vagina", "tokens": ["vagina", "labia"] },
+    { "name": "anus", "tokens": ["anus"] }
   ]
 }

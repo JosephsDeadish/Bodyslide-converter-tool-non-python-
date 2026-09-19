@@ -866,7 +866,9 @@
   {
     "name": "SAM Light",
     "aliases": [
-      "SAMLight"
+      "SAMLight",
+      "SAM Lite",
+      "Shape Atlas Light"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -1000,7 +1002,9 @@
     "name": "UBE",
     "aliases": [
       "Ultimate Body Enhancer",
-      "UBE Body"
+      "UBE Body",
+      "UBE 2",
+      "Ultimate Body Enhancer 2"
     ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
@@ -1234,7 +1238,12 @@
     "aliases": [
       "Beast Vanilla",
       "Khajiit Vanilla",
-      "Argonian Vanilla"
+      "Argonian Vanilla",
+      "Khajiit Body",
+      "Argonian Body",
+      "Saxhleel",
+      "Cathay",
+      "Senche"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1252,7 +1261,10 @@
       "beast",
       "khajiit",
       "argonian",
-      "tail"
+      "tail",
+      "saxhleel",
+      "cathay",
+      "senche"
     ],
     "sliderNames": [
       "Belly",
@@ -1279,12 +1291,22 @@
       "beast",
       "khajiit",
       "argonian",
-      "tail"
+      "tail",
+      "saxhleel",
+      "cathay",
+      "senche",
+      "feline",
+      "reptile",
+      "digitigrade"
     ],
     "textureTokens": [
       "femalebody",
       "malebody",
-      "tail"
+      "tail",
+      "khajiit",
+      "argonian",
+      "scales",
+      "fur"
     ],
     "physicsTokens": [],
     "vertexCountMin": 4000,
@@ -1307,7 +1329,10 @@
       "Goatkin",
       "Goat Folk",
       "Goat Reborn",
-      "Namira's Goat Reborn"
+      "Namira's Goat Reborn",
+      "Faun",
+      "Caprine",
+      "Cloven Hoof"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1331,7 +1356,10 @@
       "goatkin",
       "satyr",
       "hoof",
-      "horn"
+      "horn",
+      "faun",
+      "caprine",
+      "cloven"
     ],
     "sliderNames": [
       "Belly",
@@ -1360,7 +1388,11 @@
       "goatkin",
       "satyr",
       "hoof",
-      "horn"
+      "horn",
+      "faun",
+      "caprine",
+      "cloven",
+      "ramhorn"
     ],
     "textureTokens": [
       "goat",
@@ -1394,7 +1426,9 @@
     "name": "Hagraven",
     "aliases": [
       "Hag Raven",
-      "Hagraven Humanoid"
+      "Hagraven Humanoid",
+      "Raven Hag",
+      "Crow Witch"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1441,7 +1475,9 @@
       "hagraven",
       "hag",
       "wing",
-      "feather"
+      "feather",
+      "ravenhag",
+      "crowwitch"
     ],
     "textureTokens": [
       "hagraven",
@@ -1469,7 +1505,10 @@
     "name": "Spriggan",
     "aliases": [
       "Spriggan Humanoid",
-      "Spriggan Body"
+      "Spriggan Body",
+      "Briarfolk",
+      "Rootfolk",
+      "Dryad"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1517,7 +1556,10 @@
       "branch",
       "vine",
       "bark",
-      "leaf"
+      "leaf",
+      "briarfolk",
+      "rootfolk",
+      "dryad"
     ],
     "textureTokens": [
       "spriggan",
@@ -1549,7 +1591,10 @@
       "Horse Follower",
       "Centaur",
       "Ponyfolk",
-      "Marekin"
+      "Marekin",
+      "Horsefolk",
+      "Marefolk",
+      "Equus"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1605,7 +1650,10 @@
       "equine",
       "centaur",
       "hoof",
-      "mane"
+      "mane",
+      "marefolk",
+      "equus",
+      "pony"
     ],
     "textureTokens": [
       "horse",
@@ -1641,7 +1689,9 @@
       "Harpy",
       "Birdfolk",
       "Ravenwing",
-      "Winged Avian"
+      "Winged Avian",
+      "Featherfolk",
+      "Pinionfolk"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1663,7 +1713,8 @@
       "harpy",
       "bird",
       "wing",
-      "feather"
+      "feather",
+      "pinion"
     ],
     "sliderNames": [
       "Belly",
@@ -1692,13 +1743,17 @@
       "harpy",
       "bird",
       "wing",
-      "feather"
+      "feather",
+      "pinion",
+      "featherfolk",
+      "pinionfolk"
     ],
     "textureTokens": [
       "avian",
       "bird",
       "wing",
-      "feather"
+      "feather",
+      "pinion"
     ],
     "physicsTokens": [
       "wing",

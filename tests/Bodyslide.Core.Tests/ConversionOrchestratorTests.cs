@@ -2574,6 +2574,11 @@ public sealed class ConversionOrchestratorTests
     [InlineData("avian_custom_race_patch.esp", "Avian variant")]
     [InlineData("khajiit_vampire_child_follower.esp", "Khajiit variant")]
     [InlineData("custom_race_vampire_child_follower.esp", "Humanoid variant")]
+    [InlineData("lykaios_cathay_follower.esp", "Khajiit variant")]
+    [InlineData("saxhleel_draconid_patch.esp", "Argonian variant")]
+    [InlineData("faun_ramhorn_customrace.esp", "Goat variant")]
+    [InlineData("equus_marefolk_follower.esp", "Equine variant")]
+    [InlineData("featherfolk_pinion_follower.esp", "Avian variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -8383,6 +8388,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC L Calf", digitigradeFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
         Assert.Equal("tail", groupName);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("PinionFeatherSwing01", out var wingGroup));
+        Assert.Equal("wing", wingGroup);
+        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ManeRoot", "Forelock"]));
+        Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Feather01.L", "Feather01.R"]));
     }
 }
 
@@ -8423,6 +8432,15 @@ public sealed class ExpandedPresetTests
     [InlineData("Spriggan Balanced", "Spriggan")]
     [InlineData("Equine Humanoid Balanced", "Equine Humanoid")]
     [InlineData("Avian Humanoid Balanced", "Avian Humanoid")]
+    [InlineData("Vanilla Beast Athletic", "Vanilla Beast")]
+    [InlineData("Goat Humanoid Athletic", "Goat Humanoid")]
+    [InlineData("Hagraven Lean", "Hagraven")]
+    [InlineData("Spriggan Lean", "Spriggan")]
+    [InlineData("Equine Humanoid Athletic", "Equine Humanoid")]
+    [InlineData("Avian Humanoid Athletic", "Avian Humanoid")]
+    [InlineData("SAM Light Balanced", "SAM Light")]
+    [InlineData("UBE Athletic", "UBE")]
+    [InlineData("Vanilla to Vanilla Beast", "Vanilla Beast")]
     [InlineData("Vanilla to TNG","TNG")]
     [InlineData("Vanilla to Goat Humanoid","Goat Humanoid")]
     [InlineData("Vanilla to Hagraven","Hagraven")]
@@ -8696,12 +8714,20 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Schlongs of Skyrim", "SOS")]
     [InlineData("The New Gentleman", "TNG")]
     [InlineData("Ultimate Body Enhancer", "UBE")]
+    [InlineData("Ultimate Body Enhancer 2", "UBE")]
     [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
+    [InlineData("Faun", "Goat Humanoid")]
     [InlineData("Hag Raven", "Hagraven")]
+    [InlineData("Raven Hag", "Hagraven")]
     [InlineData("Horse Follower", "Equine Humanoid")]
+    [InlineData("Equus", "Equine Humanoid")]
     [InlineData("Harpy", "Avian Humanoid")]
+    [InlineData("Featherfolk", "Avian Humanoid")]
+    [InlineData("Saxhleel", "Vanilla Beast")]
+    [InlineData("Cathay", "Vanilla Beast")]
     [InlineData("Schlongs-of-Skyrim", "SOS")]
     [InlineData("Sam-Light", "SAM Light")]
+    [InlineData("SAM Lite", "SAM Light")]
     public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
     {
         Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));
@@ -8718,9 +8744,14 @@ public sealed class BodyTypeCatalogTests
     [InlineData("TNG Extended", "TNG")]
     [InlineData("Vanilla Body", "Vanilla")]
     [InlineData("Goat Reborn", "Goat Humanoid")]
+    [InlineData("Faun", "Goat Humanoid")]
     [InlineData("Spriggan Body", "Spriggan")]
     [InlineData("Centaur", "Equine Humanoid")]
+    [InlineData("Equus", "Equine Humanoid")]
     [InlineData("Birdfolk", "Avian Humanoid")]
+    [InlineData("Featherfolk", "Avian Humanoid")]
+    [InlineData("Saxhleel", "Vanilla Beast")]
+    [InlineData("SAM Lite", "SAM Light")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
         Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
@@ -17024,6 +17055,22 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.Contains("Custom Breast Swing L", repaired);
         Assert.Contains("Custom Breast Swing R", repaired);
         Assert.DoesNotContain("Custom Tail Chain", repaired);
+    }
+
+    [Fact]
+    public void RepairTargetBones_PreservesUncommonFrameworkChains()
+    {
+        var repaired = PhysicsRepairCatalog.RepairTargetBones(
+            ["Wing.L", "Wing.R"],
+            ["Wing.L", "Wing.R", "Feather01.L", "Feather01.R", "ManeRoot"],
+            ["Custom Wing Membrane L", "Custom Wing Membrane R", "Pinion Sweep L", "Pinion Sweep R", "Mane Toss Chain", "Horn Trail"]);
+
+        Assert.Contains("Custom Wing Membrane L", repaired);
+        Assert.Contains("Custom Wing Membrane R", repaired);
+        Assert.Contains("Pinion Sweep L", repaired);
+        Assert.Contains("Pinion Sweep R", repaired);
+        Assert.Contains("Mane Toss Chain", repaired);
+        Assert.DoesNotContain("Horn Trail", repaired);
     }
 }
 

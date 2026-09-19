@@ -3,14 +3,14 @@
     "label": "sam-light",
     "bonePrefixes": ["SAM ", "SOS "],
     "boneTokens": ["Genitals", "Schlong", "Scrotum"],
-    "distinctiveSignatures": ["SAM Genitals", "SOS GenitalsBase"],
+    "distinctiveSignatures": ["SAM Genitals", "SOS GenitalsBase", "SOS Scrotum"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "ube-extended",
     "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
     "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower"],
-    "distinctiveSignatures": ["BreastUpper", "BreastOuter"],
+    "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "Anus"],
     "minimumSignatureMatches": 2
   },
   {
@@ -29,37 +29,37 @@
   },
   {
     "label": "horned-humanoid",
-    "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn"],
-    "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof"],
-    "distinctiveSignatures": ["Horn.L", "Horn.R"],
+    "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn", "HornTip", "RamHorn", "Cloven"],
+    "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof", "HornTip", "Cloven", "Ramhorn"],
+    "distinctiveSignatures": ["Horn.L", "Horn.R", "Hock.L", "Hock.R"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "winged-humanoid",
-    "bonePrefixes": ["Wing", "Feather"],
-    "boneTokens": ["Wing.L", "Wing.R", "LeftWing", "RightWing", "Hagraven", "Spriggan"],
-    "distinctiveSignatures": ["Wing.L", "Wing.R"],
+    "bonePrefixes": ["Wing", "Feather", "WingTip"],
+    "boneTokens": ["Wing.L", "Wing.R", "LeftWing", "RightWing", "WingTip", "Feather", "Hagraven", "Spriggan"],
+    "distinctiveSignatures": ["Wing.L", "Wing.R", "WingTip.L", "WingTip.R"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "digitigrade-beast",
-    "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw"],
-    "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw"],
-    "distinctiveSignatures": ["Hock.L", "Hock.R"],
+    "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw", "Claw"],
+    "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw", "Claw", "Lykaios"],
+    "distinctiveSignatures": ["Hock.L", "Hock.R", "DigitigradeFoot.L", "DigitigradeFoot.R"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "equine-humanoid",
     "bonePrefixes": ["Mane", "Forelock", "Tail"],
-    "boneTokens": ["Tail4", "Tail5", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Mane", "Forelock"],
-    "distinctiveSignatures": ["Tail4", "Tail5"],
+    "boneTokens": ["Tail4", "Tail5", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Mane", "Forelock", "Equus", "Mare"],
+    "distinctiveSignatures": ["Tail4", "Tail5", "ManeRoot", "Forelock"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "avian-humanoid",
     "bonePrefixes": ["WingMid", "WingTip", "Feather"],
-    "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "Feather01", "Feather02", "Pinion"],
-    "distinctiveSignatures": ["WingMid.L", "WingMid.R"],
+    "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "Feather01", "Feather02", "Pinion", "Talon"],
+    "distinctiveSignatures": ["WingMid.L", "WingMid.R", "Feather01.L", "Feather01.R"],
     "minimumSignatureMatches": 2
   }
 ]
