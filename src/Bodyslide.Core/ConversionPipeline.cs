@@ -198,6 +198,31 @@ public sealed record ConversionValidationSummary(
     int LowSeverityCount,
     IReadOnlyList<ConversionValidationIssue> Issues);
 
+public static class ConversionValidationPresentation
+{
+    public static string GetGateLabel(string? status) =>
+        status?.Trim() switch
+        {
+            var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) => "PASS",
+            var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) => "REVIEW REQUIRED",
+            var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) => "FAIL",
+            _ => "CHECK"
+        };
+
+    public static string GetDispositionMessage(string? status) =>
+        status?.Trim() switch
+        {
+            var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) =>
+                "Install-ready after one final preview pass and a normal in-game or mod-manager smoke test.",
+            var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) =>
+                "Review required before install/share. Work through the flagged preview and report items, then validate again.",
+            var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) =>
+                "Do not install/share yet. Fix the blocking conversion issues, re-run the conversion, and validate the regenerated output again.",
+            _ =>
+                "Open the preview and generated validation reports before install/share."
+        };
+}
+
 internal static class ConversionValidationGuidance
 {
     public static IReadOnlyList<ConversionValidationIssue> PrioritizeIssues(
@@ -11948,6 +11973,8 @@ internal static class ConversionReadmeGenerator
 
         sb.AppendLine("  * Validation summary:");
         sb.AppendLine($"    Status: {validationSummary.Status} (score {validationSummary.Score})");
+        sb.AppendLine($"    Gate: {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}");
+        sb.AppendLine($"    {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)}");
 
         if (validationSummary.Issues.Count == 0)
         {
@@ -18229,6 +18256,8 @@ internal sealed class LocalExportService(
 
         var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 8);
         var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody);
+        var gateLabel = ConversionValidationPresentation.GetGateLabel(validationSummary.Status);
+        var dispositionMessage = ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status);
         var statusColor = validationSummary.Status switch
         {
             "ready" => "#6bcb77",
@@ -18240,8 +18269,9 @@ internal sealed class LocalExportService(
         var panel = new System.Text.StringBuilder();
         panel.AppendLine("""      <div class="panel">""");
         panel.AppendLine("""        <h3 style="margin-top:0">Conversion Readiness &amp; Next Actions</h3>""");
-        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Status:</strong> <span style="color:{statusColor};font-weight:700">{HtmlEncode(validationSummary.Status)}</span> · <strong>Score:</strong> {validationSummary.Score}</p>""");
+        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Status:</strong> <span style="color:{statusColor};font-weight:700">{HtmlEncode(gateLabel)}</span> <span style="color:#9ab">({HtmlEncode(validationSummary.Status)})</span> · <strong>Score:</strong> {validationSummary.Score}</p>""");
         panel.AppendLine($"""        <p style="font-size:.8rem;color:#9ab;margin:0 0 10px">Issues: {validationSummary.HighSeverityCount} high · {validationSummary.MediumSeverityCount} medium · {validationSummary.LowSeverityCount} low</p>""");
+        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 10px">{HtmlEncode(dispositionMessage)}</p>""");
 
         if (prioritizedIssues.Count == 0)
         {

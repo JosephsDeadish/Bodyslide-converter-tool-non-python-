@@ -599,11 +599,13 @@ static void WritePostConversionGuidance(ConversionResult result)
     }
 
     Console.WriteLine(
-        $"Validation: {validationSummary.Status} " +
-        $"(score {validationSummary.Score}; " +
+        $"Validation: {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} " +
+        $"(machine status: {validationSummary.Status}; " +
+        $"score {validationSummary.Score}; " +
         $"high {validationSummary.HighSeverityCount}, " +
         $"medium {validationSummary.MediumSeverityCount}, " +
         $"low {validationSummary.LowSeverityCount})");
+    Console.WriteLine(ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status));
 
     var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3);
     if (prioritizedIssues.Count > 0)

@@ -4,6 +4,16 @@ namespace Bodyslide.Core.Tests;
 
 public sealed class ConversionValidationGuidanceTests
 {
+    [Theory]
+    [InlineData("ready", "PASS", "Install-ready")]
+    [InlineData("needs-review", "REVIEW REQUIRED", "Review required before install/share")]
+    [InlineData("high-risk", "FAIL", "Do not install/share yet")]
+    public void ConversionValidationPresentation_UsesClearGateMessaging(string status, string expectedGate, string expectedMessageFragment)
+    {
+        Assert.Equal(expectedGate, ConversionValidationPresentation.GetGateLabel(status));
+        Assert.Contains(expectedMessageFragment, ConversionValidationPresentation.GetDispositionMessage(status), StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void BuildFollowUpActions_CoversBodyDetectionAndBodySlideFailureCases()
     {
@@ -134,5 +144,35 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(actions, action => action.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("mod managers install", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildValidationPreviewPanelHtml_UsesPassReviewFailLabels()
+    {
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildValidationPreviewPanelHtml",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        static string Render(System.Reflection.MethodInfo methodInfo, string status)
+        {
+            var summary = new ConversionValidationSummary(status, 70, status.Equals("high-risk", StringComparison.OrdinalIgnoreCase) ? 1 : 0, 0, 0, []);
+            return Assert.IsType<string>(methodInfo.Invoke(null, [summary, "3BA"]));
+        }
+
+        var readyHtml = Render(method!, "ready");
+        Assert.Contains("PASS", readyHtml, StringComparison.Ordinal);
+        Assert.Contains("Install-ready after one final preview pass", readyHtml, StringComparison.OrdinalIgnoreCase);
+
+        var reviewHtml = Render(method, "needs-review");
+        Assert.Contains("REVIEW REQUIRED", reviewHtml, StringComparison.Ordinal);
+        Assert.Contains("Review required before install/share", reviewHtml, StringComparison.OrdinalIgnoreCase);
+
+        var failHtml = Render(method, "high-risk");
+        Assert.Contains("FAIL", failHtml, StringComparison.Ordinal);
+        Assert.Contains("Do not install/share yet", failHtml, StringComparison.OrdinalIgnoreCase);
     }
 }

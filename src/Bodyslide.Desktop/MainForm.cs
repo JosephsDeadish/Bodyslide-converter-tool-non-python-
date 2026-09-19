@@ -3529,7 +3529,7 @@ public sealed class MainForm : Form
             add(
                 "Validation",
                 validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
-                $"Validation status: {validationSummary.Status} (score {validationSummary.Score}). Open conversion-quality.json for the full breakdown.",
+                $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open conversion-quality.json for the full breakdown.",
                 qualityPath);
 
             foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
@@ -4088,12 +4088,17 @@ public sealed class MainForm : Form
         var highCount = entries.Count(static entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
         var warningCount = entries.Count(static entry => entry.Priority.Equals("Warning", StringComparison.OrdinalIgnoreCase));
         var actionCount = entries.Count(static entry => entry.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase));
-        if (requiresReview)
+        if (highCount > 0)
         {
-            return $"Review before install/share: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
+            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
         }
 
-        return "Output looks ready for a final preview pass. If the mesh looks right in Preview, the generated files and install artifacts are ready for normal smoke testing.";
+        if (requiresReview)
+        {
+            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — inspect Preview and linked reports before install/share: {warningCount} warning and {actionCount} action item(s).";
+        }
+
+        return $"{ConversionValidationPresentation.GetGateLabel("ready")} — install-ready after one final Preview pass and normal smoke testing.";
     }
 
     private static int GetGuidancePriorityRank(string priority) =>
