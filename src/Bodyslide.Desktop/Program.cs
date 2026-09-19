@@ -41,7 +41,7 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             using var form = new MainForm();
             form.CreateControl();
-            Console.WriteLine($"SlideSmith desktop smoke test passed: {form.GetSmokeTestSummary()}");
+            Console.WriteLine(form.GetSmokeTestSummaryJson());
             return 0;
         }
         catch (Exception ex)

@@ -176,12 +176,10 @@ internal static class RaceCompatibilityCatalog
     private static uint ParseFormId(string value)
     {
         var trimmed = value.Trim();
-        if (trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            return uint.Parse(trimmed[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        }
-
-        return uint.Parse(trimmed, CultureInfo.InvariantCulture);
+        var hexValue = trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[2..]
+            : trimmed;
+        return uint.Parse(hexValue, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
     }
 
     private static IReadOnlyList<string> NormalizeStringList(IEnumerable<string>? values) =>

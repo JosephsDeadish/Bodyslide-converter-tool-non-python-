@@ -932,15 +932,18 @@ public sealed class MainForm : Form
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
     }
 
-    internal string GetSmokeTestSummary()
+    internal string GetSmokeTestSummaryJson()
     {
-        return
-            $"title=\"{Text}\", " +
-            $"presets={_presetComboBox.Items.Count}, " +
-            $"targets={_targetComboBox.Items.Count}, " +
-            $"profiles={_profileComboBox.Items.Count}, " +
-            $"physics={_physicsComboBox.Items.Count}, " +
-            $"tabs={_resultsTabControl.TabPages.Count}";
+        return JsonSerializer.Serialize(new
+        {
+            status = "ok",
+            title = Text,
+            presets = _presetComboBox.Items.Count,
+            targets = _targetComboBox.Items.Count,
+            profiles = _profileComboBox.Items.Count,
+            physics = _physicsComboBox.Items.Count,
+            tabs = _resultsTabControl.TabPages.Count
+        });
     }
 
     private static GroupBox CreateSection(string title, Control content)
@@ -1116,6 +1119,7 @@ public sealed class MainForm : Form
 
     private void SaveThemePreference(UiTheme theme)
     {
+        string? tempPath = null;
         try
         {
             var settingsPath = GetThemeSettingsPath();
@@ -1130,11 +1134,23 @@ public sealed class MainForm : Form
                     ["theme"] = theme.ToString()
                 },
                 new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(settingsPath, json);
+            tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, settingsPath, overwrite: true);
         }
         catch (Exception ex)
         {
             AppendLog($"Failed to save theme preference: {ex.Message}");
+            if (!string.IsNullOrWhiteSpace(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
         }
     }
 
