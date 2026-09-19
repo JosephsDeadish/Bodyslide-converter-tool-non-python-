@@ -5781,37 +5781,97 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
         string targetBody,
         CancellationToken cancellationToken)
     {
+        var addonByResolvedKey = pluginAnalysis.ArmorAddons
+            .Where(static addon => addon.FormId != 0)
+            .Select(addon => new
+            {
+                Addon = addon,
+                Key = BuildResolvedPluginFormKey(
+                    addon.OwningPluginFileName,
+                    addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
+            })
+            .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
         var referencedRaces = new List<(RaceCompatibilityRace Race, bool IsInferred)>();
         var seenRaceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        void AddReferencedRace(uint? formId, string? editorId, IReadOnlyList<string>? meshPaths)
+        void AddReferencedRace(RaceCompatibilityRace race, bool isInferred)
         {
-            RaceCompatibilityRace? race = null;
-            var isInferred = false;
-            if (formId is uint rawFormId && RaceCompatibilityCatalog.TryGetRace(rawFormId, out var explicitRace))
-            {
-                race = explicitRace;
-            }
-            else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, pluginAnalysis.ScannedPlugins, out var inferredRace))
-            {
-                race = inferredRace;
-                isInferred = true;
-            }
-
-            if (race is not null && seenRaceNames.Add(race.Name))
+            if (seenRaceNames.Add(race.Name))
             {
                 referencedRaces.Add((race, isInferred));
             }
         }
 
+        bool TryResolveReferencedRace(uint? formId, string? editorId, IReadOnlyList<string>? meshPaths, out RaceCompatibilityRace race, out bool isInferred)
+        {
+            race = default!;
+            isInferred = false;
+            if (formId is uint rawFormId && RaceCompatibilityCatalog.TryGetRace(rawFormId, out var explicitRace))
+            {
+                race = explicitRace;
+                return true;
+            }
+
+            if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, pluginAnalysis.ScannedPlugins, out var inferredRace))
+            {
+                race = inferredRace;
+                isInferred = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        static IReadOnlyList<PluginLinkedFormReference> GetLinkedReferences(PluginArmorRecord armorRecord) =>
+            armorRecord.LinkedArmorAddonReferences?.Count > 0
+                ? armorRecord.LinkedArmorAddonReferences
+                : armorRecord.LinkedArmorAddonFormIds?.Select(rawFormId => new PluginLinkedFormReference(
+                    rawFormId,
+                    armorRecord.OwningPluginFileName,
+                    rawFormId & 0x00FFFFFFu)).ToList()
+                    ?? [];
+
+        IReadOnlyList<PluginArmorAddon> ResolveLinkedArmorAddons(PluginArmorRecord armorRecord)
+        {
+            var linkedAddons = new List<PluginArmorAddon>();
+            foreach (var linkedReference in GetLinkedReferences(armorRecord))
+            {
+                var linkedKey = BuildResolvedPluginFormKey(
+                    linkedReference.OwningPluginFileName,
+                    linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
+                if (addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
+                {
+                    linkedAddons.Add(linkedAddon);
+                }
+            }
+
+            return linkedAddons;
+        }
+
         foreach (var addon in pluginAnalysis.ArmorAddons)
         {
-            AddReferencedRace(addon.RaceFormId, addon.EditorId, addon.DetectedMeshPaths);
+            if (TryResolveReferencedRace(addon.RaceFormId, addon.EditorId, addon.DetectedMeshPaths, out var race, out var isInferred))
+            {
+                AddReferencedRace(race, isInferred);
+            }
         }
 
         foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
         {
-            AddReferencedRace(armorRecord.RaceFormId, armorRecord.EditorId, armorRecord.DetectedMeshPaths);
+            if (TryResolveReferencedRace(armorRecord.RaceFormId, armorRecord.EditorId, armorRecord.DetectedMeshPaths, out var race, out var isInferred))
+            {
+                AddReferencedRace(race, isInferred);
+                continue;
+            }
+
+            foreach (var linkedAddon in ResolveLinkedArmorAddons(armorRecord))
+            {
+                if (TryResolveReferencedRace(linkedAddon.RaceFormId, linkedAddon.EditorId, linkedAddon.DetectedMeshPaths, out race, out isInferred))
+                {
+                    AddReferencedRace(race, isInferred);
+                }
+            }
         }
 
         if (referencedRaces.Count == 0)
@@ -6893,10 +6953,10 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var tuning = BodyDetectionTuningCatalog.Current;
-        var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
-        var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
-        var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
-        var bodyReferenceNames = armor.BodyReferenceFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
+        var meshNames = BuildDetectionSignalNames(armor.MeshFiles);
+        var textureNames = BuildDetectionSignalNames(armor.TextureFiles);
+        var physicsNames = BuildDetectionSignalNames(armor.PhysicsFiles);
+        var bodyReferenceNames = BuildDetectionSignalNames(armor.BodyReferenceFiles);
         var geometrySignature = NifGeometrySignatureReader.TryReadBest(
             armor.MeshFiles.Concat(armor.BodyReferenceFiles.Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))));
 
@@ -6934,6 +6994,43 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return new BodyDetectionReport(top.Template.Body, top.Score, evidence
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray());
+    }
+
+    private static IReadOnlyList<string> BuildDetectionSignalNames(IEnumerable<string> paths) =>
+        paths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .SelectMany(path =>
+            {
+                var fileName = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+                var normalizedPath = NormalizeDetectionPath(path);
+                return new[] { fileName, normalizedPath };
+            })
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static string NormalizeDetectionPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        var normalized = path.Replace('\\', '/').Trim();
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .TakeLast(6)
+            .Select(segment =>
+            {
+                var withoutExtension = Path.GetFileNameWithoutExtension(segment) ?? segment;
+                return withoutExtension
+                    .Replace('-', ' ')
+                    .Replace('_', ' ')
+                    .Replace('.', ' ')
+                    .Trim();
+            })
+            .Where(static segment => !string.IsNullOrWhiteSpace(segment));
+        return string.Join(' ', segments);
     }
 
     private static async Task<string> ReadPhysicsContentsAsync(IReadOnlyList<string> physicsFiles, CancellationToken cancellationToken)

@@ -2610,6 +2610,50 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicRaceCompatibilityService_InfersRaceFromLinkedArmorAddonContextAcrossMasterChain()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["AvianChild.esp", "AvianMaster.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/avian/feather_wrap_0.nif"],
+                    0x01000800u,
+                    "AvianWingHarnessAddon",
+                    [32, 40],
+                    null,
+                    "AvianMaster.esp",
+                    0x00000800u,
+                    ["Skyrim.esm"])
+            ],
+            ArmorRecords:
+            [
+                new PluginArmorRecord(
+                    "ARMO",
+                    ["meshes/armor/shared/world_generic.nif"],
+                    0x02000810u,
+                    "FollowerHarnessArmor",
+                    null,
+                    null,
+                    [32, 40],
+                    null,
+                    "AvianChild.esp",
+                    0x00000810u,
+                    [new PluginLinkedFormReference(0x01000800u, "AvianMaster.esp", 0x00000800u)],
+                    ["AvianMaster.esp"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("Avian variant", report.IncompatibleRaces);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Avian variant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BasicRaceCompatibilityService_ReturnsCompatibleWhenNoRaceFormIds()
     {
         var service = new BasicRaceCompatibilityService();
@@ -6738,6 +6782,24 @@ public sealed class BodySignatureVertexCountTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_UsesNestedPathContextForGenericBodyLayouts()
+    {
+        var service = new SignatureBodyDetectionService();
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mods/messy/bodyframeworks/bhunp/follower/outfit_0.nif",
+            MeshFiles: ["/tmp/mods/messy/bodyframeworks/bhunp/follower/outfit_0.nif"],
+            TextureFiles: [],
+            PhysicsFiles: [],
+            BodyReferenceFiles: ["/tmp/mods/CalienteTools/BodySlide/ShapeData/bhunp/reference/bodyshape.tri"]);
+
+        var result = await service.DetectAsync(armor, CancellationToken.None);
+
+        Assert.Equal("BHUNP", result.Body);
+        Assert.Contains(result.Evidence, evidence => evidence.StartsWith("mesh:", StringComparison.Ordinal));
+        Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
     }
 
     [Fact]
