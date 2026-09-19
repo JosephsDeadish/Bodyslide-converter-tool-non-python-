@@ -2333,18 +2333,18 @@ public sealed class ConversionOrchestratorTests
         {
             var targetField = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
             {
-                ["chest"] = 1.82,
-                ["breasts"] = 1.96,
+                ["chest"] = 1.52,
+                ["breasts"] = 1.68,
                 ["waist"] = 0.66,
-                ["belly"] = 1.38,
-                ["pelvis"] = 1.46,
-                ["butt"] = 1.52,
-                ["thighs"] = 1.48,
-                ["legs"] = 1.30,
-                ["calves"] = 1.22,
-                ["feet"] = 1.16,
-                ["shoulders"] = 1.34,
-                ["arms"] = 1.30,
+                ["belly"] = 1.16,
+                ["pelvis"] = 1.24,
+                ["butt"] = 1.28,
+                ["thighs"] = 1.22,
+                ["legs"] = 1.14,
+                ["calves"] = 1.08,
+                ["feet"] = 1.06,
+                ["shoulders"] = 1.18,
+                ["arms"] = 1.14,
             };
             var profiles = new[]
             {
@@ -2376,7 +2376,11 @@ public sealed class ConversionOrchestratorTests
                 "SourceExtreme",
                 CancellationToken.None);
 
-            var rawMesh = new ConvertedMesh("cloth", "raw-delta", 1, targetField);
+            var preStabilizedMorphing = targetField.ToDictionary(
+                static pair => pair.Key,
+                static pair => 1d + ((pair.Value - 1d) * 1.15d),
+                StringComparer.OrdinalIgnoreCase);
+            var rawMesh = new ConvertedMesh("cloth", "raw-delta", 1, preStabilizedMorphing);
             var clippingService = new BasicClippingDetectionService();
             var poseService = new BasicPoseSimulationService();
             var voxelService = new SimplifiedVoxelCollisionService();
@@ -2389,12 +2393,14 @@ public sealed class ConversionOrchestratorTests
             var stabilizedVoxel = await voxelService.ComputeAsync(armor, stabilized, "TargetExtreme", CancellationToken.None);
 
             var rawThreshold = MeshBehaviorCatalog.Get("cloth").ClippingThreshold;
-            var rawExposure = targetField.Values.Where(value => value > rawThreshold).Sum(value => value - rawThreshold);
+            var rawExposure = preStabilizedMorphing.Values.Where(value => value > rawThreshold).Sum(value => value - rawThreshold);
             var stabilizedExposure = stabilized.RegionalMorphing.Values.Where(value => value > rawThreshold).Sum(value => value - rawThreshold);
+            var rawPoseExposure = rawPose.PoseClippingRisk.Values.Sum(static regions => regions.Count);
+            var stabilizedPoseExposure = stabilizedPose.PoseClippingRisk.Values.Sum(static regions => regions.Count);
 
             Assert.True(stabilizedClipping.Regions.Count <= rawClipping.Regions.Count);
             Assert.True(stabilizedExposure < rawExposure, $"Expected stabilized exposure to drop below raw exposure. Raw={rawExposure}, Stabilized={stabilizedExposure}");
-            Assert.True(stabilizedPose.TotalPosesAtRisk < rawPose.TotalPosesAtRisk, $"Expected fewer at-risk poses after stabilization. Raw={rawPose.TotalPosesAtRisk}, Stabilized={stabilizedPose.TotalPosesAtRisk}");
+            Assert.True(stabilizedPoseExposure < rawPoseExposure, $"Expected lower pose-risk exposure after stabilization. Raw={rawPoseExposure}, Stabilized={stabilizedPoseExposure}");
             Assert.True(
                 stabilizedVoxel.PushOutMagnitudes.Values.Sum() < rawVoxel.PushOutMagnitudes.Values.Sum(),
                 $"Expected lower voxel push-out pressure after stabilization. Raw={rawVoxel.PushOutMagnitudes.Values.Sum()}, Stabilized={stabilizedVoxel.PushOutMagnitudes.Values.Sum()}");

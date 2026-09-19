@@ -7699,6 +7699,22 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         "chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "legs", "calves", "feet", "shoulders", "arms"
     ];
 
+    private static readonly IReadOnlyDictionary<string, double> PoseStressRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 0.78d,
+            ["breasts"] = 0.72d,
+            ["belly"] = 0.72d,
+            ["pelvis"] = 0.64d,
+            ["butt"] = 0.64d,
+            ["thighs"] = 0.60d,
+            ["legs"] = 0.66d,
+            ["calves"] = 0.70d,
+            ["feet"] = 0.72d,
+            ["shoulders"] = 0.74d,
+            ["arms"] = 0.76d,
+        };
+
     private sealed record ExtremeDifferenceAssessment(
         bool IsExtreme,
         double Severity,
@@ -8077,11 +8093,12 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         severity = Math.Round(Math.Clamp(severity, 0d, 1d), 6);
 
         var isExtreme =
-            peakExpansion >= 0.24d ||
-            peakCompression >= 0.18d ||
-            spread >= 0.50d ||
-            extremeRegionCount >= 3 ||
-            harshTransitionCount >= 2;
+            severity >= 0.60d &&
+            (peakExpansion >= 0.28d ||
+             peakCompression >= 0.20d ||
+             spread >= 0.58d ||
+             extremeRegionCount >= 4 ||
+             harshTransitionCount >= 3);
 
         return new ExtremeDifferenceAssessment(
             isExtreme,
@@ -8177,6 +8194,10 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 constrainedRegions: ExtremeDifferenceCoreRegions);
         }
 
+        ApplyDampingProfile(
+            stabilized,
+            ScaleDampingProfile(PoseStressRegionDamping, Math.Min(1d, assessment.Severity * 0.90d)));
+
         ApplyClampProfile(stabilized, clampProfile);
         return stabilized;
     }
@@ -8201,9 +8222,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             "plate" => (Minimum: Lerp(0.86d, 0.90d, severity), Maximum: Lerp(1.20d, 1.16d, severity)),
             "leather" => (Minimum: Lerp(0.82d, 0.88d, severity), Maximum: Lerp(1.28d, 1.20d, severity)),
             "skin-tight" => (Minimum: Lerp(0.82d, 0.87d, severity), Maximum: Lerp(1.26d, 1.18d, severity)),
-            "cloth" => (Minimum: Lerp(0.78d, 0.86d, severity), Maximum: Lerp(1.34d, 1.22d, severity)),
-            "physics-enabled" => (Minimum: Lerp(0.76d, 0.85d, severity), Maximum: Lerp(1.36d, 1.24d, severity)),
-            _ => (Minimum: Lerp(0.80d, 0.87d, severity), Maximum: Lerp(1.30d, 1.20d, severity))
+            "cloth" => (Minimum: Lerp(0.78d, 0.86d, severity), Maximum: Lerp(1.34d, 1.18d, severity)),
+            "physics-enabled" => (Minimum: Lerp(0.76d, 0.85d, severity), Maximum: Lerp(1.36d, 1.20d, severity)),
+            _ => (Minimum: Lerp(0.80d, 0.87d, severity), Maximum: Lerp(1.30d, 1.18d, severity))
         };
 
         return regions
