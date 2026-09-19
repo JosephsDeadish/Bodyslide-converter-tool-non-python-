@@ -8787,6 +8787,35 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithOutputZip_PackagesInstallableMirrorOfFolderOutput()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory, OutputZip: true));
+            Assert.True(result.Success);
+
+            var zipPath = outputDirectory + ".zip";
+            Assert.True(File.Exists(zipPath), $"Expected packaged ZIP at {zipPath}.");
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            AssertZipMatchesDirectory(archive, outputDirectory);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticModPackDirectory_WithMixedPlugins_PreservesContextualPluginMeshes()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace();
@@ -9772,6 +9801,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Mod Organizer 2 / Vortex", zippedReadme, StringComparison.Ordinal);
             Assert.Contains("preview-workbench.html", zippedReadme, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("plugin-patches.json", zippedReadme, StringComparison.OrdinalIgnoreCase);
+
+            AssertZipMatchesDirectory(archive, outputDirectory);
         }
         finally
         {
@@ -9942,6 +9973,36 @@ public sealed class RealisticModPackFixtureTests
         using var stream = entry!.Open();
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
+    }
+
+    private static void AssertZipMatchesDirectory(ZipArchive archive, string directory)
+    {
+        var expectedFiles = Directory
+            .GetFiles(directory, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var archiveEntries = archive.Entries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Name))
+            .Select(static entry => entry.FullName.Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Equal(expectedFiles, archiveEntries);
+
+        foreach (var relativePath in expectedFiles)
+        {
+            var entry = archive.Entries.FirstOrDefault(candidate =>
+                candidate.FullName.Replace('\\', '/').Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(entry);
+
+            var expectedBytes = File.ReadAllBytes(Path.Combine(directory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            using var archiveStream = entry!.Open();
+            using var ms = new MemoryStream();
+            archiveStream.CopyTo(ms);
+            Assert.Equal(expectedBytes, ms.ToArray());
+        }
     }
 
     private static byte[] BuildFixtureArmaPlugin(string meshPath)
