@@ -9258,6 +9258,47 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticFailureCrossPluginAliasTieModPackDirectory_EmitsUnresolvedTieGroupDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginAliasTieModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var tieGroups = patchJson.RootElement.GetProperty("UnresolvedTieGroups");
+            Assert.True(tieGroups.GetArrayLength() >= 2);
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                string.Equals(element.GetProperty("PluginMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-a/viewmodel", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-b/firstperson", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-a/inventory", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-b/worldmodel", StringComparison.OrdinalIgnoreCase)));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/pack-a/viewmodel", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/pack-b/worldmodel", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureCrossPluginUnscannedMasterModPackDirectory_ReportsLinkedMasterGap()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginUnscannedMasterModPack");
@@ -9452,6 +9493,46 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersFirstPersonSourceMesh_WhenPluginPathUsesViewModelDirectoryAlias()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/plain/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/firstperson/steelboots_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/viewmodel/steelboots_0.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/firstperson/steelboots_0.nif", sourceMeshMap["meshes/armor/common/viewmodel/steelboots_0.nif"]);
+    }
+
+    [Fact]
     public void BuildPluginRewritePlan_MatchesGroundAliasBetweenGndAndGround()
     {
         var sourceMeshPaths = new[]
@@ -9488,6 +9569,46 @@ public sealed class RealisticModPackFixtureTests
 
         Assert.Empty(ambiguousMatches);
         Assert.Equal("/tmp/meshes/armor/steel/steelboots_ground.nif", sourceMeshMap["meshes/armor/common/steelboots_gnd.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_PrefersWorldModelSourceMesh_WhenSourceDirectoryUsesInventoryAlias()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/plain/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/inventory/steelboots_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/world/steelboots_0.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/inventory/steelboots_0.nif", sourceMeshMap["meshes/armor/common/world/steelboots_0.nif"]);
     }
 
     [Fact]

@@ -16053,10 +16053,8 @@ internal sealed class LocalExportService(
 
     private static int CountMatchingTrailingSegments(string leftPath, string rightPath)
     {
-        var leftSegments = NormalizeComparablePath(leftPath)
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var rightSegments = NormalizeComparablePath(rightPath)
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var leftSegments = SplitComparablePathSegments(leftPath);
+        var rightSegments = SplitComparablePathSegments(rightPath);
         var matches = 0;
         for (int leftIndex = leftSegments.Length - 1, rightIndex = rightSegments.Length - 1;
              leftIndex >= 0 && rightIndex >= 0;
@@ -16075,10 +16073,8 @@ internal sealed class LocalExportService(
 
     private static int CountMatchingLeadingSegments(string leftPath, string rightPath)
     {
-        var leftSegments = NormalizeComparablePath(leftPath)
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var rightSegments = NormalizeComparablePath(rightPath)
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var leftSegments = SplitComparablePathSegments(leftPath);
+        var rightSegments = SplitComparablePathSegments(rightPath);
         var matches = 0;
         var length = Math.Min(leftSegments.Length, rightSegments.Length);
         for (var index = 0; index < length; index++)
@@ -16096,22 +16092,20 @@ internal sealed class LocalExportService(
 
     private static bool HasPathSuffix(string path, string suffix)
     {
-        var normalizedPath = NormalizeComparablePath(path);
-        var normalizedSuffix = NormalizeComparablePath(suffix);
+        var normalizedPath = NormalizeContextComparablePath(path);
+        var normalizedSuffix = NormalizeContextComparablePath(suffix);
         return normalizedPath.Equals(normalizedSuffix, StringComparison.OrdinalIgnoreCase)
             || normalizedPath.EndsWith($"/{normalizedSuffix}", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> EnumerateComparablePathAncestors(string path)
     {
-        var normalized = NormalizeComparablePath(path);
-        if (string.IsNullOrWhiteSpace(normalized))
+        var segments = SplitComparablePathSegments(path);
+        if (segments.Length == 0)
         {
             yield break;
         }
 
-        var segments = normalized
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         for (var length = segments.Length; length >= 1; length--)
         {
             yield return string.Join('/', segments.Take(length));
@@ -16119,14 +16113,24 @@ internal sealed class LocalExportService(
     }
 
     private static int CountPathSegments(string path) =>
-        NormalizeComparablePath(path)
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Length;
+        SplitComparablePathSegments(path).Length;
+
+    private static string NormalizeContextComparablePath(string path) =>
+        string.Join('/', SplitComparablePathSegments(path));
 
     private static string NormalizeComparablePath(string path) =>
         string.IsNullOrWhiteSpace(path)
             ? string.Empty
             : path.Replace('\\', '/').Trim().Trim('/');
+
+    private static string[] SplitComparablePathSegments(string path)
+    {
+        return NormalizeComparablePath(path)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(CanonicalizeComparablePathSegment)
+            .Where(static segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+    }
 
     private static string DescribeSourceContextPath(string path)
     {
@@ -16328,6 +16332,7 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<string> ExtractComparablePathTokens(string path)
     {
         return ExtractRawPathTokens(path)
+            .Select(CanonicalizeComparablePathToken)
             .Where(static token => token.Length > 1 && !IsGenericPluginPathToken(token))
             .ToArray();
     }
@@ -16382,13 +16387,13 @@ internal sealed class LocalExportService(
             return string.Empty;
         }
 
-        return token.Trim().ToLowerInvariant() switch
+        return CanonicalizeComparablePathToken(token) switch
         {
             "1stperson" or "firstperson" or "first" or "fp" => string.Empty,
             "gnd" => "ground",
             "f" or "fem" => "female",
             "m" or "masc" => "male",
-            _ => token
+            _ => token.Trim()
         };
     }
 
@@ -16408,14 +16413,16 @@ internal sealed class LocalExportService(
     private static bool IsFirstPersonVariantToken(string token)
     {
         var normalizedToken = NormalizeVariantSignalToken(token);
-        return normalizedToken is "1stperson" or "firstperson" or "first" or "1st" or "fp" or "1person"
+        return normalizedToken is "1stperson" or "firstperson" or "first" or "1st" or "fp" or "1person" or
+            "viewmodel" or "viewmodels" or "fpview" or "1p" or "1stp"
             || normalizedToken.Contains("firstperson", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsWorldVariantToken(string token)
     {
         var normalizedToken = NormalizeVariantSignalToken(token);
-        return normalizedToken is "world" or "ground" or "gnd"
+        return normalizedToken is "world" or "ground" or "gnd" or "worldmodel" or "worldmodels" or
+            "inventory" or "inv" or "dropmodel" or "dropped"
             || normalizedToken.Contains("world", StringComparison.OrdinalIgnoreCase)
             || normalizedToken.Contains("ground", StringComparison.OrdinalIgnoreCase);
     }
@@ -16449,6 +16456,29 @@ internal sealed class LocalExportService(
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray());
+    }
+
+    private static string CanonicalizeComparablePathToken(string token)
+    {
+        var normalizedToken = NormalizeVariantSignalToken(token);
+        return normalizedToken switch
+        {
+            "1stperson" or "firstperson" or "first" or "1st" or "fp" or "1person" or
+                "viewmodel" or "viewmodels" or "fpview" or "1p" or "1stp" => "firstperson",
+            "world" or "ground" or "gnd" or "worldmodel" or "worldmodels" or
+                "inventory" or "inv" or "dropmodel" or "dropped" => "world",
+            _ => normalizedToken
+        };
+    }
+
+    private static string CanonicalizeComparablePathSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment))
+        {
+            return string.Empty;
+        }
+
+        return CanonicalizeComparablePathToken(segment);
     }
 
     private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath, string? sourceMeshPath = null)
