@@ -19305,10 +19305,10 @@ internal sealed class LocalExportService(
 
                 try
                 {
-                    var bytes = File.ReadAllBytes(nifPath);
-                    if (NifGeometrySignatureReader.TryLocateVertexBlock(bytes, out _, out var vertexCount) && vertexCount > best)
+                    var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
+                    if (vertices is { Count: > 0 } && vertices.Count > best)
                     {
-                        best = vertexCount;
+                        best = vertices.Count;
                     }
                 }
                 catch (IOException)

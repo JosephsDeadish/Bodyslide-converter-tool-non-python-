@@ -5222,6 +5222,53 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithBsTriShapeStyleNif_WritesBodySlideMorphPayloadsUsingHalfFloatVertexCount()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bstriShape_morphcount_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var shapeDataDirectory = Directory
+                .GetDirectories(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"), "*", SearchOption.TopDirectoryOnly)
+                .Single();
+            var lowBsdPath = Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.TopDirectoryOnly)
+                .First(path => !Path.GetFileName(path).EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase));
+            var lowTriPath = Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly)
+                .First(path => !Path.GetFileName(path).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Equal(320u, ReadBsdVertexCount(lowBsdPath));
+            Assert.Equal(320u, ReadTriVertexCount(lowTriPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static uint ReadBsdVertexCount(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            var sliderNameLength = BitConverter.ToUInt16(bytes, 7);
+            return BitConverter.ToUInt32(bytes, 9 + sliderNameLength);
+        }
+
+        static uint ReadTriVertexCount(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            return BitConverter.ToUInt32(bytes, 8);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithSmallBsTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10389,6 +10436,58 @@ public sealed class RealisticModPackFixtureTests
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticMultiBlockLinkedFrameworkModPackDirectory_WritesShapeDataMorphCountsFromConvertedHalfFloatMeshes()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMultiBlockLinkedFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            var shapeDataDirectory = Directory
+                .GetDirectories(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData"), "*", SearchOption.TopDirectoryOnly)
+                .Single();
+            var expectedVertexCount = Directory
+                .GetFiles(shapeDataDirectory, "*.nif", SearchOption.TopDirectoryOnly)
+                .Select(NifGeometrySignatureReader.TryReadFullVertices)
+                .Where(static vertices => vertices is { Count: > 0 })
+                .Select(static vertices => (uint)vertices!.Count)
+                .DefaultIfEmpty()
+                .Max();
+
+            Assert.True(expectedVertexCount > 0, "Expected staged ShapeData NIFs with readable vertex data.");
+
+            var lowBsdPath = Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.TopDirectoryOnly)
+                .First(path => !Path.GetFileName(path).EndsWith("_1.bsd", StringComparison.OrdinalIgnoreCase));
+            var lowTriPath = Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.TopDirectoryOnly)
+                .First(path => !Path.GetFileName(path).EndsWith("_1.tri", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Equal(expectedVertexCount, ReadBsdVertexCount(lowBsdPath));
+            Assert.Equal(expectedVertexCount, ReadTriVertexCount(lowTriPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static uint ReadBsdVertexCount(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            var sliderNameLength = BitConverter.ToUInt16(bytes, 7);
+            return BitConverter.ToUInt32(bytes, 9 + sliderNameLength);
+        }
+
+        static uint ReadTriVertexCount(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            return BitConverter.ToUInt32(bytes, 8);
         }
     }
 
