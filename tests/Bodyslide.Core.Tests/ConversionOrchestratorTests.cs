@@ -9730,6 +9730,61 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticFailurePartialLinkedFamilyModPackDirectory_WithOutputZip_PackagesReviewArtifactsForModManagers()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailurePartialLinkedFamilyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory, OutputZip: true));
+            Assert.True(result.Success);
+
+            var zipPath = outputDirectory + ".zip";
+            Assert.True(File.Exists(zipPath), $"Expected packaged ZIP at {zipPath}.");
+
+            var stagedMeshPath = Directory
+                .EnumerateFiles(Path.Combine(outputDirectory, "meshes", "slidesmith"), "*.nif", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(outputDirectory, path).Replace('\\', '/'))
+                .FirstOrDefault();
+            Assert.False(string.IsNullOrWhiteSpace(stagedMeshPath), "Expected at least one staged converted mesh in the output folder.");
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            AssertZipContainsEntry(archive, "README.txt");
+            AssertZipContainsEntry(archive, "conversion-quality.json");
+            AssertZipContainsEntry(archive, "plugin-patches.json");
+            AssertZipContainsEntry(archive, "preview.html");
+            AssertZipContainsEntry(archive, "preview-workbench.html");
+            AssertZipContainsEntry(archive, "fomod/ModuleConfig.xml");
+            AssertZipContainsEntry(archive, "fomod/info.xml");
+            AssertZipContainsEntry(archive, "SKSE/Plugins/hdtSMP64/devious_restraint.xml");
+            AssertZipContainsEntry(archive, stagedMeshPath!);
+
+            var zippedQualityJson = ReadZipEntryText(archive, "conversion-quality.json");
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", zippedQualityJson, StringComparison.Ordinal);
+
+            var zippedPatchJson = ReadZipEntryText(archive, "plugin-patches.json");
+            Assert.Contains("LinkedArmorFamilyReviewSteps", zippedPatchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousHarnessArmor", zippedPatchJson, StringComparison.Ordinal);
+
+            var zippedReadme = ReadZipEntryText(archive, "README.txt");
+            Assert.Contains("Mod Organizer 2 / Vortex", zippedReadme, StringComparison.Ordinal);
+            Assert.Contains("preview-workbench.html", zippedReadme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("plugin-patches.json", zippedReadme, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticHeadgearFullHelmetModPackDirectory_PreservesHeadgearPartitionsAndGroundMesh()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHeadgearFullHelmetModPack");
@@ -9867,6 +9922,26 @@ public sealed class RealisticModPackFixtureTests
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             File.Copy(file, destinationPath, overwrite: true);
         }
+    }
+
+    private static void AssertZipContainsEntry(ZipArchive archive, string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        Assert.Contains(
+            archive.Entries,
+            entry => entry.FullName.Replace('\\', '/').Equals(normalizedRelativePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ReadZipEntryText(ZipArchive archive, string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        var entry = archive.Entries.FirstOrDefault(entry =>
+            entry.FullName.Replace('\\', '/').Equals(normalizedRelativePath, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(entry);
+
+        using var stream = entry!.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static byte[] BuildFixtureArmaPlugin(string meshPath)
