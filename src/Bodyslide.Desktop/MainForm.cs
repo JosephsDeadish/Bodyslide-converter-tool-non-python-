@@ -2087,10 +2087,21 @@ public sealed class MainForm : Form
 
             foreach (var outputDirectory in outputDirectories)
             {
-                AppendGuidanceFromConversionQuality(outputDirectory, Add, ref requiresReview);
-                AppendGuidanceFromPackValidation(outputDirectory, Add, ref requiresReview);
-                AppendGuidanceFromPluginPatches(outputDirectory, Add, ref requiresReview);
-                AppendGuidanceFromWorldPhysics(outputDirectory, Add, ref requiresReview);
+                AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
+            }
+
+            if (requiresReview &&
+                !string.IsNullOrWhiteSpace(previewPath) &&
+                File.Exists(previewPath))
+            {
+                Add(
+                    "Review flow",
+                    "Action",
+                    "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
+                    previewPath);
             }
 
             if (entries.Count == 0)
@@ -3384,6 +3395,7 @@ public sealed class MainForm : Form
 
     private static void AppendGuidanceFromConversionQuality(
         string outputDirectory,
+        string? previewPath,
         Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
@@ -3418,12 +3430,26 @@ public sealed class MainForm : Form
 
             foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
             {
-                add("Warning", ToDisplayPriority(issue.Severity), issue.Message, qualityPath);
+                add(
+                    GetGuidanceAreaForIssueCode(issue.Code),
+                    ToDisplayPriority(issue.Severity),
+                    issue.Message,
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, issue.Code, qualityPath));
             }
 
-            foreach (var action in ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody, maxActions: 4))
+            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 4))
             {
-                add("Next action", "Action", action, qualityPath);
+                var action = ConversionValidationGuidance.GetIssueFollowUp(issue, targetBody);
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    continue;
+                }
+
+                add(
+                    $"{GetGuidanceAreaForIssueCode(issue.Code)} next step",
+                    "Action",
+                    action,
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, issue.Code, qualityPath));
             }
         }
         catch (Exception ex)
@@ -3435,6 +3461,7 @@ public sealed class MainForm : Form
 
     private static void AppendGuidanceFromPackValidation(
         string outputDirectory,
+        string? previewPath,
         Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
@@ -3481,7 +3508,11 @@ public sealed class MainForm : Form
                         continue;
                     }
 
-                    add("Packaging review", count > 0 ? "Action" : "Info", guidance, reportPath);
+                    add(
+                        "Packaging review",
+                        count > 0 ? "Action" : "Info",
+                        guidance,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, code, reportPath));
                 }
             }
         }
@@ -3494,6 +3525,7 @@ public sealed class MainForm : Form
 
     private static void AppendGuidanceFromPluginPatches(
         string outputDirectory,
+        string? previewPath,
         Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
@@ -3519,7 +3551,7 @@ public sealed class MainForm : Form
                 "Plugin patching",
                 "Action",
                 $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
-                patchPath);
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", patchPath));
 
             if (TryGetProperty(root, "PluginInstallHints", out var pluginInstallHints) && pluginInstallHints.ValueKind == JsonValueKind.Array)
             {
@@ -3584,6 +3616,7 @@ public sealed class MainForm : Form
 
     private static void AppendGuidanceFromWorldPhysics(
         string outputDirectory,
+        string? previewPath,
         Action<string, string, string, string?> add,
         ref bool requiresReview)
     {
@@ -3636,7 +3669,7 @@ public sealed class MainForm : Form
                     "Footwear",
                     "High",
                     $"Detected {heelProfile} footwear. Validate heel height, toe angle, and ground contact in preview-workbench.html and world-physics.json before shipping.",
-                    reportPath);
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "heel-offset-review", reportPath));
             }
         }
         catch (Exception ex)
@@ -3644,6 +3677,161 @@ public sealed class MainForm : Form
             requiresReview = true;
             add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}", reportPath);
         }
+    }
+
+    private static string GetGuidanceAreaForIssueCode(string? code)
+    {
+        var normalized = code?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "Next action";
+        }
+
+        if (IsPreviewDrivenGuidanceCode(normalized))
+        {
+            return "Preview review";
+        }
+
+        if (normalized is "unsupported-bones")
+        {
+            return "Skeleton review";
+        }
+
+        if (normalized is "missing-normal-maps")
+        {
+            return "Texture review";
+        }
+
+        if (normalized is "incomplete-source-fallback" or "bodyslide-incompatible" ||
+            normalized.StartsWith("missing-bodyslide-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "BodySlide support";
+        }
+
+        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Plugin review";
+        }
+
+        if (normalized.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Packaging review";
+        }
+
+        return "Next action";
+    }
+
+    private static string ResolveGuidanceTargetPath(
+        string outputDirectory,
+        string? previewPath,
+        string? issueCode,
+        string fallbackPath)
+    {
+        var normalized = issueCode?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return fallbackPath;
+        }
+
+        if (IsPreviewDrivenGuidanceCode(normalized) &&
+            !string.IsNullOrWhiteSpace(previewPath) &&
+            File.Exists(previewPath))
+        {
+            return previewPath;
+        }
+
+        if (normalized is "unsupported-bones")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json") ?? fallbackPath;
+        }
+
+        if (normalized is "missing-normal-maps")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "texture-summary.json") ?? fallbackPath;
+        }
+
+        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json") ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-cbpc-config")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")) ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-smp-config")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml")) ?? fallbackPath;
+        }
+
+        if (normalized is "bodyslide-incompatible" or "incomplete-source-fallback" ||
+            normalized.StartsWith("missing-bodyslide-", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide")) ?? fallbackPath;
+        }
+
+        if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return Directory
+                       .EnumerateFiles(outputDirectory, "*.zip", SearchOption.TopDirectoryOnly)
+                       .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                       .FirstOrDefault()
+                   ?? outputDirectory;
+        }
+
+        if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-fomod-module-config", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "info.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, "fomod")
+                ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-mesh-output" or "zip-missing-staged-mesh-output")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("meshes", "slidesmith")) ?? outputDirectory;
+        }
+
+        return fallbackPath;
+    }
+
+    private static bool IsPreviewDrivenGuidanceCode(string code) =>
+        code.Equals("low-detection-confidence", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("low-body-match", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("unsupported-nif-layout", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("heuristic-nif-read", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("synthetic-morph-fallback", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("retargeted-morph-reuse", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("clipping-detected", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("voxel-penetration", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("pose-risk", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("auto-correction-applied", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("heel-offset-review", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("plugin-link-unsupported-nif-layout", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-workbench", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-html", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-svg", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ResolveExistingGuidancePath(string outputDirectory, string relativePath)
+    {
+        var fullPath = Path.Combine(outputDirectory, relativePath);
+        if (File.Exists(fullPath) || Directory.Exists(fullPath))
+        {
+            return fullPath;
+        }
+
+        return null;
     }
 
     private static int GetGuidancePriorityRank(string priority) =>
