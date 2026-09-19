@@ -1,8 +1,8 @@
 using Bodyslide.Core;
-using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -1166,10 +1166,9 @@ public sealed class MainForm : Form
         {
             try
             {
-                using var personalizeKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-                if (personalizeKey?.GetValue("AppsUseLightTheme") is int appsUseLightTheme)
+                if (TryGetWindowsRegistryTheme() is { } registryTheme)
                 {
-                    return appsUseLightTheme == 0 ? UiTheme.Dark : UiTheme.Light;
+                    return registryTheme;
                 }
             }
             catch (Exception ex)
@@ -1181,6 +1180,15 @@ public sealed class MainForm : Form
         var background = SystemColors.Window;
         var luminance = ((background.R * 0.2126) + (background.G * 0.7152) + (background.B * 0.0722)) / 255d;
         return luminance < 0.5d ? UiTheme.Dark : UiTheme.Light;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static UiTheme? TryGetWindowsRegistryTheme()
+    {
+        using var personalizeKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        return personalizeKey?.GetValue("AppsUseLightTheme") is int appsUseLightTheme
+            ? appsUseLightTheme == 0 ? UiTheme.Dark : UiTheme.Light
+            : null;
     }
 
     private void PopulateCatalogTab()
@@ -3498,8 +3506,13 @@ public sealed class MainForm : Form
             : null;
 
     private static string? TryReadBool(JsonElement element, string propertyName) =>
+        TryReadBoolValue(element, propertyName) is { } value
+            ? (value ? "Yes" : "No")
+            : null;
+
+    private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
-            ? (value.GetBoolean() ? "Yes" : "No")
+            ? value.GetBoolean()
             : null;
 
     private static string? TryReadNestedString(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
@@ -3597,8 +3610,9 @@ public sealed class MainForm : Form
             using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
             return TryReadValidationSummary(document.RootElement);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            System.Diagnostics.Trace.TraceWarning($"Failed to read validation summary from '{reportPath}': {ex.Message}");
             return null;
         }
     }
@@ -3776,7 +3790,7 @@ public sealed class MainForm : Form
                 ? TryReadString(physicsCompatibility, "Summary")
                 : null;
             var physicsCompatible = hasPhysicsCompatibility
-                ? TryReadBool(physicsCompatibility, "IsCompatible")
+                ? TryReadBoolValue(physicsCompatibility, "IsCompatible")
                 : null;
             if (unsupportedBones.Count == 0)
             {
@@ -3803,7 +3817,7 @@ public sealed class MainForm : Form
 
             if (hasPhysicsCompatibility && !string.IsNullOrWhiteSpace(physicsRequestedProfile))
             {
-                if (string.Equals(physicsCompatible, "False", StringComparison.OrdinalIgnoreCase) || physicsMissingBones.Count > 0)
+                if (physicsCompatible == false || physicsMissingBones.Count > 0)
                 {
                     requiresReview = true;
                     add(
@@ -4054,7 +4068,7 @@ public sealed class MainForm : Form
                 {
                     var sourcePlugin = TryReadString(hint, "SourcePlugin") ?? "plugin";
                     var generatedPatch = TryReadString(hint, "GeneratedPatchPlugin");
-                    var manualReview = TryReadBool(hint, "ManualReviewRequired");
+                    var manualReview = TryReadBoolValue(hint, "ManualReviewRequired");
                     var loadAfter = TryReadArray(hint, "RecommendedPluginLoadAfter");
                     var placement = TryReadString(hint, "RecommendedModManagerPlacement");
                     var notes = TryReadArray(hint, "Notes");
@@ -4071,7 +4085,7 @@ public sealed class MainForm : Form
                             patchPath);
                     }
 
-                    if (string.Equals(manualReview, "Yes", StringComparison.OrdinalIgnoreCase))
+                    if (manualReview == true)
                     {
                         requiresReview = true;
                         add(
