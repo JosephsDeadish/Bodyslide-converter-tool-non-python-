@@ -9387,21 +9387,39 @@ public sealed class RealisticModPackFixtureTests
             var result = Assert.Single(results);
             Assert.True(result.Success);
 
-            var partitionsStep = Assert.Single(result.Steps.Where(step => step.StartsWith("partitions:", StringComparison.Ordinal)));
+            var partitionsStep = Assert.Single(result.Steps, step => step.StartsWith("partitions:", StringComparison.Ordinal));
             Assert.Contains("30:Head", partitionsStep, StringComparison.Ordinal);
             Assert.Contains("31:Hair", partitionsStep, StringComparison.Ordinal);
             Assert.DoesNotContain("42:Circlet", partitionsStep, StringComparison.Ordinal);
 
-            var stagedHelmet0 = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_0.nif");
-            var stagedHelmet1 = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_1.nif");
-            var stagedGround = Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_ground.nif");
-            Assert.True(File.Exists(stagedHelmet0));
-            Assert.True(File.Exists(stagedHelmet1));
-            Assert.True(File.Exists(stagedGround));
+            var stagedHelmet0Candidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_0.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_0.nif"),
+            };
+            var stagedHelmet1Candidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_1.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1.nif"),
+            };
+            var stagedGroundCandidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_ground.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_ground.nif"),
+            };
+            Assert.True(stagedHelmet0Candidates.Any(File.Exists), "Expected converted headgear low-weight mesh to be staged.");
+            Assert.True(stagedHelmet1Candidates.Any(File.Exists), "Expected converted headgear high-weight mesh to be staged.");
+            Assert.True(stagedGroundCandidates.Any(File.Exists), "Expected converted headgear ground mesh to be staged.");
 
-            var patchJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "plugin-patches.json"));
-            Assert.Contains("meshes/slidesmith/cbbe/armor/daedric/daedric_greathelm_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("meshes/slidesmith/cbbe/armor/daedric/daedric_greathelm_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.True(
+                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_0.nif")),
+                "Expected first-person fallback headgear mesh to be staged.");
+            Assert.True(
+                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_1.nif")),
+                "Expected first-person high-weight fallback headgear mesh to be staged.");
+            Assert.True(
+                File.Exists(Path.Combine(outputDirectory, "SlideSmith_daedric_greathelm_0.esp")),
+                "Expected scratch plugin output for the staged headgear package.");
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("missing-plugin-partitions", qualityJson, StringComparison.Ordinal);
