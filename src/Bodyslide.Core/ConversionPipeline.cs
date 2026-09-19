@@ -272,17 +272,20 @@ internal static class ConversionValidationGuidance
             "missing-normal-maps" =>
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
-                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm beast/custom races have matching body meshes or dedicated addon records before release.",
+                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/beast races have matching body meshes, skeleton variants, and dedicated addon records before release.",
             "plugin-rewrite-ambiguous-filename" or
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
-            "plugin-link-missing-arma-record" or
-            "plugin-link-partial-family-failure" or
-            "plugin-link-unscanned-master-reference" or
             "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" =>
                 "Open plugin-patches.json and patch-armor.pas in xEdit context, verify each ARMO/ARMA mesh path and master-chain warning, and ensure any generated *_SlidesmithPatch.esp loads after the source plugin before release.",
+            "plugin-link-missing-arma-record" =>
+                "Open plugin-patches.json in xEdit context, find the linked ARMA FormID that did not resolve, and repair the source plugin/master dependency chain before re-running the conversion.",
+            "plugin-link-partial-family-failure" =>
+                "Open plugin-patches.json and compare every linked armor family variant (world, first-person, female/male, and addon-specific meshes), then re-run only after each linked ARMO/ARMA record resolves to a converted counterpart.",
+            "plugin-link-unscanned-master-reference" =>
+                "Install or extract the missing plugin masters, then re-run with the full master chain available so linked ARMA references stop being skipped during rewrite verification.",
             "plugin-patch-missing-master-chain" or
             "plugin-patch-master-order-mismatch" =>
                 "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
@@ -300,14 +303,17 @@ internal static class ConversionValidationGuidance
                 "Open fomod/ModuleConfig.xml, add the missing meshes/plugins/support-file install entries, and test the package in MO2 or Vortex before release.",
             "missing-bodyslide-osp" =>
                 "Re-run with slider export enabled and confirm CalienteTools/BodySlide/SliderSets contains the generated .osp project before publishing BodySlide-capable output.",
-            "missing-bodyslide-shape-data" or
-            "missing-bodyslide-reference-nif" or
+            "missing-bodyslide-shape-data" =>
+                "Inspect CalienteTools/BodySlide/ShapeData and re-run before release so the generated outfit ships with its full BodySlide ShapeData folder instead of a partial slider package.",
+            "missing-bodyslide-reference-nif" =>
+                "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
-                "Inspect CalienteTools/BodySlide/ShapeData for the generated reference NIF, BSD, and TRI payloads, then re-run before release so BodySlide users do not receive a partial slider package.",
-            "missing-preview-workbench" or
+                "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+            "missing-preview-workbench" =>
+                "Re-run the conversion to regenerate preview-workbench.html, then open it before release to verify the converted mesh, ground mesh, and flagged risk regions are reviewable outside the app.",
             "missing-preview-html" or
             "missing-preview-svg" =>
-                "Re-run the conversion to regenerate preview-workbench.html, preview.html, and preview.svg, then verify the visual review bundle opens before release.",
+                "Re-run the conversion to regenerate preview.html and preview.svg, then confirm the visual review bundle opens before release.",
             "missing-output-zip" =>
                 "Re-run with output-zip enabled or rebuild the distributable archive, then confirm the final zip contains the same staged meshes, support files, and reports as the output folder before sharing it.",
             "zip-missing-readme" or
@@ -322,9 +328,10 @@ internal static class ConversionValidationGuidance
             "zip-missing-bodyslide-reference-nif" or
             "zip-missing-bodyslide-slider-payload" or
             "zip-missing-xedit-script" or
-            "zip-missing-plugin-patch-report" or
-            "zip-missing-staged-mesh-output" =>
+            "zip-missing-plugin-patch-report" =>
                 "Open armor-pack-validation.json, rebuild the distributable zip, and verify the archive includes every staged mesh, plugin/support file, BodySlide payload, and report before sharing it through a mod manager.",
+            "zip-missing-staged-mesh-output" =>
+                "Open armor-pack-validation.json, rebuild the distributable zip, and verify the archive contains the full meshes/slidesmith Data-relative output so mod managers install the same meshes that were validated in the folder build.",
             "invalid-output-zip" =>
                 "Delete the broken distributable zip, regenerate it from the validated output folder, and verify it can be opened and installed by your mod manager before release.",
             _ => null

@@ -3530,14 +3530,31 @@ public sealed class MainForm : Form
 
         var normalized = code.Trim();
         var issueCountLabel = count > 1 ? $" ({count} cases)" : string.Empty;
+        var body = normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase)
+            ? normalized["zip-missing-".Length..]
+            : normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase)
+                ? normalized["missing-".Length..]
+                : string.Empty;
         if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Rebuild the distributable zip and confirm it contains {DescribePackArtifact(normalized["zip-missing-".Length..])}{issueCountLabel}.";
+            return body.Equals("staged-mesh-output", StringComparison.OrdinalIgnoreCase)
+                ? $"Rebuild the distributable zip and confirm it contains the full Data-relative meshes/slidesmith output that your mod manager is expected to install{issueCountLabel}."
+                : body.Equals("plugin-patch-report", StringComparison.OrdinalIgnoreCase)
+                    ? $"Rebuild the distributable zip and confirm it contains plugin-patches.json so plugin rewrite/load-order review survives outside the raw output folder{issueCountLabel}."
+                    : $"Rebuild the distributable zip and confirm it contains {DescribePackArtifact(body)}{issueCountLabel}.";
         }
 
         if (normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Regenerate or copy {DescribePackArtifact(normalized["missing-".Length..])} into the output folder before publishing{issueCountLabel}.";
+            return body.Equals("preview-workbench", StringComparison.OrdinalIgnoreCase)
+                ? $"Regenerate preview-workbench.html and open it before publishing so the converted mesh can be visually reviewed outside the desktop app{issueCountLabel}."
+                : body.Equals("bodyslide-reference-nif", StringComparison.OrdinalIgnoreCase)
+                    ? $"Regenerate the BodySlide reference NIF inside CalienteTools/BodySlide/ShapeData before publishing so Outfit Studio and BodySlide can open the generated project correctly{issueCountLabel}."
+                    : body.Equals("staged-mesh-output", StringComparison.OrdinalIgnoreCase)
+                        ? $"Regenerate the Data-relative meshes/slidesmith output before publishing so installed/generated meshes match the validated conversion results{issueCountLabel}."
+                        : body.Equals("output-zip", StringComparison.OrdinalIgnoreCase)
+                            ? $"Regenerate the final distributable zip before publishing and confirm it matches the validated output folder contents{issueCountLabel}."
+                            : $"Regenerate or copy {DescribePackArtifact(body)} into the output folder before publishing{issueCountLabel}.";
         }
 
         if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase))

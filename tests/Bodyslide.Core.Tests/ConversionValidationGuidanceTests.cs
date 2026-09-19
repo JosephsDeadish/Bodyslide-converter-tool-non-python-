@@ -87,4 +87,30 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(actions, action => action.Contains("ground contact", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("linked ARMA meshes", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void BuildFollowUpActions_CoversPartialOutputAndMasterChainCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "UNSAFE",
+            28,
+            3,
+            2,
+            0,
+            [
+                new ConversionValidationIssue("plugin-link-partial-family-failure", "high", "Linked family only partially rewrote."),
+                new ConversionValidationIssue("plugin-link-unscanned-master-reference", "high", "Missing masters prevented linked ARMA verification."),
+                new ConversionValidationIssue("missing-bodyslide-reference-nif", "medium", "Reference NIF was not written."),
+                new ConversionValidationIssue("missing-preview-workbench", "medium", "Workbench preview is missing."),
+                new ConversionValidationIssue("zip-missing-staged-mesh-output", "medium", "Zip is missing staged meshes."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "3BA", maxActions: 8);
+
+        Assert.Contains(actions, action => action.Contains("linked armor family", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("full master chain", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("mod managers install", StringComparison.OrdinalIgnoreCase));
+    }
 }
