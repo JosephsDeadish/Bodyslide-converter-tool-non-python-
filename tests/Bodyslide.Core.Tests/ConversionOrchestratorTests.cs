@@ -1940,6 +1940,35 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DetectsSplitAccessoryFootwearHints()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bootPath = Path.Combine(dir, "traveler_boots_0.nif");
+        var strapPath = Path.Combine(dir, "traveler_boots_buckle_strap_1.nif");
+        await File.WriteAllBytesAsync(bootPath, []);
+        await File.WriteAllBytesAsync(strapPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(bootPath, [bootPath, strapPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.True(result.HasSplitMeshes);
+            Assert.True(result.HasAccessoryPieces);
+            Assert.True(result.HasStrapLikePieces);
+            Assert.True(result.HasRigidSubMeshes);
+            Assert.True(result.IsFootwear);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2053,6 +2082,146 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal("rigid-no-deform", result.Strategy);
             Assert.Empty(result.RegionalMorphing);
             Assert.Same(cage, result.DeformationCage);
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_SplitMeshesReduceAdjacentSeamGaps()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.0,
+                        ["calves"] = 1.0,
+                        ["legs"] = 1.0,
+                        ["thighs"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.60,
+                        ["calves"] = 0.70,
+                        ["legs"] = 1.08,
+                        ["thighs"] = 1.05,
+                    }),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var cage = new DeformationCage("smooth-adaptive-cage");
+            var service = new StrategyMeshConversionService();
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var splitAnalysis = new MeshAnalysis("cloth", false, 2, HasSplitMeshes: true);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var split = await service.ConvertAsync(armor, splitAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            var baselineGap = Math.Abs(baseline.RegionalMorphing["feet"] - baseline.RegionalMorphing["calves"]);
+            var splitGap = Math.Abs(split.RegionalMorphing["feet"] - split.RegionalMorphing["calves"]);
+            Assert.True(splitGap < baselineGap, $"Expected split-mesh seam tuning to reduce the feet/calves gap. Baseline={baselineGap}, split={splitGap}");
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_FootwearAndStrapsDampenAggressiveMorphing()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.0,
+                        ["calves"] = 1.0,
+                        ["legs"] = 1.0,
+                        ["chest"] = 1.0,
+                        ["breasts"] = 1.0,
+                        ["waist"] = 1.0,
+                        ["pelvis"] = 1.0,
+                        ["butt"] = 1.0,
+                        ["thighs"] = 1.0,
+                        ["shoulders"] = 1.0,
+                        ["arms"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.55,
+                        ["calves"] = 1.42,
+                        ["legs"] = 1.18,
+                        ["chest"] = 1.48,
+                        ["breasts"] = 1.82,
+                        ["waist"] = 0.76,
+                        ["pelvis"] = 1.30,
+                        ["butt"] = 1.34,
+                        ["thighs"] = 1.22,
+                        ["shoulders"] = 1.24,
+                        ["arms"] = 1.16,
+                    }),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var cage = new DeformationCage("smooth-adaptive-cage");
+            var service = new StrategyMeshConversionService();
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var tunedAnalysis = new MeshAnalysis(
+                "cloth",
+                false,
+                2,
+                HasSplitMeshes: true,
+                HasAccessoryPieces: true,
+                HasStrapLikePieces: true,
+                HasRigidSubMeshes: true,
+                IsFootwear: true);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var tuned = await service.ConvertAsync(armor, tunedAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            Assert.True(tuned.RegionalMorphing["feet"] < baseline.RegionalMorphing["feet"]);
+            Assert.True(tuned.RegionalMorphing["calves"] < baseline.RegionalMorphing["calves"]);
+            Assert.True(tuned.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
+            Assert.True(tuned.RegionalMorphing["chest"] < baseline.RegionalMorphing["chest"]);
+            Assert.True(Math.Abs(tuned.RegionalMorphing["waist"] - 1.0) < Math.Abs(baseline.RegionalMorphing["waist"] - 1.0));
         }
         finally
         {

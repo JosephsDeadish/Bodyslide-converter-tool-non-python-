@@ -61,7 +61,16 @@ public static class HeadgearSubTypes
     public const string Circlet    = "circlet";
 }
 
-public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount, string? HeadgearSubType = null);
+public sealed record MeshAnalysis(
+    string MeshType,
+    bool PhysicsEnabled,
+    int MeshCount,
+    string? HeadgearSubType = null,
+    bool HasSplitMeshes = false,
+    bool HasAccessoryPieces = false,
+    bool HasStrapLikePieces = false,
+    bool HasRigidSubMeshes = false,
+    bool IsFootwear = false);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -4451,6 +4460,36 @@ public sealed class ConversionOrchestrator(
             ReportStage("Analyzing mesh", 6);
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
             steps.Add($"mesh-type:{analysis.MeshType}");
+            var meshFeatures = new List<string>();
+            if (analysis.HasSplitMeshes)
+            {
+                meshFeatures.Add("split");
+            }
+
+            if (analysis.HasAccessoryPieces)
+            {
+                meshFeatures.Add("accessory");
+            }
+
+            if (analysis.HasStrapLikePieces)
+            {
+                meshFeatures.Add("strap");
+            }
+
+            if (analysis.HasRigidSubMeshes)
+            {
+                meshFeatures.Add("rigid");
+            }
+
+            if (analysis.IsFootwear)
+            {
+                meshFeatures.Add("footwear");
+            }
+
+            if (meshFeatures.Count > 0)
+            {
+                steps.Add($"mesh-features:{string.Join('+', meshFeatures)}");
+            }
 
             ReportStage("Binding armor regions", 7);
             var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
@@ -7120,9 +7159,24 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
     private static readonly string[] CircletKeywords =
         ["circlet", "crown", "diadem", "tiara", "hat", "cap", "headgear"];
 
+    private static readonly string[] FootwearKeywords =
+        ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "heel", "heels", "sabaton", "greave"];
+
+    private static readonly string[] StrapKeywords =
+        ["strap", "straps", "belt", "belts", "harness", "garter", "garters", "wrap", "wraps", "band", "bands"];
+
+    private static readonly string[] AccessoryKeywords =
+        ["pauldron", "pauldrons", "shoulder", "shoulders", "cape", "cloak", "scarf", "shawl", "sleeve", "sleeves", "glove", "gloves", "gauntlet", "gauntlets", "bracer", "bracers", "buckle", "buckles", "clasp", "clasps", "accessory", "accessories"];
+
+    private static readonly string[] RigidPieceKeywords =
+        ["plate", "plates", "pauldron", "pauldrons", "buckle", "buckles", "clasp", "clasps", "guard", "guards", "greave", "greaves", "sabaton", "sabatons", "shield", "shields", "rigid"];
+
     public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
+        var partitionSlots = armor.MeshFiles
+            .SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots)
+            .ToHashSet();
 
         // Determine whether any filename matches a headgear keyword (all sub-type groups combined).
         bool IsHeadgear(string name) =>
@@ -7160,7 +7214,28 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 headgearSubType = HeadgearSubTypes.Circlet;
         }
 
-        return Task.FromResult(new MeshAnalysis(finalMeshType, physicsEnabled, armor.MeshFiles.Count, headgearSubType));
+        var hasSplitMeshes = armor.MeshFiles.Count > 1;
+        var hasStrapLikePieces = fileNames.Any(name => StrapKeywords.Any(name.Contains));
+        var isFootwear = fileNames.Any(name => FootwearKeywords.Any(name.Contains)) ||
+            partitionSlots.Contains(37) ||
+            partitionSlots.Contains(38);
+        var hasAccessoryPieces = fileNames.Any(name => AccessoryKeywords.Any(name.Contains)) ||
+            hasStrapLikePieces ||
+            isFootwear ||
+            hasSplitMeshes;
+        var hasRigidSubMeshes = finalMeshType == "plate" ||
+            fileNames.Any(name => RigidPieceKeywords.Any(name.Contains));
+
+        return Task.FromResult(new MeshAnalysis(
+            finalMeshType,
+            physicsEnabled,
+            armor.MeshFiles.Count,
+            headgearSubType,
+            HasSplitMeshes: hasSplitMeshes,
+            HasAccessoryPieces: hasAccessoryPieces,
+            HasStrapLikePieces: hasStrapLikePieces,
+            HasRigidSubMeshes: hasRigidSubMeshes,
+            IsFootwear: isFootwear));
     }
 }
 
@@ -7265,6 +7340,55 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["arms"] = ["shoulders", "chest", "waist"]
         };
 
+    private static readonly IReadOnlyDictionary<string, double> FootwearRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"] = 0.42d,
+            ["calves"] = 0.58d,
+            ["legs"] = 0.72d,
+            ["thighs"] = 0.86d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> StrapRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 0.72d,
+            ["breasts"] = 0.60d,
+            ["waist"] = 0.64d,
+            ["belly"] = 0.68d,
+            ["pelvis"] = 0.72d,
+            ["butt"] = 0.78d,
+            ["thighs"] = 0.82d,
+            ["shoulders"] = 0.76d,
+            ["arms"] = 0.80d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> AccessoryRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.84d,
+            ["arms"] = 0.86d,
+            ["chest"] = 0.90d,
+            ["waist"] = 0.90d,
+            ["pelvis"] = 0.90d,
+            ["thighs"] = 0.88d,
+            ["calves"] = 0.84d,
+            ["feet"] = 0.84d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> RigidPieceRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.72d,
+            ["arms"] = 0.72d,
+            ["chest"] = 0.80d,
+            ["waist"] = 0.82d,
+            ["pelvis"] = 0.82d,
+            ["thighs"] = 0.80d,
+            ["calves"] = 0.76d,
+            ["feet"] = 0.74d,
+        };
+
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
         var strategy = analysis.MeshType switch
@@ -7324,7 +7448,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var solverRefinedMorphing = !string.IsNullOrWhiteSpace(sourceBody)
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing, cage));
+        var featureAdjustedMorphing = ApplyMeshFeatureTuning(solverRefinedMorphing, analysis);
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, featureAdjustedMorphing, cage));
     }
 
     /// <summary>
@@ -7534,6 +7659,145 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         return current;
     }
+
+    private static IReadOnlyDictionary<string, double> ApplyMeshFeatureTuning(
+        IReadOnlyDictionary<string, double> field,
+        MeshAnalysis analysis)
+    {
+        if (field.Count == 0)
+        {
+            return field;
+        }
+
+        var tuned = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+
+        if (analysis.HasSplitMeshes)
+        {
+            ApplySeamContinuity(tuned, maxGap: 0.24d, blendStrength: 0.70d);
+        }
+
+        if (analysis.HasAccessoryPieces)
+        {
+            ApplyDampingProfile(tuned, AccessoryRegionDamping);
+        }
+
+        if (analysis.HasStrapLikePieces)
+        {
+            ApplyDampingProfile(tuned, StrapRegionDamping);
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.18d,
+                blendStrength: 0.80d,
+                constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
+        }
+
+        if (analysis.HasRigidSubMeshes && !string.Equals(analysis.MeshType, "plate", StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyDampingProfile(tuned, RigidPieceRegionDamping);
+        }
+
+        if (analysis.IsFootwear)
+        {
+            ApplyDampingProfile(tuned, FootwearRegionDamping);
+            ApplyClampProfile(
+                tuned,
+                new Dictionary<string, (double Minimum, double Maximum)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["feet"] = (0.92d, 1.18d),
+                    ["calves"] = (0.88d, 1.22d),
+                    ["legs"] = (0.84d, 1.24d),
+                });
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.12d,
+                blendStrength: 0.85d,
+                constrainedRegions: ["feet", "calves", "legs", "thighs"]);
+        }
+
+        return tuned;
+    }
+
+    private static void ApplyDampingProfile(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, double> dampingProfile)
+    {
+        foreach (var (region, damping) in dampingProfile)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(1d + ((value - 1d) * damping), 6);
+        }
+    }
+
+    private static void ApplyClampProfile(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, (double Minimum, double Maximum)> clampProfile)
+    {
+        foreach (var (region, limits) in clampProfile)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(Math.Clamp(value, limits.Minimum, limits.Maximum), 6);
+        }
+    }
+
+    private static void ApplySeamContinuity(
+        IDictionary<string, double> field,
+        double maxGap,
+        double blendStrength,
+        IReadOnlyCollection<string>? constrainedRegions = null)
+    {
+        var visitedPairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, neighbors) in RegionalAdjacency)
+        {
+            if (!field.ContainsKey(region) ||
+                (constrainedRegions is not null && !constrainedRegions.Contains(region)))
+            {
+                continue;
+            }
+
+            foreach (var neighbor in neighbors)
+            {
+                if (!field.ContainsKey(neighbor) ||
+                    (constrainedRegions is not null && !constrainedRegions.Contains(neighbor)))
+                {
+                    continue;
+                }
+
+                var pairKey = string.Compare(region, neighbor, StringComparison.OrdinalIgnoreCase) <= 0
+                    ? $"{region}|{neighbor}"
+                    : $"{neighbor}|{region}";
+                if (!visitedPairs.Add(pairKey))
+                {
+                    continue;
+                }
+
+                var left = field[region];
+                var right = field[neighbor];
+                var gap = left - right;
+                if (Math.Abs(gap) <= maxGap)
+                {
+                    continue;
+                }
+
+                var midpoint = (left + right) / 2d;
+                var direction = Math.Sign(gap);
+                var targetLeft = midpoint + (direction * maxGap / 2d);
+                var targetRight = midpoint - (direction * maxGap / 2d);
+                field[region] = Math.Round(Lerp(left, targetLeft, blendStrength), 6);
+                field[neighbor] = Math.Round(Lerp(right, targetRight, blendStrength), 6);
+            }
+        }
+    }
+
+    private static double Lerp(double from, double to, double amount) =>
+        from + ((to - from) * amount);
 }
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
