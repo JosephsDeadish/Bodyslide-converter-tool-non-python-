@@ -9022,6 +9022,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("conversion-quality.json", previewHtml, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("supported Skyrim NIF layout", previewHtml, StringComparison.OrdinalIgnoreCase);
 
+            var readme = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "README.txt"));
+            Assert.Contains("Review these files first:", readme, StringComparison.Ordinal);
+            Assert.Contains("Recovery checklist:", readme, StringComparison.Ordinal);
+            Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Top reported issues:", readme, StringComparison.Ordinal);
+
             var workbenchHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview-workbench.html"));
             Assert.Contains("Recommended next actions", workbenchHtml, StringComparison.Ordinal);
             Assert.Contains("conversion-quality.json", workbenchHtml, StringComparison.Ordinal);
@@ -13243,6 +13250,9 @@ public sealed class ConversionReadmeGeneratorTests
 
         Assert.Contains("Validation summary:", readme);
         Assert.Contains("Status: needs-review (score 72)", readme);
+        Assert.Contains("Review these files first:", readme);
+        Assert.Contains("Recovery checklist:", readme);
+        Assert.Contains("Top reported issues:", readme);
         Assert.Contains("[HIGH] unsupported-nif-layout", readme);
         Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);

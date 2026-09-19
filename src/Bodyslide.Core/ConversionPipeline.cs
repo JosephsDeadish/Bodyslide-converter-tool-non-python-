@@ -292,6 +292,24 @@ internal static class ConversionValidationGuidance
             .ToList();
     }
 
+    public static IReadOnlyList<string> BuildReviewArtifacts(
+        ConversionValidationSummary? validationSummary,
+        int maxArtifacts = 8)
+    {
+        if (validationSummary?.Issues is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return PrioritizeIssues(validationSummary)
+            .SelectMany(GetIssueReviewArtifacts)
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxArtifacts))
+            .Cast<string>()
+            .ToList();
+    }
+
     public static int GetIssueSeverityRank(string severity) =>
         severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? 3
         : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? 2
@@ -304,6 +322,14 @@ internal static class ConversionValidationGuidance
         return string.IsNullOrWhiteSpace(mapped)
             ? GetFallbackIssueFollowUp(issue, targetBody)
             : mapped;
+    }
+
+    public static IReadOnlyList<string> GetIssueReviewArtifacts(ConversionValidationIssue issue)
+    {
+        var mapped = GetIssueReviewArtifacts(issue.Code);
+        return mapped.Count > 0
+            ? mapped
+            : GetFallbackIssueReviewArtifacts(issue.Code);
     }
 
     public static string? GetIssueFollowUp(string code, string targetBody) =>
@@ -434,6 +460,75 @@ internal static class ConversionValidationGuidance
             _ => null
         };
 
+    public static IReadOnlyList<string> GetIssueReviewArtifacts(string code) =>
+        code switch
+        {
+            "low-detection-confidence" or "low-body-match" =>
+                ["conversion-quality.json", "preview-workbench.html"],
+            "bodyslide-incompatible" =>
+                ["conversion-quality.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
+            "unsupported-nif-layout" or "heuristic-nif-read" =>
+                ["conversion-quality.json", "preview-workbench.html"],
+            "incomplete-source-fallback" =>
+                ["conversion-quality.json", "CalienteTools/BodySlide/ShapeData/"],
+            "synthetic-morph-fallback" or "retargeted-morph-reuse" =>
+                ["conversion-quality.json", "preview-workbench.html", "CalienteTools/BodySlide/ShapeData/"],
+            "topology-mismatch-risk" or "clipping-detected" or "voxel-penetration" or "pose-risk" or "auto-correction-applied" =>
+                ["conversion-quality.json", "preview-workbench.html", "pose-simulation-report.json"],
+            "missing-source-partitions" or "unknown-export-partitions" =>
+                ["conversion-quality.json", "preview-workbench.html"],
+            "missing-plugin-partitions" or "plugin-rewrite-ambiguous-filename" or
+            "plugin-rewrite-missing-converted-match" or "plugin-rewrite-missing-staged-mesh" or
+            "plugin-rewrite-verification-warning" or "plugin-link-missing-converted-match" or
+            "plugin-link-missing-staged-mesh" or "plugin-link-missing-arma-record" or
+            "plugin-link-partial-family-failure" or "plugin-link-unscanned-master-reference" or
+            "plugin-patch-missing-master-chain" or "plugin-patch-master-order-mismatch" =>
+                ["plugin-patches.json", "patch-armor.pas", "conversion-quality.json"],
+            "plugin-link-unsupported-nif-layout" =>
+                ["plugin-patches.json", "conversion-quality.json", "preview-workbench.html"],
+            "heel-offset-review" =>
+                ["world-physics.json", "preview-workbench.html"],
+            "unsupported-bones" or "race-compatibility-warning" =>
+                ["skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
+            "missing-normal-maps" =>
+                ["texture-summary.json", "conversion-quality.json"],
+            "missing-conversion-quality-report" =>
+                ["conversion.log"],
+            "missing-skeleton-compatibility-report" =>
+                ["conversion-quality.json"],
+            "missing-pose-report" =>
+                ["conversion-quality.json", "preview-workbench.html"],
+            "missing-world-physics-report" =>
+                ["conversion-quality.json", "preview-workbench.html"],
+            "missing-readme" =>
+                ["conversion-quality.json"],
+            "missing-dependency-map" or "missing-staged-mesh-output" =>
+                ["dependency-map.json", "armor-pack-validation.json"],
+            "missing-staged-cbpc-config" or "missing-staged-smp-config" =>
+                ["armor-pack-validation.json"],
+            "fomod-missing-folder-entry" or "fomod-missing-root-plugin-entry" or "fomod-missing-root-support-entry" =>
+                ["fomod/ModuleConfig.xml", "armor-pack-validation.json"],
+            "missing-bodyslide-osp" =>
+                ["CalienteTools/BodySlide/SliderSets/", "conversion-quality.json"],
+            "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" =>
+                ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
+            "missing-xedit-script" or "missing-plugin-patch-report" =>
+                ["plugin-patches.json", "conversion-quality.json"],
+            "missing-root-plugin" or "missing-preview-workbench" or "missing-preview-html" or "missing-preview-svg" or
+            "missing-output-zip" or "zip-missing-readme" or "zip-missing-fomod-module-config" or
+            "zip-missing-fomod-info" or "zip-missing-dependency-map" or
+            "zip-missing-conversion-quality-report" or "zip-missing-skeleton-compatibility-report" or
+            "zip-missing-pose-report" or "zip-missing-world-physics-report" or
+            "zip-missing-preview-svg" or "zip-missing-preview-html" or "zip-missing-preview-workbench" or
+            "zip-missing-staged-cbpc-config" or "zip-missing-staged-smp-config" or
+            "zip-missing-root-plugin" or "zip-missing-root-support-file" or "zip-missing-bodyslide-osp" or
+            "zip-missing-bodyslide-shape-data" or "zip-missing-bodyslide-reference-nif" or
+            "zip-missing-bodyslide-slider-payload" or "zip-missing-xedit-script" or
+            "zip-missing-plugin-patch-report" or "zip-missing-staged-mesh-output" or "invalid-output-zip" =>
+                ["armor-pack-validation.json", "conversion-quality.json"],
+            _ => []
+        };
+
     private static string? GetFallbackIssueFollowUp(ConversionValidationIssue issue, string targetBody)
     {
         if (string.IsNullOrWhiteSpace(issue.Code) && string.IsNullOrWhiteSpace(issue.Message))
@@ -498,6 +593,64 @@ internal static class ConversionValidationGuidance
         return string.IsNullOrWhiteSpace(message)
             ? "Open conversion-quality.json and review the reported validation issue before release."
             : $"Open conversion-quality.json and address this validation issue before release: {message}";
+    }
+
+    private static IReadOnlyList<string> GetFallbackIssueReviewArtifacts(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return [];
+        }
+
+        if (code.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["plugin-patches.json", "conversion-quality.json"];
+        }
+
+        if (code.Contains("preview", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["preview-workbench.html", "preview.html", "preview.svg"];
+        }
+
+        if (code.Contains("bodyslide", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("slider", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("morph", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["conversion-quality.json", "CalienteTools/BodySlide/ShapeData/"];
+        }
+
+        if (code.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-output-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-staged-", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["armor-pack-validation.json", "conversion-quality.json"];
+        }
+
+        if (code.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("world", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["world-physics.json", "preview-workbench.html"];
+        }
+
+        if (code.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["skeleton-compatibility.json", "conversion-quality.json"];
+        }
+
+        if (code.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("uv", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("clipping", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("voxel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("pose", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["preview-workbench.html", "pose-simulation-report.json", "conversion-quality.json"];
+        }
+
+        return ["conversion-quality.json"];
     }
 }
 
@@ -12032,6 +12185,28 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine("    No follow-up issues were reported by the conversion checks.");
             return;
         }
+
+        var reviewArtifacts = ConversionValidationGuidance.BuildReviewArtifacts(validationSummary);
+        if (reviewArtifacts.Count > 0)
+        {
+            sb.AppendLine("  * Review these files first:");
+            foreach (var artifact in reviewArtifacts)
+            {
+                sb.AppendLine($"    - {artifact}");
+            }
+        }
+
+        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(validationSummary, request.TargetBody, maxActions: 4);
+        if (followUpActions.Count > 0)
+        {
+            sb.AppendLine("  * Recovery checklist:");
+            for (var index = 0; index < followUpActions.Count; index++)
+            {
+                sb.AppendLine($"    {index + 1}. {followUpActions[index]}");
+            }
+        }
+
+        sb.AppendLine("  * Top reported issues:");
 
         foreach (var issue in validationSummary.Issues
                      .OrderByDescending(static issue => ConversionValidationGuidance.GetIssueSeverityRank(issue.Severity))
