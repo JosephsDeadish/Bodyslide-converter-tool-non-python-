@@ -12414,6 +12414,53 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public void Generate_WithMissingPreviewIssue_TellsUserToRegenerateVisualReviewBundle()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            81,
+            0,
+            0,
+            1,
+            [
+                new ConversionValidationIssue(
+                    "missing-preview-workbench",
+                    "low",
+                    "preview-workbench.html was not generated, so the side-by-side review workbench is missing.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview.svg", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("re-run the conversion", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithUnmappedPluginIssue_FallsBackToExactPluginReviewGuidance()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            63,
+            1,
+            0,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "plugin-master-chain-edge-case",
+                    "high",
+                    "Follower addon chain still points at an unresolved master record after rewrite planning.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("xEdit", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Follower addon chain still points at an unresolved master record after rewrite planning.", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Generate_IsNonEmptyString()
     {
         var readme = BuildReadme();

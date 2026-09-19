@@ -218,7 +218,7 @@ internal static class ConversionValidationGuidance
         }
 
         return PrioritizeIssues(validationSummary)
-            .Select(issue => GetIssueFollowUp(issue.Code, targetBody))
+            .Select(issue => GetIssueFollowUp(issue, targetBody))
             .Where(static action => !string.IsNullOrWhiteSpace(action))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(Math.Max(0, maxActions))
@@ -231,6 +231,14 @@ internal static class ConversionValidationGuidance
         : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? 2
         : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? 1
         : 0;
+
+    public static string? GetIssueFollowUp(ConversionValidationIssue issue, string targetBody)
+    {
+        var mapped = GetIssueFollowUp(issue.Code, targetBody);
+        return string.IsNullOrWhiteSpace(mapped)
+            ? GetFallbackIssueFollowUp(issue, targetBody)
+            : mapped;
+    }
 
     public static string? GetIssueFollowUp(string code, string targetBody) =>
         code switch
@@ -296,6 +304,10 @@ internal static class ConversionValidationGuidance
             "missing-bodyslide-reference-nif" or
             "missing-bodyslide-slider-payload" =>
                 "Inspect CalienteTools/BodySlide/ShapeData for the generated reference NIF, BSD, and TRI payloads, then re-run before release so BodySlide users do not receive a partial slider package.",
+            "missing-preview-workbench" or
+            "missing-preview-html" or
+            "missing-preview-svg" =>
+                "Re-run the conversion to regenerate preview-workbench.html, preview.html, and preview.svg, then verify the visual review bundle opens before release.",
             "missing-output-zip" =>
                 "Re-run with output-zip enabled or rebuild the distributable archive, then confirm the final zip contains the same staged meshes, support files, and reports as the output folder before sharing it.",
             "zip-missing-readme" or
@@ -317,6 +329,72 @@ internal static class ConversionValidationGuidance
                 "Delete the broken distributable zip, regenerate it from the validated output folder, and verify it can be opened and installed by your mod manager before release.",
             _ => null
         };
+
+    private static string? GetFallbackIssueFollowUp(ConversionValidationIssue issue, string targetBody)
+    {
+        if (string.IsNullOrWhiteSpace(issue.Code) && string.IsNullOrWhiteSpace(issue.Message))
+        {
+            return null;
+        }
+
+        var code = issue.Code?.Trim() ?? string.Empty;
+        var message = issue.Message?.Trim() ?? string.Empty;
+        var detailsSuffix = string.IsNullOrWhiteSpace(message)
+            ? string.Empty
+            : $" Problem reported: {message}";
+
+        if (code.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open plugin-patches.json and conversion-quality.json, then review this plugin edge case in xEdit before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("preview", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Re-run the conversion or restore the missing preview artifact, then confirm preview-workbench.html, preview.html, and preview.svg are present before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("bodyslide", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("slider", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("morph", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open conversion-quality.json and inspect the generated BodySlide/slider payloads before release, then rebuild the output if anything is partial or missing.{detailsSuffix}";
+        }
+
+        if (code.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-output-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-staged-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open armor-pack-validation.json and the staged output folder, then rebuild the package until the missing generated/install artifact is present.{detailsSuffix}";
+        }
+
+        if (code.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("world", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open world-physics.json and preview-workbench.html, then validate world-drop placement, footwear offsets, and ground contact on the converted {targetBody} output.{detailsSuffix}";
+        }
+
+        if (code.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open skeleton-compatibility.json and conversion-quality.json, then patch the target skeleton or outfit bone names before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("uv", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("clipping", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("voxel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("pose", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Review preview-workbench.html, pose-simulation-report.json, and conversion-quality.json, then manually inspect the converted {targetBody} mesh for deformation cleanup before release.{detailsSuffix}";
+        }
+
+        return string.IsNullOrWhiteSpace(message)
+            ? "Open conversion-quality.json and review the reported validation issue before release."
+            : $"Open conversion-quality.json and address this validation issue before release: {message}";
+    }
 }
 
 public sealed record PluginRewriteVerificationReport(
