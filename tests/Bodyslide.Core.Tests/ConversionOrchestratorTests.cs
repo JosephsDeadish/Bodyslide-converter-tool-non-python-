@@ -4500,6 +4500,35 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithExtremeSyntheticDrift_FlagsTopologyMismatchRiskInQualityReport()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "extreme_drift_armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateUpperBodyArmorVertices());
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"TopologyMismatchRisk\": true", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"Code\": \"topology-mismatch-risk\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("regional-drift:", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("breasts", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("chest", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithBlockGraphStyleNif_AppliesVertexTransform()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10714,6 +10743,41 @@ public sealed class RealisticModPackFixtureTests
             {
                 File.Delete(zipPath);
             }
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureMessyLinkedDiagnosticsModPackDirectory_CombinesPluginDiagnosticsAndQualityWarnings()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureMessyLinkedDiagnosticsModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var partialFamilies = patchReport.RootElement
+                .GetProperty("RewriteVerification")
+                .GetProperty("PartialLinkedArmorFamilyFailures");
+            Assert.Single(partialFamilies.EnumerateArray());
+            Assert.Contains("LinkedDeviousHarnessArmor", patchReport.RootElement.ToString(), StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("archive_failure_ground.nif", qualityJson, StringComparison.Ordinal);
+
+            var readme = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "README.txt"));
+            Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Recovery checklist:", readme, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 

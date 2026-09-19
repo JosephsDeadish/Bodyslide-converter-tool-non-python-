@@ -13358,7 +13358,13 @@ internal sealed class LocalExportService(
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
-            AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
+            AssessTopologyAndUvMismatch(
+                armor.MeshFiles,
+                writtenNifs,
+                mesh.RegionalMorphing,
+                clipping.Detected,
+                voxelResult.HasPenetrations,
+                poseResult.HighRiskPoses.Count);
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var pluginPatchWarnings = new List<string>();
         var patchVerificationPaths = new List<string>();
@@ -16235,7 +16241,11 @@ internal sealed class LocalExportService(
     private static (bool TopologyMismatchRisk, double VertexCountDeltaRatio, double? UvCoverageDeltaRatio, double? UvAspectRatioDelta, IReadOnlyList<string> QualityWarnings)
         AssessTopologyAndUvMismatch(
             IReadOnlyList<string> sourceMeshFiles,
-            IReadOnlyList<string> convertedMeshFiles)
+            IReadOnlyList<string> convertedMeshFiles,
+            IReadOnlyDictionary<string, double>? regionalMorphing = null,
+            bool clippingDetected = false,
+            bool voxelPenetrationsFound = false,
+            int highRiskPoseCount = 0)
     {
         var warnings = new List<string>();
         var sourceSignature = NifGeometrySignatureReader.TryReadBest(sourceMeshFiles);
@@ -16282,7 +16292,47 @@ internal sealed class LocalExportService(
             }
         }
 
+        var extremeRegionalDrift = regionalMorphing?
+            .Where(static pair => Math.Abs(pair.Value - 1d) >= 0.20d)
+            .OrderByDescending(pair => Math.Abs(pair.Value - 1d))
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList()
+            ?? [];
+        if (extremeRegionalDrift.Count >= 2 &&
+            (clippingDetected || voxelPenetrationsFound || highRiskPoseCount > 0))
+        {
+            topologyRisk = true;
+            warnings.Add($"regional-drift:{string.Join(",", extremeRegionalDrift.Select(static pair => $"{NormalizeTopologyWarningToken(pair.Key)}={pair.Value:0.00}"))}");
+        }
+
         return (topologyRisk, vertexDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, warnings);
+    }
+
+    private static string NormalizeTopologyWarningToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "region";
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var lastWasSeparator = false;
+        foreach (var ch in value.Trim())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(char.ToLowerInvariant(ch));
+                lastWasSeparator = false;
+            }
+            else if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-') is { Length: > 0 } token ? token : "region";
     }
 
     private static IReadOnlyList<string> BuildNifSupportWarnings(
