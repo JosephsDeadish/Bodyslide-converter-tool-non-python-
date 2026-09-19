@@ -8583,6 +8583,11 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
     private static string ResolveConfiguredSkeletonFoundationLabel(string skeletonFoundation)
     {
+        if (SkeletonFoundationAliasCatalog.TryResolve(skeletonFoundation, out var canonicalLabel))
+        {
+            return canonicalLabel;
+        }
+
         var slug = SlugifySkeletonTarget(skeletonFoundation);
         return IsGenericXpmsseFoundation(slug)
             ? "xpmsse"

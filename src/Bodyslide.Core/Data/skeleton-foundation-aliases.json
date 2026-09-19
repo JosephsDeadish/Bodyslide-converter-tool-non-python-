@@ -1,0 +1,97 @@
+[
+  {
+    "canonical": "xpmsse",
+    "aliases": [
+      "XPMSSE",
+      "XPMSE",
+      "XP32 Maximum Skeleton Special Extended",
+      "XP32 Maximum Skeleton Extended",
+      "XP32MSE",
+      "XP32 Skeleton"
+    ]
+  },
+  {
+    "canonical": "vanilla-skyrim",
+    "aliases": [
+      "Vanilla Skyrim",
+      "Vanilla Body",
+      "Skyrim Vanilla"
+    ]
+  },
+  {
+    "canonical": "sam-light",
+    "aliases": [
+      "SAM",
+      "SAM Light",
+      "Shape Atlas for Men"
+    ]
+  },
+  {
+    "canonical": "ube-extended",
+    "aliases": [
+      "UBE",
+      "Ultimate Body Enhancer"
+    ]
+  },
+  {
+    "canonical": "tng-extended",
+    "aliases": [
+      "TNG",
+      "TNG Extended",
+      "TNGExtended",
+      "The New Gentleman",
+      "New Gentleman"
+    ]
+  },
+  {
+    "canonical": "beast-humanoid",
+    "aliases": [
+      "Vanilla Beast",
+      "Beast Vanilla",
+      "Khajiit Vanilla",
+      "Argonian Vanilla"
+    ]
+  },
+  {
+    "canonical": "horned-humanoid",
+    "aliases": [
+      "Goat Humanoid",
+      "Goat Reborn",
+      "Goatkin",
+      "Goat Folk",
+      "Namira's Goat Reborn"
+    ]
+  },
+  {
+    "canonical": "winged-humanoid",
+    "aliases": [
+      "Hagraven",
+      "Hag Raven",
+      "Hagraven Humanoid",
+      "Spriggan",
+      "Spriggan Humanoid",
+      "Spriggan Body"
+    ]
+  },
+  {
+    "canonical": "digitigrade-beast",
+    "aliases": [
+      "Digitigrade Beast",
+      "Beast Follower"
+    ]
+  },
+  {
+    "canonical": "equine-humanoid",
+    "aliases": [
+      "Equine Humanoid",
+      "Horse Follower"
+    ]
+  },
+  {
+    "canonical": "avian-humanoid",
+    "aliases": [
+      "Avian Humanoid",
+      "Winged Follower"
+    ]
+  }
+]

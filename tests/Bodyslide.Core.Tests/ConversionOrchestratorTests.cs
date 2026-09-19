@@ -17228,6 +17228,43 @@ public sealed class CustomBodyProfileSupportTests
         Assert.Equal("tng-extended-physics", result.TargetSkeleton);
     }
 
+    [Theory]
+    [InlineData("XP32 Maximum Skeleton Special Extended", true, "xpmsse-physics")]
+    [InlineData("Shape Atlas for Men", true, "sam-light-physics")]
+    [InlineData("Ultimate Body Enhancer", true, "ube-extended-physics")]
+    [InlineData("Vanilla Beast", false, "beast-humanoid")]
+    [InlineData("Horse Follower", false, "equine-humanoid")]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_ResolvesSkeletonFoundationAliases(
+        string skeletonFoundation,
+        bool withPhysicsBones,
+        string expectedTargetSkeleton)
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "AliasTarget",
+                    DetectionTokens: ["aliastarget"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.02 },
+                    PhysicsBones: withPhysicsBones ? ["NPC L Breast01"] : [],
+                    SkeletonFoundation: skeletonFoundation)
+            ]);
+
+        var result = await service.MapAsync(armor, "AliasTarget", CancellationToken.None);
+
+        Assert.Equal(expectedTargetSkeleton, result.TargetSkeleton);
+    }
+
     [Fact]
     public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PreservesFoundationWithoutPhysicsSuffix()
     {
