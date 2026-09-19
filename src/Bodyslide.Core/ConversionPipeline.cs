@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security;
+using System.Text;
 using System.Text.Json;
 using SharpCompress.Archives.SevenZip;
 using SharpCompress.Readers;
@@ -13362,9 +13363,9 @@ internal sealed class LocalExportService(
                 armor.MeshFiles,
                 writtenNifs,
                 mesh.RegionalMorphing,
-                clipping.Detected,
+                clipping.HasClipping,
                 voxelResult.HasPenetrations,
-                poseResult.HighRiskPoses.Count);
+                poseSimulation.TotalPosesAtRisk);
         qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
         var pluginPatchWarnings = new List<string>();
         var patchVerificationPaths = new List<string>();
