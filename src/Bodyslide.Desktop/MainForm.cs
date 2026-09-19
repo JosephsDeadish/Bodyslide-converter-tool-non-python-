@@ -3392,6 +3392,13 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    if (TryGetProperty(root, "PhysicsCompatibility", out var physicsCompatibility))
+                    {
+                        AddReportMetric(reportName, "Physics profile", TryReadString(physicsCompatibility, "RequestedProfile"), filePath);
+                        AddReportMetric(reportName, "Physics ready", TryReadBool(physicsCompatibility, "IsCompatible"), filePath);
+                        AddReportMetric(reportName, "Missing physics bones", TryReadArray(physicsCompatibility, "MissingBones"), filePath);
+                        AddReportMetric(reportName, "Remapped physics bones", TryReadArray(physicsCompatibility, "RemappedBones"), filePath);
+                    }
                     break;
                 case "race-compatibility.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -3742,6 +3749,19 @@ public sealed class MainForm : Form
             var sourceSkeleton = TryReadString(root, "SourceSkeleton") ?? "unknown";
             var targetSkeleton = TryReadString(root, "TargetSkeleton") ?? "unknown";
             var unsupportedBones = ReadArrayValues(root, "UnsupportedBones");
+            JsonElement physicsCompatibility = default;
+            var hasPhysicsCompatibility = TryGetProperty(root, "PhysicsCompatibility", out physicsCompatibility);
+            var physicsMissingBones = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "MissingBones") : [];
+            var physicsRemappedBones = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "RemappedBones") : [];
+            var physicsRequestedProfile = hasPhysicsCompatibility
+                ? TryReadString(physicsCompatibility, "RequestedProfile")
+                : null;
+            var physicsSummary = hasPhysicsCompatibility
+                ? TryReadString(physicsCompatibility, "Summary")
+                : null;
+            var physicsCompatible = hasPhysicsCompatibility
+                ? TryReadBool(physicsCompatibility, "IsCompatible")
+                : null;
             if (unsupportedBones.Count == 0)
             {
                 add(
@@ -3749,20 +3769,62 @@ public sealed class MainForm : Form
                     "Info",
                     $"Skeleton mapping looks clean: {sourceSkeleton} → {targetSkeleton}. No unsupported bones were reported.",
                     reportPath);
-                return;
+            }
+            else
+            {
+                requiresReview = true;
+                add(
+                    "Skeleton review",
+                    "Warning",
+                    $"{unsupportedBones.Count} unsupported bone(s) were reported while mapping {sourceSkeleton} → {targetSkeleton}: {BuildListPreview(unsupportedBones)}.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+                add(
+                    "Skeleton next step",
+                    "Action",
+                    "Open skeleton-compatibility.json and verify follower/custom/beast bones plus any required physics chains before installing the converted mesh in-game.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
             }
 
-            requiresReview = true;
-            add(
-                "Skeleton review",
-                "Warning",
-                $"{unsupportedBones.Count} unsupported bone(s) were reported while mapping {sourceSkeleton} → {targetSkeleton}: {BuildListPreview(unsupportedBones)}.",
-                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
-            add(
-                "Skeleton next step",
-                "Action",
-                "Open skeleton-compatibility.json and verify follower/custom/beast bones plus any required physics chains before installing the converted mesh in-game.",
-                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+            if (hasPhysicsCompatibility && !string.IsNullOrWhiteSpace(physicsRequestedProfile))
+            {
+                if (physicsCompatible == false || physicsMissingBones.Count > 0)
+                {
+                    requiresReview = true;
+                    add(
+                        "Physics compatibility",
+                        "Warning",
+                        string.IsNullOrWhiteSpace(physicsSummary)
+                            ? $"Physics profile {physicsRequestedProfile} is not fully compatible with {targetSkeleton}: {BuildListPreview(physicsMissingBones)}."
+                            : physicsSummary,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-bone-missing", reportPath));
+                    add(
+                        "Physics next step",
+                        "Action",
+                        "Open skeleton-compatibility.json, compare the requested physics profile against the expected and missing target bones, then disable or replace unsupported physics chains before shipping.",
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-bone-missing", reportPath));
+                }
+                else if (physicsRemappedBones.Count > 0)
+                {
+                    requiresReview = true;
+                    add(
+                        "Physics compatibility",
+                        "Warning",
+                        string.IsNullOrWhiteSpace(physicsSummary)
+                            ? $"Physics profile {physicsRequestedProfile} needed remapped chains: {BuildListPreview(physicsRemappedBones)}."
+                            : physicsSummary,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-bone-remap", reportPath));
+                }
+                else
+                {
+                    add(
+                        "Physics compatibility",
+                        "Info",
+                        string.IsNullOrWhiteSpace(physicsSummary)
+                            ? $"Physics profile {physicsRequestedProfile} matches the target skeleton/body capability."
+                            : physicsSummary,
+                        reportPath);
+                }
+            }
         }
         catch (Exception ex)
         {

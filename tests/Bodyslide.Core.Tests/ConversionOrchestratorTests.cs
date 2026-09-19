@@ -2573,6 +2573,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("horse_custom_follower.esp", "Equine variant")]
     [InlineData("avian_custom_race_patch.esp", "Avian variant")]
     [InlineData("khajiit_vampire_child_follower.esp", "Khajiit variant")]
+    [InlineData("custom_race_vampire_child_follower.esp", "Humanoid variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -2583,6 +2584,71 @@ public sealed class ConversionOrchestratorTests
             pluginNames: [pluginName],
             out var inferredRace));
         Assert.Equal(expectedVariant, inferredRace.Name);
+    }
+
+    [Fact]
+    public async Task ExportAsync_SkeletonCompatibilityReport_IncludesPhysicsCompatibilitySummary()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(32));
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "Vanilla", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp+cbpc", CbpcConfigXml: "<CBPC/>", SmpConfigXml: "<system name=\"test\"><bone name=\"NPC L Breast\" /></system>");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "Vanilla", ["Body"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "xpmsse-physics",
+                "xpmsse-physics",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+            var steps = new[]
+            {
+                "physics:smp+cbpc",
+                "physics-injection:NPC L Breast+NPC R Breast",
+                "physics-bone-missing:NPC Belly",
+                "physics-bone-remap:NPC L Breast01=>NPC L Breast"
+            };
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, steps,
+                detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
+            var root = document.RootElement;
+            var compatibility = root.GetProperty("PhysicsCompatibility");
+            Assert.Equal("smp+cbpc", compatibility.GetProperty("RequestedProfile").GetString());
+            Assert.False(compatibility.GetProperty("IsCompatible").GetBoolean());
+            Assert.Contains(
+                compatibility.GetProperty("MissingBones").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "NPC Belly", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                compatibility.GetProperty("RemappedBones").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "NPC L Breast01=>NPC L Breast", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     [Theory]

@@ -153,6 +153,29 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversPhysicsCapabilityMismatchAndRemapCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            44,
+            1,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("physics-bone-missing", "high", "Required target physics bones were missing."),
+                new ConversionValidationIssue("physics-bone-remap", "medium", "Physics chains were remapped."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Vanilla Beast", maxActions: 6);
+        var artifacts = ConversionValidationGuidance.BuildReviewArtifacts(summary, maxArtifacts: 6);
+
+        Assert.Contains(actions, action => action.Contains("requested physics profile", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("remapped physics chains", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPartitionLossAndAmbiguousPluginTieCases()
     {
         var summary = new ConversionValidationSummary(

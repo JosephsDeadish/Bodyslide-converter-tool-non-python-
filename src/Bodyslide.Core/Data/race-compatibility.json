@@ -63,6 +63,14 @@
   ],
   "inferenceRules": [
     {
+      "name": "Humanoid variant",
+      "groups": ["humanoid"],
+      "editorIdHints": ["vampire", "child", "follower", "custom race", "customrace"],
+      "pluginNameHints": ["vampire", "child", "follower", "custom race", "customrace", "custom"],
+      "meshPathHints": ["follower", "custom", "vampire", "child"],
+      "allowGenericOnly": true
+    },
+    {
       "name": "Khajiit variant",
       "groups": ["beast", "khajiit", "feline", "digitigrade"],
       "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay"],

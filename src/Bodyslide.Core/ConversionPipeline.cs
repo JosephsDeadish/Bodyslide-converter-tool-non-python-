@@ -372,6 +372,10 @@ internal static class ConversionValidationGuidance
                 "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
+            "physics-bone-missing" =>
+                "Open skeleton-compatibility.json, compare the requested physics profile against the expected and missing target bones, then switch to a compatible body/skeleton or disable the unsupported physics chains before release.",
+            "physics-bone-remap" =>
+                "Open skeleton-compatibility.json and review the remapped physics chains so SMP/CBPC bones still land on the intended target-body regions before release.",
             "unknown-export-partitions" =>
                 "Open conversion-quality.json and the converted mesh in Outfit Studio or NifSkope, verify the exported BSDismember partitions match the outfit coverage, and compare them against any plugin biped-slot hints before release.",
             "missing-normal-maps" =>
@@ -500,6 +504,8 @@ internal static class ConversionValidationGuidance
                 ["world-physics.json", "preview-workbench.html"],
             "unsupported-bones" or "race-compatibility-warning" =>
                 ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
+            "physics-bone-missing" or "physics-bone-remap" =>
+                ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json"],
             "missing-normal-maps" =>
                 ["texture-summary.json", "conversion-quality.json"],
             "missing-conversion-quality-report" =>
@@ -1104,6 +1110,19 @@ public sealed record WorldObjectPhysicsReport(
     bool GroundMeshAvailable,
     IReadOnlyList<string> Recommendations,
     HeelAnalysisReport? HeelAnalysis = null);
+
+public sealed record PhysicsCompatibilityReport(
+    string TargetBody,
+    string TargetSkeleton,
+    string RequestedProfile,
+    string RecommendedProfile,
+    bool TargetBodySupportsPhysics,
+    bool IsCompatible,
+    IReadOnlyList<string> ExpectedBones,
+    IReadOnlyList<string> InjectedBones,
+    IReadOnlyList<string> MissingBones,
+    IReadOnlyList<string> RemappedBones,
+    string Summary);
 
 public sealed record PreviewWorkbenchPayload(
     string MeshFile,
@@ -13286,9 +13305,21 @@ internal sealed class LocalExportService(
         // Write skeleton-compatibility.json — full bone mapping report so users know
         // exactly which bones mapped, which were unsupported, and which skeletons were detected.
         var skeletonCompatPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+        var physicsCompatibility = BuildPhysicsCompatibilityReport(
+            request.TargetBody,
+            skeletonMapping,
+            physics,
+            steps);
         await File.WriteAllTextAsync(
             skeletonCompatPath,
-            JsonSerializer.Serialize(skeletonMapping, new JsonSerializerOptions { WriteIndented = true }),
+            JsonSerializer.Serialize(new
+            {
+                skeletonMapping.SourceSkeleton,
+                skeletonMapping.TargetSkeleton,
+                skeletonMapping.BoneMappings,
+                skeletonMapping.UnsupportedBones,
+                PhysicsCompatibility = physicsCompatibility,
+            }, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
 
@@ -16095,6 +16126,52 @@ internal sealed class LocalExportService(
     private static bool IsBethesdaPluginFile(string path) =>
         Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
+    private static PhysicsCompatibilityReport BuildPhysicsCompatibilityReport(
+        string targetBody,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
+        IReadOnlyList<string> steps)
+    {
+        var injectedBones = ExtractInjectedPhysicsBones(steps);
+        var remappedBones = ExtractPhysicsBoneRemaps(steps);
+        var missingBones = ExtractMissingPhysicsBones(steps);
+        var hasProfile = BodyTechnicalProfileCatalog.TryGet(targetBody, out var profile);
+        var expectedBones = hasProfile
+            ? profile.RequiredPhysicsBones
+            : [];
+        var requestedProfile = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedProfile)
+            ? normalizedProfile
+            : physics.Profile;
+        var targetBodySupportsPhysics = hasProfile && profile.SupportsPhysics;
+        var physicsRequested = !string.Equals(requestedProfile, "none", StringComparison.OrdinalIgnoreCase);
+        var isCompatible = !physicsRequested ||
+            (targetBodySupportsPhysics && missingBones.Count == 0);
+        var summary = !physicsRequested
+            ? "No runtime physics profile was requested for this output."
+            : !targetBodySupportsPhysics
+                ? $"Physics profile '{requestedProfile}' was requested, but {targetBody} does not advertise built-in physics-capable bones."
+                : missingBones.Count > 0
+                    ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
+                    : remappedBones.Count > 0
+                        ? $"Physics profile '{requestedProfile}' is usable, but {remappedBones.Count} physics chain(s) were remapped to fit the target skeleton."
+                        : injectedBones.Count > 0
+                            ? $"Physics profile '{requestedProfile}' matches the target body's advertised physics capability."
+                            : $"Physics profile '{requestedProfile}' did not need explicit injected bones for this output.";
+
+        return new PhysicsCompatibilityReport(
+            targetBody,
+            skeletonMapping.TargetSkeleton,
+            requestedProfile,
+            hasProfile ? profile.RecommendedPhysicsProfile : "none",
+            targetBodySupportsPhysics,
+            isCompatible,
+            expectedBones,
+            injectedBones,
+            missingBones,
+            remappedBones,
+            summary);
+    }
+
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
     {
         const string prefix = "race-compat:warnings=";
@@ -16120,6 +16197,21 @@ internal sealed class LocalExportService(
         }
 
         return remapStep[prefix.Length..]
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractInjectedPhysicsBones(IReadOnlyList<string> steps)
+    {
+        const string prefix = "physics-injection:";
+        var injectionStep = steps.FirstOrDefault(step => step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(injectionStep))
+        {
+            return [];
+        }
+
+        return injectionStep[prefix.Length..]
             .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

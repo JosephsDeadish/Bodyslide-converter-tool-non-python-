@@ -15,7 +15,8 @@ internal sealed record RaceCompatibilityInferenceRule(
     IReadOnlyList<string> Groups,
     IReadOnlyList<string> EditorIdHints,
     IReadOnlyList<string> PluginNameHints,
-    IReadOnlyList<string> MeshPathHints);
+    IReadOnlyList<string> MeshPathHints,
+    bool AllowGenericOnly = false);
 
 internal static class RaceCompatibilityCatalog
 {
@@ -168,7 +169,8 @@ internal static class RaceCompatibilityCatalog
             NormalizeStringList(dto.Groups),
             NormalizeStringList(dto.EditorIdHints),
             NormalizeStringList(dto.PluginNameHints),
-            NormalizeStringList(dto.MeshPathHints));
+            NormalizeStringList(dto.MeshPathHints),
+            dto.AllowGenericOnly);
     }
 
     private static uint ParseFormId(string value)
@@ -196,31 +198,77 @@ internal static class RaceCompatibilityCatalog
         IReadOnlyList<string> normalizedPluginNames)
     {
         var score = 0;
+        var specificMatchFound = false;
         if (!string.IsNullOrWhiteSpace(normalizedEditorId))
         {
-            score += rule.EditorIdHints
-                .Where(hint => normalizedEditorId.Contains(hint, StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() * 4;
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.EditorIdHints, normalizedEditorId);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 8;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches * 2;
+            }
         }
 
         foreach (var pluginName in normalizedPluginNames)
         {
-            score += rule.PluginNameHints
-                .Where(hint => pluginName.Contains(hint, StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() * 3;
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.PluginNameHints, pluginName);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 6;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches;
+            }
         }
 
         foreach (var meshPath in normalizedMeshPaths)
         {
-            score += rule.MeshPathHints
-                .Where(hint => meshPath.Contains(hint, StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count();
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.MeshPathHints, meshPath);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 3;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches;
+            }
         }
 
-        return score;
+        return specificMatchFound || rule.AllowGenericOnly
+            ? score
+            : 0;
+    }
+
+    private static (int SpecificMatches, int GenericMatches) ScoreHintMatches(
+        IReadOnlyList<string> hints,
+        string normalizedValue)
+    {
+        var specificMatches = 0;
+        var genericMatches = 0;
+        foreach (var hint in hints
+                     .Where(hint => normalizedValue.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (IsGenericInferenceHint(hint))
+            {
+                genericMatches++;
+            }
+            else
+            {
+                specificMatches++;
+            }
+        }
+
+        return (specificMatches, genericMatches);
+    }
+
+    private static bool IsGenericInferenceHint(string hint)
+    {
+        var normalized = NormalizeHintSource(hint);
+        return normalized.Equals("vampire", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("child", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("follower", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("custom race", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("customrace", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("custom", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeHintSource(string? value) =>
@@ -271,5 +319,6 @@ internal static class RaceCompatibilityCatalog
         public string[]? EditorIdHints { get; init; }
         public string[]? PluginNameHints { get; init; }
         public string[]? MeshPathHints { get; init; }
+        public bool AllowGenericOnly { get; init; }
     }
 }
