@@ -1200,6 +1200,10 @@ public static class PresetCatalog
         ["Hagraven Zeroed"] = new("Hagraven Zeroed", "Hagraven", "zeroed", "none"),
         ["Spriggan Balanced"] = new("Spriggan Balanced", "Spriggan", "balanced", "none"),
         ["Spriggan Zeroed"] = new("Spriggan Zeroed", "Spriggan", "zeroed", "none"),
+        ["Equine Humanoid Balanced"] = new("Equine Humanoid Balanced", "Equine Humanoid", "balanced", "none"),
+        ["Equine Humanoid Zeroed"] = new("Equine Humanoid Zeroed", "Equine Humanoid", "zeroed", "none"),
+        ["Avian Humanoid Balanced"] = new("Avian Humanoid Balanced", "Avian Humanoid", "balanced", "none"),
+        ["Avian Humanoid Zeroed"] = new("Avian Humanoid Zeroed", "Avian Humanoid", "zeroed", "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
         ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
         ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
@@ -1208,6 +1212,8 @@ public static class PresetCatalog
         ["Vanilla to Goat Humanoid"] = new("Vanilla to Goat Humanoid", "Goat Humanoid", "balanced", "none"),
         ["Vanilla to Hagraven"] = new("Vanilla to Hagraven", "Hagraven", "balanced", "none"),
         ["Vanilla to Spriggan"] = new("Vanilla to Spriggan", "Spriggan", "balanced", "none"),
+        ["Vanilla to Equine Humanoid"] = new("Vanilla to Equine Humanoid", "Equine Humanoid", "balanced", "none"),
+        ["Vanilla to Avian Humanoid"] = new("Vanilla to Avian Humanoid", "Avian Humanoid", "balanced", "none"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
@@ -5775,7 +5781,7 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             {
                 race = explicitRace;
             }
-            else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, out var inferredRace))
+            else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, pluginAnalysis.ScannedPlugins, out var inferredRace))
             {
                 race = inferredRace;
                 isInferred = true;
@@ -7950,6 +7956,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["Goat Humanoid"] = CreateTuning(("chest", 1.03d), ("breasts", 1.05d), ("legs", 1.04d), ("calves", 1.06d)),
             ["Hagraven"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.05d), ("shoulders", 1.06d), ("arms", 1.07d)),
             ["Spriggan"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.07d), ("shoulders", 1.05d), ("arms", 1.06d)),
+            ["Equine Humanoid"] = CreateTuning(("pelvis", 1.05d), ("legs", 1.07d), ("thighs", 1.07d), ("calves", 1.09d)),
+            ["Avian Humanoid"] = CreateTuning(("shoulders", 1.09d), ("arms", 1.09d), ("chest", 1.03d), ("waist", 0.96d)),
         };
 
     private static IReadOnlyDictionary<string, double> CreateTuning(params (string Region, double Scale)[] entries) =>

@@ -49,6 +49,16 @@
       "body": "Spriggan",
       "compatibleGroups": ["humanoid", "beast", "spriggan", "horned"],
       "warningGroups": []
+    },
+    {
+      "body": "Equine Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "equine", "hoofed"],
+      "warningGroups": []
+    },
+    {
+      "body": "Avian Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "avian", "winged"],
+      "warningGroups": []
     }
   ],
   "inferenceRules": [
@@ -56,42 +66,49 @@
       "name": "Khajiit variant",
       "groups": ["beast", "khajiit", "feline", "digitigrade"],
       "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay"],
+      "pluginNameHints": ["khajiit", "senche", "cathay", "feline", "digitigrade", "vampire", "child", "follower", "custom race"],
       "meshPathHints": ["khajiit", "senche", "cathay", "feline", "digitigrade"]
     },
     {
       "name": "Argonian variant",
       "groups": ["beast", "argonian", "reptile", "tail"],
       "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard"],
+      "pluginNameHints": ["argonian", "saxhleel", "reptile", "lizard", "tail", "vampire", "child", "follower", "custom race"],
       "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "tail"]
     },
     {
       "name": "Goat variant",
       "groups": ["beast", "goat", "horned", "hoofed"],
       "editorIdHints": ["goat", "satyr", "faun", "ramhorn", "cloven"],
+      "pluginNameHints": ["goat", "satyr", "faun", "hoof", "horn", "follower", "custom race"],
       "meshPathHints": ["goat", "satyr", "faun", "horn", "hoof", "cloven"]
     },
     {
       "name": "Hagraven variant",
       "groups": ["beast", "hagraven", "winged", "avian"],
       "editorIdHints": ["hagraven", "hagravenrace", "hag raven"],
+      "pluginNameHints": ["hagraven", "hag raven", "wing", "feather", "follower", "custom race"],
       "meshPathHints": ["hagraven", "wing", "feather", "pinion"]
     },
     {
       "name": "Spriggan variant",
       "groups": ["beast", "spriggan", "horned"],
       "editorIdHints": ["spriggan", "briar", "nature spirit", "treefolk"],
+      "pluginNameHints": ["spriggan", "briar", "branch", "vine", "follower", "custom race"],
       "meshPathHints": ["spriggan", "briar", "roots", "bark", "branches"]
     },
     {
       "name": "Equine variant",
       "groups": ["beast", "equine", "hoofed"],
       "editorIdHints": ["horse", "mare", "pony", "equine", "centaur"],
+      "pluginNameHints": ["horse", "mare", "pony", "equine", "centaur", "hoof", "follower", "custom race"],
       "meshPathHints": ["horse", "mane", "hoof", "equine", "centaur"]
     },
     {
       "name": "Avian variant",
       "groups": ["beast", "avian", "winged"],
       "editorIdHints": ["avian", "harpy", "bird", "ravenwing"],
+      "pluginNameHints": ["avian", "harpy", "bird", "ravenwing", "feather", "wing", "follower", "custom race"],
       "meshPathHints": ["avian", "wing", "feather", "bird", "pinion"]
     }
   ]

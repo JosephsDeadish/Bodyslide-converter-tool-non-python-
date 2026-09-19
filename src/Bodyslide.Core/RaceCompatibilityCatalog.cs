@@ -14,6 +14,7 @@ internal sealed record RaceCompatibilityInferenceRule(
     string Name,
     IReadOnlyList<string> Groups,
     IReadOnlyList<string> EditorIdHints,
+    IReadOnlyList<string> PluginNameHints,
     IReadOnlyList<string> MeshPathHints);
 
 internal static class RaceCompatibilityCatalog
@@ -51,6 +52,7 @@ internal static class RaceCompatibilityCatalog
     public static bool TryInferRaceFromContext(
         string? editorId,
         IReadOnlyList<string>? meshPaths,
+        IReadOnlyList<string>? pluginNames,
         out RaceCompatibilityRace race)
     {
         race = default!;
@@ -59,8 +61,14 @@ internal static class RaceCompatibilityCatalog
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Select(NormalizeHintSource)
             .ToArray() ?? [];
+        var normalizedPluginNames = pluginNames?
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(NormalizeHintSource)
+            .ToArray() ?? [];
 
-        if (string.IsNullOrWhiteSpace(normalizedEditorId) && normalizedMeshPaths.Length == 0)
+        if (string.IsNullOrWhiteSpace(normalizedEditorId) &&
+            normalizedMeshPaths.Length == 0 &&
+            normalizedPluginNames.Length == 0)
         {
             return false;
         }
@@ -69,7 +77,7 @@ internal static class RaceCompatibilityCatalog
         var bestScore = 0;
         foreach (var rule in Data.Value.InferenceRules)
         {
-            var score = ScoreInferenceRule(rule, normalizedEditorId, normalizedMeshPaths);
+            var score = ScoreInferenceRule(rule, normalizedEditorId, normalizedMeshPaths, normalizedPluginNames);
             if (score > bestScore)
             {
                 bestRule = rule;
@@ -159,6 +167,7 @@ internal static class RaceCompatibilityCatalog
             dto.Name.Trim(),
             NormalizeStringList(dto.Groups),
             NormalizeStringList(dto.EditorIdHints),
+            NormalizeStringList(dto.PluginNameHints),
             NormalizeStringList(dto.MeshPathHints));
     }
 
@@ -183,7 +192,8 @@ internal static class RaceCompatibilityCatalog
     private static int ScoreInferenceRule(
         RaceCompatibilityInferenceRule rule,
         string? normalizedEditorId,
-        IReadOnlyList<string> normalizedMeshPaths)
+        IReadOnlyList<string> normalizedMeshPaths,
+        IReadOnlyList<string> normalizedPluginNames)
     {
         var score = 0;
         if (!string.IsNullOrWhiteSpace(normalizedEditorId))
@@ -192,6 +202,14 @@ internal static class RaceCompatibilityCatalog
                 .Where(hint => normalizedEditorId.Contains(hint, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count() * 4;
+        }
+
+        foreach (var pluginName in normalizedPluginNames)
+        {
+            score += rule.PluginNameHints
+                .Where(hint => pluginName.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() * 3;
         }
 
         foreach (var meshPath in normalizedMeshPaths)
@@ -208,7 +226,15 @@ internal static class RaceCompatibilityCatalog
     private static string NormalizeHintSource(string? value) =>
         string.IsNullOrWhiteSpace(value)
             ? string.Empty
-            : value.Trim().Replace('\\', '/');
+            : string.Join(
+                ' ',
+                value.Trim()
+                    .Replace('\\', '/')
+                    .Replace('/', ' ')
+                    .Replace('-', ' ')
+                    .Replace('_', ' ')
+                    .Replace('.', ' ')
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private sealed record RaceCompatibilityCatalogData(
         IReadOnlyDictionary<uint, RaceCompatibilityRace> RacesByFormId,
@@ -243,6 +269,7 @@ internal static class RaceCompatibilityCatalog
         public string? Name { get; init; }
         public string[]? Groups { get; init; }
         public string[]? EditorIdHints { get; init; }
+        public string[]? PluginNameHints { get; init; }
         public string[]? MeshPathHints { get; init; }
     }
 }

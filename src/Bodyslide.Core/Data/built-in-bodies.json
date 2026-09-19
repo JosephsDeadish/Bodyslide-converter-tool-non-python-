@@ -1542,5 +1542,184 @@
       "WingTip.R"
     ],
     "skeletonFramework": "winged-humanoid"
+  },
+  {
+    "name": "Equine Humanoid",
+    "aliases": [
+      "Horse Follower",
+      "Centaur",
+      "Ponyfolk",
+      "Marekin"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Equine beast-humanoid skeleton",
+    "notes": "Humanoid equine target for centaur, mare, and horse-follower body ecosystems with extended tail, hock, and hoof expectations. No built-in physics by default; tail swing, hock weighting, and hoof contact still need in-game review.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "Hock.L",
+      "Hock.R",
+      "Hoof.L",
+      "Hoof.R",
+      "ManeRoot",
+      "Forelock"
+    ],
+    "referenceTokens": [
+      "horse",
+      "equine",
+      "centaur",
+      "hoof",
+      "mane"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "NeckLength"
+    ],
+    "transformationField": {
+      "chest": 1.01,
+      "waist": 0.98,
+      "pelvis": 1.04,
+      "legs": 1.07,
+      "shoulders": 1.02,
+      "breasts": 0.99,
+      "butt": 1.04,
+      "belly": 1.01,
+      "arms": 0.99,
+      "thighs": 1.06,
+      "calves": 1.08
+    },
+    "detectionTokens": [
+      "horse",
+      "equine",
+      "centaur",
+      "hoof",
+      "mane"
+    ],
+    "textureTokens": [
+      "horse",
+      "equine",
+      "tail",
+      "hoof"
+    ],
+    "physicsTokens": [
+      "tail",
+      "hoof",
+      "mane"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7300,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.9,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.98,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail4",
+      "Tail5",
+      "Hock.L",
+      "Hock.R",
+      "Hoof.L",
+      "Hoof.R"
+    ],
+    "skeletonFramework": "equine-humanoid"
+  },
+  {
+    "name": "Avian Humanoid",
+    "aliases": [
+      "Harpy",
+      "Birdfolk",
+      "Ravenwing",
+      "Winged Avian"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Avian winged-humanoid skeleton",
+    "notes": "Wing-heavy humanoid target for harpy, ravenwing, and other avian follower ecosystems. No built-in physics by default; wing fold, feather spread, and talon/foot alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Wing.L",
+      "Wing.R",
+      "WingMid.L",
+      "WingMid.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather01.L",
+      "Feather01.R"
+    ],
+    "referenceTokens": [
+      "avian",
+      "harpy",
+      "bird",
+      "wing",
+      "feather"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "WingSpan",
+      "FeatherSpread"
+    ],
+    "transformationField": {
+      "chest": 0.97,
+      "waist": 0.94,
+      "pelvis": 1.0,
+      "legs": 0.99,
+      "shoulders": 1.08,
+      "breasts": 0.95,
+      "butt": 0.99,
+      "belly": 1.01,
+      "arms": 1.09,
+      "thighs": 0.98,
+      "calves": 0.97
+    },
+    "detectionTokens": [
+      "avian",
+      "harpy",
+      "bird",
+      "wing",
+      "feather"
+    ],
+    "textureTokens": [
+      "avian",
+      "bird",
+      "wing",
+      "feather"
+    ],
+    "physicsTokens": [
+      "wing",
+      "feather"
+    ],
+    "vertexCountMin": 4400,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.6,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.93,
+    "physicsBoneSignatures": [
+      "Wing.L",
+      "Wing.R",
+      "WingMid.L",
+      "WingMid.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather01.L",
+      "Feather01.R"
+    ],
+    "skeletonFramework": "avian-humanoid"
   }
 ]
