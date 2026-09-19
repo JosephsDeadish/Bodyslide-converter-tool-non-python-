@@ -4283,6 +4283,57 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithNiTriBasedGeomDataNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "tribasedgeom_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            geometryToken: "NiTriBasedGeomData",
+            prefixPadding: 32);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("block-graph-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(96, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "tribasedgeom_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one NiTriBasedGeomData vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithExtraWideLargePrefixInterleavedFloatNif_ParsesAsSupportedAndTransformsVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -14822,6 +14873,71 @@ public sealed class OutputCompletenessTests
 
             Assert.Equal(3f, result[0].X, 3);
             Assert.Equal(1f, result[1].X, 3);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RetargetMorphPayload_UsesNormalizedGeometryTransferForReorderedScaledTargets()
+    {
+        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-large.nif");
+            var targetPath = Path.Combine(tmpDir, "target-large.nif");
+            var sourceVertices = Enumerable.Range(0, 2048)
+                .Select(index =>
+                {
+                    var t = index / 2047f;
+                    return (
+                        X: ((index % 9) - 4) * 0.05f,
+                        Y: ((index % 7) - 3) * 0.035f,
+                        Z: t * 4.0f);
+                })
+                .ToList();
+            var targetVertices = sourceVertices
+                .Where((_, index) => index % 2 == 0)
+                .Reverse()
+                .Select(vertex => (
+                    X: (vertex.X * 1.8f) + 2.5f,
+                    Y: (vertex.Y * 0.65f) - 1.25f,
+                    Z: (vertex.Z * 2.2f) + 9f))
+                .ToList();
+
+            await SyntheticNifTestData.WriteAsync(sourcePath, sourceVertices);
+            await SyntheticNifTestData.WriteAsync(targetPath, targetVertices);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = Enumerable.Range(0, sourceVertices.Count)
+                .Select(index => (X: (float)(index + 1), Y: 0f, Z: 0f))
+                .ToArray();
+
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                method!.Invoke(null, [sourceDeltas, targetVertices.Count, context]));
+
+            Assert.Equal(targetVertices.Count, result.Count);
+            for (var targetIndex = 0; targetIndex < result.Count; targetIndex++)
+            {
+                var expectedSourceIndex = (sourceVertices.Count - 2) - (targetIndex * 2);
+                Assert.Equal(sourceDeltas[expectedSourceIndex].X, result[targetIndex].X, 3);
+            }
         }
         finally
         {

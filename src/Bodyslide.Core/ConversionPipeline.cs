@@ -1791,6 +1791,7 @@ internal static class NifGeometrySignatureReader
     [
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
         (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
         (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
     ];
@@ -1804,6 +1805,7 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
         (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
         (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
         (System.Text.Encoding.ASCII.GetBytes("NiLinesData"), "NiLinesData"),
@@ -2641,6 +2643,11 @@ internal static class NifGeometrySignatureReader
         if (typeName.Contains("TriStripsData", StringComparison.Ordinal))
         {
             return 9;
+        }
+
+        if (typeName.Contains("TriBasedGeomData", StringComparison.Ordinal))
+        {
+            return 8;
         }
 
         if (typeName.Contains("GeometryData", StringComparison.Ordinal))
@@ -16900,10 +16907,15 @@ internal sealed class LocalExportService(
             }
         }
 
+        private sealed record MorphTransferInfluence(
+            int SourceIndex,
+            float Weight);
+
         private sealed record MorphTransferContext(
             IReadOnlyList<MeshVertex> SourceVertices,
             IReadOnlyList<MeshVertex> TargetVertices,
-            int[] TargetToSourceIndexMap);
+            int[] TargetToSourceIndexMap,
+            IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
@@ -16921,10 +16933,18 @@ internal sealed class LocalExportService(
                 return null;
             }
 
+            var influenceMap = BuildMorphTransferInfluenceMap(sourceVertices, targetVertices);
+            var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
+                ? influenceMap
+                    .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
+                    .ToArray()
+                : BuildNearestSurfaceMap(sourceVertices, targetVertices);
+
             return new MorphTransferContext(
                 sourceVertices,
                 targetVertices,
-                BuildNearestSurfaceMap(sourceVertices, targetVertices));
+                nearestSurfaceMap,
+                influenceMap);
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
@@ -17011,7 +17031,8 @@ internal sealed class LocalExportService(
                 var nearestSurface = new (float X, float Y, float Z)[targetVertexCount];
                 for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
                 {
-                    nearestSurface[targetIndex] = sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
+                    var blended = TryBlendRetargetedDelta(sourceDeltas, morphTransferContext, targetIndex);
+                    nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
                 }
 
                 return nearestSurface;
@@ -17081,6 +17102,168 @@ internal sealed class LocalExportService(
             }
 
             return mapping;
+        }
+
+        private static IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> BuildMorphTransferInfluenceMap(
+            IReadOnlyList<MeshVertex> sourceVertices,
+            IReadOnlyList<MeshVertex> targetVertices)
+        {
+            if (sourceVertices.Count == 0 || targetVertices.Count == 0)
+            {
+                return [];
+            }
+
+            var normalizedSource = NormalizeVerticesForTransfer(sourceVertices);
+            var normalizedTarget = NormalizeVerticesForTransfer(targetVertices);
+            var sourceByHeight = normalizedSource
+                .Select(static (vertex, index) => (Vertex: vertex, Index: index))
+                .OrderBy(static entry => entry.Vertex.Z)
+                .ToArray();
+            var sortedSourceHeights = sourceByHeight.Select(static entry => entry.Vertex.Z).ToArray();
+            var influences = new IReadOnlyList<MorphTransferInfluence>[targetVertices.Count];
+            var candidateWindowRadius = Math.Clamp(sourceVertices.Count / 40, 48, 256);
+
+            for (var targetIndex = 0; targetIndex < normalizedTarget.Count; targetIndex++)
+            {
+                var targetVertex = normalizedTarget[targetIndex];
+                var insertionIndex = Array.BinarySearch(sortedSourceHeights, targetVertex.Z);
+                if (insertionIndex < 0)
+                {
+                    insertionIndex = ~insertionIndex;
+                }
+
+                var start = Math.Max(0, insertionIndex - candidateWindowRadius);
+                var end = Math.Min(sourceByHeight.Length - 1, insertionIndex + candidateWindowRadius);
+                var bestCandidates = new List<(int SourceIndex, float DistanceSquared)>(capacity: 4);
+
+                for (var candidateIndex = start; candidateIndex <= end; candidateIndex++)
+                {
+                    var candidate = sourceByHeight[candidateIndex];
+                    var dx = targetVertex.X - candidate.Vertex.X;
+                    var dy = targetVertex.Y - candidate.Vertex.Y;
+                    var dz = targetVertex.Z - candidate.Vertex.Z;
+                    var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                    InsertMorphTransferCandidate(bestCandidates, candidate.Index, distanceSquared);
+                }
+
+                if (bestCandidates.Count == 0)
+                {
+                    var fallbackIndex = Math.Clamp(
+                        (int)Math.Round(((double)targetIndex / Math.Max(1, targetVertices.Count - 1)) * Math.Max(0, sourceVertices.Count - 1)),
+                        0,
+                        Math.Max(0, sourceVertices.Count - 1));
+                    influences[targetIndex] = [new MorphTransferInfluence(fallbackIndex, 1f)];
+                    continue;
+                }
+
+                if (bestCandidates[0].DistanceSquared <= 0.000001f)
+                {
+                    influences[targetIndex] = [new MorphTransferInfluence(bestCandidates[0].SourceIndex, 1f)];
+                    continue;
+                }
+
+                var rawWeights = bestCandidates
+                    .Select(static candidate => 1f / MathF.Max(0.0001f, candidate.DistanceSquared))
+                    .ToArray();
+                var weightSum = rawWeights.Sum();
+                if (weightSum <= 0.000001f)
+                {
+                    influences[targetIndex] = [new MorphTransferInfluence(bestCandidates[0].SourceIndex, 1f)];
+                    continue;
+                }
+
+                influences[targetIndex] = bestCandidates
+                    .Select((candidate, index) => new MorphTransferInfluence(candidate.SourceIndex, rawWeights[index] / weightSum))
+                    .ToArray();
+            }
+
+            return influences;
+        }
+
+        private static void InsertMorphTransferCandidate(
+            List<(int SourceIndex, float DistanceSquared)> bestCandidates,
+            int sourceIndex,
+            float distanceSquared)
+        {
+            var insertAt = bestCandidates.FindIndex(existing => distanceSquared < existing.DistanceSquared);
+            if (insertAt < 0)
+            {
+                bestCandidates.Add((sourceIndex, distanceSquared));
+            }
+            else
+            {
+                bestCandidates.Insert(insertAt, (sourceIndex, distanceSquared));
+            }
+
+            if (bestCandidates.Count > 4)
+            {
+                bestCandidates.RemoveAt(bestCandidates.Count - 1);
+            }
+        }
+
+        private static (float X, float Y, float Z)? TryBlendRetargetedDelta(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            if (targetIndex < 0 || targetIndex >= morphTransferContext.TargetToSourceInfluences.Count)
+            {
+                return null;
+            }
+
+            var influences = morphTransferContext.TargetToSourceInfluences[targetIndex];
+            if (influences.Count == 0)
+            {
+                return null;
+            }
+
+            var x = 0f;
+            var y = 0f;
+            var z = 0f;
+            var totalWeight = 0f;
+            foreach (var influence in influences)
+            {
+                if (influence.SourceIndex < 0 || influence.SourceIndex >= sourceDeltas.Count || influence.Weight <= 0f)
+                {
+                    continue;
+                }
+
+                var delta = sourceDeltas[influence.SourceIndex];
+                x += delta.X * influence.Weight;
+                y += delta.Y * influence.Weight;
+                z += delta.Z * influence.Weight;
+                totalWeight += influence.Weight;
+            }
+
+            return totalWeight <= 0.000001f
+                ? null
+                : (x / totalWeight, y / totalWeight, z / totalWeight);
+        }
+
+        private static IReadOnlyList<MeshVertex> NormalizeVerticesForTransfer(IReadOnlyList<MeshVertex> vertices)
+        {
+            if (vertices.Count == 0)
+            {
+                return [];
+            }
+
+            var minX = vertices.Min(static vertex => vertex.X);
+            var maxX = vertices.Max(static vertex => vertex.X);
+            var minY = vertices.Min(static vertex => vertex.Y);
+            var maxY = vertices.Max(static vertex => vertex.Y);
+            var minZ = vertices.Min(static vertex => vertex.Z);
+            var maxZ = vertices.Max(static vertex => vertex.Z);
+
+            var width = MathF.Max(0.0001f, maxX - minX);
+            var depth = MathF.Max(0.0001f, maxY - minY);
+            var height = MathF.Max(0.0001f, maxZ - minZ);
+
+            return vertices
+                .Select(vertex => new MeshVertex(
+                    (vertex.X - minX) / width,
+                    (vertex.Y - minY) / depth,
+                    (vertex.Z - minZ) / height))
+                .ToList();
         }
 
         private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)
