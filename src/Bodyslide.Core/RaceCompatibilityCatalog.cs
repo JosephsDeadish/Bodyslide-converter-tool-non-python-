@@ -33,7 +33,8 @@ internal static class RaceCompatibilityCatalog
     public static IReadOnlyCollection<RaceCompatibilityBodyRule> BodyRules => Data.Value.BodyRules.Values.ToArray();
 
     public static bool TryGetRace(uint formId, out RaceCompatibilityRace race) =>
-        Data.Value.RacesByFormId.TryGetValue(formId & 0x00FFFFFFu, out race!);
+        Data.Value.RacesByFormId.TryGetValue(formId, out race!)
+        || Data.Value.RacesByFormId.TryGetValue(formId & 0x00FFFFFFu, out race!);
 
     public static bool TryGetBodyRule(string bodyName, out RaceCompatibilityBodyRule rule)
     {

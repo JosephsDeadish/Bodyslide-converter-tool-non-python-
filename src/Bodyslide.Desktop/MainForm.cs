@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System.Reflection;
@@ -1131,6 +1132,21 @@ public sealed class MainForm : Form
 
     private static UiTheme GetSystemPreferredTheme()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var personalizeKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                if (personalizeKey?.GetValue("AppsUseLightTheme") is int appsUseLightTheme)
+                {
+                    return appsUseLightTheme == 0 ? UiTheme.Dark : UiTheme.Light;
+                }
+            }
+            catch
+            {
+            }
+        }
+
         var background = SystemColors.Window;
         var luminance = ((background.R * 0.2126) + (background.G * 0.7152) + (background.B * 0.0722)) / 255d;
         return luminance < 0.5d ? UiTheme.Dark : UiTheme.Light;

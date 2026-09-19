@@ -111,7 +111,12 @@ internal static class BuiltInBodyMetadataCatalog
             return true;
         }
 
-        return AliasMap.Value.TryGetValue(normalized, out canonicalName!);
+        if (AliasMap.Value.TryGetValue(normalized, out canonicalName!))
+        {
+            return true;
+        }
+
+        return AliasMap.Value.TryGetValue(Slugify(normalized), out canonicalName!);
     }
 
     public static IReadOnlyDictionary<string, double> CreateFallbackTransformationField() =>
@@ -136,13 +141,44 @@ internal static class BuiltInBodyMetadataCatalog
         var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var body in Bodies.Value.Values)
         {
+            aliases[body.Name] = body.Name;
+            aliases[Slugify(body.Name)] = body.Name;
             foreach (var alias in body.Aliases)
             {
                 aliases[alias] = body.Name;
+                aliases[Slugify(alias)] = body.Name;
             }
         }
 
         return aliases;
+    }
+
+    private static string Slugify(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        var lastWasSeparator = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
     }
 
     private static BuiltInBodyMetadata Normalize(BuiltInBodyMetadataDto dto)

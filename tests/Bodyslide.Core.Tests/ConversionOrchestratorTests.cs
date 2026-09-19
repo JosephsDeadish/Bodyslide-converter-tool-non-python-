@@ -6146,6 +6146,16 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_WithDeltaCountGreaterThanVertexCount_IsRejected()
+        {
+            var bytes = BuildTriPayload(
+                vertexCount: 1,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0.5f, 0.25f, 0.125f)]));
+
+            Assert.False(TriMorphReader.TryRead(bytes, out _));
+        }
+
+        [Fact]
         public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
         {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -8185,6 +8195,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Ultimate Body Enhancer", "UBE")]
     [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
     [InlineData("Hag Raven", "Hagraven")]
+    [InlineData("Schlongs-of-Skyrim", "SOS")]
+    [InlineData("Sam-Light", "SAM Light")]
     public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
     {
         Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));

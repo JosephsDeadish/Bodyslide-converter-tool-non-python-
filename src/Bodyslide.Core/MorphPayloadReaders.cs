@@ -201,7 +201,7 @@ internal static class TriMorphReader
         for (var i = 0; i < morphCount; i++)
         {
             var deltaCount = counts[i];
-            if (deltaCount <= 0 || deltaCount > 250_000)
+            if (deltaCount <= 0 || deltaCount > vertexCount || deltaCount > 250_000)
             {
                 return false;
             }
