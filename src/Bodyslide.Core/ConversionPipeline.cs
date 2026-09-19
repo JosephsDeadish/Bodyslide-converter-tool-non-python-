@@ -8766,7 +8766,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 
         var tuning = BuildSolverTuning(mesh);
 
-        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning) : null;
+        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning, mesh.TargetPhysicsBones) : null;
         var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
@@ -8805,51 +8805,84 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return tuning;
     }
 
-    private static string BuildCbpcXml(bool isMale, PhysicsSolverTuning tuning)
+    private static string BuildCbpcXml(bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<CBPCConfig version=\"1\">");
-        if (isMale)
+
+        var emittedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var requestedBones = EnumerateRequestedPhysicsBones(isMale, targetPhysicsBones).ToList();
+        foreach (var bone in requestedBones)
         {
-            sb.AppendLine("  <PecPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.88 * tuning.StiffnessMultiplier)}</Stiffness>");
-            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.62 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
-            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.04 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.06 * tuning.OffsetMultiplier)}</MaxOffset>");
-            sb.AppendLine("  </PecPhysics>");
-            sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.92 * tuning.StiffnessMultiplier)}</Stiffness>");
-            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
-            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.03 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.04 * tuning.OffsetMultiplier)}</MaxOffset>");
-            sb.AppendLine("  </BellyPhysics>");
+            var group = ClassifyPhysicsBoneGroup(bone, isMale);
+            if (string.IsNullOrWhiteSpace(group) || !emittedGroups.Add(group))
+            {
+                continue;
+            }
+
+            AppendGroup(group);
         }
-        else
+
+        if (emittedGroups.Count == 0)
         {
-            sb.AppendLine("  <BreastPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.90 * tuning.StiffnessMultiplier)}</Stiffness>");
-            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
-            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.05 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.08 * tuning.OffsetMultiplier)}</MaxOffset>");
-            sb.AppendLine("  </BreastPhysics>");
-            sb.AppendLine("  <ButtPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.85 * tuning.StiffnessMultiplier)}</Stiffness>");
-            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
-            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.06 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.06 * tuning.OffsetMultiplier)}</MaxOffset>");
-            sb.AppendLine("  </ButtPhysics>");
-            sb.AppendLine("  <BellyPhysics>");
-            sb.AppendLine($"    <Stiffness>{F(0.92 * tuning.StiffnessMultiplier)}</Stiffness>");
-            sb.AppendLine($"    <Damping>{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
-            sb.AppendLine($"    <Gravity>{F(Math.Clamp(0.03 * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
-            sb.AppendLine($"    <MaxOffset>{F(0.04 * tuning.OffsetMultiplier)}</MaxOffset>");
-            sb.AppendLine("  </BellyPhysics>");
+            foreach (var fallbackGroup in isMale
+                         ? new[] { "pec", "belly" }
+                         : new[] { "breast", "butt", "belly" })
+            {
+                AppendGroup(fallbackGroup);
+            }
         }
 
         sb.AppendLine("</CBPCConfig>");
         return sb.ToString();
+
+        void AppendGroup(string group)
+        {
+            var sectionName = group switch
+            {
+                "pec" => "PecPhysics",
+                "breast" => "BreastPhysics",
+                "butt" => "ButtPhysics",
+                "belly" => "BellyPhysics",
+                "genitals" => "GenitalPhysics",
+                "tail" => "TailPhysics",
+                "hair" => "HairPhysics",
+                "wing" => "WingPhysics",
+                "horn" => "HornPhysics",
+                "mouth" => "MouthPhysics",
+                "head" => "HeadPhysics",
+                "heel" => "HeelPhysics",
+                "thigh" => "ThighPhysics",
+                _ => $"{char.ToUpperInvariant(group[0])}{group[1..]}Physics"
+            };
+
+            var (stiffness, damping, gravity, maxOffset) = group switch
+            {
+                "pec" => (0.88d, 0.62d, 0.04d, 0.06d),
+                "breast" => (0.90d, 0.60d, 0.05d, 0.08d),
+                "butt" => (0.85d, 0.55d, 0.06d, 0.06d),
+                "belly" => (0.92d, 0.65d, 0.03d, 0.04d),
+                "genitals" => (0.78d, 0.58d, 0.04d, 0.05d),
+                "tail" => (0.84d, 0.62d, 0.02d, 0.05d),
+                "hair" => (0.74d, 0.48d, 0.02d, 0.07d),
+                "wing" => (0.93d, 0.70d, 0.01d, 0.04d),
+                "horn" => (0.97d, 0.84d, 0.01d, 0.03d),
+                "mouth" => (0.91d, 0.76d, 0.02d, 0.03d),
+                "head" => (0.95d, 0.82d, 0.01d, 0.03d),
+                "heel" => (0.98d, 0.86d, 0.01d, 0.03d),
+                "thigh" => (0.87d, 0.57d, 0.04d, 0.05d),
+                _ => (0.88d, 0.60d, 0.03d, 0.04d)
+            };
+
+            sb.AppendLine($"  <{sectionName}>");
+            sb.AppendLine($"    <Stiffness>{F(stiffness * tuning.StiffnessMultiplier)}</Stiffness>");
+            sb.AppendLine($"    <Damping>{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}</Damping>");
+            sb.AppendLine($"    <Gravity>{F(Math.Clamp(gravity * tuning.GravityMultiplier, 0.01, 0.20))}</Gravity>");
+            sb.AppendLine($"    <MaxOffset>{F(maxOffset * tuning.OffsetMultiplier)}</MaxOffset>");
+            sb.AppendLine($"  </{sectionName}>");
+        }
     }
 
     private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
@@ -8859,71 +8892,31 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         var emittedBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
-        if (isMale)
+        var requestedBones = EnumerateRequestedPhysicsBones(isMale, targetPhysicsBones).ToList();
+        if (targetPhysicsBones is { Count: > 0 })
         {
-            AppendBone("NPC L Pec", 2.5, 0.85, 0.60, 15, 0.15);
-            AppendBone("NPC R Pec", 2.5, 0.85, 0.60, 15, 0.15);
-            AppendBone("NPC Belly", 1.5, 0.90, 0.65, 8, 0.10);
+            foreach (var bone in requestedBones)
+            {
+                if (string.IsNullOrWhiteSpace(bone) || emittedBones.Contains(bone))
+                {
+                    continue;
+                }
+
+                var (mass, stiffness, damping, angleLimit, restitution) = GetSmpTuningForBone(bone, isMale);
+                AppendBone(bone, mass, stiffness, damping, angleLimit, restitution);
+            }
         }
         else
         {
-            AppendBone("NPC L Breast01", 2.0, 0.80, 0.50, 20, 0.20);
-            AppendBone("NPC R Breast01", 2.0, 0.80, 0.50, 20, 0.20);
-            AppendBone("NPC Belly", 1.5, 0.90, 0.60, 10, 0.10);
-            AppendBone("NPC L Butt", 1.8, 0.75, 0.55, 15, 0.20);
-            AppendBone("NPC R Butt", 1.8, 0.75, 0.55, 15, 0.20);
-        }
+            foreach (var fallbackBone in requestedBones)
+            {
+                if (string.IsNullOrWhiteSpace(fallbackBone) || emittedBones.Contains(fallbackBone))
+                {
+                    continue;
+                }
 
-        foreach (var extraBone in targetPhysicsBones ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(extraBone) || emittedBones.Contains(extraBone))
-            {
-                continue;
-            }
-
-            var lowered = extraBone.ToLowerInvariant();
-            if (MatchesSemanticAlias(lowered, "genitals") || lowered.Contains("balls", StringComparison.Ordinal))
-            {
-                AppendBone(extraBone, 1.25, 0.72, 0.62, 12, 0.12);
-            }
-            else if (lowered.Contains("thigh", StringComparison.Ordinal) || lowered.Contains("butt", StringComparison.Ordinal))
-            {
-                AppendBone(extraBone, 1.85, 0.74, 0.58, 14, 0.18);
-            }
-            else if (lowered.Contains("breast", StringComparison.Ordinal) || lowered.Contains("pec", StringComparison.Ordinal) || lowered.Contains("lat", StringComparison.Ordinal))
-            {
-                AppendBone(extraBone, 2.1, 0.78, 0.56, 16, 0.16);
-            }
-            else if (MatchesSemanticAlias(lowered, "hair"))
-            {
-                AppendBone(extraBone, 0.72, 0.68, 0.48, 24, 0.08);
-            }
-            else if (MatchesSemanticAlias(lowered, "tail"))
-            {
-                AppendBone(extraBone, 1.35, 0.81, 0.64, 18, 0.12);
-            }
-            else if (MatchesSemanticAlias(lowered, "wing"))
-            {
-                AppendBone(extraBone, 1.55, 0.83, 0.63, 12, 0.10);
-            }
-            else if (lowered.Contains("horn", StringComparison.Ordinal))
-            {
-                AppendBone(extraBone, 0.90, 0.96, 0.84, 4, 0.05);
-            }
-            else if (MatchesSemanticAlias(lowered, "mouth") ||
-                     lowered.Contains("jaw", StringComparison.Ordinal) ||
-                     lowered.Contains("tongue", StringComparison.Ordinal) ||
-                     lowered.Contains("lip", StringComparison.Ordinal))
-            {
-                AppendBone(extraBone, 0.85, 0.92, 0.78, 6, 0.06);
-            }
-            else if (MatchesSemanticAlias(lowered, "head"))
-            {
-                AppendBone(extraBone, 1.10, 0.94, 0.82, 5, 0.05);
-            }
-            else if (MatchesSemanticAlias(lowered, "heel"))
-            {
-                AppendBone(extraBone, 0.95, 0.96, 0.86, 4, 0.05);
+                var (mass, stiffness, damping, angleLimit, restitution) = GetSmpTuningForBone(fallbackBone, isMale);
+                AppendBone(fallbackBone, mass, stiffness, damping, angleLimit, restitution);
             }
         }
 
@@ -8937,6 +8930,125 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             sb.AppendLine($"    <angularLimit min=\"{F(-angleLimit * tuning.OffsetMultiplier)}\" max=\"{F(angleLimit * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(restitution * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
         }
+    }
+
+    private static IReadOnlyList<string> EnumerateRequestedPhysicsBones(bool isMale, IReadOnlyList<string>? targetPhysicsBones)
+    {
+        if (targetPhysicsBones is { Count: > 0 })
+        {
+            return targetPhysicsBones
+                .Where(static bone => !string.IsNullOrWhiteSpace(bone))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return isMale
+            ? ["NPC L Pec", "NPC R Pec", "NPC Belly"]
+            : ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"];
+    }
+
+    private static string ClassifyPhysicsBoneGroup(string boneName, bool isMale)
+    {
+        var lowered = boneName.Trim().ToLowerInvariant();
+        if (MatchesSemanticAlias(lowered, "genitals") || lowered.Contains("balls", StringComparison.Ordinal))
+        {
+            return "genitals";
+        }
+
+        if (MatchesSemanticAlias(lowered, "tail"))
+        {
+            return "tail";
+        }
+
+        if (MatchesSemanticAlias(lowered, "wing"))
+        {
+            return "wing";
+        }
+
+        if (MatchesSemanticAlias(lowered, "hair"))
+        {
+            return "hair";
+        }
+
+        if (lowered.Contains("horn", StringComparison.Ordinal))
+        {
+            return "horn";
+        }
+
+        if (MatchesSemanticAlias(lowered, "mouth") ||
+            lowered.Contains("jaw", StringComparison.Ordinal) ||
+            lowered.Contains("tongue", StringComparison.Ordinal) ||
+            lowered.Contains("lip", StringComparison.Ordinal))
+        {
+            return "mouth";
+        }
+
+        if (MatchesSemanticAlias(lowered, "head"))
+        {
+            return "head";
+        }
+
+        if (MatchesSemanticAlias(lowered, "heel") ||
+            lowered.Contains("hock", StringComparison.Ordinal) ||
+            lowered.Contains("hoof", StringComparison.Ordinal) ||
+            lowered.Contains("paw", StringComparison.Ordinal) ||
+            lowered.Contains("digitigrade", StringComparison.Ordinal))
+        {
+            return "heel";
+        }
+
+        if (lowered.Contains("thigh", StringComparison.Ordinal))
+        {
+            return "thigh";
+        }
+
+        if (lowered.Contains("butt", StringComparison.Ordinal) || lowered.Contains("glute", StringComparison.Ordinal))
+        {
+            return "butt";
+        }
+
+        if (lowered.Contains("belly", StringComparison.Ordinal) ||
+            lowered.Contains("waist", StringComparison.Ordinal) ||
+            lowered.Contains("abdomen", StringComparison.Ordinal) ||
+            lowered.Contains("stomach", StringComparison.Ordinal))
+        {
+            return "belly";
+        }
+
+        if (lowered.Contains("pec", StringComparison.Ordinal) || lowered.Contains("lat", StringComparison.Ordinal))
+        {
+            return "pec";
+        }
+
+        if (lowered.Contains("breast", StringComparison.Ordinal) || MatchesSemanticAlias(lowered, "breast"))
+        {
+            return isMale ? "pec" : "breast";
+        }
+
+        return string.Empty;
+    }
+
+    private static (double Mass, double Stiffness, double Damping, double AngleLimit, double Restitution) GetSmpTuningForBone(string boneName, bool isMale)
+    {
+        var group = ClassifyPhysicsBoneGroup(boneName, isMale);
+        return group switch
+        {
+            "genitals" => (1.25d, 0.72d, 0.62d, 12d, 0.12d),
+            "tail" => (1.35d, 0.81d, 0.64d, 18d, 0.12d),
+            "wing" => (1.55d, 0.83d, 0.63d, 12d, 0.10d),
+            "hair" => (0.72d, 0.68d, 0.48d, 24d, 0.08d),
+            "horn" => (0.90d, 0.96d, 0.84d, 4d, 0.05d),
+            "mouth" => (0.85d, 0.92d, 0.78d, 6d, 0.06d),
+            "head" => (1.10d, 0.94d, 0.82d, 5d, 0.05d),
+            "heel" => (0.95d, 0.96d, 0.86d, 4d, 0.05d),
+            "thigh" or "butt" => (1.85d, 0.74d, 0.58d, 14d, 0.18d),
+            "pec" => (2.5d, 0.85d, 0.60d, 15d, 0.15d),
+            "breast" => (2.1d, 0.78d, 0.56d, 16d, 0.16d),
+            "belly" => (1.5d, 0.90d, 0.60d, 10d, 0.10d),
+            _ => isMale
+                ? (1.40d, 0.88d, 0.64d, 10d, 0.10d)
+                : (1.45d, 0.84d, 0.60d, 12d, 0.10d)
+        };
     }
 
     private static bool MatchesSemanticAlias(string loweredBoneName, string semanticKey) =>

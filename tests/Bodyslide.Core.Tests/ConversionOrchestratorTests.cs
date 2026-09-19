@@ -5737,6 +5737,49 @@ public sealed class PhysicsXmlTests
     }
 
     [Fact]
+    public async Task BuildAsync_NicheTargetPhysicsBones_LimitsCbpcGroupsToSupportedCapabilities()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "creature",
+            "goat",
+            true,
+            TargetPhysicsBones: ["Goat Tail A", "Goat Wing L", "Goat Wing R", "Goat Horn L", "Goat Horn R"]);
+
+        var config = await service.BuildAsync(mesh, "Goat Humanoid", "cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.CbpcConfigXml);
+        Assert.Contains("<TailPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.Contains("<WingPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.Contains("<HornPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<BreastPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<ButtPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<PecPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NicheTargetPhysicsBones_DoesNotInjectHumanFallbackBonesIntoSmp()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "creature",
+            "goat",
+            true,
+            TargetPhysicsBones: ["Goat Tail A", "Goat Tail B", "Goat Horn L", "Goat Horn R"]);
+
+        var config = await service.BuildAsync(mesh, "Goat Humanoid", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Goat Tail A", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Goat Tail B", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Goat Horn L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPC R Breast01", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPC L Butt", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NPC Belly", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BuildAsync_CbpcOnlyProfile_NoSmpXml()
     {
         var service = new BasicPhysicsSupportService();
