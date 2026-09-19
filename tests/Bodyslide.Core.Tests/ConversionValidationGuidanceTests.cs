@@ -99,6 +99,28 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversPartitionLossAndAmbiguousPluginTieCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            43,
+            2,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("missing-source-partitions", "high", "Source slot signal was dropped."),
+                new ConversionValidationIssue("missing-plugin-partitions", "medium", "Plugin slot signal was dropped."),
+                new ConversionValidationIssue("plugin-rewrite-ambiguous-filename", "high", "Plugin mesh path matched multiple source meshes."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "3BA", maxActions: 6);
+
+        Assert.Contains(actions, action => action.Contains("BSDismember partitions", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("BOD2/BODT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("trailing path context", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_DeepensRaceAndUnsupportedNifGuidance()
     {
         var summary = new ConversionValidationSummary(

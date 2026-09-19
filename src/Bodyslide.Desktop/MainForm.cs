@@ -3957,6 +3957,11 @@ public sealed class MainForm : Form
             return "BodySlide support";
         }
 
+        if (normalized is "missing-source-partitions" or "missing-plugin-partitions")
+        {
+            return "Partition review";
+        }
+
         if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
         {
@@ -4062,6 +4067,8 @@ public sealed class MainForm : Form
         code.Equals("synthetic-morph-fallback", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("retargeted-morph-reuse", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-source-partitions", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-plugin-partitions", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("clipping-detected", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("voxel-penetration", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("pose-risk", StringComparison.OrdinalIgnoreCase) ||

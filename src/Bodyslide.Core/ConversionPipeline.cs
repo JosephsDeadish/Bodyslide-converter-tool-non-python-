@@ -293,6 +293,12 @@ internal static class ConversionValidationGuidance
                 "Build the generated BodySlide project at low/high weights, then compare the reused morph result in Outfit Studio and preview-workbench.html to catch slider drift caused by vertex-count retargeting.",
             "topology-mismatch-risk" =>
                 "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
+            "missing-source-partitions" =>
+                "Open conversion-quality.json and preview-workbench.html, compare the exported BSDismember partitions against the source mesh slot layout in Outfit Studio or NifSkope, then restore any missing source-driven partition blocks before shipping.",
+            "missing-plugin-partitions" =>
+                "Open conversion-quality.json and plugin-patches.json, compare the exported BSDismember partitions against the source plugin BOD2/BODT slot hints and linked ARMA variants, then re-export once every required plugin-driven partition is restored.",
+            "plugin-rewrite-ambiguous-filename" =>
+                "Open plugin-patches.json and conversion-quality.json, compare each ambiguous plugin mesh path against the source folder family and linked ARMA context, then rename or relocate the winning source mesh so trailing path context resolves to one clear match before re-running.",
             "clipping-detected" or "voxel-penetration" or "pose-risk" =>
                 $"Review preview-workbench.html and pose-simulation-report.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
             "auto-correction-applied" =>
