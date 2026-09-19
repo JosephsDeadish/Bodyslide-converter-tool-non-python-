@@ -11633,7 +11633,7 @@ internal static class ConversionReadmeGenerator
                      .Take(8))
         {
             sb.AppendLine($"  * [{issue.Severity.ToUpperInvariant()}] {issue.Code}: {issue.Message}");
-            var nextStep = ConversionValidationGuidance.GetIssueFollowUp(issue.Code, request.TargetBody);
+            var nextStep = ConversionValidationGuidance.GetIssueFollowUp(issue, request.TargetBody);
             if (!string.IsNullOrWhiteSpace(nextStep))
             {
                 sb.AppendLine($"    Next step: {nextStep}");
