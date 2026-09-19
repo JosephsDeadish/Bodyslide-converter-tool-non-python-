@@ -366,6 +366,14 @@ internal static class ConversionValidationGuidance
                 "Re-run the conversion and confirm conversion-quality.json is present before release so the validation score, issue list, and next-action guidance remain available outside the app.",
             "missing-skeleton-compatibility-report" =>
                 "Re-run the conversion and confirm skeleton-compatibility.json is present before release so skeleton requirements and unsupported-bone warnings remain reviewable.",
+            "missing-pose-report" =>
+                "Re-run the conversion and confirm pose-simulation-report.json is present before release so stressed-pose clipping checks remain reviewable outside the desktop preview.",
+            "missing-world-physics-report" =>
+                "Re-run the conversion and confirm world-physics.json is present before release so dropped-item/world-model collision, heel, and ground-contact guidance ships with the output.",
+            "missing-readme" =>
+                "Regenerate README.txt before release so install order, plugin patch, physics, and manual review notes stay with the packaged conversion.",
+            "missing-dependency-map" =>
+                "Re-run the conversion and confirm dependency-map.json is present before release so every staged mesh, plugin rewrite, and source-support dependency remains traceable during manual review.",
             "missing-staged-cbpc-config" =>
                 "Re-run the conversion or copy the generated cbpc-config.xml into SKSE/Plugins/CBPCSystem, then confirm the staged mod output contains the expected CBPC config before packaging.",
             "missing-staged-smp-config" =>
@@ -384,6 +392,12 @@ internal static class ConversionValidationGuidance
                 "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
                 "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+            "missing-xedit-script" =>
+                "Re-run the conversion and confirm patch-armor.pas is packaged beside plugin-patches.json before release so manual xEdit patch follow-up remains available outside the app.",
+            "missing-plugin-patch-report" =>
+                "Re-run the conversion and confirm plugin-patches.json is present before release so plugin rewrite mappings, load-order hints, and linked-family review steps ship with the output.",
+            "missing-root-plugin" =>
+                "Copy the source or generated ESP/ESM/ESL into the package root before release, then verify the FOMOD/plugin install flow still enables the rewritten plugin in your mod manager.",
             "missing-preview-workbench" =>
                 "Re-run the conversion to regenerate preview-workbench.html, then confirm preview.html and preview.svg are also present so the converted mesh, ground mesh, and flagged risk regions remain reviewable outside the app before release.",
             "missing-preview-html" or

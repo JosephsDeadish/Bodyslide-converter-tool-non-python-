@@ -4120,26 +4120,75 @@ public sealed class MainForm : Form
             return ResolveExistingGuidancePath(outputDirectory, "texture-summary.json") ?? fallbackPath;
         }
 
+        if (normalized is "clipping-detected" or "voxel-penetration" or "pose-risk" or "auto-correction-applied")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "pose-simulation-report.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+                ?? fallbackPath;
+        }
+
+        if (normalized is "heel-offset-review" or "missing-world-physics-report")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "world-physics.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+                ?? fallbackPath;
+        }
+
         if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
         {
             return ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json") ?? fallbackPath;
         }
 
+        if (normalized is "missing-plugin-patch-report" or "missing-xedit-script")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "patch-armor.pas")
+                ?? outputDirectory;
+        }
+
+        if (normalized is "missing-readme")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "README.txt") ?? outputDirectory;
+        }
+
+        if (normalized is "missing-dependency-map" or "missing-conversion-quality-report")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "dependency-map.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+                ?? outputDirectory;
+        }
+
+        if (normalized is "missing-skeleton-compatibility-report")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json") ?? outputDirectory;
+        }
+
+        if (normalized is "missing-pose-report")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "pose-simulation-report.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+                ?? outputDirectory;
+        }
+
         if (normalized is "missing-staged-cbpc-config")
         {
-            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")) ?? fallbackPath;
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "CBPCSystem"))
+                ?? outputDirectory;
         }
 
         if (normalized is "missing-staged-smp-config")
         {
-            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml")) ?? fallbackPath;
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "hdtSMP64"))
+                ?? outputDirectory;
         }
 
         if (normalized is "bodyslide-incompatible" or "incomplete-source-fallback" ||
             normalized.StartsWith("missing-bodyslide-", StringComparison.OrdinalIgnoreCase))
         {
-            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide")) ?? fallbackPath;
+            return ResolveBodySlideGuidanceTargetPath(outputDirectory) ?? fallbackPath;
         }
 
         if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase) ||
@@ -4165,7 +4214,14 @@ public sealed class MainForm : Form
 
         if (normalized is "missing-staged-mesh-output" or "zip-missing-staged-mesh-output")
         {
-            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("meshes", "slidesmith")) ?? outputDirectory;
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("meshes", "slidesmith"))
+                ?? ResolveExistingGuidancePath(outputDirectory, "meshes")
+                ?? outputDirectory;
+        }
+
+        if (normalized is "missing-root-plugin")
+        {
+            return ResolveFirstExistingPath(outputDirectory, "*.esp", "*.esm", "*.esl") ?? outputDirectory;
         }
 
         return fallbackPath;
@@ -4197,6 +4253,31 @@ public sealed class MainForm : Form
         if (File.Exists(fullPath) || Directory.Exists(fullPath))
         {
             return fullPath;
+        }
+
+        return null;
+    }
+
+    private static string? ResolveBodySlideGuidanceTargetPath(string outputDirectory)
+    {
+        return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "ShapeData"))
+            ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderSets"))
+            ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide"))
+            ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json");
+    }
+
+    private static string? ResolveFirstExistingPath(string outputDirectory, params string[] patterns)
+    {
+        foreach (var pattern in patterns)
+        {
+            var match = Directory
+                .EnumerateFiles(outputDirectory, pattern, SearchOption.TopDirectoryOnly)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                return match;
+            }
         }
 
         return null;

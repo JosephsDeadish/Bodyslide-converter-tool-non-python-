@@ -99,6 +99,36 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversMissingAcceptanceAndPluginHandoffArtifacts()
+    {
+        var summary = new ConversionValidationSummary(
+            "UNSAFE",
+            26,
+            3,
+            2,
+            0,
+            [
+                new ConversionValidationIssue("missing-readme", "medium", "README.txt was not generated."),
+                new ConversionValidationIssue("missing-dependency-map", "medium", "dependency-map.json was not generated."),
+                new ConversionValidationIssue("missing-pose-report", "low", "pose-simulation-report.json was not generated."),
+                new ConversionValidationIssue("missing-world-physics-report", "low", "world-physics.json was not generated."),
+                new ConversionValidationIssue("missing-plugin-patch-report", "medium", "plugin-patches.json was not generated."),
+                new ConversionValidationIssue("missing-xedit-script", "medium", "patch-armor.pas was not generated."),
+                new ConversionValidationIssue("missing-root-plugin", "high", "The root plugin file is missing."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "3BA", maxActions: 8);
+
+        Assert.Contains(actions, action => action.Contains("README.txt", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("dependency-map.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("world-physics.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("plugin-patches.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("package root", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversTopologyHeelAndLinkedPluginFailureCases()
     {
         var summary = new ConversionValidationSummary(
