@@ -1156,8 +1156,9 @@ public sealed class MainForm : Form
                     return appsUseLightTheme == 0 ? UiTheme.Dark : UiTheme.Light;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceWarning($"Failed to detect system theme preference from the registry: {ex.Message}");
             }
         }
 
@@ -2580,10 +2581,13 @@ public sealed class MainForm : Form
 
     private static string BuildResultTabTitle(string baseTitle, string? status)
     {
+        if (ConversionValidationPresentation.GetGateRank(status) <= 0)
+        {
+            return baseTitle;
+        }
+
         var gate = ConversionValidationPresentation.GetGateLabel(status);
-        return gate.Equals("CHECK", StringComparison.OrdinalIgnoreCase)
-            ? baseTitle
-            : $"{baseTitle} ({gate})";
+        return $"{baseTitle} ({gate})";
     }
 
     private static string BuildValidationStatusLabel(string? status, bool previewAvailable)
