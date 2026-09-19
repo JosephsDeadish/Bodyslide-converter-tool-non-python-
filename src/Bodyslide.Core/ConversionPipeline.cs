@@ -8357,38 +8357,38 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
     ];
 
     // Maps filename keyword substrings to regions (checked when bone names are unavailable).
-    private static readonly (string FileToken, string Region)[] FileRegionRules =
+    private static readonly (string FileToken, IReadOnlyList<string> Regions)[] FileRegionRules =
     [
-        ("cuirass",     "chest"),
-        ("breastplate", "chest"),
-        ("chestplate",  "chest"),
-        ("torso",       "chest"),
-        ("robe",        "chest"),
-        ("gauntlet",    "arms"),
-        ("glove",       "arms"),
-        ("forearm",     "arms"),
-        ("bracer",      "arms"),
-        ("sabatons",    "feet"),
-        ("greave",      "legs"),
-        ("boot",        "feet"),
-        ("shoe",        "feet"),
-        ("sandal",      "feet"),
-        ("slipper",     "feet"),
-        ("heel",        "feet"),
-        ("pump",        "feet"),
-        ("legging",     "legs"),
-        ("trouser",     "legs"),
-        ("pauldron",    "shoulders"),
-        ("spaulder",    "shoulders"),
-        ("shoulder",    "shoulders"),
-        ("helm",        "shoulders"),
-        ("hood",        "shoulders"),
-        ("crown",       "shoulders"),
-        ("skirt",       "pelvis"),
-        ("kilt",        "pelvis"),
-        ("loincloth",   "pelvis"),
-        ("pelvis",      "pelvis"),
-        ("body",        "chest"),
+        ("cuirass",     ["chest"]),
+        ("breastplate", ["chest"]),
+        ("chestplate",  ["chest"]),
+        ("torso",       ["chest"]),
+        ("robe",        ["chest"]),
+        ("gauntlet",    ["arms"]),
+        ("glove",       ["arms"]),
+        ("forearm",     ["arms"]),
+        ("bracer",      ["arms"]),
+        ("sabatons",    ["feet"]),
+        ("greave",      ["calves", "legs"]),
+        ("boot",        ["feet", "calves"]),
+        ("shoe",        ["feet"]),
+        ("sandal",      ["feet"]),
+        ("slipper",     ["feet"]),
+        ("heel",        ["feet", "calves"]),
+        ("pump",        ["feet"]),
+        ("legging",     ["calves", "legs"]),
+        ("trouser",     ["legs"]),
+        ("pauldron",    ["shoulders"]),
+        ("spaulder",    ["shoulders"]),
+        ("shoulder",    ["shoulders"]),
+        ("helm",        ["shoulders"]),
+        ("hood",        ["shoulders"]),
+        ("crown",       ["shoulders"]),
+        ("skirt",       ["pelvis"]),
+        ("kilt",        ["pelvis"]),
+        ("loincloth",   ["pelvis"]),
+        ("pelvis",      ["pelvis"]),
+        ("body",        ["chest"]),
     ];
 
     private static readonly IReadOnlyDictionary<int, IReadOnlyList<string>> PartitionRegionRules =
@@ -8463,11 +8463,14 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
         foreach (var meshFile in armor.MeshFiles)
         {
             var name = Path.GetFileNameWithoutExtension(meshFile).ToLowerInvariant();
-            foreach (var (fileToken, region) in FileRegionRules)
+            foreach (var (fileToken, regions) in FileRegionRules)
             {
                 if (name.Contains(fileToken, StringComparison.OrdinalIgnoreCase))
                 {
-                    fileScores[region] = fileScores.GetValueOrDefault(region) + 1;
+                    foreach (var region in regions)
+                    {
+                        fileScores[region] = fileScores.GetValueOrDefault(region) + 1;
+                    }
                 }
             }
         }

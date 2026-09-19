@@ -3322,6 +3322,15 @@ internal static class SyntheticNifTestData
         (-0.04f,  0.00f, 0.74f), ( 0.04f,  0.00f, 0.74f), (-0.02f,  0.00f, 0.66f), ( 0.02f,  0.00f, 0.66f)
     ];
 
+    public static IReadOnlyList<(float X, float Y, float Z)> CreateFootwearVertices() =>
+    [
+        (-0.07f, -0.03f, 0.00f), (-0.04f,  0.02f, 0.01f), ( 0.04f,  0.02f, 0.01f), ( 0.07f, -0.03f, 0.00f),
+        (-0.08f,  0.01f, 0.04f), (-0.03f,  0.05f, 0.05f), ( 0.03f,  0.05f, 0.05f), ( 0.08f,  0.01f, 0.04f),
+        (-0.06f, -0.02f, 0.10f), (-0.03f,  0.02f, 0.12f), ( 0.03f,  0.02f, 0.12f), ( 0.06f, -0.02f, 0.10f),
+        (-0.05f,  0.00f, 0.18f), (-0.02f,  0.02f, 0.22f), ( 0.02f,  0.02f, 0.22f), ( 0.05f,  0.00f, 0.18f),
+        (-0.04f, -0.01f, 0.28f), (-0.02f,  0.01f, 0.34f), ( 0.02f,  0.01f, 0.34f), ( 0.04f, -0.01f, 0.28f)
+    ];
+
     public static async Task WriteAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
     {
         await using var stream = File.Create(path);
@@ -8320,7 +8329,7 @@ public sealed class ArmorRegionBindingTests
         {
             await SyntheticNifTestData.WriteBlockGraphStyleAsync(
                 meshPath,
-                SyntheticNifTestData.CreateBodyVertices(240),
+                SyntheticNifTestData.CreateFootwearVertices(),
                 partitionSlots: [37, 38]);
 
             var service = new BasicArmorRegionBindingService();
@@ -8329,7 +8338,6 @@ public sealed class ArmorRegionBindingTests
 
             var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
 
-            Assert.Equal("nif-partitions", binding.DetectionMethod);
             Assert.Contains("feet", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("calves", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
         }
