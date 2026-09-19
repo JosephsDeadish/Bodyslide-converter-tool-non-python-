@@ -750,7 +750,9 @@ internal readonly record struct MeshPathVariantSignals(
     bool IsFirstPerson,
     bool IsWorld,
     bool IsFemale,
-    bool IsMale);
+    bool IsMale,
+    bool IsLowWeight,
+    bool IsHighWeight);
 
 public sealed record PartialLinkedArmorFamilyFailure(
     string ArmorRecord,
@@ -15989,6 +15991,8 @@ internal sealed class LocalExportService(
         score += ScoreVariantSignalAlignment(pluginSignals.IsWorld, sourceSignals.IsWorld, matchBonus: 180, mismatchPenalty: 120);
         score += ScoreVariantSignalAlignment(pluginSignals.IsFemale, sourceSignals.IsFemale, matchBonus: 260, mismatchPenalty: 220);
         score += ScoreVariantSignalAlignment(pluginSignals.IsMale, sourceSignals.IsMale, matchBonus: 260, mismatchPenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsLowWeight, sourceSignals.IsLowWeight, matchBonus: 320, mismatchPenalty: 260);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsHighWeight, sourceSignals.IsHighWeight, matchBonus: 320, mismatchPenalty: 260);
         return score;
     }
 
@@ -16010,15 +16014,16 @@ internal sealed class LocalExportService(
     private static MeshPathVariantSignals ExtractMeshPathVariantSignals(string path)
     {
         var tokens = ExtractRawPathTokens(path);
+        var fileStemTokens = ExtractFileStemTokens(path);
         return new MeshPathVariantSignals(
-            IsFirstPerson: tokens.Any(static token =>
-                token.Equals("1stperson", StringComparison.OrdinalIgnoreCase) ||
-                token.Equals("firstperson", StringComparison.OrdinalIgnoreCase) ||
-                token.Equals("first", StringComparison.OrdinalIgnoreCase) ||
-                token.Equals("fp", StringComparison.OrdinalIgnoreCase)),
-            IsWorld: tokens.Any(static token => token.Equals("world", StringComparison.OrdinalIgnoreCase)),
-            IsFemale: tokens.Any(static token => token.Equals("female", StringComparison.OrdinalIgnoreCase)),
-            IsMale: tokens.Any(static token => token.Equals("male", StringComparison.OrdinalIgnoreCase)));
+            IsFirstPerson: tokens.Any(IsFirstPersonVariantToken),
+            IsWorld: tokens.Any(IsWorldVariantToken),
+            IsFemale: tokens.Any(static token => token.Equals("female", StringComparison.OrdinalIgnoreCase))
+                || fileStemTokens.Any(IsFemaleVariantToken),
+            IsMale: tokens.Any(static token => token.Equals("male", StringComparison.OrdinalIgnoreCase))
+                || fileStemTokens.Any(IsMaleVariantToken),
+            IsLowWeight: HasLowWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path),
+            IsHighWeight: HasHighWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path));
     }
 
     private static int GetDiscouragedSourcePathPenalty(string sourceMeshPath)
@@ -16081,11 +16086,17 @@ internal sealed class LocalExportService(
         var pluginStem = Path.GetFileNameWithoutExtension(pluginFileName) ?? pluginFileName;
         var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName) ?? sourceFileName;
         return !HasExplicitBodyWeightSuffix(pluginStem) &&
-               sourceStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase);
+               HasLowWeightVariantSuffix(sourceStem);
     }
 
     private static bool HasExplicitBodyWeightSuffix(string fileStem) =>
-        fileStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+        HasLowWeightVariantSuffix(fileStem) ||
+        HasHighWeightVariantSuffix(fileStem);
+
+    private static bool HasLowWeightVariantSuffix(string fileStem) =>
+        fileStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasHighWeightVariantSuffix(string fileStem) =>
         fileStem.EndsWith("_1", StringComparison.OrdinalIgnoreCase);
 
     private static string TrimMeshesPrefix(string pluginPath)
@@ -16150,19 +16161,76 @@ internal sealed class LocalExportService(
         }
 
         var stem = Path.GetFileNameWithoutExtension(fileName) ?? fileName;
-        stem = stem.Replace("1stperson", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Replace("firstperson", string.Empty, StringComparison.OrdinalIgnoreCase);
-        if (stem.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
-            stem.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        stem = stem.Replace("1stperson", "_firstperson_", StringComparison.OrdinalIgnoreCase)
+            .Replace("firstperson", "_firstperson_", StringComparison.OrdinalIgnoreCase);
+        var normalizedTokens = stem
+            .Split(['_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(CanonicalizeMeshStemMatchToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        if (normalizedTokens.Count > 0 && normalizedTokens[^1] is "0" or "1")
         {
-            stem = stem[..^2];
+            normalizedTokens.RemoveAt(normalizedTokens.Count - 1);
         }
 
-        return new string(stem
+        return new string(normalizedTokens
+            .SelectMany(static token => token)
             .Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant)
             .ToArray());
     }
+
+    private static string CanonicalizeMeshStemMatchToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return token.Trim().ToLowerInvariant() switch
+        {
+            "1stperson" or "firstperson" or "first" or "fp" => string.Empty,
+            "gnd" => "ground",
+            "f" or "fem" => "female",
+            "m" or "masc" => "male",
+            _ => token
+        };
+    }
+
+    private static IReadOnlyList<string> ExtractFileStemTokens(string path)
+    {
+        var stem = Path.GetFileNameWithoutExtension(path) ?? path;
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            return [];
+        }
+
+        stem = stem.Replace("1stperson", "_1stperson_", StringComparison.OrdinalIgnoreCase)
+            .Replace("firstperson", "_firstperson_", StringComparison.OrdinalIgnoreCase);
+        return stem.Split(['_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static bool IsFirstPersonVariantToken(string token) =>
+        token.Equals("1stperson", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("firstperson", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("first", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("1st", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("fp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWorldVariantToken(string token) =>
+        token.Equals("world", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("ground", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("gnd", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFemaleVariantToken(string token) =>
+        token.Equals("female", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("fem", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("f", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsMaleVariantToken(string token) =>
+        token.Equals("male", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("masc", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("m", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath, string? sourceMeshPath = null)
     {
