@@ -2066,6 +2066,8 @@ public sealed class MainForm : Form
     private bool PopulateGuidanceTab(IReadOnlyList<string> outputDirectories, string? previewPath)
     {
         var requiresReview = false;
+        var gateStatus = "ready";
+        var gateRank = ConversionValidationPresentation.GetGateRank(gateStatus);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entries = new List<GuidanceEntry>();
 
@@ -2085,13 +2087,21 @@ public sealed class MainForm : Form
                 entries.Add(new GuidanceEntry(area, priority, guidance, targetPath));
             }
 
+            void PromoteGate(string? candidateStatus)
+            {
+                var candidateRank = ConversionValidationPresentation.GetGateRank(candidateStatus);
+                if (candidateRank > gateRank)
+                {
+                    gateRank = candidateRank;
+                    gateStatus = candidateStatus ?? gateStatus;
+                }
+            }
+
             if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
             {
                 Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
-                return false;
             }
-
-            if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
+            else if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
             {
                 Add(
                     "Preview",
@@ -2111,9 +2121,9 @@ public sealed class MainForm : Form
 
             foreach (var outputDirectory in outputDirectories)
             {
-                AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+                AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+                AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
                 AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
@@ -2128,8 +2138,8 @@ public sealed class MainForm : Form
                     : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
                 Add(
                     "Overall status",
-                    requiresReview ? "Warning" : "Info",
-                    BuildGuidanceOverview(entries, requiresReview),
+                    gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
+                    BuildGuidanceOverview(entries, requiresReview, gateStatus),
                     guidanceTarget);
             }
 
@@ -3557,7 +3567,8 @@ public sealed class MainForm : Form
         string outputDirectory,
         string? previewPath,
         Action<string, string, string, string?> add,
-        ref bool requiresReview)
+        ref bool requiresReview,
+        Action<string?> promoteGate)
     {
         var reportPath = Path.Combine(outputDirectory, "batch-report.json");
         if (!File.Exists(reportPath))
@@ -3581,6 +3592,14 @@ public sealed class MainForm : Form
             {
                 return;
             }
+
+            promoteGate(packStatus switch
+            {
+                var value when string.Equals(value, "HIGH-RISK", StringComparison.OrdinalIgnoreCase) => "high-risk",
+                var value when string.Equals(value, "NEEDS-REVIEW", StringComparison.OrdinalIgnoreCase) => "needs-review",
+                var value when string.Equals(value, "READY", StringComparison.OrdinalIgnoreCase) => "ready",
+                _ => null
+            });
 
             if (failedCount > 0 || needsReviewCount > 0 || highRiskCount > 0 || missingQualityCount > 0)
             {
@@ -3622,7 +3641,8 @@ public sealed class MainForm : Form
         string outputDirectory,
         string? previewPath,
         Action<string, string, string, string?> add,
-        ref bool requiresReview)
+        ref bool requiresReview,
+        Action<string?> promoteGate)
     {
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         if (!File.Exists(qualityPath))
@@ -3640,6 +3660,8 @@ public sealed class MainForm : Form
             {
                 return;
             }
+
+            promoteGate(validationSummary.Status);
 
             if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
                 validationSummary.Issues.Count > 0)
@@ -3833,7 +3855,8 @@ public sealed class MainForm : Form
         string outputDirectory,
         string? previewPath,
         Action<string, string, string, string?> add,
-        ref bool requiresReview)
+        ref bool requiresReview,
+        Action<string?> promoteGate)
     {
         var reportPath = Path.Combine(outputDirectory, "armor-pack-validation.json");
         if (!File.Exists(reportPath))
@@ -3852,6 +3875,14 @@ public sealed class MainForm : Form
             {
                 return;
             }
+
+            promoteGate(status switch
+            {
+                var value when string.Equals(value, "HIGH-RISK", StringComparison.OrdinalIgnoreCase) => "high-risk",
+                var value when string.Equals(value, "NEEDS-REVIEW", StringComparison.OrdinalIgnoreCase) => "needs-review",
+                var value when string.Equals(value, "READY", StringComparison.OrdinalIgnoreCase) => "ready",
+                _ => null
+            });
 
             if (!status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
                 needsReviewCount > 0 ||
@@ -3916,10 +3947,9 @@ public sealed class MainForm : Form
                 return;
             }
 
-            requiresReview = true;
             add(
                 "Plugin patching",
-                "Action",
+                "Info",
                 $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
                 ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", patchPath));
 
@@ -3936,15 +3966,19 @@ public sealed class MainForm : Form
 
                     if (!string.IsNullOrWhiteSpace(generatedPatch))
                     {
+                        var loadAfterLabel = !string.IsNullOrWhiteSpace(loadAfter) && !string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase)
+                            ? loadAfter
+                            : sourcePlugin;
                         add(
                             "Plugin install",
                             "Action",
-                            $"{generatedPatch} should load after {sourcePlugin}{(string.IsNullOrWhiteSpace(loadAfter) || string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : $" ({loadAfter})")}. {placement}",
+                            $"{generatedPatch} should load after {loadAfterLabel}. {placement}",
                             patchPath);
                     }
 
                     if (string.Equals(manualReview, "Yes", StringComparison.OrdinalIgnoreCase))
                     {
+                        requiresReview = true;
                         add(
                             "Plugin review",
                             "Warning",
@@ -3969,6 +4003,7 @@ public sealed class MainForm : Form
                     var action = TryReadString(step, "SuggestedXEditAction");
                     var priority = TryReadString(step, "ReviewPriority");
 
+                    requiresReview = true;
                     add(
                         "Linked armor family",
                         string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
@@ -4204,6 +4239,12 @@ public sealed class MainForm : Form
             normalized.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
         {
+            var expectedZipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            if (File.Exists(expectedZipPath))
+            {
+                return expectedZipPath;
+            }
+
             return Directory
                        .EnumerateFiles(outputDirectory, "*.zip", SearchOption.TopDirectoryOnly)
                        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -4292,17 +4333,22 @@ public sealed class MainForm : Form
         return null;
     }
 
-    private static string BuildGuidanceOverview(IReadOnlyList<GuidanceEntry> entries, bool requiresReview)
+    private static string BuildGuidanceOverview(IReadOnlyList<GuidanceEntry> entries, bool requiresReview, string? gateStatus)
     {
         var highCount = entries.Count(static entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
         var warningCount = entries.Count(static entry => entry.Priority.Equals("Warning", StringComparison.OrdinalIgnoreCase));
         var actionCount = entries.Count(static entry => entry.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase));
-        if (highCount > 0)
+        var effectiveGate = ConversionValidationPresentation.GetGateRank(gateStatus) >= ConversionValidationPresentation.GetGateRank("high-risk")
+            ? "high-risk"
+            : (ConversionValidationPresentation.GetGateRank(gateStatus) >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview)
+                ? "needs-review"
+                : "ready";
+        if (string.Equals(effectiveGate, "high-risk", StringComparison.OrdinalIgnoreCase))
         {
             return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
         }
 
-        if (requiresReview)
+        if (string.Equals(effectiveGate, "needs-review", StringComparison.OrdinalIgnoreCase))
         {
             return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — inspect Preview and linked reports before install/share: {warningCount} warning and {actionCount} action item(s).";
         }
