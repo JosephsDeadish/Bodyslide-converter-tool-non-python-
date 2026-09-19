@@ -9070,6 +9070,86 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_PrefersNonFirstPersonSourceMesh_WhenPluginPathIsUnsuffixed()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_1stperson_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_0.nif", sourceMeshMap["meshes/armor/common/steelboots.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_PrefersFirstPersonSourceMesh_WhenPluginPathUsesFirstPersonStem()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_1stperson_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots_1stperson.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_1stperson_0.nif", sourceMeshMap["meshes/armor/common/steelboots_1stperson.nif"]);
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticModularStandaloneAddonModPackDirectory_ResolvesStandaloneArmaFamilyContext()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModularStandaloneAddonModPack");

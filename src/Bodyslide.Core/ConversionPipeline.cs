@@ -746,6 +746,12 @@ public sealed record UnresolvedPluginTieGroup(
     IReadOnlyList<PluginTieFamilyHint> SharedCandidateFamilies,
     string ManualReviewReason);
 
+private readonly record struct MeshPathVariantSignals(
+    bool IsFirstPerson,
+    bool IsWorld,
+    bool IsFemale,
+    bool IsMale);
+
 public sealed record PartialLinkedArmorFamilyFailure(
     string ArmorRecord,
     string OwningPluginFileName,
@@ -15778,6 +15784,7 @@ internal sealed class LocalExportService(
                 score += 40;
             }
 
+            score += GetMeshVariantAlignmentScore(normalizedPluginPath, comparableSourcePath);
             score += GetSourceMeshVariantCountBonus(comparableSourcePath, sourceMeshVariantCounts);
             score -= GetDiscouragedSourcePathPenalty(comparableSourcePath);
 
@@ -15972,6 +15979,48 @@ internal sealed class LocalExportService(
         return (variantCount - 1) * 120;
     }
 
+    private static int GetMeshVariantAlignmentScore(string pluginMeshPath, string sourceMeshPath)
+    {
+        var pluginSignals = ExtractMeshPathVariantSignals(pluginMeshPath);
+        var sourceSignals = ExtractMeshPathVariantSignals(sourceMeshPath);
+
+        var score = 0;
+        score += ScoreVariantSignalAlignment(pluginSignals.IsFirstPerson, sourceSignals.IsFirstPerson, matchBonus: 600, mismatchPenalty: 450, unexpectedSourcePenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsWorld, sourceSignals.IsWorld, matchBonus: 180, mismatchPenalty: 120);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsFemale, sourceSignals.IsFemale, matchBonus: 260, mismatchPenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsMale, sourceSignals.IsMale, matchBonus: 260, mismatchPenalty: 220);
+        return score;
+    }
+
+    private static int ScoreVariantSignalAlignment(
+        bool pluginHasSignal,
+        bool sourceHasSignal,
+        int matchBonus,
+        int mismatchPenalty,
+        int unexpectedSourcePenalty = 0)
+    {
+        if (pluginHasSignal)
+        {
+            return sourceHasSignal ? matchBonus : -mismatchPenalty;
+        }
+
+        return sourceHasSignal ? -unexpectedSourcePenalty : 0;
+    }
+
+    private static MeshPathVariantSignals ExtractMeshPathVariantSignals(string path)
+    {
+        var tokens = ExtractRawPathTokens(path);
+        return new MeshPathVariantSignals(
+            IsFirstPerson: tokens.Any(static token =>
+                token.Equals("1stperson", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("firstperson", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("first", StringComparison.OrdinalIgnoreCase) ||
+                token.Equals("fp", StringComparison.OrdinalIgnoreCase)),
+            IsWorld: tokens.Any(static token => token.Equals("world", StringComparison.OrdinalIgnoreCase)),
+            IsFemale: tokens.Any(static token => token.Equals("female", StringComparison.OrdinalIgnoreCase)),
+            IsMale: tokens.Any(static token => token.Equals("male", StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static int GetDiscouragedSourcePathPenalty(string sourceMeshPath)
     {
         var normalizedPath = NormalizeComparablePath(sourceMeshPath);
@@ -16072,10 +16121,15 @@ internal sealed class LocalExportService(
 
     private static IReadOnlyList<string> ExtractComparablePathTokens(string path)
     {
-        return NormalizeComparablePath(path)
-            .Split(['/', '\\', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        return ExtractRawPathTokens(path)
             .Where(static token => token.Length > 1 && !IsGenericPluginPathToken(token))
             .ToArray();
+    }
+
+    private static IReadOnlyList<string> ExtractRawPathTokens(string path)
+    {
+        return NormalizeComparablePath(path)
+            .Split(['/', '\\', '_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private static bool IsGenericPluginPathToken(string token) =>
