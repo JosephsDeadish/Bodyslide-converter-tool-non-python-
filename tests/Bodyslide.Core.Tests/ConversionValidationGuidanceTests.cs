@@ -1,0 +1,68 @@
+using Bodyslide.Core;
+
+namespace Bodyslide.Core.Tests;
+
+public sealed class ConversionValidationGuidanceTests
+{
+    [Fact]
+    public void BuildFollowUpActions_CoversBodyDetectionAndBodySlideFailureCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            62,
+            1,
+            2,
+            0,
+            [
+                new ConversionValidationIssue("low-body-match", "high", "Body match confidence stayed low."),
+                new ConversionValidationIssue("bodyslide-incompatible", "medium", "Generated BodySlide payload is incomplete."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "3BA");
+
+        Assert.Contains(actions, action => action.Contains("source-body override", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("slider export disabled", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildFollowUpActions_DeduplicatesSharedPluginMasterChainGuidance()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            54,
+            2,
+            0,
+            0,
+            [
+                new ConversionValidationIssue("plugin-patch-missing-master-chain", "high", "Generated patch is missing required masters."),
+                new ConversionValidationIssue("plugin-patch-master-order-mismatch", "high", "Generated patch master order is wrong."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "CBBE");
+
+        Assert.Single(actions);
+        Assert.Contains("*_SlidesmithPatch.esp", actions[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildFollowUpActions_CoversPackagingAndZipFailureCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "UNSAFE",
+            31,
+            2,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("missing-staged-mesh-output", "high", "Staged meshes are missing."),
+                new ConversionValidationIssue("missing-output-zip", "medium", "Requested output zip was not generated."),
+                new ConversionValidationIssue("zip-missing-plugin-patch-report", "medium", "Zip is missing plugin-patches.json."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "HIMBO");
+
+        Assert.Contains(actions, action => action.Contains("dependency-map.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("output-zip enabled", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("armor-pack-validation.json", StringComparison.OrdinalIgnoreCase));
+    }
+}

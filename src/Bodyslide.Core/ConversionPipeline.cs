@@ -235,6 +235,10 @@ internal static class ConversionValidationGuidance
     public static string? GetIssueFollowUp(string code, string targetBody) =>
         code switch
         {
+            "low-detection-confidence" or "low-body-match" =>
+                "Open conversion-quality.json and preview-workbench.html, confirm the detected/source body is correct, then re-run with an explicit source-body override or better reference assets if the armor was matched to the wrong body family.",
+            "bodyslide-incompatible" =>
+                "Open conversion-quality.json, verify the target body has compatible BodySlide slider support for this outfit, and re-run with slider export disabled or with matching BodySlide OSP/TRI/BSD/reference assets before release.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "heuristic-nif-read" =>
@@ -243,14 +247,22 @@ internal static class ConversionValidationGuidance
                 "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit, place them beside the mod or under BodySlide/ShapeData, then re-run so conversion-quality.json no longer reports source-asset fallback.",
             "synthetic-morph-fallback" =>
                 "Build the generated project in BodySlide at low and high weights, then compare the results in preview-workbench.html or Outfit Studio for slider drift before release.",
+            "retargeted-morph-reuse" =>
+                "Build the generated BodySlide project at low/high weights, then compare the reused morph result in Outfit Studio and preview-workbench.html to catch slider drift caused by vertex-count retargeting.",
             "topology-mismatch-risk" =>
                 "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
             "clipping-detected" or "voxel-penetration" or "pose-risk" =>
                 $"Review preview-workbench.html and pose-simulation-report.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
+            "auto-correction-applied" =>
+                "Open preview-workbench.html and pose-simulation-report.json, compare the corrected regions against the source mesh, and confirm the automatic push-out did not bloat seams, straps, or rigid details before shipping.",
             "heel-offset-review" =>
                 "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
+            "unknown-export-partitions" =>
+                "Open conversion-quality.json and the converted mesh in Outfit Studio or NifSkope, verify the exported BSDismember partitions match the outfit coverage, and compare them against any plugin biped-slot hints before release.",
+            "missing-normal-maps" =>
+                "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
                 "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm beast/custom races have matching body meshes or dedicated addon records before release.",
             "plugin-rewrite-ambiguous-filename" or
@@ -263,6 +275,46 @@ internal static class ConversionValidationGuidance
             "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" =>
                 "Open plugin-patches.json and patch-armor.pas in xEdit context, verify each ARMO/ARMA mesh path and master-chain warning, and ensure any generated *_SlidesmithPatch.esp loads after the source plugin before release.",
+            "plugin-patch-missing-master-chain" or
+            "plugin-patch-master-order-mismatch" =>
+                "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
+            "plugin-link-unsupported-nif-layout" =>
+                "Identify the linked ARMA meshes called out in conversion-quality.json or plugin-patches.json, re-save those source NIFs into a supported Skyrim layout, then re-run so linked armor families stop falling back on unsupported geometry reads.",
+            "missing-staged-cbpc-config" =>
+                "Re-run the conversion or copy the generated cbpc-config.xml into SKSE/Plugins/CBPCSystem, then confirm the staged mod output contains the expected CBPC config before packaging.",
+            "missing-staged-smp-config" =>
+                "Re-run the conversion or copy the generated smp-config.xml into SKSE/Plugins/hdtSMP64, then confirm the staged mod output contains the expected SMP config before packaging.",
+            "missing-staged-mesh-output" =>
+                "Open dependency-map.json and the meshes/slidesmith output folder, re-run the conversion for the missing variants, and do not package the mod until every referenced staged mesh exists under the Data-relative output path.",
+            "fomod-missing-folder-entry" or
+            "fomod-missing-root-plugin-entry" or
+            "fomod-missing-root-support-entry" =>
+                "Open fomod/ModuleConfig.xml, add the missing meshes/plugins/support-file install entries, and test the package in MO2 or Vortex before release.",
+            "missing-bodyslide-osp" =>
+                "Re-run with slider export enabled and confirm CalienteTools/BodySlide/SliderSets contains the generated .osp project before publishing BodySlide-capable output.",
+            "missing-bodyslide-shape-data" or
+            "missing-bodyslide-reference-nif" or
+            "missing-bodyslide-slider-payload" =>
+                "Inspect CalienteTools/BodySlide/ShapeData for the generated reference NIF, BSD, and TRI payloads, then re-run before release so BodySlide users do not receive a partial slider package.",
+            "missing-output-zip" =>
+                "Re-run with output-zip enabled or rebuild the distributable archive, then confirm the final zip contains the same staged meshes, support files, and reports as the output folder before sharing it.",
+            "zip-missing-readme" or
+            "zip-missing-fomod-module-config" or
+            "zip-missing-fomod-info" or
+            "zip-missing-staged-cbpc-config" or
+            "zip-missing-staged-smp-config" or
+            "zip-missing-root-plugin" or
+            "zip-missing-root-support-file" or
+            "zip-missing-bodyslide-osp" or
+            "zip-missing-bodyslide-shape-data" or
+            "zip-missing-bodyslide-reference-nif" or
+            "zip-missing-bodyslide-slider-payload" or
+            "zip-missing-xedit-script" or
+            "zip-missing-plugin-patch-report" or
+            "zip-missing-staged-mesh-output" =>
+                "Open armor-pack-validation.json, rebuild the distributable zip, and verify the archive includes every staged mesh, plugin/support file, BodySlide payload, and report before sharing it through a mod manager.",
+            "invalid-output-zip" =>
+                "Delete the broken distributable zip, regenerate it from the validated output folder, and verify it can be opened and installed by your mod manager before release.",
             _ => null
         };
 }
