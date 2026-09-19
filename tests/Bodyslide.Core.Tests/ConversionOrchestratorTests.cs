@@ -5798,6 +5798,18 @@ public sealed class PhysicsXmlTests
     }
 
     [Fact]
+    public async Task BuildAsync_ExplicitlyEmptyTargetPhysicsBones_DoesNotGenerateFallbackPhysicsXml()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("cloth", "default", true, TargetPhysicsBones: []);
+
+        var config = await service.BuildAsync(mesh, "CBBE", "smp+cbpc", CancellationToken.None);
+
+        Assert.Null(config.CbpcConfigXml);
+        Assert.Null(config.SmpConfigXml);
+    }
+
+    [Fact]
     public async Task BuildAsync_CbpcOnlyProfile_NoSmpXml()
     {
         var service = new BasicPhysicsSupportService();
@@ -8601,6 +8613,7 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Equal("OK", catalogCheck.Status);
         Assert.Contains("body aliases", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("skeleton frameworks", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("verified body physics bone coverage", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
 
         var nifCheck = Assert.Single(checks, check => check.Area == "NIF parsing");
         Assert.Equal("OK", nifCheck.Status);
@@ -8609,6 +8622,14 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Contains("bsmeshlod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("bssegmented-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("nimesh-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ValidateCatalogConsistency_BuiltInBodiesAndRaceRulesHaveFrameworkCoverage()
+    {
+        var issues = RuntimeReadinessReporter.ValidateCatalogConsistency();
+
+        Assert.Empty(issues);
     }
 }
 
@@ -16681,6 +16702,23 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.NotNull(result.TargetPhysicsBones);
         Assert.Contains("BreastUpper", result.TargetPhysicsBones!);
         Assert.Contains("NPC L Breast01", result.TargetPhysicsBones!);
+    }
+
+    [Fact]
+    public async Task TransferAsync_VanillaBeastTarget_RecordsFrameworkFallbackRemap()
+    {
+        var svc = new BasicWeightTransferService();
+        var mesh = new ConvertedMesh("creature", "vertex-projection", 1, new Dictionary<string, double> { ["belly"] = 1.0 });
+        var analysis = new MeshAnalysis("creature", true, 1);
+
+        var result = await svc.TransferAsync(mesh, analysis, "Vanilla Beast", null, CancellationToken.None);
+
+        Assert.NotNull(result.TargetPhysicsBones);
+        Assert.Contains("Tail3", result.TargetPhysicsBones!);
+        Assert.DoesNotContain("Tail4", result.TargetPhysicsBones!);
+        Assert.NotNull(result.PhysicsBoneRemaps);
+        Assert.Contains("Tail4=>Tail3", result.PhysicsBoneRemaps!);
+        Assert.Null(result.UnsupportedTargetPhysicsBones);
     }
 
     [Fact]

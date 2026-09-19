@@ -87,18 +87,51 @@ public static class RuntimeReadinessReporter
             var skeletonCommonBoneCount = SkeletonMappingCatalog.CommonBones.Count;
             var raceCompatibilityRuleCount = RaceCompatibilityCatalog.BodyRules.Count;
             var physicsRepairGroupCount = PhysicsRepairCatalog.All.Count;
+            var consistencyIssues = ValidateCatalogConsistency();
             _ = BodyDetectionTuningCatalog.Current;
             _ = MeshBehaviorCatalog.Get("cloth");
 
             return new(
                 "Catalog data",
-                "OK",
-                $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups");
+                consistencyIssues.Count == 0 ? "OK" : "Error",
+                consistencyIssues.Count == 0
+                    ? $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, verified body physics bone coverage"
+                    : $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups; catalog consistency issues: {string.Join(" | ", consistencyIssues.Take(5))}");
         }
         catch (Exception ex)
         {
             return new("Catalog data", "Error", $"Embedded application data catalogs failed to load: {ex.Message}");
         }
+    }
+
+    internal static IReadOnlyList<string> ValidateCatalogConsistency()
+    {
+        var issues = new List<string>();
+
+        foreach (var body in BuiltInBodyMetadataCatalog.All.OrderBy(static body => body.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var bone in body.AvailablePhysicsBones)
+            {
+                if (SkeletonMappingCatalog.TryResolveSupportedBone(bone, body.SkeletonFramework, out _))
+                {
+                    continue;
+                }
+
+                issues.Add($"{body.Name}: physics bone '{bone}' is not covered by skeleton framework '{body.SkeletonFramework}'");
+            }
+        }
+
+        foreach (var rule in RaceCompatibilityCatalog.BodyRules.OrderBy(static rule => rule.Body, StringComparer.OrdinalIgnoreCase))
+        {
+            if (BuiltInBodyMetadataCatalog.TryResolveCanonicalName(rule.Body, out _))
+            {
+                continue;
+            }
+
+            issues.Add($"Race rule body '{rule.Body}' does not resolve to a known built-in body.");
+        }
+
+        return issues;
     }
 
     private static RuntimeReadinessCheck CreateExecutableCheck(string? currentExePath)

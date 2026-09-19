@@ -35,6 +35,60 @@ internal static class SkeletonMappingCatalog
             : [];
     }
 
+    public static bool IsBoneSupportedByFramework(string? frameworkId, string boneName)
+    {
+        if (string.IsNullOrWhiteSpace(boneName))
+        {
+            return false;
+        }
+
+        if (Data.Value.CommonBoneIndex.Contains(boneName.Trim()))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(frameworkId) &&
+               Data.Value.Frameworks.TryGetValue(frameworkId.Trim(), out var framework) &&
+               framework.Bones.Contains(boneName.Trim(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static bool TryResolveSupportedBone(
+        string sourceBone,
+        string? frameworkId,
+        out string resolvedBone)
+    {
+        resolvedBone = string.Empty;
+        if (string.IsNullOrWhiteSpace(sourceBone))
+        {
+            return false;
+        }
+
+        var trimmedSourceBone = sourceBone.Trim();
+        if (IsBoneSupportedByFramework(frameworkId, trimmedSourceBone))
+        {
+            resolvedBone = trimmedSourceBone;
+            return true;
+        }
+
+        if (!TryGetFallbackCandidates(trimmedSourceBone, frameworkId, out var fallbackCandidates))
+        {
+            return false;
+        }
+
+        foreach (var candidate in fallbackCandidates)
+        {
+            if (!IsBoneSupportedByFramework(frameworkId, candidate))
+            {
+                continue;
+            }
+
+            resolvedBone = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
     public static bool ContainsFrameworkBone(string boneName) =>
         Data.Value.FrameworkBoneIndex.Contains(boneName);
 
@@ -81,11 +135,12 @@ internal static class SkeletonMappingCatalog
             .Select(NormalizeFramework)
             .Where(static framework => !string.IsNullOrWhiteSpace(framework.Id))
             .ToDictionary(static framework => framework.Id, StringComparer.OrdinalIgnoreCase);
+        var commonBoneIndex = commonBones.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var frameworkBoneIndex = frameworks.Values
             .SelectMany(static framework => framework.Bones)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return new SkeletonMappingCatalogData(commonBones, fallbackMappings, frameworks, frameworkBoneIndex);
+        return new SkeletonMappingCatalogData(commonBones, commonBoneIndex, fallbackMappings, frameworks, frameworkBoneIndex);
     }
 
     private static SkeletonMappingFramework NormalizeFramework(SkeletonMappingFrameworkDto dto)
@@ -138,6 +193,7 @@ internal static class SkeletonMappingCatalog
 
     private sealed record SkeletonMappingCatalogData(
         IReadOnlyList<string> CommonBones,
+        IReadOnlySet<string> CommonBoneIndex,
         IReadOnlyDictionary<string, IReadOnlyList<string>> FallbackMappings,
         IReadOnlyDictionary<string, SkeletonMappingFramework> Frameworks,
         IReadOnlySet<string> FrameworkBoneIndex);

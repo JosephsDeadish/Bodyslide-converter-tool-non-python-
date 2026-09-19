@@ -16,6 +16,13 @@
     "NPC R UpperArm",
     "NPC R ForeArm",
     "NPC R Hand",
+    "NPC L Breast",
+    "NPC R Breast",
+    "NPC Belly",
+    "NPC L Butt",
+    "NPC R Butt",
+    "NPC L Pec",
+    "NPC R Pec",
     "NPC L Thigh",
     "NPC L Calf",
     "NPC L Foot",
@@ -96,10 +103,14 @@
       "bones": [
         "NPC L Pec",
         "NPC R Pec",
+        "NPC L Lat",
+        "NPC R Lat",
         "NPC Belly",
         "NPC L Butt",
         "NPC R Butt",
         "SOS GenitalsBase",
+        "SOS Genitals01",
+        "SOS Genitals02",
         "SOS Scrotum"
       ]
     },
@@ -121,6 +132,15 @@
     {
       "id": "ube-extended",
       "bones": [
+        "NPC L Breast",
+        "NPC R Breast",
+        "NPC L Breast01",
+        "NPC R Breast01",
+        "NPC L Breast02",
+        "NPC R Breast02",
+        "NPC Belly",
+        "NPC L Butt",
+        "NPC R Butt",
         "BreastUpper",
         "BreastLower",
         "BreastOuter",
@@ -173,7 +193,11 @@
         "LeftHorn",
         "RightHorn",
         "GoatHorn.L",
-        "GoatHorn.R"
+        "GoatHorn.R",
+        "Hock.L",
+        "Hock.R",
+        "Hoof.L",
+        "Hoof.R"
       ],
       "fallbackMappings": {
         "HornTip.L": ["Horn.L", "LeftHorn", "GoatHorn.L"],

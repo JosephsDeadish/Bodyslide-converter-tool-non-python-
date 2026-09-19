@@ -89,7 +89,14 @@ public sealed record ConvertedMesh(
     int MeshCount,
     IReadOnlyDictionary<string, double> RegionalMorphing,
     DeformationCage? DeformationCage = null);
-public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
+public sealed record WeightedMesh(
+    string MeshType,
+    string WeightProfile,
+    bool PhysicsWeightsTransferred,
+    IReadOnlyList<string>? SourceSmpBones = null,
+    IReadOnlyList<string>? TargetPhysicsBones = null,
+    IReadOnlyList<string>? PhysicsBoneRemaps = null,
+    IReadOnlyList<string>? UnsupportedTargetPhysicsBones = null);
 /// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
 /// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
 public sealed record SourceMorphQualityMetrics(
@@ -4836,6 +4843,10 @@ public sealed class ConversionOrchestrator(
             // expected skin influences.
             if (weighted.TargetPhysicsBones is { Count: > 0 } targetPhysBones)
                 steps.Add($"physics-injection:{string.Join('+', targetPhysBones)}");
+            if (weighted.PhysicsBoneRemaps is { Count: > 0 } physicsBoneRemaps)
+                steps.Add($"physics-bone-remap:{string.Join('+', physicsBoneRemaps)}");
+            if (weighted.UnsupportedTargetPhysicsBones is { Count: > 0 } unsupportedTargetPhysicsBones)
+                steps.Add($"physics-bone-missing:{string.Join('+', unsupportedTargetPhysicsBones)}");
             // Weight solver — detect and repair overweighted, underweighted, and disconnected
             // vertices produced by the weight-transfer pass.
             if (weightSolverService is not null)
@@ -8513,11 +8524,14 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
         // the target body requires physics bones AND the mesh is not headgear
         // (headgear is body-independent and does not need physics influences).
         var hasCustomProfile = CustomBodyProfileSupport.TryGetProfile(sourceArmor, targetBody, out var customProfile);
+        BuiltInBodyMetadata? builtInBody = null;
         var targetPhysBones = hasCustomProfile
             ? customProfile.PhysicsBones
-            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInBody)
+            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out builtInBody)
                 ? builtInBody.AvailablePhysicsBones
                 : null;
+        List<string>? physicsBoneRemaps = null;
+        List<string>? unsupportedTargetPhysicsBones = null;
 
         if (analysis.PhysicsEnabled && targetPhysBones is not null)
         {
@@ -8527,12 +8541,52 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
                     ? profileInfo.AvailablePhysicsBones
                     : targetPhysBones;
             targetPhysBones = PhysicsRepairCatalog.RepairTargetBones(targetPhysBones, supportedBones, smpBones);
+
+            if (!hasCustomProfile && builtInBody is not null)
+            {
+                var resolvedTargetBones = new List<string>();
+                foreach (var bone in targetPhysBones)
+                {
+                    if (string.IsNullOrWhiteSpace(bone))
+                    {
+                        continue;
+                    }
+
+                    if (SkeletonMappingCatalog.TryResolveSupportedBone(bone, builtInBody.SkeletonFramework, out var resolvedBone))
+                    {
+                        if (!resolvedBone.Equals(bone, StringComparison.OrdinalIgnoreCase))
+                        {
+                            physicsBoneRemaps ??= [];
+                            physicsBoneRemaps.Add($"{bone}=>{resolvedBone}");
+                        }
+
+                        if (!resolvedTargetBones.Contains(resolvedBone, StringComparer.OrdinalIgnoreCase))
+                        {
+                            resolvedTargetBones.Add(resolvedBone);
+                        }
+
+                        continue;
+                    }
+
+                    unsupportedTargetPhysicsBones ??= [];
+                    unsupportedTargetPhysicsBones.Add(bone);
+                }
+
+                targetPhysBones = resolvedTargetBones;
+            }
         }
 
         if (!analysis.PhysicsEnabled || analysis.HeadgearSubType is not null)
             targetPhysBones = null;
 
-        return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones, targetPhysBones));
+        return Task.FromResult(new WeightedMesh(
+            mesh.MeshType,
+            profile,
+            analysis.PhysicsEnabled,
+            smpBones,
+            targetPhysBones,
+            physicsBoneRemaps,
+            unsupportedTargetPhysicsBones));
     }
 
     // Parse bone names from SMP XML physics files bundled with the source armor.
@@ -8769,13 +8823,14 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
+        var suppressPhysicsConfigs = mesh.TargetPhysicsBones is { Count: 0 };
         var isMale  = MeshBehaviorCatalog.MaleBodyTargets.Contains(targetBody, StringComparer.OrdinalIgnoreCase) ||
             (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
         var tuning = BuildSolverTuning(mesh);
 
-        var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning, mesh.TargetPhysicsBones) : null;
-        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
+        var cbpcXml = hasCbpc && !suppressPhysicsConfigs ? BuildCbpcXml(isMale, tuning, mesh.TargetPhysicsBones) : null;
+        var smpXml  = hasSmp  && !suppressPhysicsConfigs ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
@@ -8833,7 +8888,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             AppendGroup(group);
         }
 
-        if (emittedGroups.Count == 0)
+        if (emittedGroups.Count == 0 && targetPhysicsBones is null)
         {
             foreach (var fallbackGroup in isMale
                          ? new[] { "pec", "belly" }
@@ -8914,7 +8969,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
                 AppendBone(bone, mass, stiffness, damping, angleLimit, restitution);
             }
         }
-        else
+        else if (targetPhysicsBones is null)
         {
             foreach (var fallbackBone in requestedBones)
             {
@@ -8942,7 +8997,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 
     private static IReadOnlyList<string> EnumerateRequestedPhysicsBones(bool isMale, IReadOnlyList<string>? targetPhysicsBones)
     {
-        if (targetPhysicsBones is { Count: > 0 })
+        if (targetPhysicsBones is not null)
         {
             return targetPhysicsBones
                 .Where(static bone => !string.IsNullOrWhiteSpace(bone))
@@ -9074,10 +9129,12 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
     {
         var commonBones = SkeletonMappingCatalog.CommonBones;
         IReadOnlySet<string> targetPhysicsBones;
-        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
-            customProfile.PhysicsBones is { Count: > 0 } customPhysicsBones)
+        IReadOnlyList<string>? customPhysicsBones = null;
+        var hasCustomPhysicsProfile = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+            (customPhysicsBones = customProfile.PhysicsBones) is { Count: > 0 };
+        if (hasCustomPhysicsProfile)
         {
-            targetPhysicsBones = customPhysicsBones.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            targetPhysicsBones = customPhysicsBones!.ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         else
         {
@@ -9085,7 +9142,10 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         var targetFrameworkId = ResolveTargetFrameworkId(targetBody, armor, targetPhysicsBones);
-        var allTargetBones = commonBones
+        var commonTargetBones = hasCustomPhysicsProfile
+            ? commonBones.Where(static bone => !IsPhysicsBone(bone))
+            : commonBones;
+        var allTargetBones = commonTargetBones
             .Concat(SkeletonMappingCatalog.GetFrameworkBones(targetFrameworkId))
             .Concat(targetPhysicsBones)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -15319,6 +15379,24 @@ internal sealed class LocalExportService(
                 $"{skeletonMapping.UnsupportedBones.Count} source bone(s) had no target equivalent."));
         }
 
+        var physicsBoneRemaps = ExtractPhysicsBoneRemaps(steps);
+        if (physicsBoneRemaps.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-bone-remap",
+                "low",
+                $"Generated physics bones were remapped to framework-supported targets: {string.Join(", ", physicsBoneRemaps.Take(6))}."));
+        }
+
+        var missingPhysicsBones = ExtractMissingPhysicsBones(steps);
+        if (missingPhysicsBones.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-bone-missing",
+                missingPhysicsBones.Count >= 3 ? "high" : "medium",
+                $"Some generated physics bones were not supported by the selected target skeleton/body framework: {string.Join(", ", missingPhysicsBones.Take(6))}."));
+        }
+
         if (poseSimulation.TotalPosesAtRisk > 0)
         {
             issues.Add(new ConversionValidationIssue(
@@ -15928,6 +16006,36 @@ internal sealed class LocalExportService(
 
         return warningStep[prefix.Length..]
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractPhysicsBoneRemaps(IReadOnlyList<string> steps)
+    {
+        const string prefix = "physics-bone-remap:";
+        var remapStep = steps.FirstOrDefault(step => step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(remapStep))
+        {
+            return [];
+        }
+
+        return remapStep[prefix.Length..]
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractMissingPhysicsBones(IReadOnlyList<string> steps)
+    {
+        const string prefix = "physics-bone-missing:";
+        var missingStep = steps.FirstOrDefault(step => step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(missingStep))
+        {
+            return [];
+        }
+
+        return missingStep[prefix.Length..]
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
