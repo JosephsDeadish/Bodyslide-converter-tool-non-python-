@@ -1,4 +1,5 @@
 using Bodyslide.Core;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System.Reflection;
@@ -24,6 +25,7 @@ public sealed class MainForm : Form
     private readonly ComboBox _sourceComboBox;
     private readonly ComboBox _physicsComboBox;
     private readonly ComboBox _worldModeComboBox;
+    private readonly ComboBox _themeComboBox;
     private readonly TextBox _logTextBox;
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
@@ -35,6 +37,7 @@ public sealed class MainForm : Form
     private readonly Button _loadResultButton;
     private readonly Button _openBatchReportButton;
     private readonly Button _openReportButton;
+    private readonly Button _openGuidanceTargetButton;
     private readonly Button _openArtifactButton;
     private readonly Button _loadCustomProfileButton;
     private readonly Button _saveProfileButton;
@@ -49,6 +52,9 @@ public sealed class MainForm : Form
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _statusLabel;
     private readonly Label _presetDetailsLabel;
+    private readonly Label _targetDetailsLabel;
+    private readonly Label _sourceDetailsLabel;
+    private readonly Label _physicsDetailsLabel;
     private readonly ProgressBar _progressBar;
     private readonly TabControl _resultsTabControl;
     private readonly TabPage _previewTabPage;
@@ -58,6 +64,8 @@ public sealed class MainForm : Form
     private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _guidanceTabPage;
+    private readonly ListView _guidanceListView;
     private readonly TabPage _reportsTabPage;
     private readonly ListView _reportsListView;
     private readonly TabPage _catalogTabPage;
@@ -71,6 +79,7 @@ public sealed class MainForm : Form
     private readonly ListView _customProfilesListView;
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
+    private readonly ToolTip _optionToolTip;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
@@ -78,6 +87,7 @@ public sealed class MainForm : Form
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
+    private UiTheme _currentTheme;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -90,6 +100,25 @@ public sealed class MainForm : Form
         "world-physics.json",
         "plugin-patches.json",
     ];
+
+    private enum UiTheme
+    {
+        Light,
+        Dark,
+    }
+
+    private sealed record UiThemePalette(
+        Color AppBackground,
+        Color SurfaceBackground,
+        Color InputBackground,
+        Color Foreground,
+        Color SecondaryForeground,
+        Color Accent,
+        Color Border,
+        Color WarningBackground,
+        Color WarningForeground);
+
+    private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
 
     public MainForm()
     {
@@ -105,6 +134,13 @@ public sealed class MainForm : Form
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
         _inspector = StandaloneConversionModules.CreateInspector();
+        _optionToolTip = new ToolTip
+        {
+            AutoPopDelay = 12000,
+            InitialDelay = 300,
+            ReshowDelay = 150,
+            ShowAlways = true,
+        };
 
         var layout = new TableLayoutPanel
         {
@@ -140,7 +176,7 @@ public sealed class MainForm : Form
             Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
-        layout.Controls.Add(dropPanel, 0, 0);
+        layout.Controls.Add(CreateSection("Quick import", dropPanel), 0, 0);
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
         _inputTextBox.AllowDrop = true;
@@ -197,13 +233,13 @@ public sealed class MainForm : Form
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Preset mode (quick destination setup)",
+            Text = "Preset mode (recommended quick setup)",
             AutoSize = true,
             Checked = true,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Manual mode (choose destination body)",
+            Text = "Manual mode (choose the destination body yourself)",
             AutoSize = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
@@ -214,7 +250,7 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             Margin = new Padding(12, 4, 0, 0),
-            Text = "Converts armor/clothes: FROM body = source armor body, TO body = destination fit.",
+            Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
         });
         layout.Controls.Add(modeRow, 0, 2);
 
@@ -238,14 +274,14 @@ public sealed class MainForm : Form
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var conversionGuideLabel = new Label
         {
-            Text = "Tip: each supported body includes a \"<Body> Zeroed\" preset.",
+            Text = "Use a preset when you want one named output setup. Presets choose the destination body, slider shape, and default output physics for you.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(conversionGuideLabel, 0, 0);
         leftOptions.SetColumnSpan(conversionGuideLabel, 2);
-        leftOptions.Controls.Add(new Label { Text = "Preset (to-body + slider shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        leftOptions.Controls.Add(new Label { Text = "Preset (destination body + shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -256,16 +292,21 @@ public sealed class MainForm : Form
             _presetComboBox.Items.Add(preset.Name);
         }
 
-        _presetComboBox.SelectedIndexChanged += (_, _) => UpdatePresetDetails();
+        _presetComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            UpdatePresetDetails();
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
         leftOptions.Controls.Add(_presetComboBox, 1, 1);
-        leftOptions.Controls.Add(new Label { Text = "Preset batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        leftOptions.Controls.Add(new Label { Text = "Preset batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _presetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
         leftOptions.Controls.Add(_presetBatchTextBox, 1, 2);
-        leftOptions.Controls.Add(new Label { Text = "To body (destination)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        leftOptions.Controls.Add(new Label { Text = "To body / destination body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _targetComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -279,8 +320,18 @@ public sealed class MainForm : Form
         {
             _targetComboBox.SelectedIndex = 0;
         }
+        _targetComboBox.SelectedIndexChanged += (_, _) =>
+        {
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
+        _targetComboBox.TextChanged += (_, _) =>
+        {
+            UpdateTargetDetails();
+            UpdatePhysicsDetails();
+        };
         leftOptions.Controls.Add(_targetComboBox, 1, 3);
-        leftOptions.Controls.Add(new Label { Text = "Destination batch (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        leftOptions.Controls.Add(new Label { Text = "Destination body batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _targetBatchTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
@@ -290,7 +341,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label(), 0, 5);
         var allBodiesButton = new Button
         {
-            Text = "Convert armor to all bodies",
+            Text = "Convert to every supported body",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
             Margin = new Padding(0, 2, 0, 4),
@@ -307,13 +358,22 @@ public sealed class MainForm : Form
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
+            MaximumSize = new Size(420, 0),
         };
         leftOptions.Controls.Add(_presetDetailsLabel, 1, 6);
+        leftOptions.Controls.Add(new Label { Text = "Destination body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
+        _targetDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        leftOptions.Controls.Add(_targetDetailsLabel, 1, 7);
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        conversionOptionsPanel.Controls.Add(leftOptions, 0, 0);
+        conversionOptionsPanel.Controls.Add(CreateSection("Destination setup (what you want to build)", leftOptions), 0, 0);
 
         var rightOptions = new TableLayoutPanel
         {
@@ -323,7 +383,16 @@ public sealed class MainForm : Form
         };
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        rightOptions.Controls.Add(new Label { Text = "Profile (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 0);
+        var overrideGuideLabel = new Label
+        {
+            Text = "These fields are optional hints or overrides. They help the converter understand the source armor or change the output behavior when auto-detection is not enough.",
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(overrideGuideLabel, 0, 0);
+        rightOptions.SetColumnSpan(overrideGuideLabel, 2);
+        rightOptions.Controls.Add(new Label { Text = "Shape profile (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _profileComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -335,9 +404,9 @@ public sealed class MainForm : Form
             _profileComboBox.Items.Add(profile);
         }
         _profileComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_profileComboBox, 1, 0);
+        rightOptions.Controls.Add(_profileComboBox, 1, 1);
 
-        rightOptions.Controls.Add(new Label { Text = "From body (source armor body, optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
+        rightOptions.Controls.Add(new Label { Text = "From body / source armor body (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -349,9 +418,19 @@ public sealed class MainForm : Form
             _sourceComboBox.Items.Add(body.Name);
         }
         _sourceComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_sourceComboBox, 1, 1);
+        _sourceComboBox.SelectedIndexChanged += (_, _) => UpdateSourceDetails();
+        _sourceComboBox.TextChanged += (_, _) => UpdateSourceDetails();
+        rightOptions.Controls.Add(_sourceComboBox, 1, 2);
+        rightOptions.Controls.Add(new Label { Text = "Source body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _sourceDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(_sourceDetailsLabel, 1, 3);
 
-        rightOptions.Controls.Add(new Label { Text = "Physics (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        rightOptions.Controls.Add(new Label { Text = "Physics for converted output (optional override)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _physicsComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -363,19 +442,18 @@ public sealed class MainForm : Form
             _physicsComboBox.Items.Add(PhysicsProfileCatalog.ToDisplayName(profile));
         }
         _physicsComboBox.SelectedIndex = 0;
-        var physicsToolTip = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400 };
-        physicsToolTip.SetToolTip(_physicsComboBox,
-            "Overrides the physics bone injection for the target body.\n" +
-            "ANY body can use ANY physics profile — this is not restricted to a body's default.\n" +
-            "  (auto)     — uses each body's built-in default (e.g. smp+cbpc for 3BA, none for CBBE)\n" +
-            "  none       — no soft-body bones injected; safe for all bodies\n" +
-            "  cbpc       — CBPC CPU soft-body bones\n" +
-            "  smp        — SMP GPU soft-body bones\n" +
-            "  Soft Body (CBPC + SMP) — full soft-body (SMP + CBPC combined)\n" +
-            "  alias accepted on CLI: soft-body => smp+cbpc");
-        rightOptions.Controls.Add(_physicsComboBox, 1, 2);
+        _physicsComboBox.SelectedIndexChanged += (_, _) => UpdatePhysicsDetails();
+        rightOptions.Controls.Add(_physicsComboBox, 1, 4);
+        rightOptions.Controls.Add(new Label { Text = "Physics details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 5);
+        _physicsDetailsLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+        };
+        rightOptions.Controls.Add(_physicsDetailsLabel, 1, 5);
 
-        rightOptions.Controls.Add(new Label { Text = "World drop mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        rightOptions.Controls.Add(new Label { Text = "Dropped-item / world mesh mode (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
         _worldModeComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -387,9 +465,9 @@ public sealed class MainForm : Form
             _worldModeComboBox.Items.Add(worldMode);
         }
         _worldModeComboBox.SelectedIndex = 0;
-        rightOptions.Controls.Add(_worldModeComboBox, 1, 3);
+        rightOptions.Controls.Add(_worldModeComboBox, 1, 6);
 
-        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF for bone mapping (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
         var skeletonNifPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -409,10 +487,10 @@ public sealed class MainForm : Form
         browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonNif();
         skeletonNifPanel.Controls.Add(_skeletonNifTextBox, 0, 0);
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
-        rightOptions.Controls.Add(skeletonNifPanel, 1, 4);
+        rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
 
-        conversionOptionsPanel.Controls.Add(rightOptions, 1, 0);
-        layout.Controls.Add(conversionOptionsPanel, 0, 3);
+        conversionOptionsPanel.Controls.Add(CreateSection("Source hints, output overrides, and support files", rightOptions), 1, 0);
+        layout.Controls.Add(CreateSection("Conversion setup", conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
@@ -480,7 +558,7 @@ public sealed class MainForm : Form
         customProfileActions.Controls.Add(_removeCustomProfileButton);
         customProfileActions.Controls.Add(_clearCustomProfilesButton);
         customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
-        layout.Controls.Add(customProfilesPanel, 0, 6);
+        layout.Controls.Add(CreateSection("Custom profiles", customProfilesPanel), 0, 6);
 
         var actionRow = new FlowLayoutPanel
         {
@@ -492,13 +570,13 @@ public sealed class MainForm : Form
         };
         _outputZipCheckBox = new CheckBox
         {
-            Text = "Create output zip",
+            Text = "Package output as zip",
             AutoSize = true,
             Margin = new Padding(0, 8, 12, 0),
         };
         _buildSlidersCheckBox = new CheckBox
         {
-            Text = "Build BodySlide files",
+            Text = "Generate BodySlide project files",
             AutoSize = true,
             Checked = true,
             Margin = new Padding(0, 8, 12, 0),
@@ -571,6 +649,15 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 0, 8, 0),
         };
         _openReportButton.Click += (_, _) => OpenSelectedReport();
+        _openGuidanceTargetButton = new Button
+        {
+            Text = "Open next action",
+            Width = 125,
+            Height = 34,
+            Enabled = false,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _openGuidanceTargetButton.Click += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _openArtifactButton = new Button
         {
             Text = "Open file",
@@ -611,6 +698,21 @@ public sealed class MainForm : Form
             Margin = new Padding(8, 0, 0, 0),
         };
         _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
+        var themeLabel = new Label
+        {
+            Text = "Theme",
+            AutoSize = true,
+            Margin = new Padding(16, 8, 4, 0),
+        };
+        _themeComboBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 110,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        _themeComboBox.Items.Add(UiTheme.Light.ToString());
+        _themeComboBox.Items.Add(UiTheme.Dark.ToString());
+        _themeComboBox.SelectedIndexChanged += (_, _) => OnThemeSelectionChanged();
         actionRow.Controls.Add(_outputZipCheckBox);
         actionRow.Controls.Add(_buildSlidersCheckBox);
         actionRow.Controls.Add(_convertButton);
@@ -621,12 +723,15 @@ public sealed class MainForm : Form
         actionRow.Controls.Add(_loadResultButton);
         actionRow.Controls.Add(_openBatchReportButton);
         actionRow.Controls.Add(_openReportButton);
+        actionRow.Controls.Add(_openGuidanceTargetButton);
         actionRow.Controls.Add(_openArtifactButton);
         actionRow.Controls.Add(_loadCustomProfileButton);
         actionRow.Controls.Add(_saveProfileButton);
         actionRow.Controls.Add(_inspectCacheButton);
         actionRow.Controls.Add(_runSelfCheckButton);
-        layout.Controls.Add(actionRow, 0, 7);
+        actionRow.Controls.Add(themeLabel);
+        actionRow.Controls.Add(_themeComboBox);
+        layout.Controls.Add(CreateSection("Actions", actionRow), 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -704,6 +809,25 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _guidanceTabPage = new TabPage("Next actions");
+        _guidanceListView = new ListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+            ShowItemToolTips = true,
+        };
+        _guidanceListView.Columns.Add("Area", 150);
+        _guidanceListView.Columns.Add("Priority", 90);
+        _guidanceListView.Columns.Add("Guidance", -2);
+        _guidanceListView.SelectedIndexChanged += (_, _) => _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string targetPath &&
+            (File.Exists(targetPath) || Directory.Exists(targetPath));
+        _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
+        _guidanceTabPage.Controls.Add(_guidanceListView);
+        _resultsTabControl.TabPages.Add(_guidanceTabPage);
         _reportsTabPage = new TabPage("Reports");
         _reportsListView = new ListView
         {
@@ -784,19 +908,248 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        layout.Controls.Add(bottomPanel, 0, 8);
+        layout.Controls.Add(CreateSection("Results and diagnostics", bottomPanel), 0, 8);
 
         RefreshModeState();
         UpdatePresetDetails();
+        UpdateTargetDetails();
+        UpdateSourceDetails();
+        UpdatePhysicsDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
+        PopulateGuidanceTab(Array.Empty<string>(), null);
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab([], null);
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
-        AppendLog("Ready. Choose armor/clothing input, set FROM (source, optional) and TO (destination), then click Convert.");
+        ConfigureOptionTooltips();
+        _currentTheme = LoadThemePreference();
+        _themeComboBox.SelectedItem = _currentTheme.ToString();
+        ApplyTheme(_currentTheme);
+        AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
+    }
+
+    internal string GetSmokeTestSummary()
+    {
+        return
+            $"title=\"{Text}\", " +
+            $"presets={_presetComboBox.Items.Count}, " +
+            $"targets={_targetComboBox.Items.Count}, " +
+            $"profiles={_profileComboBox.Items.Count}, " +
+            $"physics={_physicsComboBox.Items.Count}, " +
+            $"tabs={_resultsTabControl.TabPages.Count}";
+    }
+
+    private static GroupBox CreateSection(string title, Control content)
+    {
+        content.Dock = DockStyle.Fill;
+        return new GroupBox
+        {
+            Text = title,
+            Dock = DockStyle.Fill,
+            Padding = new Padding(10),
+            Margin = new Padding(0, 8, 0, 0),
+            Controls = { content }
+        };
+    }
+
+    private void OnThemeSelectionChanged()
+    {
+        if (_themeComboBox.SelectedItem is not string selectedTheme ||
+            !Enum.TryParse<UiTheme>(selectedTheme, ignoreCase: true, out var theme))
+        {
+            return;
+        }
+
+        _currentTheme = theme;
+        ApplyTheme(theme);
+        SaveThemePreference(theme);
+        AppendLog($"Theme switched to {theme} mode.");
+    }
+
+    private void ApplyTheme(UiTheme theme)
+    {
+        var palette = CreateThemePalette(theme);
+        SuspendLayout();
+        ApplyThemeToControl(this, palette);
+        ResumeLayout(performLayout: true);
+        Invalidate(true);
+    }
+
+    private static UiThemePalette CreateThemePalette(UiTheme theme) =>
+        theme == UiTheme.Dark
+            ? new UiThemePalette(
+                AppBackground: Color.FromArgb(30, 34, 40),
+                SurfaceBackground: Color.FromArgb(44, 49, 58),
+                InputBackground: Color.FromArgb(22, 27, 34),
+                Foreground: Color.FromArgb(236, 239, 244),
+                SecondaryForeground: Color.FromArgb(185, 192, 203),
+                Accent: Color.FromArgb(88, 166, 255),
+                Border: Color.FromArgb(90, 98, 110),
+                WarningBackground: Color.FromArgb(87, 63, 18),
+                WarningForeground: Color.FromArgb(255, 235, 150))
+            : new UiThemePalette(
+                AppBackground: Color.FromArgb(244, 246, 249),
+                SurfaceBackground: Color.White,
+                InputBackground: Color.White,
+                Foreground: Color.FromArgb(32, 37, 43),
+                SecondaryForeground: Color.FromArgb(90, 98, 110),
+                Accent: Color.FromArgb(0, 120, 215),
+                Border: Color.FromArgb(201, 209, 217),
+                WarningBackground: Color.FromArgb(255, 248, 196),
+                WarningForeground: Color.FromArgb(120, 60, 0));
+
+    private void ApplyThemeToControl(Control control, UiThemePalette palette)
+    {
+        switch (control)
+        {
+            case GroupBox:
+            case TabPage:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+            case Form:
+            case Panel:
+                control.BackColor = palette.AppBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+            case Label label:
+                label.BackColor = Color.Transparent;
+                label.ForeColor = ReferenceEquals(label, _statusLabel) ||
+                    ReferenceEquals(label, _presetDetailsLabel) ||
+                    ReferenceEquals(label, _targetDetailsLabel) ||
+                    ReferenceEquals(label, _sourceDetailsLabel) ||
+                    ReferenceEquals(label, _physicsDetailsLabel)
+                    ? palette.SecondaryForeground
+                    : palette.Foreground;
+                break;
+            case TextBox textBox:
+                textBox.BorderStyle = BorderStyle.FixedSingle;
+                break;
+            case ListView listView:
+                listView.BackColor = palette.SurfaceBackground;
+                listView.ForeColor = palette.Foreground;
+                if (ReferenceEquals(listView, _guidanceListView))
+                {
+                    ApplyGuidanceItemStyles(palette);
+                }
+                break;
+            case Button button:
+                button.UseVisualStyleBackColor = false;
+                button.FlatStyle = FlatStyle.Flat;
+                button.FlatAppearance.BorderColor = palette.Border;
+                button.FlatAppearance.MouseDownBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.35);
+                button.FlatAppearance.MouseOverBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.18);
+                button.BackColor = palette.SurfaceBackground;
+                button.ForeColor = palette.Foreground;
+                break;
+            case CheckBox checkBox:
+                checkBox.BackColor = Color.Transparent;
+                checkBox.ForeColor = palette.Foreground;
+                break;
+            case RadioButton radioButton:
+                radioButton.BackColor = Color.Transparent;
+                radioButton.ForeColor = palette.Foreground;
+                break;
+            case ProgressBar:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Accent;
+                break;
+            default:
+                control.BackColor = palette.SurfaceBackground;
+                control.ForeColor = palette.Foreground;
+                break;
+        }
+
+        foreach (Control child in control.Controls)
+        {
+            ApplyThemeToControl(child, palette);
+        }
+    }
+
+    private static Color BlendColors(Color background, Color accent, double amount)
+    {
+        amount = Math.Clamp(amount, 0d, 1d);
+        return Color.FromArgb(
+            (int)Math.Round(background.R + ((accent.R - background.R) * amount)),
+            (int)Math.Round(background.G + ((accent.G - background.G) * amount)),
+            (int)Math.Round(background.B + ((accent.B - background.B) * amount)));
+    }
+
+    private UiTheme LoadThemePreference()
+    {
+        try
+        {
+            var settingsPath = GetThemeSettingsPath();
+            if (!File.Exists(settingsPath))
+            {
+                return GetSystemPreferredTheme();
+            }
+
+            var json = File.ReadAllText(settingsPath);
+            var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            if (settings is not null &&
+                settings.TryGetValue("theme", out var themeValue) &&
+                Enum.TryParse<UiTheme>(themeValue, ignoreCase: true, out var theme))
+            {
+                return theme;
+            }
+        }
+        catch
+        {
+        }
+
+        return GetSystemPreferredTheme();
+    }
+
+    private void SaveThemePreference(UiTheme theme)
+    {
+        try
+        {
+            var settingsPath = GetThemeSettingsPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            var json = JsonSerializer.Serialize(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["theme"] = theme.ToString()
+                },
+                new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(settingsPath, json);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to save theme preference: {ex.Message}");
+        }
+    }
+
+    private static string GetThemeSettingsPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlideSmith",
+            "ui-settings.json");
+
+    private static UiTheme GetSystemPreferredTheme()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var personalizeKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                if (personalizeKey?.GetValue("AppsUseLightTheme") is int appsUseLightTheme)
+                {
+                    return appsUseLightTheme == 0 ? UiTheme.Dark : UiTheme.Light;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        var background = SystemColors.Window;
+        var luminance = ((background.R * 0.2126) + (background.G * 0.7152) + (background.B * 0.0722)) / 255d;
+        return luminance < 0.5d ? UiTheme.Dark : UiTheme.Light;
     }
 
     private void PopulateCatalogTab()
@@ -811,7 +1164,7 @@ public sealed class MainForm : Form
             [
                 "Preset",
                 preset.Name,
-                $"Target={preset.TargetBody}; Deformation={preset.DeformationProfile}; Physics={preset.PhysicsProfile}",
+                $"Builds for {preset.TargetBody}; shape={preset.DeformationProfile}; output physics={PhysicsProfileCatalog.ToDisplayName(preset.PhysicsProfile)} [{preset.PhysicsProfile}]",
             ]));
         }
 
@@ -827,22 +1180,25 @@ public sealed class MainForm : Form
                 : "n/a";
 
             string details;
-            if (BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+            if (BuiltInBodyMetadataCatalog.TryGet(body.Name, out var metadata) &&
+                BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
             {
-                var physicsLabel = $"Default physics={PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]";
-                var recommendedLabel = $"Recommended physics={PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]";
-                var supportsLabel = $"SupportsPhysics={profile.SupportsPhysics}";
+                var aliases = metadata.Aliases.Count == 0
+                    ? "none"
+                    : string.Join(", ", metadata.Aliases);
+                var physicsLabel = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
+                var recommendedLabel = PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile);
                 var bonesLabel = profile.SupportsPhysics
-                    ? $"RequiredPhysicsBones=[{string.Join(", ", profile.RequiredPhysicsBones)}]"
-                    : "RequiredPhysicsBones=[]";
-                var groupLabel = profile.SupportsPhysics
-                    ? $"BoneGroups=[{string.Join(", ", profile.PhysicsBoneGroups.Keys.OrderBy(static k => k, StringComparer.OrdinalIgnoreCase))}]"
-                    : "BoneGroups=[]";
-                details = $"Vertices={vertexRange}; Skeleton={profile.SkeletonFoundation}; {physicsLabel}; {recommendedLabel}; {supportsLabel}; {bonesLabel}; {groupLabel}; Notes={profile.Notes}";
+                    ? string.Join(", ", profile.RequiredPhysicsBones.Take(6)) + (profile.RequiredPhysicsBones.Count > 6 ? ", ..." : string.Empty)
+                    : "none";
+                var slidersLabel = metadata.SliderNames.Count == 0
+                    ? "none listed"
+                    : string.Join(", ", metadata.SliderNames.Take(6)) + (metadata.SliderNames.Count > 6 ? ", ..." : string.Empty);
+                details = $"Gender={metadata.Gender}; Aliases={aliases}; Vertex range={vertexRange}; Skeleton={profile.SkeletonFoundation}; Default output physics={physicsLabel} [{profile.DefaultPhysics}]; Recommended override={recommendedLabel} [{profile.RecommendedPhysicsProfile}]; Physics bones={bonesLabel}; Example sliders={slidersLabel}; Notes={profile.Notes}";
             }
             else
             {
-                details = $"Vertices={vertexRange}; No technical profile data. Any physics profile can still be applied via the Physics override.";
+                details = $"Vertex range={vertexRange}; No built-in body notes available. You can still target it manually and apply any physics override.";
             }
 
             _catalogListView.Items.Add(new ListViewItem(["Body", body.Name, details]));
@@ -863,7 +1219,7 @@ public sealed class MainForm : Form
             var name = string.Equals(displayName, physics, StringComparison.OrdinalIgnoreCase)
                 ? physics
                 : $"{displayName} [{physics}]";
-            _catalogListView.Items.Add(new ListViewItem(["Physics profile", name, physDesc ?? ""]));
+            _catalogListView.Items.Add(new ListViewItem(["Physics profile", name, physDesc ?? "Applies to the converted output, not to the original source armor."]));
         }
 
         // ── World drop modes ─────────────────────────────────────────────────
@@ -1053,6 +1409,10 @@ public sealed class MainForm : Form
                 _targetComboBox.SelectedIndex = targetIndex;
             }
         }
+
+        UpdatePresetDetails();
+        UpdateTargetDetails();
+        UpdatePhysicsDetails();
     }
 
     private async Task ConvertAsync()
@@ -1137,16 +1497,40 @@ public sealed class MainForm : Form
 
             // Wire a per-item progress callback so the progress bar advances
             // during batch runs instead of showing a marquee spinner throughout.
+            string? lastProgressLogMessage = null;
             var progress = new Progress<BatchProgressUpdate>(update =>
             {
                 var total = Math.Max(1, update.Total);
                 var completed = Math.Clamp(update.Completed, 0, total);
-                var percent = (int)Math.Round((double)completed / total * 100d, MidpointRounding.AwayFromZero);
+                double progressUnits = completed;
+                if (!update.IsItemCompleted && update.StageCount > 0)
+                {
+                    var stageFraction = Math.Clamp((double)update.StageIndex / update.StageCount, 0d, 1d);
+                    progressUnits = Math.Min(total, completed + stageFraction);
+                }
+
+                var percent = (int)Math.Round(progressUnits / total * 100d, MidpointRounding.AwayFromZero);
+                var activeItem = update.IsItemCompleted
+                    ? completed
+                    : Math.Min(total, Math.Max(1, completed + 1));
+                var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
+                    ? update.CurrentFile
+                    : $"{update.CurrentFile} — {update.Stage}";
                 _progressBar.Style = ProgressBarStyle.Continuous;
                 _progressBar.MarqueeAnimationSpeed = 0;
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
-                _statusLabel.Text = $"Converting {completed}/{total} ({percent}%): {update.CurrentFile}";
+                _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
+
+                if (!string.IsNullOrWhiteSpace(update.Stage))
+                {
+                    var logMessage = $"Processing {activeItem}/{total}: {update.CurrentFile} — {update.Stage}";
+                    if (!string.Equals(logMessage, lastProgressLogMessage, StringComparison.Ordinal))
+                    {
+                        AppendLog(logMessage);
+                        lastProgressLogMessage = logMessage;
+                    }
+                }
             });
 
             var results = await Task.Run(
@@ -1160,6 +1544,13 @@ public sealed class MainForm : Form
             PopulateSummaryTab(results);
             PopulateReportsTab(results);
             PopulateArtifactsTab(results);
+            var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
+
+            _resultsTabControl.SelectedTab = guidanceNeedsReview
+                ? _guidanceTabPage
+                : !string.IsNullOrWhiteSpace(_lastPreviewPath)
+                    ? _previewTabPage
+                    : _summaryTabPage;
 
             AppendLog($"Converted {results.Count} armor item(s).");
             if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
@@ -1179,6 +1570,15 @@ public sealed class MainForm : Form
                     builder.AppendLine($"  - {step}");
                 }
                 AppendLog(builder.ToString().TrimEnd());
+            }
+
+            if (guidanceNeedsReview)
+            {
+                AppendLog("Review recommended next actions in the Next actions tab before installing or sharing the output.");
+            }
+            else if (!string.IsNullOrWhiteSpace(_lastPreviewPath))
+            {
+                AppendLog("Preview looks ready for review. Open the Preview tab for a final visual pass before installing or sharing.");
             }
 
             _statusLabel.Text = "Conversion complete.";
@@ -1309,8 +1709,11 @@ public sealed class MainForm : Form
         _openPreviewButton.Enabled = !isBusy && File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = !isBusy && File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = !isBusy && _reportsListView.SelectedItems.Count > 0;
+        _openGuidanceTargetButton.Enabled = !isBusy && _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedGuidanceTarget &&
+            (File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget));
         _openArtifactButton.Enabled = !isBusy && _artifactsListView.SelectedItems.Count > 0;
-        UseWaitCursor = false;
+        UseWaitCursor = isBusy;
         if (!isBusy)
         {
             _progressBar.Style = ProgressBarStyle.Continuous;
@@ -1423,7 +1826,8 @@ public sealed class MainForm : Form
         _ = await LoadPreviewInAppAsync(previewPath);
         PopulateReportsTab(selectedFolder);
         PopulateArtifactsTab(selectedFolder);
-        _resultsTabControl.SelectedTab = _previewTabPage;
+        var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
+        _resultsTabControl.SelectedTab = guidanceNeedsReview ? _guidanceTabPage : _previewTabPage;
         AppendLog($"Loaded previous result from: {selectedFolder}");
     }
 
@@ -1519,16 +1923,6 @@ public sealed class MainForm : Form
         void Add(string property, string value) =>
             _summaryListView.Items.Add(new ListViewItem([property, value]));
 
-        void AddWarning(string property, string value)
-        {
-            var item = new ListViewItem([property, value])
-            {
-                BackColor = System.Drawing.Color.FromArgb(255, 255, 180),
-                ForeColor = System.Drawing.Color.FromArgb(120, 60, 0)
-            };
-            _summaryListView.Items.Add(item);
-        }
-
         Add("Items converted", results.Count.ToString());
 
         // Aggregate key steps across all results.
@@ -1546,6 +1940,8 @@ public sealed class MainForm : Form
                     Add("Detected body", step["detected-body:".Length..]);
                 else if (step.StartsWith("source-body-override:", StringComparison.Ordinal))
                     Add("Source body (override)", step["source-body-override:".Length..]);
+                else if (step.StartsWith("cross-gender-conversion:", StringComparison.Ordinal))
+                    Add("Cross-gender conversion", step["cross-gender-conversion:".Length..]);
                 else if (step.StartsWith("mesh-type:", StringComparison.Ordinal))
                     Add("Mesh type", step["mesh-type:".Length..]);
                 else if (step.StartsWith("cage:", StringComparison.Ordinal))
@@ -1622,6 +2018,165 @@ public sealed class MainForm : Form
         }
     }
 
+    private void ApplyGuidanceItemStyles(UiThemePalette palette)
+    {
+        foreach (ListViewItem item in _guidanceListView.Items)
+        {
+            var priority = item.SubItems.Count > 1 ? item.SubItems[1].Text : string.Empty;
+            var severity = GetGuidancePriorityRank(priority);
+            if (severity <= 0)
+            {
+                item.BackColor = palette.SurfaceBackground;
+                item.ForeColor = palette.Foreground;
+            }
+            else if (severity >= 3)
+            {
+                item.BackColor = BlendColors(palette.WarningBackground, palette.Accent, 0.12);
+                item.ForeColor = palette.WarningForeground;
+            }
+            else
+            {
+                item.BackColor = BlendColors(palette.WarningBackground, palette.SurfaceBackground, 0.35);
+                item.ForeColor = palette.Foreground;
+            }
+        }
+    }
+
+    private bool PopulateGuidanceTab(IReadOnlyList<ConversionResult> results, string? previewPath)
+    {
+        var outputDirectories = results
+            .Select(result => result.OutputDirectory)
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return PopulateGuidanceTab(outputDirectories, previewPath);
+    }
+
+    private bool PopulateGuidanceTab(string? outputDirectory, string? previewPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            return PopulateGuidanceTab(Array.Empty<string>(), previewPath);
+        }
+
+        return PopulateGuidanceTab([outputDirectory], previewPath);
+    }
+
+    private bool PopulateGuidanceTab(IReadOnlyList<string> outputDirectories, string? previewPath)
+    {
+        var requiresReview = false;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<GuidanceEntry>();
+
+        _guidanceListView.BeginUpdate();
+        try
+        {
+            _guidanceListView.Items.Clear();
+
+            void Add(string area, string priority, string guidance, string? targetPath = null)
+            {
+                if (string.IsNullOrWhiteSpace(guidance) ||
+                    !seen.Add($"{area}|{priority}|{guidance}"))
+                {
+                    return;
+                }
+
+                entries.Add(new GuidanceEntry(area, priority, guidance, targetPath));
+            }
+
+            if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
+            {
+                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
+            {
+                Add(
+                    "Preview",
+                    "Info",
+                    "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.",
+                    previewPath);
+            }
+            else
+            {
+                requiresReview = true;
+                Add(
+                    "Preview",
+                    "Warning",
+                    "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.",
+                    outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory)));
+            }
+
+            foreach (var outputDirectory in outputDirectories)
+            {
+                AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
+            }
+
+            if (entries.Count > 0)
+            {
+                var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
+                    ? previewPath
+                    : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
+                Add(
+                    "Overall status",
+                    requiresReview ? "Warning" : "Info",
+                    BuildGuidanceOverview(entries, requiresReview),
+                    guidanceTarget);
+            }
+
+            if (requiresReview &&
+                !string.IsNullOrWhiteSpace(previewPath) &&
+                File.Exists(previewPath))
+            {
+                Add(
+                    "Review flow",
+                    "Action",
+                    "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
+                    previewPath);
+            }
+
+            if (entries.Count == 0)
+            {
+                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+            }
+
+            foreach (var entry in entries
+                         .OrderByDescending(entry => GetGuidancePriorityRank(entry.Priority))
+                         .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase))
+            {
+                var item = new ListViewItem([entry.Area, entry.Priority, entry.Guidance])
+                {
+                    Tag = entry.TargetPath,
+                    ToolTipText = string.IsNullOrWhiteSpace(entry.TargetPath)
+                        ? entry.Guidance
+                        : $"{entry.Guidance}{Environment.NewLine}{entry.TargetPath}"
+                };
+                _guidanceListView.Items.Add(item);
+            }
+
+            ApplyGuidanceItemStyles(CreateThemePalette(_currentTheme));
+        }
+        finally
+        {
+            _guidanceListView.EndUpdate();
+        }
+
+        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedTargetPath &&
+            (File.Exists(selectedTargetPath) || Directory.Exists(selectedTargetPath));
+
+        return requiresReview;
+    }
+
     private void PopulateInspectionTab(ConversionInspectionResult inspection)
     {
         _inspectListView.BeginUpdate();
@@ -1668,6 +2223,19 @@ public sealed class MainForm : Form
             Add("Body references", inspection.Armor.BodyReferenceFiles.Count.ToString());
             Add("Weight variants", inspection.Armor.WeightVariantPairs?.Count.ToString() ?? "0");
             Add("Custom body profiles", inspection.Armor.CustomBodyProfiles?.Count.ToString() ?? "0");
+            if (inspection.NifSupport is { Count: > 0 } nifSupport)
+            {
+                Add("NIF support", string.Join(", ",
+                    nifSupport.Select(report => $"{Path.GetFileName(report.MeshPath)}={report.Status}/{report.ParseMode}")));
+                var heelReports = nifSupport
+                    .Where(static report => report.HeelAnalysis is not null)
+                    .Select(report => $"{Path.GetFileName(report.MeshPath)}={report.HeelAnalysis!.Profile} ({report.HeelAnalysis.Confidence:P0})")
+                    .ToList();
+                if (heelReports.Count > 0)
+                {
+                    Add("Heel / footwear detection", string.Join(", ", heelReports));
+                }
+            }
             if (inspection.Armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
             {
                 Add("Custom body names", string.Join(", ", customProfiles.Select(profile => profile.Name)));
@@ -1755,6 +2323,53 @@ public sealed class MainForm : Form
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = filePath,
+            UseShellExecute = true,
+        });
+    }
+
+    private async Task OpenSelectedGuidanceTargetAsync()
+    {
+        if (_guidanceListView.SelectedItems.Count == 0)
+        {
+            return;
+        }
+
+        if (_guidanceListView.SelectedItems[0].Tag is not string targetPath ||
+            string.IsNullOrWhiteSpace(targetPath))
+        {
+            MessageBox.Show(this, "This next-action item does not have a direct file or folder to open.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (Directory.Exists(targetPath))
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = targetPath,
+                UseShellExecute = true,
+            });
+            return;
+        }
+
+        if (!File.Exists(targetPath))
+        {
+            MessageBox.Show(this, "The file for this next-action item was not found.", "Open next action", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            PopulateGuidanceTab(GetPreferredOutputDirectoryForOpen(), _lastPreviewPath);
+            return;
+        }
+
+        if (PreviewFileCandidates.Contains(Path.GetFileName(targetPath), StringComparer.OrdinalIgnoreCase))
+        {
+            _lastPreviewPath = targetPath;
+            UpdatePathActionStates();
+            await LoadPreviewInAppAsync(targetPath);
+            _resultsTabControl.SelectedTab = _previewTabPage;
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = targetPath,
             UseShellExecute = true,
         });
     }
@@ -1917,7 +2532,131 @@ public sealed class MainForm : Form
             return;
         }
 
-        _presetDetailsLabel.Text = $"TO body: {preset.TargetBody} | Slider shape: {preset.DeformationProfile} | Physics: {preset.PhysicsProfile}";
+        _presetDetailsLabel.Text =
+            $"Preset output: build for {preset.TargetBody}, use the {preset.DeformationProfile} shape profile, and default to {PhysicsProfileCatalog.ToDisplayName(preset.PhysicsProfile)} output physics.";
+    }
+
+    private void UpdateTargetDetails()
+    {
+        var targetBody = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        if (string.IsNullOrWhiteSpace(targetBody) || string.Equals(targetBody, "CUSTOM", StringComparison.OrdinalIgnoreCase))
+        {
+            _targetDetailsLabel.Text = "Type or select the body you want the converted armor to fit.";
+            return;
+        }
+
+        _targetDetailsLabel.Text = BuildBodyDetailsText(
+            targetBody,
+            defaultText: $"This is the destination body the converted armor will be reshaped for.",
+            isSourceContext: false);
+    }
+
+    private void UpdateSourceDetails()
+    {
+        var rawSource = string.IsNullOrWhiteSpace(_sourceComboBox.Text)
+            ? _sourceComboBox.SelectedItem?.ToString()
+            : _sourceComboBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(rawSource) ||
+            string.Equals(rawSource, "(auto)", StringComparison.OrdinalIgnoreCase))
+        {
+            _sourceDetailsLabel.Text =
+                "Auto means the app tries to detect what body the original armor was built for from meshes, plugins, and BodySlide support files. Choose a source body only if detection is wrong or the mod is unusual.";
+            return;
+        }
+
+        var resolvedSource = BodyTypeCatalog.ResolveName(rawSource);
+        _sourceDetailsLabel.Text =
+            $"Source hint only: treat the original armor as built for {resolvedSource}. This does not change the destination body or output physics. " +
+            BuildBodyDetailsText(resolvedSource, defaultText: string.Empty, isSourceContext: true);
+    }
+
+    private void UpdatePhysicsDetails()
+    {
+        var effectiveTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        var selectedPhysics = ReadOptionalComboValue(_physicsComboBox);
+        if (PhysicsProfileCatalog.TryNormalize(selectedPhysics, out var normalizedOverride))
+        {
+            _physicsDetailsLabel.Text =
+                $"Output physics override: the converted armor will use {PhysicsProfileCatalog.ToDisplayName(normalizedOverride)} regardless of the source armor. " +
+                BuildPhysicsHelpSuffix(normalizedOverride, effectiveTarget);
+            return;
+        }
+
+        var effectivePhysics = ResolveEffectivePhysicsProfile(effectiveTarget);
+        _physicsDetailsLabel.Text =
+            $"Auto output physics: the converter will use {PhysicsProfileCatalog.ToDisplayName(effectivePhysics)} based on the selected preset/body. " +
+            "This setting controls the converted output, not the original source armor's physics. " +
+            BuildPhysicsHelpSuffix(effectivePhysics, effectiveTarget);
+    }
+
+    private void ConfigureOptionTooltips()
+    {
+        _optionToolTip.SetToolTip(_usePresetRadio,
+            "Recommended for most users. A preset picks the destination body, shape profile, and default output physics together.");
+        _optionToolTip.SetToolTip(_useCustomTargetRadio,
+            "Use this when you want to type or choose the destination body directly instead of starting from a preset.");
+        _optionToolTip.SetToolTip(_presetComboBox,
+            "Quick setup for the output you want. Presets do not describe the original source armor body.");
+        _optionToolTip.SetToolTip(_presetBatchTextBox,
+            "Optional comma-separated preset list for batch conversion. Example: 3BA Curvy, HIMBO Lean");
+        _optionToolTip.SetToolTip(_targetComboBox,
+            "The body you want the converted armor to fit. This is the destination/output body.");
+        _optionToolTip.SetToolTip(_targetBatchTextBox,
+            "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.");
+        _optionToolTip.SetToolTip(_profileComboBox,
+            "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
+        _optionToolTip.SetToolTip(_sourceComboBox,
+            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This does not choose the output body.");
+        _optionToolTip.SetToolTip(_physicsComboBox,
+            "Controls the converted output physics, not the source armor.\n" +
+            "Auto = use the preset/body default.\n" +
+            "None = no soft-body bones.\n" +
+            "CBPC = CPU physics bones.\n" +
+            "SMP = GPU cloth/soft-body bones.\n" +
+            "Soft Body (CBPC + SMP) = combined setup.");
+        _optionToolTip.SetToolTip(_worldModeComboBox,
+            "Controls how dropped-item/world meshes are reported and packaged for the converted output.");
+        _optionToolTip.SetToolTip(_skeletonNifTextBox,
+            "Optional skeleton file used to improve bone mapping. Leave blank if the input mod already includes the right skeleton support.");
+        _optionToolTip.SetToolTip(_outputZipCheckBox,
+            "Create a ready-to-share zip package of the converted output.");
+        _optionToolTip.SetToolTip(_buildSlidersCheckBox,
+            "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+    }
+
+    private static string BuildBodyDetailsText(string bodyName, string defaultText, bool isSourceContext)
+    {
+        if (!BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata) ||
+            !BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile))
+        {
+            return defaultText;
+        }
+
+        var aliases = metadata.Aliases.Count == 0
+            ? string.Empty
+            : $" Also known as {string.Join(", ", metadata.Aliases)}.";
+        var physics = PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics);
+        var roleText = isSourceContext
+            ? "Use this if the original armor was authored for this body family."
+            : "Use this if you want the converted armor to fit this body family.";
+        return $"{roleText} {metadata.Gender} body. Skeleton: {profile.SkeletonFoundation}. Default output physics: {physics}.{aliases} {metadata.Notes}".Trim();
+    }
+
+    private static string BuildPhysicsHelpSuffix(string physicsProfile, string targetBody)
+    {
+        if (!BodyTechnicalProfileCatalog.TryGet(targetBody, out var profile))
+        {
+            return "Any supported body can use any physics option.";
+        }
+
+        if (string.Equals(physicsProfile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return "No extra soft-body bones will be injected into the converted meshes.";
+        }
+
+        return profile.SupportsPhysics
+            ? $"Typical bones for {targetBody} include {string.Join(", ", profile.RequiredPhysicsBones.Take(4))}{(profile.RequiredPhysicsBones.Count > 4 ? ", ..." : string.Empty)}."
+            : $"{targetBody} has no built-in body-specific physics-bone catalog, so this acts as a general output override.";
     }
 
     private bool TryGetSelectedPreset(out ConversionPreset preset)
@@ -1957,6 +2696,9 @@ public sealed class MainForm : Form
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
+        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
+            _guidanceListView.SelectedItems[0].Tag is string selectedGuidanceTarget &&
+            (File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget));
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
         _openCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count == 1;
         _removeCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count > 0;
@@ -2209,7 +2951,7 @@ public sealed class MainForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var effectiveTarget = ResolveProfileTargetName();
+        var effectiveTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
         if (string.IsNullOrWhiteSpace(effectiveTarget))
         {
             MessageBox.Show(this, "Select or type a target body before saving a profile.", "Save profile", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -2220,7 +2962,7 @@ public sealed class MainForm : Form
         var effectiveProfile = ResolveEffectiveDeformationProfile();
         var baseField = CreateBaseTransformationField(effectiveTarget);
         var transformedField = ApplyDeformationProfile(baseField, effectiveProfile);
-        var bodyInfo = BodyTypeCatalog.All.FirstOrDefault(body => string.Equals(body.Name, effectiveTarget, StringComparison.OrdinalIgnoreCase));
+        BodyTypeCatalog.TryResolve(effectiveTarget, out var bodyInfo);
         var gender = IsMaleBody(effectiveTarget) ? "male" : "female";
         var payload = new
         {
@@ -2371,9 +3113,7 @@ public sealed class MainForm : Form
             : @"meshes\actors\character\character assets\";
 
     private static bool IsMaleBody(string targetBody) =>
-        targetBody.Equals("HIMBO", StringComparison.OrdinalIgnoreCase) ||
-        targetBody.Equals("SAM", StringComparison.OrdinalIgnoreCase) ||
-        targetBody.Equals("SOS", StringComparison.OrdinalIgnoreCase);
+        BodyTypeCatalog.IsMaleBody(targetBody);
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
     {
@@ -2641,6 +3381,808 @@ public sealed class MainForm : Form
             ? TryReadString(nested, nestedPropertyName)
             : null;
 
+    private static int? TryReadIntValue(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
+            ? result
+            : null;
+
+    private static int TryReadArrayCount(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.GetArrayLength()
+            : 0;
+
+    private static ConversionValidationSummary? TryReadValidationSummary(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ValidationSummary", out var summary) || summary.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var status = TryReadString(summary, "Status");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        var issues = new List<ConversionValidationIssue>();
+        if (TryGetProperty(summary, "Issues", out var issuesValue) && issuesValue.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var issue in issuesValue.EnumerateArray())
+            {
+                var code = TryReadString(issue, "Code");
+                var severity = TryReadString(issue, "Severity");
+                var message = TryReadString(issue, "Message");
+                if (string.IsNullOrWhiteSpace(code) ||
+                    string.IsNullOrWhiteSpace(severity) ||
+                    string.IsNullOrWhiteSpace(message))
+                {
+                    continue;
+                }
+
+                issues.Add(new ConversionValidationIssue(code, severity, message));
+            }
+        }
+
+        return new ConversionValidationSummary(
+            status,
+            TryReadIntValue(summary, "Score") ?? 0,
+            TryReadIntValue(summary, "HighSeverityCount") ?? 0,
+            TryReadIntValue(summary, "MediumSeverityCount") ?? 0,
+            TryReadIntValue(summary, "LowSeverityCount") ?? 0,
+            issues);
+    }
+
+    private static void AppendGuidanceFromBatchReport(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "batch-report.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var totalCount = TryReadIntValue(root, "TotalCount") ?? 0;
+            var successCount = TryReadIntValue(root, "SuccessCount") ?? 0;
+            var failedCount = TryReadIntValue(root, "FailedCount") ?? 0;
+            var needsReviewCount = TryReadIntValue(root, "NeedsReviewCount") ?? 0;
+            var highRiskCount = TryReadIntValue(root, "HighRiskCount") ?? 0;
+            var missingQualityCount = TryReadIntValue(root, "MissingQualityReportCount") ?? 0;
+            var packStatus = TryReadString(root, "PackReadinessStatus") ?? "Unknown";
+
+            if (totalCount <= 0)
+            {
+                return;
+            }
+
+            if (failedCount > 0 || needsReviewCount > 0 || highRiskCount > 0 || missingQualityCount > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Batch results",
+                failedCount > 0 || highRiskCount > 0 ? "Warning" : "Info",
+                $"Batch summary: {successCount}/{totalCount} succeeded, {failedCount} failed, {needsReviewCount} need review, {highRiskCount} are high risk. Pack status: {packStatus}.",
+                reportPath);
+
+            if (failedCount > 0)
+            {
+                add(
+                    "Batch follow-up",
+                    "Action",
+                    $"Open batch-report.json and re-run or isolate the {failedCount} failed item(s) before publishing the pack.",
+                    reportPath);
+            }
+
+            if (missingQualityCount > 0)
+            {
+                add(
+                    "Batch follow-up",
+                    "Action",
+                    $"Some outputs are missing conversion-quality.json ({missingQualityCount} item(s)). Re-run those conversions before installing or sharing the results.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-conversion-quality-report", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Batch results", "Warning", $"Could not read batch-report.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromConversionQuality(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        if (!File.Exists(qualityPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(qualityPath));
+            var root = document.RootElement;
+            var targetBody = TryReadString(root, "TargetBody") ?? "target body";
+            var validationSummary = TryReadValidationSummary(root);
+            if (validationSummary is null)
+            {
+                return;
+            }
+
+            if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+                validationSummary.Issues.Count > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Validation",
+                validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
+                $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open conversion-quality.json for the full breakdown.",
+                qualityPath);
+
+            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
+            {
+                add(
+                    GetGuidanceAreaForIssueCode(issue.Code),
+                    ToDisplayPriority(issue.Severity),
+                    issue.Message,
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, issue.Code, qualityPath));
+            }
+
+            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 4))
+            {
+                var action = ConversionValidationGuidance.GetIssueFollowUp(issue, targetBody);
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    continue;
+                }
+
+                add(
+                    $"{GetGuidanceAreaForIssueCode(issue.Code)} next step",
+                    "Action",
+                    action,
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, issue.Code, qualityPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Validation", "Warning", $"Could not read conversion-quality.json: {ex.Message}", qualityPath);
+        }
+    }
+
+    private static void AppendGuidanceFromSkeletonCompatibility(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var sourceSkeleton = TryReadString(root, "SourceSkeleton") ?? "unknown";
+            var targetSkeleton = TryReadString(root, "TargetSkeleton") ?? "unknown";
+            var unsupportedBones = ReadArrayValues(root, "UnsupportedBones");
+            if (unsupportedBones.Count == 0)
+            {
+                add(
+                    "Skeleton review",
+                    "Info",
+                    $"Skeleton mapping looks clean: {sourceSkeleton} → {targetSkeleton}. No unsupported bones were reported.",
+                    reportPath);
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Skeleton review",
+                "Warning",
+                $"{unsupportedBones.Count} unsupported bone(s) were reported while mapping {sourceSkeleton} → {targetSkeleton}: {BuildListPreview(unsupportedBones)}.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+            add(
+                "Skeleton next step",
+                "Action",
+                "Open skeleton-compatibility.json and verify follower/custom/beast bones plus any required physics chains before installing the converted mesh in-game.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "unsupported-bones", reportPath));
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Skeleton review", "Warning", $"Could not read skeleton-compatibility.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromTextureSummary(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "texture-summary.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var missingNormals = ReadArrayValues(root, "MissingNormals");
+            if (missingNormals.Count == 0)
+            {
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Texture review",
+                "Warning",
+                $"{missingNormals.Count} texture set(s) are missing normal maps: {BuildListPreview(missingNormals)}.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-normal-maps", reportPath));
+            add(
+                "Texture next step",
+                "Action",
+                "Copy or generate the missing normal maps before packaging so the converted armor does not lose surface detail or look flat in-game.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "missing-normal-maps", reportPath));
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Texture review", "Warning", $"Could not read texture-summary.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromDependencyMap(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "dependency-map.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var sourceBodies = ReadDistinctArrayPropertyValues(root, "DetectedSourceBody");
+            var sourceSkeletons = ReadDistinctArrayPropertyValues(root, "SourceSkeleton");
+            var linkedArmorFamilies = SumNestedArrayInt(root, "LinkedArmaFormIds");
+
+            if (sourceBodies.Count > 1)
+            {
+                requiresReview = true;
+                add(
+                    "Ecosystem mix",
+                    "Action",
+                    $"The output references multiple detected source body ecosystems ({BuildListPreview(sourceBodies)}). Smoke-test the converted pack in your mod manager before release.",
+                    reportPath);
+            }
+
+            if (sourceSkeletons.Count > 1)
+            {
+                requiresReview = true;
+                add(
+                    "Ecosystem mix",
+                    "Warning",
+                    $"Multiple source skeleton families were detected ({BuildListPreview(sourceSkeletons)}). Recheck race/follower coverage and plugin load order before publishing.",
+                    reportPath);
+            }
+
+            if (linkedArmorFamilies > 0)
+            {
+                add(
+                    "Plugin context",
+                    "Info",
+                    $"Dependency map includes {linkedArmorFamilies} linked ARMA reference(s). Keep plugin-patches.json with the packaged output so install/load-order guidance ships with the conversion.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Dependency review", "Warning", $"Could not read dependency-map.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromPackValidation(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "armor-pack-validation.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var status = TryReadString(root, "PackReadinessStatus");
+            var needsReviewCount = TryReadIntValue(root, "NeedsReviewCount") ?? 0;
+            var highRiskCount = TryReadIntValue(root, "HighRiskCount") ?? 0;
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return;
+            }
+
+            if (!status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+                needsReviewCount > 0 ||
+                highRiskCount > 0)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "Packaging",
+                status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
+                $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.",
+                reportPath);
+
+            if (TryGetProperty(root, "TopIssueCodes", out var topIssueCodes) && topIssueCodes.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var issue in topIssueCodes.EnumerateArray().Take(3))
+                {
+                    var code = TryReadString(issue, "Code");
+                    var count = TryReadIntValue(issue, "Count") ?? 0;
+                    var guidance = BuildPackIssueGuidance(code, count);
+                    if (string.IsNullOrWhiteSpace(guidance))
+                    {
+                        continue;
+                    }
+
+                    add(
+                        "Packaging review",
+                        count > 0 ? "Action" : "Info",
+                        guidance,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, code, reportPath));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromPluginPatches(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+        if (!File.Exists(patchPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(patchPath));
+            var root = document.RootElement;
+            var patchSteps = TryReadArrayCount(root, "ProposedPatchSteps");
+            var rewriteMappings = TryReadArrayCount(root, "RewriteMappings");
+            if (patchSteps <= 0 && rewriteMappings <= 0)
+            {
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                "Plugin patching",
+                "Action",
+                $"Open plugin-patches.json if the mod ships ESP/ESM/ESL files. Review {rewriteMappings} rewrite mapping(s) and {patchSteps} proposed patch step(s) in xEdit context before release.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", patchPath));
+
+            if (TryGetProperty(root, "PluginInstallHints", out var pluginInstallHints) && pluginInstallHints.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var hint in pluginInstallHints.EnumerateArray().Take(2))
+                {
+                    var sourcePlugin = TryReadString(hint, "SourcePlugin") ?? "plugin";
+                    var generatedPatch = TryReadString(hint, "GeneratedPatchPlugin");
+                    var manualReview = TryReadBool(hint, "ManualReviewRequired");
+                    var loadAfter = TryReadArray(hint, "RecommendedPluginLoadAfter");
+                    var placement = TryReadString(hint, "RecommendedModManagerPlacement");
+                    var notes = TryReadArray(hint, "Notes");
+
+                    if (!string.IsNullOrWhiteSpace(generatedPatch))
+                    {
+                        add(
+                            "Plugin install",
+                            "Action",
+                            $"{generatedPatch} should load after {sourcePlugin}{(string.IsNullOrWhiteSpace(loadAfter) || string.Equals(loadAfter, "None", StringComparison.OrdinalIgnoreCase) ? string.Empty : $" ({loadAfter})")}. {placement}",
+                            patchPath);
+                    }
+
+                    if (string.Equals(manualReview, "Yes", StringComparison.OrdinalIgnoreCase))
+                    {
+                        add(
+                            "Plugin review",
+                            "Warning",
+                            $"{sourcePlugin} still needs manual xEdit review before release. {notes}",
+                            patchPath);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(notes) &&
+                             !string.Equals(notes, "None", StringComparison.OrdinalIgnoreCase))
+                    {
+                        add("Plugin notes", "Info", $"{sourcePlugin}: {notes}", patchPath);
+                    }
+                }
+            }
+
+            if (TryGetProperty(root, "LinkedArmorFamilyReviewSteps", out var linkedReviewSteps) && linkedReviewSteps.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var step in linkedReviewSteps.EnumerateArray().Take(2))
+                {
+                    var armorRecord = TryReadString(step, "ArmorRecord") ?? "linked armor family";
+                    var sourcePlugin = TryReadString(step, "OwningPluginFileName") ?? "plugin";
+                    var reason = TryReadString(step, "ManualReviewReason");
+                    var action = TryReadString(step, "SuggestedXEditAction");
+                    var priority = TryReadString(step, "ReviewPriority");
+
+                    add(
+                        "Linked armor family",
+                        string.Equals(priority, "high", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                        $"{armorRecord} ({sourcePlugin}): {action ?? reason ?? "Review linked ARMA members in xEdit before release."}",
+                        patchPath);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Plugin patching", "Warning", $"Could not read plugin-patches.json: {ex.Message}", patchPath);
+        }
+    }
+
+    private static void AppendGuidanceFromWorldPhysics(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "world-physics.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            var root = document.RootElement;
+            var mode = TryReadString(root, "Mode");
+            var groundMeshAvailable = TryReadBool(root, "GroundMeshAvailable");
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                add(
+                    "World / ground mesh",
+                    "Info",
+                    $"World-object mode: {mode}. Ground mesh available: {groundMeshAvailable ?? "Unknown"}. Open world-physics.json if you need exact dropped-item recommendations.",
+                    reportPath);
+            }
+
+            if (TryGetProperty(root, "Recommendations", out var recommendations) && recommendations.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var recommendation in recommendations.EnumerateArray()
+                             .Select(FormatJsonValue)
+                             .Where(static value => !string.IsNullOrWhiteSpace(value))
+                             .Take(3))
+                {
+                    var priority = recommendation.Contains("manually verify", StringComparison.OrdinalIgnoreCase) ||
+                                   recommendation.Contains("fallback", StringComparison.OrdinalIgnoreCase)
+                        ? "Action"
+                        : "Info";
+                    if (priority == "Action")
+                    {
+                        requiresReview = true;
+                    }
+
+                    add("World / ground mesh", priority, recommendation, reportPath);
+                }
+            }
+
+            var heelProfile = TryReadNestedString(root, "HeelAnalysis", "Profile");
+            if (heelProfile is "high-heel" or "raised-heel")
+            {
+                requiresReview = true;
+                add(
+                    "Footwear",
+                    "High",
+                    $"Detected {heelProfile} footwear. Validate heel height, toe angle, and ground contact in preview-workbench.html and world-physics.json before shipping.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "heel-offset-review", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static string GetGuidanceAreaForIssueCode(string? code)
+    {
+        var normalized = code?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "Next action";
+        }
+
+        if (IsPreviewDrivenGuidanceCode(normalized))
+        {
+            return "Preview review";
+        }
+
+        if (normalized is "unsupported-bones")
+        {
+            return "Skeleton review";
+        }
+
+        if (normalized is "missing-normal-maps")
+        {
+            return "Texture review";
+        }
+
+        if (normalized is "incomplete-source-fallback" or "bodyslide-incompatible" ||
+            normalized.StartsWith("missing-bodyslide-", StringComparison.OrdinalIgnoreCase))
+        {
+            return "BodySlide support";
+        }
+
+        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Plugin review";
+        }
+
+        if (normalized.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Packaging review";
+        }
+
+        return "Next action";
+    }
+
+    private static string ResolveGuidanceTargetPath(
+        string outputDirectory,
+        string? previewPath,
+        string? issueCode,
+        string fallbackPath)
+    {
+        var normalized = issueCode?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return fallbackPath;
+        }
+
+        if (IsPreviewDrivenGuidanceCode(normalized) &&
+            !string.IsNullOrWhiteSpace(previewPath) &&
+            File.Exists(previewPath))
+        {
+            return previewPath;
+        }
+
+        if (normalized is "unsupported-bones")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json") ?? fallbackPath;
+        }
+
+        if (normalized is "missing-normal-maps")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "texture-summary.json") ?? fallbackPath;
+        }
+
+        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json") ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-cbpc-config")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")) ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-smp-config")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml")) ?? fallbackPath;
+        }
+
+        if (normalized is "bodyslide-incompatible" or "incomplete-source-fallback" ||
+            normalized.StartsWith("missing-bodyslide-", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide")) ?? fallbackPath;
+        }
+
+        if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return Directory
+                       .EnumerateFiles(outputDirectory, "*.zip", SearchOption.TopDirectoryOnly)
+                       .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                       .FirstOrDefault()
+                   ?? outputDirectory;
+        }
+
+        if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-fomod-module-config", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "info.xml"))
+                ?? ResolveExistingGuidancePath(outputDirectory, "fomod")
+                ?? fallbackPath;
+        }
+
+        if (normalized is "missing-staged-mesh-output" or "zip-missing-staged-mesh-output")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, Path.Combine("meshes", "slidesmith")) ?? outputDirectory;
+        }
+
+        return fallbackPath;
+    }
+
+    private static bool IsPreviewDrivenGuidanceCode(string code) =>
+        code.Equals("low-detection-confidence", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("low-body-match", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("unsupported-nif-layout", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("heuristic-nif-read", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("synthetic-morph-fallback", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("retargeted-morph-reuse", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("clipping-detected", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("voxel-penetration", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("pose-risk", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("auto-correction-applied", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("heel-offset-review", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("plugin-link-unsupported-nif-layout", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-workbench", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-html", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-preview-svg", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ResolveExistingGuidancePath(string outputDirectory, string relativePath)
+    {
+        var fullPath = Path.Combine(outputDirectory, relativePath);
+        if (File.Exists(fullPath) || Directory.Exists(fullPath))
+        {
+            return fullPath;
+        }
+
+        return null;
+    }
+
+    private static string BuildGuidanceOverview(IReadOnlyList<GuidanceEntry> entries, bool requiresReview)
+    {
+        var highCount = entries.Count(static entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
+        var warningCount = entries.Count(static entry => entry.Priority.Equals("Warning", StringComparison.OrdinalIgnoreCase));
+        var actionCount = entries.Count(static entry => entry.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase));
+        if (highCount > 0)
+        {
+            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
+        }
+
+        if (requiresReview)
+        {
+            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — inspect Preview and linked reports before install/share: {warningCount} warning and {actionCount} action item(s).";
+        }
+
+        return $"{ConversionValidationPresentation.GetGateLabel("ready")} — install-ready after one final Preview pass and normal smoke testing.";
+    }
+
+    private static int GetGuidancePriorityRank(string priority) =>
+        priority.Equals("High", StringComparison.OrdinalIgnoreCase) ? 4
+        : priority.Equals("Warning", StringComparison.OrdinalIgnoreCase) ? 3
+        : priority.Equals("Action", StringComparison.OrdinalIgnoreCase) ? 2
+        : priority.Equals("Medium", StringComparison.OrdinalIgnoreCase) ? 2
+        : priority.Equals("Low", StringComparison.OrdinalIgnoreCase) ? 1
+        : 0;
+
+    private static string ToDisplayPriority(string severity) =>
+        severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? "High"
+        : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? "Medium"
+        : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? "Low"
+        : "Info";
+
+    private static string? BuildPackIssueGuidance(string? code, int count)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        var normalized = code.Trim();
+        var issueCountLabel = count > 1 ? $" ({count} cases)" : string.Empty;
+        var body = normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase)
+            ? normalized["zip-missing-".Length..]
+            : normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase)
+                ? normalized["missing-".Length..]
+                : string.Empty;
+        if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return body.Equals("staged-mesh-output", StringComparison.OrdinalIgnoreCase)
+                ? $"Rebuild the distributable zip and confirm it contains the full Data-relative meshes/slidesmith output that your mod manager is expected to install{issueCountLabel}."
+                : body.Equals("plugin-patch-report", StringComparison.OrdinalIgnoreCase)
+                    ? $"Rebuild the distributable zip and confirm it contains plugin-patches.json so plugin rewrite/load-order review survives outside the raw output folder{issueCountLabel}."
+                    : $"Rebuild the distributable zip and confirm it contains {DescribePackArtifact(body)}{issueCountLabel}.";
+        }
+
+        if (normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return body.Equals("preview-workbench", StringComparison.OrdinalIgnoreCase)
+                ? $"Regenerate preview-workbench.html and open it before publishing so the converted mesh can be visually reviewed outside the desktop app{issueCountLabel}."
+                : body.Equals("bodyslide-reference-nif", StringComparison.OrdinalIgnoreCase)
+                    ? $"Regenerate the BodySlide reference NIF inside CalienteTools/BodySlide/ShapeData before publishing so Outfit Studio and BodySlide can open the generated project correctly{issueCountLabel}."
+                    : body.Equals("staged-mesh-output", StringComparison.OrdinalIgnoreCase)
+                        ? $"Regenerate the Data-relative meshes/slidesmith output before publishing so installed/generated meshes match the validated conversion results{issueCountLabel}."
+                        : body.Equals("output-zip", StringComparison.OrdinalIgnoreCase)
+                            ? $"Regenerate the final distributable zip before publishing and confirm it matches the validated output folder contents{issueCountLabel}."
+                            : $"Regenerate or copy {DescribePackArtifact(body)} into the output folder before publishing{issueCountLabel}.";
+        }
+
+        if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open fomod/ModuleConfig.xml and fix the installer entries for {normalized["fomod-".Length..].Replace('-', ' ')}{issueCountLabel}.";
+        }
+
+        return $"Review armor-pack-validation.json for {normalized.Replace('-', ' ')}{issueCountLabel}.";
+    }
+
+    private static string DescribePackArtifact(string suffix) =>
+        suffix.ToLowerInvariant() switch
+        {
+            "readme" => "README.txt",
+            "dependency-map" => "dependency-map.json",
+            "preview-html" => "preview.html",
+            "preview-workbench" => "preview-workbench.html",
+            "fomod-module-config" => "fomod/ModuleConfig.xml",
+            "fomod-info" => "fomod/info.xml",
+            "staged-mesh-output" => "the generated meshes/slidesmith output",
+            "xedit-script" => "patch-armor.pas",
+            "plugin-patch-report" => "plugin-patches.json",
+            "output-zip" => "the final distributable zip",
+            "bodyslide-osp" => "the generated BodySlide SliderSets .osp file",
+            "bodyslide-shape-data" => "the generated BodySlide ShapeData payloads",
+            "bodyslide-reference-nif" => "the BodySlide reference NIF",
+            "bodyslide-slider-payload" => "the generated BSD/TRI slider payloads",
+            "root-plugin" => "the copied/generated plugin file at the package root",
+            "root-plugin-entry" => "the plugin root-file FOMOD entry",
+            "staged-cbpc-config" => "the staged CBPC config",
+            "staged-smp-config" => "the staged SMP config",
+            _ => suffix.Replace('-', ' ')
+        };
+
     private static string? TryReadArray(JsonElement element, string propertyName)
     {
         if (!TryGetProperty(element, propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
@@ -2662,6 +4204,62 @@ public sealed class MainForm : Form
         return items.Length <= previewCount
             ? string.Join(", ", items)
             : $"{string.Join(", ", items.Take(previewCount))} (+{items.Length - previewCount} more)";
+    }
+
+    private static IReadOnlyList<string> ReadArrayValues(JsonElement element, string propertyName)
+    {
+        if (!TryGetProperty(element, propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return value
+            .EnumerateArray()
+            .Select(FormatJsonValue)
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadDistinctArrayPropertyValues(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return element
+            .EnumerateArray()
+            .Select(item => TryReadString(item, propertyName))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static int SumNestedArrayInt(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        return element
+            .EnumerateArray()
+            .Sum(item => TryReadArrayCount(item, propertyName));
+    }
+
+    private static string BuildListPreview(IReadOnlyList<string> values)
+    {
+        if (values.Count == 0)
+        {
+            return "none";
+        }
+
+        return values.Count <= 3
+            ? string.Join(", ", values)
+            : $"{string.Join(", ", values.Take(3))} (+{values.Count - 3} more)";
     }
 
     private static string CountNestedArray(JsonElement element, string propertyName) =>

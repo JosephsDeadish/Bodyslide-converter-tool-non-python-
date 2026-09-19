@@ -1,0 +1,68 @@
+{
+  "races": [
+    { "name": "DefaultRace", "formId": "0x00013741", "groups": ["humanoid"] },
+    { "name": "NordRace", "formId": "0x00013742", "groups": ["humanoid"] },
+    { "name": "ImperialRace", "formId": "0x00013744", "groups": ["humanoid"] },
+    { "name": "BretonRace", "formId": "0x00013745", "groups": ["humanoid"] },
+    { "name": "RedguardRace", "formId": "0x00013746", "groups": ["humanoid"] },
+    { "name": "AltmerRace", "formId": "0x00013747", "groups": ["humanoid"] },
+    { "name": "BosmerRace", "formId": "0x00013748", "groups": ["humanoid"] },
+    { "name": "DunmerRace", "formId": "0x00013749", "groups": ["humanoid"] },
+    { "name": "OrcRace", "formId": "0x0001397A", "groups": ["humanoid"] },
+    { "name": "KhajiitRace", "formId": "0x00023FE9", "groups": ["beast", "khajiit", "feline", "digitigrade"] },
+    { "name": "ArgonianRace", "formId": "0x00013BB9", "groups": ["beast", "argonian", "reptile", "tail"] }
+  ],
+  "bodyRules": [
+    { "body": "CBBE", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "3BA", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "BHUNP", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "UNP", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "UNPB", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "UUNP", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "COCO CBBE", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "COCO UUNP", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "TBD", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "HIMBO", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "SAM", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "SAM Light", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "SOS", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "TNG", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "UBE", "compatibleGroups": ["humanoid"], "warningGroups": [] },
+    { "body": "Vanilla", "compatibleGroups": ["humanoid", "beast"], "warningGroups": [] },
+    {
+      "body": "Vanilla Beast",
+      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
+      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail"],
+      "warningMessage": "tail, paw/foot, and race-variant rigging should still be verified in-game."
+    },
+    {
+      "body": "Goat Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "goat", "horned"],
+      "warningGroups": []
+    },
+    {
+      "body": "Hagraven",
+      "compatibleGroups": ["humanoid", "beast", "hagraven", "winged"],
+      "warningGroups": []
+    },
+    {
+      "body": "Spriggan",
+      "compatibleGroups": ["humanoid", "beast", "spriggan", "horned"],
+      "warningGroups": []
+    }
+  ],
+  "inferenceRules": [
+    {
+      "name": "Khajiit variant",
+      "groups": ["beast", "khajiit", "feline", "digitigrade"],
+      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay"],
+      "meshPathHints": ["khajiit", "senche", "cathay", "feline", "digitigrade"]
+    },
+    {
+      "name": "Argonian variant",
+      "groups": ["beast", "argonian", "reptile", "tail"],
+      "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard"],
+      "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "tail"]
+    }
+  ]
+}

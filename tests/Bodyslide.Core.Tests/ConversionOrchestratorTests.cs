@@ -1,6 +1,9 @@
 using Bodyslide.Core;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using SharpCompress.Common;
 using SharpCompress.Writers.SevenZip;
 
@@ -33,6 +36,168 @@ public sealed class ConversionOrchestratorTests
             Directory.Delete(outputDirectory, recursive: true);
         }
     }
+
+
+    [Fact]
+    public void PluginPatches_LinkedArmorAddonsWithUnsupportedSourceNifs_ReportSpecificVerificationIssue()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor_0.nif")
+                },
+                [],
+                [],
+                1);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["LinkedArmor.esp [ESP; confidence=1.00]"],
+                [
+                    new PluginArmorAddon(
+                        "LinkedArmor.esp [ESP; confidence=1.00]",
+                        ["meshes/armor/iron/ironarmor_0.nif"],
+                        FormId: 0x00000802u,
+                        EditorId: "LinkedAddon",
+                        OwningPluginFileName: "LinkedArmor.esp",
+                        LocalFormId: 0x00000802u)
+                ],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "LinkedArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x00000801u,
+                        EditorId: "LinkedArmor",
+                        OwningPluginFileName: "LinkedArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences:
+                        [
+                            new PluginLinkedFormReference(
+                                RawFormId: 0x00000802u,
+                                OwningPluginFileName: "LinkedArmor.esp",
+                                LocalFormId: 0x00000802u)
+                        ])
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    new[]
+                    {
+                        new NifSupportReport(
+                            Path.Combine(outputDirectory, "meshes", "armor", "iron", "ironarmor_0.nif"),
+                            "unsupported",
+                            "unreadable-geometry",
+                            null,
+                            ["manual-review-required"])
+                    }
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(0, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Contains(
+                "LinkedArmor (0x00000801) -> LinkedAddon (0x00000802) => meshes/armor/iron/ironarmor_0.nif [unreadable-geometry]",
+                report.UnsupportedLinkedArmorAddonMeshes ?? []);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_ReportsAmbiguousConvertedFilenameCollisions_ForManualReview()
+    {
+        static void WriteUInt32Le(byte[] bytes, int offset, uint value)
+        {
+            bytes[offset] = (byte)(value & 0xFF);
+            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
+            bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
+            bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+
+        static byte[] BuildSubrecord(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static byte[] BuildMinimalPluginWithArmaMod2Path(string meshPath)
+        {
+            var mod2 = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+            var tes4 = new byte[24];
+            var arma = new byte[24 + mod2.Length];
+            System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(tes4, 0);
+            System.Text.Encoding.ASCII.GetBytes("ARMA").CopyTo(arma, 0);
+            WriteUInt32Le(arma, 4, (uint)mod2.Length);
+            WriteUInt32Le(arma, 12, 0x00001234u);
+            mod2.CopyTo(arma, 24);
+            return [.. tes4, .. arma];
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory  = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "AmbiguousPaths.esp");
+        var pluginBytes = BuildMinimalPluginWithArmaMod2Path("meshes/armor/iron/shared_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        var firstMeshDirectory = Path.Combine(workingDirectory, "set-a");
+        var secondMeshDirectory = Path.Combine(workingDirectory, "set-b");
+        Directory.CreateDirectory(firstMeshDirectory);
+        Directory.CreateDirectory(secondMeshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(firstMeshDirectory, "shared_0.nif"), "mesh-a");
+        await File.WriteAllTextAsync(Path.Combine(secondMeshDirectory, "shared_0.nif"), "mesh-b");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"AmbiguousConvertedMatches\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/iron/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
 
     [Fact]
     public async Task ConvertAsync_ThrowsWhenInputDoesNotExist()
@@ -211,6 +376,67 @@ public sealed class ConversionOrchestratorTests
 
             Assert.Equal(2, results.Count);
             Assert.All(results, result => Assert.StartsWith(outputDirectory, result.OutputDirectory, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithNiMeshTokenGuidedFloatNif_ParsesAsSupportedAndAvoidsUnsupportedIssue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "nimesh_token_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            geometryToken: "NiMesh",
+            bytesBeforeCount: 8,
+            prefixPadding: 24);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.NotEqual("unreadable-geometry", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NifGeometrySignatureReader_UnsupportedNiLinesTokenStub_ReportsGeometryFamily()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "nilines_stub.nif");
+        await SyntheticNifTestData.WriteUnsupportedGeometryTokenStubAsync(inputFile, "NiLinesData", prefixPadding: 32);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("unsupported", report.Status);
+            Assert.Equal("unreadable-geometry", report.ParseMode);
+            Assert.Contains("geometry-family:NiLinesData", report.Messages ?? []);
+            Assert.Contains("manual-review-required", report.Messages ?? []);
+            Assert.Null(NifGeometrySignatureReader.TryRead(inputFile));
         }
         finally
         {
@@ -550,6 +776,65 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConversionLearningCache_LoadMergedEntries_IgnoresInvalidEntriesWithNullKeys()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var globalPath = Path.Combine(tmpDir, "global-cache.json");
+        var localPath = Path.Combine(tmpDir, "local-cache.json");
+        var now = DateTimeOffset.UtcNow;
+
+        await File.WriteAllTextAsync(
+            globalPath,
+            """
+            [
+              {
+                "Key": null,
+                "LastSuccessfulConversion": "2026-01-01T00:00:00+00:00",
+                "TargetBody": "3BA",
+                "MeshType": "Cuirass",
+                "Strategy": "cage",
+                "RegionalMorphing": {
+                  "Bust": 0.5
+                },
+                "HadClipping": false,
+                "CorrectionMethod": "none"
+              }
+            ]
+            """);
+        await File.WriteAllTextAsync(
+            localPath,
+            System.Text.Json.JsonSerializer.Serialize(
+                new[]
+                {
+                    new ConversionCacheEntry(
+                        Key: "boots:3ba",
+                        LastSuccessfulConversion: now,
+                        TargetBody: "3BA",
+                        MeshType: "Boots",
+                        Strategy: "cage",
+                        RegionalMorphing: new Dictionary<string, double> { ["Legs"] = 0.3 },
+                        HadClipping: false,
+                        CorrectionMethod: "none")
+                },
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        ConversionLearningCache.SetGlobalCachePath(globalPath);
+        try
+        {
+            var merged = await ConversionLearningCache.LoadMergedEntriesAsync(localPath, CancellationToken.None);
+
+            Assert.Single(merged);
+            Assert.Equal("boots:3ba", merged[0].Key);
+        }
+        finally
+        {
+            ConversionLearningCache.SetGlobalCachePath(null);
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithGlobalCachePreloaded_HitsGlobalCache()
     {
         var workDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -799,6 +1084,74 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithPluginSource_IncludesEsmRootPluginInFomod()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var meshDirectory = Path.Combine(inputDirectory, "meshes", "armor", "testarmor");
+        Directory.CreateDirectory(meshDirectory);
+        await File.WriteAllTextAsync(Path.Combine(meshDirectory, "testarmor_0.nif"), "mesh");
+        await File.WriteAllBytesAsync(
+            Path.Combine(inputDirectory, "TestArmor.esm"),
+            BuildMinimalPluginWithArmaMod2Path("meshes/armor/testarmor/testarmor_0.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var moduleConfig = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"));
+            Assert.Contains("TestArmor_patched.esm", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("TestArmor_SlidesmithPatch.esp", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("README.txt", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildMinimalPluginWithArmaMod2Path(string meshPath)
+        {
+            var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+            var tes4 = BuildSseRecord("TES4", []);
+            var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
+            return [.. tes4, .. arma];
+        }
+
+        static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
+        {
+            var buf = new byte[24 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            WriteUInt32Le(buf, 4, (uint)data.Length);
+            WriteUInt32Le(buf, 8, 0u);
+            WriteUInt32Le(buf, 12, formId);
+            data.CopyTo(buf, 24);
+            return buf;
+        }
+
+        static byte[] BuildSubrecord(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static void WriteUInt32Le(byte[] bytes, int offset, uint value)
+        {
+            bytes[offset] = (byte)(value & 0xFF);
+            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
+            bytes[offset + 2] = (byte)((value >> 16) & 0xFF);
+            bytes[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithOutputZip_ProducesZipFile()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -815,8 +1168,8 @@ public sealed class ConversionOrchestratorTests
             Assert.True(result.Success);
             var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             Assert.True(File.Exists(zipPath), $"Expected ZIP at {zipPath}");
-            Assert.Single(result.OutputFiles);
-            Assert.EndsWith(".zip", result.OutputFiles[0], StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -904,13 +1257,26 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Theory]
+    [InlineData("CBBE")]
+    [InlineData("3BA")]
     [InlineData("HIMBO")]
     [InlineData("UNP")]
+    [InlineData("UUNP")]
     [InlineData("BHUNP")]
+    [InlineData("COCO CBBE")]
+    [InlineData("COCO UUNP")]
     [InlineData("TBD")]
     [InlineData("SAM")]
+    [InlineData("SAM Light")]
     [InlineData("SOS")]
+    [InlineData("TNG")]
     [InlineData("UBE")]
+    [InlineData("Vanilla")]
+    [InlineData("Vanilla Beast")]
+    [InlineData("Goat Humanoid")]
+    [InlineData("Hagraven")]
+    [InlineData("Spriggan")]
+    [InlineData("UNPB")]
     public void BodyTransformationFieldCatalog_ResolvesAllKnownBodies(string targetBody)
     {
         var inputFile = Path.GetTempFileName();
@@ -932,8 +1298,18 @@ public sealed class ConversionOrchestratorTests
         var presets = PresetCatalog.All.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Assert.Contains("BHUNP Curvy", presets);
         Assert.Contains("HIMBO Muscular", presets);
+        Assert.Contains("TNG Athletic", presets);
         Assert.Contains("3BA Slim", presets);
         Assert.Contains("UNP Athletic", presets);
+        Assert.Contains("UNPB Curvy", presets);
+        Assert.Contains("UUNP Curvy", presets);
+        Assert.Contains("COCO CBBE Curvy", presets);
+        Assert.Contains("COCO UUNP Athletic", presets);
+        Assert.Contains("SAM Light Lean", presets);
+        Assert.Contains("Vanilla Beast Balanced", presets);
+        Assert.Contains("Goat Humanoid Balanced", presets);
+        Assert.Contains("Hagraven Balanced", presets);
+        Assert.Contains("Spriggan Balanced", presets);
     }
 
     [Fact]
@@ -976,6 +1352,31 @@ public sealed class ConversionOrchestratorTests
         finally
         {
             File.Delete(inputFile);
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithoutExplicitProfile_InfersFallbackProfileFromMeshName()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(inputDirectory);
+        Directory.CreateDirectory(outputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "travel_curvy_outfit_0.nif");
+        await File.WriteAllBytesAsync(inputFile, new byte[128]);
+
+        try
+        {
+            var orchestrator = BuildTestOrchestrator(new TestExporter());
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "UNPB", outputDirectory));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, step => step.Equals("fallback-profile:curvy", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(inputDirectory, recursive: true);
             Directory.Delete(outputDirectory, recursive: true);
         }
     }
@@ -1032,6 +1433,8 @@ public sealed class ConversionOrchestratorTests
             var infoXml = await File.ReadAllTextAsync(infoPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
+            Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -1561,6 +1964,35 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DetectsSplitAccessoryFootwearHints()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bootPath = Path.Combine(dir, "traveler_boots_0.nif");
+        var strapPath = Path.Combine(dir, "traveler_boots_buckle_strap_1.nif");
+        await File.WriteAllBytesAsync(bootPath, []);
+        await File.WriteAllBytesAsync(strapPath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(bootPath, [bootPath, strapPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.True(result.HasSplitMeshes);
+            Assert.True(result.HasAccessoryPieces);
+            Assert.True(result.HasStrapLikePieces);
+            Assert.True(result.HasRigidSubMeshes);
+            Assert.True(result.IsFootwear);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -1681,6 +2113,146 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task StrategyMeshConversionService_SplitMeshesReduceAdjacentSeamGaps()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.0,
+                        ["calves"] = 1.0,
+                        ["legs"] = 1.0,
+                        ["thighs"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.60,
+                        ["calves"] = 0.70,
+                        ["legs"] = 1.08,
+                        ["thighs"] = 1.05,
+                    }),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var cage = new DeformationCage("smooth-adaptive-cage");
+            var service = new StrategyMeshConversionService();
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var splitAnalysis = new MeshAnalysis("cloth", false, 2, HasSplitMeshes: true);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var split = await service.ConvertAsync(armor, splitAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            var baselineGap = Math.Abs(baseline.RegionalMorphing["feet"] - baseline.RegionalMorphing["calves"]);
+            var splitGap = Math.Abs(split.RegionalMorphing["feet"] - split.RegionalMorphing["calves"]);
+            Assert.True(splitGap < baselineGap, $"Expected split-mesh seam tuning to reduce the feet/calves gap. Baseline={baselineGap}, split={splitGap}");
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_FootwearAndStrapsDampenAggressiveMorphing()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.0,
+                        ["calves"] = 1.0,
+                        ["legs"] = 1.0,
+                        ["chest"] = 1.0,
+                        ["breasts"] = 1.0,
+                        ["waist"] = 1.0,
+                        ["pelvis"] = 1.0,
+                        ["butt"] = 1.0,
+                        ["thighs"] = 1.0,
+                        ["shoulders"] = 1.0,
+                        ["arms"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["feet"] = 1.55,
+                        ["calves"] = 1.42,
+                        ["legs"] = 1.18,
+                        ["chest"] = 1.48,
+                        ["breasts"] = 1.82,
+                        ["waist"] = 0.76,
+                        ["pelvis"] = 1.30,
+                        ["butt"] = 1.34,
+                        ["thighs"] = 1.22,
+                        ["shoulders"] = 1.24,
+                        ["arms"] = 1.16,
+                    }),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var cage = new DeformationCage("smooth-adaptive-cage");
+            var service = new StrategyMeshConversionService();
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var tunedAnalysis = new MeshAnalysis(
+                "cloth",
+                false,
+                2,
+                HasSplitMeshes: true,
+                HasAccessoryPieces: true,
+                HasStrapLikePieces: true,
+                HasRigidSubMeshes: true,
+                IsFootwear: true);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var tuned = await service.ConvertAsync(armor, tunedAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            Assert.True(tuned.RegionalMorphing["feet"] < baseline.RegionalMorphing["feet"]);
+            Assert.True(tuned.RegionalMorphing["calves"] < baseline.RegionalMorphing["calves"]);
+            Assert.True(tuned.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
+            Assert.True(tuned.RegionalMorphing["chest"] < baseline.RegionalMorphing["chest"]);
+            Assert.True(Math.Abs(tuned.RegionalMorphing["waist"] - 1.0) < Math.Abs(baseline.RegionalMorphing["waist"] - 1.0));
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
     // ── Gap 2: Race compatibility check ──────────────────────────────────────
 
     [Fact]
@@ -1699,6 +2271,7 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
+        Assert.Empty(report.Warnings);
     }
 
     [Fact]
@@ -1714,6 +2287,29 @@ public sealed class ConversionOrchestratorTests
             PatchGuidance: string.Empty);
 
         var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("KhajiitRace", report.IncompatibleRaces);
+        Assert.NotEmpty(report.Warnings);
+    }
+
+    [Theory]
+    [InlineData("UUNP")]
+    [InlineData("COCO CBBE")]
+    [InlineData("COCO UUNP")]
+    [InlineData("TNG")]
+    public async Task BasicRaceCompatibilityService_WarnsForKhajiitRaceWithNewHumanoidOnlyBodies(string targetBody)
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "KhajiitArmor01", [30], RaceFormId: 0x00023FE9u), // KhajiitRace
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, targetBody, CancellationToken.None);
 
         Assert.False(report.IsCompatible);
         Assert.Contains("KhajiitRace", report.IncompatibleRaces);
@@ -1736,6 +2332,53 @@ public sealed class ConversionOrchestratorTests
 
         Assert.False(report.IsCompatible);
         Assert.Contains("ArgonianRace", report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForKhajiitVariantInferredFromEditorId()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-vampire-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/khajiit/boots_0.nif"],
+                    0x100,
+                    "KhajiitRaceVampireBootsAddon",
+                    [37]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains("Khajiit variant", report.IncompatibleRaces);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Khajiit variant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForArgonianVariantInferenceOnVanillaBeastBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["argonian-follower.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/argonian/scales_0.nif"],
+                    0x100,
+                    "ArgonianRaceVampireFollowerAddon",
+                    [32, 40]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Argonian variant", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1773,6 +2416,25 @@ public sealed class ConversionOrchestratorTests
 
         Assert.True(report.IsCompatible);
         Assert.Empty(report.IncompatibleRaces);
+    }
+
+    [Fact]
+    public async Task BasicRaceCompatibilityService_AllowsBeastCompatibleTargetBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["argonian-armor.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon("ARMA", [], 0x100, "ArgonianArmor01", [30], RaceFormId: 0x00013BB9u),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+        Assert.Empty(report.Warnings);
     }
 
     // ── Gap 3: Parallel batch conversion ─────────────────────────────────────
@@ -1836,9 +2498,13 @@ public sealed class ConversionOrchestratorTests
 
             // Wait briefly for the Progress<T> callback (it marshals to the synchronization context).
             await Task.Delay(50);
-            Assert.Single(progressEvents);
-            Assert.Equal(1, progressEvents[0].Total);
-            Assert.Equal(1, progressEvents[0].Completed);
+            Assert.Contains(progressEvents, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Importing input", StringComparison.Ordinal));
+            Assert.Contains(progressEvents, update =>
+                update.IsItemCompleted &&
+                update.Total == 1 &&
+                update.Completed == 1);
         }
         finally
         {
@@ -2896,6 +3562,15 @@ internal static class SyntheticNifTestData
         (-0.04f,  0.00f, 0.74f), ( 0.04f,  0.00f, 0.74f), (-0.02f,  0.00f, 0.66f), ( 0.02f,  0.00f, 0.66f)
     ];
 
+    public static IReadOnlyList<(float X, float Y, float Z)> CreateFootwearVertices() =>
+    [
+        (-0.07f, -0.03f, 0.00f), (-0.04f,  0.02f, 0.01f), ( 0.04f,  0.02f, 0.01f), ( 0.07f, -0.03f, 0.00f),
+        (-0.08f,  0.01f, 0.04f), (-0.03f,  0.05f, 0.05f), ( 0.03f,  0.05f, 0.05f), ( 0.08f,  0.01f, 0.04f),
+        (-0.06f, -0.02f, 0.10f), (-0.03f,  0.02f, 0.12f), ( 0.03f,  0.02f, 0.12f), ( 0.06f, -0.02f, 0.10f),
+        (-0.05f,  0.00f, 0.18f), (-0.02f,  0.02f, 0.22f), ( 0.02f,  0.02f, 0.22f), ( 0.05f,  0.00f, 0.18f),
+        (-0.04f, -0.01f, 0.28f), (-0.02f,  0.01f, 0.34f), ( 0.02f,  0.01f, 0.34f), ( 0.04f, -0.01f, 0.28f)
+    ];
+
     public static async Task WriteAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
     {
         await using var stream = File.Create(path);
@@ -2960,7 +3635,25 @@ internal static class SyntheticNifTestData
         }
     }
 
-    public static async Task WriteBlockGraphStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    public static async Task WriteUnsupportedGeometryTokenStubAsync(
+        string path,
+        string geometryToken,
+        int prefixPadding = 24)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[Math.Max(24, prefixPadding)]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        writer.Write(new byte[32]);
+    }
+
+    public static async Task WriteBlockGraphStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyList<int>? partitionSlots = null,
+        int prefixPadding = 0)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -2970,7 +3663,197 @@ internal static class SyntheticNifTestData
         writer.Write(0); // root has no relevant geometry payload
         writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
         writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
 
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        if (partitionSlots is { Count: > 0 })
+        {
+            foreach (var slot in partitionSlots)
+            {
+                writer.Write(slot);
+            }
+        }
+    }
+
+    public static async Task WriteTriStripsStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding = 0)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"));
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+    }
+
+    public static async Task WriteInterleavedFloatStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(vertices.Count);
+        writer.Write(new byte[16]);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            writer.Write(float.NaN);
+            writer.Write(float.PositiveInfinity);
+            writer.Write(float.NegativeInfinity);
+            writer.Write(float.MaxValue);
+            writer.Write(float.MinValue);
+        }
+    }
+
+    public static async Task WritePaddedInterleavedFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding,
+        int stride)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        var trailingBytes = Math.Max(0, stride - (sizeof(float) * 3));
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            var trailingFloatCount = trailingBytes / sizeof(float);
+            for (var index = 0; index < trailingFloatCount; index++)
+            {
+                writer.Write(float.NaN);
+            }
+
+            for (var index = trailingFloatCount * sizeof(float); index < trailingBytes; index++)
+            {
+                writer.Write((byte)0xFF);
+            }
+        }
+    }
+
+    public static async Task WriteGraphlessInterleavedFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int prefixPadding,
+        int stride)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("CustomVertexBlob"));
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        var trailingBytes = Math.Max(0, stride - (sizeof(float) * 3));
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+            var trailingFloatCount = trailingBytes / sizeof(float);
+            for (var index = 0; index < trailingFloatCount; index++)
+            {
+                writer.Write(float.NaN);
+            }
+
+            for (var index = trailingFloatCount * sizeof(float); index < trailingBytes; index++)
+            {
+                writer.Write((byte)0x7F);
+            }
+        }
+    }
+
+    public static async Task WriteTokenGuidedPlainFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        string geometryToken = "NiTriShapeData",
+        int bytesBeforeCount = 0,
+        int prefixPadding = 0)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        writer.Write(new byte[Math.Max(0, bytesBeforeCount)]);
+        writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+    }
+
+    public static async Task WriteBlockGraphStyleWithSkinPartitionsAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyList<int> partitionSlots)
+    {
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSDismemberSkinInstance"));
+        writer.Write(partitionSlots.Count);
+        foreach (var slot in partitionSlots)
+        {
+            writer.Write(slot);
+        }
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiSkinPartition"));
+        writer.Write(partitionSlots.Count);
+        foreach (var slot in partitionSlots)
+        {
+            writer.Write(slot);
+        }
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(vertices.Count);
         foreach (var (x, y, z) in vertices)
         {
             writer.Write(x);
@@ -2985,22 +3868,44 @@ internal static class SyntheticNifTestData
     /// 20-byte vertex element).  Layout matches the real SSE format closely enough for
     /// the <c>TryLocateHalfFloatVertexBlock</c> heuristic to detect and transform it.
     /// </summary>
-    public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices)
+    public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape", stride);
+
+    public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape", stride);
+
+    public static async Task WriteBsDynamicTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSDynamicTriShape", stride);
+
+    public static async Task WriteBsLodTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSLODTriShape", stride);
+
+    public static async Task WriteBsMeshLodTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSMeshLODTriShape", stride);
+
+    public static async Task WriteBsSegmentedTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSegmentedTriShape", stride);
+
+    private static async Task WriteBsHalfFloatTriShapeStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        string blockTypeName,
+        int stride)
     {
+        Assert.True(stride >= 12 && stride <= 60 && stride % 4 == 0, "Stride must be a 4-byte multiple between 12 and 60.");
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
 
         // NIF file header
         writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
         // Block type string so NifBlockGraphParser and NifGeometrySignatureReader recognise this as SSE
-        writer.Write(System.Text.Encoding.ASCII.GetBytes("BSTriShape"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(blockTypeName));
         writer.Write((byte)0); // null terminator for the block type string
 
         // BSVertexDesc: bits 44-47 encode stride / 4.
         // stride = 20 bytes (non-skinned: pos(6) + bitX(2) + uv(4) + normal(4) + tangent(4))
         // → strideDiv4 = 5 → bits 44-47 = 5 → (5UL << 44) | flags = 0x0000_5000_0000_0057UL
-        const ulong bsVertexDesc = 0x0000_5000_0000_0057UL;
-        const int stride = 20;
+        var bsVertexDesc = (0x0000_5000_0000_0057UL & ~(0xFUL << 44)) | ((ulong)(stride / 4) << 44);
 
         // Minimal triangle list (degenerate but sufficient for the transform test)
         var numTriangles = Math.Max(1, vertices.Count / 3);
@@ -3017,7 +3922,7 @@ internal static class SyntheticNifTestData
         }
 
         // Vertex data: BSVertexData layout — Half XYZ at bytes 0,2,4; remaining 14 bytes zero.
-        var padding = new byte[stride - 6];
+        var padding = Enumerable.Repeat((byte)0xA5, stride - 6).ToArray();
         foreach (var (x, y, z) in vertices)
         {
             writer.Write(BitConverter.GetBytes((Half)x));
@@ -3033,18 +3938,41 @@ internal static class SyntheticNifTestData
     /// the BSVertexDesc + triangle data at the known offset.
     /// </summary>
     public static IReadOnlyList<(float X, float Y, float Z)> ReadBsTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSubIndexTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSSubIndexTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsDynamicTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSDynamicTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsLodTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSLODTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsMeshLodTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSMeshLODTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSegmentedTriShapeVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSSegmentedTriShape");
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
-        const int stride = 20;
-        var bsToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+        var bsToken = System.Text.Encoding.ASCII.GetBytes(blockTypeName);
         var tokenPos = bytes.AsSpan().IndexOf(bsToken);
         if (tokenPos < 0)
             return [];
 
-        // Desc is at tokenPos + len(BSTriShape) + 1 (null terminator)
+        // Desc is at tokenPos + len(typeName) + 1 (null terminator)
         var descOffset = tokenPos + bsToken.Length + 1;
         if (descOffset + 14 >= bytes.Length)
             return [];
 
+        var desc = BitConverter.ToUInt64(bytes, descOffset);
+        var strideDiv4 = (int)((desc >> 44) & 0xF);
+        if (strideDiv4 < 3 || strideDiv4 > 15)
+            return [];
+
+        var stride = strideDiv4 * 4;
         var numTriangles = BitConverter.ToInt32(bytes, descOffset + 8);
         var numVertices = (int)BitConverter.ToUInt16(bytes, descOffset + 12);
         var vertStart = descOffset + 14 + numTriangles * 6;
@@ -3090,6 +4018,31 @@ public sealed class NifOutputAndSourceOverrideTests
                 BitConverter.ToSingle(bytes, cursor + 4),
                 BitConverter.ToSingle(bytes, cursor + 8)));
             cursor += 12;
+        }
+
+        return vertices;
+    }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadInterleavedFloatVertices(byte[] bytes)
+    {
+        var token = System.Text.Encoding.ASCII.GetBytes("NiTriShapeData");
+        var tokenIndex = bytes.AsSpan().IndexOf(token);
+        Assert.True(tokenIndex >= 0, "Synthetic NIF data should contain NiTriShapeData block.");
+
+        var vertexCountOffset = tokenIndex + token.Length + 8;
+        var vertexCount = BitConverter.ToInt32(bytes, vertexCountOffset);
+        Assert.True(vertexCount > 0, "Synthetic NIF should contain at least one vertex.");
+
+        const int stride = 32;
+        var cursor = vertexCountOffset + sizeof(int) + 16;
+        var vertices = new List<(float X, float Y, float Z)>(vertexCount);
+        for (var index = 0; index < vertexCount; index++)
+        {
+            vertices.Add((
+                BitConverter.ToSingle(bytes, cursor),
+                BitConverter.ToSingle(bytes, cursor + 4),
+                BitConverter.ToSingle(bytes, cursor + 8)));
+            cursor += stride;
         }
 
         return vertices;
@@ -3224,6 +4177,519 @@ public sealed class NifOutputAndSourceOverrideTests
             var sourceBytes = await File.ReadAllBytesAsync(inputFile);
             var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
             Assert.NotEqual(sourceBytes, writtenBytes);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithTriStripsStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "tristrips_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteTriStripsStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("tristrips-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "tristrips_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one TriStrips vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSmallPaddedBlockGraphStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_padded_block_graph_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(inputFile, sourceVertices, prefixPadding: 24);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("block-graph-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_padded_block_graph_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one small padded block-graph vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSmallPaddedTriStripsStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_padded_tristrips_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteTriStripsStyleAsync(inputFile, sourceVertices, prefixPadding: 16);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("tristrips-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_padded_tristrips_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one small padded TriStrips vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithInterleavedFloatStyleNif_AppliesVertexTransform()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "interleaved_float_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inputBytes = await File.ReadAllBytesAsync(inputFile);
+            Assert.True(NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(inputBytes, out _, out var locatedVertexCount, out var locatedStride));
+            Assert.Equal(sourceVertices.Count, locatedVertexCount);
+            Assert.Equal(32, locatedStride);
+
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "interleaved_float_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one interleaved float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithWidePaddedInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "wide_padded_interleaved_boots.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 32, stride: 52);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "wide_padded_interleaved_boots.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one padded interleaved vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithExtraWideInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "extra_wide_interleaved_boots.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 36, stride: 68);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "extra_wide_interleaved_boots.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(sourceRead);
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead!.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one extra-wide interleaved vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithGraphlessInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "graphless_interleaved_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteGraphlessInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 24, stride: 36);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(96, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "graphless_interleaved_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one graphless interleaved float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithLargePrefixPaddedPlainFloatNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "large_prefix_padded_plain_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 72);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("block-graph-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(96, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "large_prefix_padded_plain_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one large-prefix padded float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithNiTriBasedGeomDataNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "tribasedgeom_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            geometryToken: "NiTriBasedGeomData",
+            prefixPadding: 32);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("block-graph-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(96, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "tribasedgeom_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one NiTriBasedGeomData vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithExtraWideLargePrefixInterleavedFloatNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "extra_wide_large_prefix_interleaved_boots.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(320);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            prefixPadding: 72,
+            stride: 112);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+            Assert.Equal(320, nifSupport.VertexCount);
+
+            var sourceRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(inputFile));
+            Assert.NotNull(sourceRead);
+            Assert.Equal(320, sourceRead!.Count);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "extra_wide_large_prefix_interleaved_boots.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var transformedRead = NifGeometrySignatureReader.TryReadFullVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.NotNull(transformedRead);
+            Assert.Equal(sourceRead.Count, transformedRead!.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one extra-wide large-prefix interleaved float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithHighHeelFootwear_ReportsHeelAnalysisAndValidationWarning()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputRoot = Path.Combine(workingDirectory, "input");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var armorDirectory = Path.Combine(inputRoot, "meshes", "armor", "heels");
+        Directory.CreateDirectory(armorDirectory);
+        var armorMesh = Path.Combine(armorDirectory, "ebony_highheel_boots_1.nif");
+        var groundMesh = Path.Combine(armorDirectory, "ebony_highheel_boots_gnd.nif");
+
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+            armorMesh,
+            SyntheticNifTestData.CreateBodyVertices(320),
+            partitionSlots: [37, 38]);
+        await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+            groundMesh,
+            SyntheticNifTestData.CreateBodyVertices(320),
+            partitionSlots: [37, 38]);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputRoot, "3BA");
+            var inspectedHeelReport = Assert.Single(inspection.NifSupport ?? [], static report => report.MeshPath.EndsWith("_1.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(inspectedHeelReport.HeelAnalysis);
+            Assert.Equal("high-heel", inspectedHeelReport.HeelAnalysis!.Profile);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputRoot, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"HeelAnalysis\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Profile\": \"high-heel\"", qualityJson, StringComparison.Ordinal);
+
+            var worldPhysicsJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "world-physics.json"));
+            Assert.Contains("\"HeelAnalysis\"", worldPhysicsJson, StringComparison.Ordinal);
+            Assert.Contains("\"Profile\": \"high-heel\"", worldPhysicsJson, StringComparison.Ordinal);
+
+            Assert.Contains("\"Code\": \"heel-offset-review\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("high-heel", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -3412,6 +4878,364 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithSmallBsTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_sse_bstrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_sse_bstrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one low-vertex SSE half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsSubIndexTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bssubindextrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsSubIndexTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bssubindextrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSSubIndexTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsSegmentedTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bssegmentedtrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsSegmentedTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bssegmentedtrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted BSSegmentedTriShape NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSSegmentedTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsDynamicTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bsdynamictrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsDynamicTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bsdynamictrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsDynamicTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsDynamicTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSDynamicTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsLodTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bslodtrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsLodTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bslodtrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted BSLODTriShape NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsLodTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsLodTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSLODTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsMeshLodTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bsmeshlodtrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsMeshLodTriShapeStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bsmeshlodtrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted BSMeshLODTriShape NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsMeshLodTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsMeshLodTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSMeshLODTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithWideStrideBsTriShapeStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "wide_stride_bstrishape_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices, stride: 48);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "wide_stride_bstrishape_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted wide-stride SSE NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsTriShapeVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsTriShapeVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one wide-stride SSE half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithSmallInterleavedFloatStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "small_interleaved_float_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(64);
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("interleaved-float", nifSupport.ParseMode);
+            Assert.Equal(64, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "small_interleaved_float_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted NIF was not written.");
+
+            var sourceRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(inputFile));
+            var transformedRead = ReadInterleavedFloatVertices(await File.ReadAllBytesAsync(writtenPath));
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        Math.Abs(src.X - dst.X) > 0.0001f ||
+                        Math.Abs(src.Y - dst.Y) > 0.0001f ||
+                        Math.Abs(src.Z - dst.Z) > 0.0001f)
+                    .Any(static changed => changed),
+                "Expected at least one low-vertex interleaved float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithSourceOverride_StepRecordsOverride()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -3452,6 +5276,31 @@ public sealed class NifOutputAndSourceOverrideTests
 
             Assert.True(result.Success);
             Assert.DoesNotContain(result.Steps, s => s.StartsWith("source-body-override:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithCrossGenderSourceOverride_RecordsStep()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cross_gender_armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(inputFile, "TNG", outputDirectory, SourceBodyOverride: "CBBE"));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("source-body-override:CBBE", StringComparison.Ordinal));
+            Assert.Contains(result.Steps, s => s.Equals("cross-gender-conversion:female→male", StringComparison.Ordinal));
         }
         finally
         {
@@ -3659,6 +5508,19 @@ public sealed class PhysicsXmlTests
     }
 
     [Fact]
+    public async Task BuildAsync_TargetSpecificPhysicsBones_GeneratesAdditionalSmpNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("mixed", "default", true, TargetPhysicsBones: ["NPC L Pec", "NPC R Pec", "NPC Belly", "TNG Genitals", "TNG Balls"]);
+
+        var config = await service.BuildAsync(mesh, "TNG", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("TNG Genitals", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("TNG Balls", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BuildAsync_CbpcOnlyProfile_NoSmpXml()
     {
         var service = new BasicPhysicsSupportService();
@@ -3687,6 +5549,8 @@ public sealed class PhysicsXmlTests
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml")));
         }
         finally
         {
@@ -3937,6 +5801,188 @@ internal sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
 public sealed class BsdSliderDataTests
 {
     [Fact]
+    public void BsdMorphReader_ReadsPayloadHeaderAndDeltas()
+    {
+        var bytes = BuildBsdPayload("PayloadWaist", isHighWeight: true, [(0.125f, -0.25f, 0.375f), (0.5f, 0.625f, -0.75f)]);
+
+        var ok = BsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal("PayloadWaist", payload!.SliderName);
+        Assert.True(payload.IsHighWeight);
+        Assert.Equal(2, payload.VertexCount);
+        Assert.Equal(0.125f, payload.Deltas[0].X, 3);
+        Assert.Equal(-0.75f, payload.Deltas[1].Z, 3);
+    }
+
+    [Fact]
+    public void BsdMorphReader_WithTrailingBytes_IsRejected()
+    {
+        byte[] bytes = [.. BuildBsdPayload("PayloadWaist", isHighWeight: false, [(0.125f, -0.25f, 0.375f)]), (byte)0x01, 0x02, 0x03];
+
+        Assert.False(BsdMorphReader.TryRead(bytes, out _));
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithOnlySliderFiles_StillMarksReferenceAssetsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "armor_0.nif");
+        var ospPath = Path.Combine(workingDirectory, "armor.osp");
+        var triPath = Path.Combine(workingDirectory, "armor.tri");
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(ospPath, "<SliderSet><Slider name=\"Belly\" /></SliderSet>");
+        await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(1, ("Belly", [(0.125f, 0f, 0f)])));
+
+        try
+        {
+            var armor = new ImportedArmor(
+                meshPath,
+                [meshPath],
+                [],
+                [],
+                [ospPath, triPath]);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.False(resolved.SourceAssetSupport!.HasReferenceAssets);
+            Assert.Contains("reference-assets", resolved.SourceAssetSupport.MissingAssets!);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+
+            foreach (var morph in morphs)
+            {
+                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+                writer.Write((ushort)nameBytes.Length);
+                writer.Write(nameBytes);
+                writer.Write((uint)morph.Deltas.Count);
+            }
+
+            foreach (var morph in morphs)
+            {
+                foreach (var (x, y, z) in morph.Deltas)
+                {
+                    writer.Write((short)Math.Round(x * 2048f));
+                    writer.Write((short)Math.Round(y * 2048f));
+                    writer.Write((short)Math.Round(z * 2048f));
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_UsesNestedOspMetadataToDiscoverShapeDataAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "nordic");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets", "Packs");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "FancySupport");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "nordic_cuirass_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "body_pack.osp");
+        var triPath = Path.Combine(shapeDataDirectory, "shared_source.tri");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="FancySupport" set="3BA">
+                <OutputPath>meshes\armor\nordic\</OutputPath>
+                <OutputFile gender="f" use="true">nordic_cuirass_0.nif</OutputFile>
+                <OutputFile gender="f" use="true" morphfile="1">nordic_cuirass_1.nif</OutputFile>
+                <Slider name="NordicWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(triPath, BuildInlineTriPayload(1, ("NordicWaist", [(0.125f, 0f, 0f)])));
+        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+
+        var unrelatedShapeData = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "UnrelatedSupport");
+        Directory.CreateDirectory(unrelatedShapeData);
+        await File.WriteAllTextAsync(
+            Path.Combine(sliderSetDirectory, "unrelated.osp"),
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="UnrelatedSupport" set="3BA">
+                <OutputPath>meshes\armor\other\</OutputPath>
+                <OutputFile gender="f" use="true">other_armor_0.nif</OutputFile>
+                <Slider name="WrongSlider" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(Path.Combine(unrelatedShapeData, "wrong.tri"), BuildInlineTriPayload(1, ("WrongSlider", [(0.25f, 0f, 0f)])));
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("NordicWaist", resolved.Sliders);
+            Assert.DoesNotContain("WrongSlider", resolved.Sliders);
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.True(resolved.SourceAssetSupport!.HasOsp);
+            Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+            Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+            Assert.DoesNotContain("reference-assets", resolved.SourceAssetSupport.MissingAssets ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+
+        static byte[] BuildInlineTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+        {
+            using var ms = new MemoryStream();
+            using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+            writer.Write((uint)vertexCount);
+            writer.Write((uint)morphs.Length);
+
+            foreach (var morph in morphs)
+            {
+                var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+                writer.Write((ushort)nameBytes.Length);
+                writer.Write(nameBytes);
+                writer.Write((uint)morph.Deltas.Count);
+            }
+
+            foreach (var morph in morphs)
+            {
+                foreach (var (x, y, z) in morph.Deltas)
+                {
+                    writer.Write((short)Math.Round(x * 2048f));
+                    writer.Write((short)Math.Round(y * 2048f));
+                    writer.Write((short)Math.Round(z * 2048f));
+                }
+            }
+
+            return ms.ToArray();
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4043,11 +6089,75 @@ public sealed class BsdSliderDataTests
         }
     }
 
-public sealed class TriMorphFileTests
-{
-    [Fact]
-    public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+    private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
     {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write((byte)'B');
+        writer.Write((byte)'S');
+        writer.Write((byte)'D');
+        writer.Write((byte)0);
+        writer.Write((ushort)1);
+        writer.Write(isHighWeight ? (byte)1 : (byte)0);
+        writer.Write((ushort)nameBytes.Length);
+        writer.Write(nameBytes);
+        writer.Write((uint)deltas.Count);
+        foreach (var (x, y, z) in deltas)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        return ms.ToArray();
+    }
+
+    public sealed class TriMorphFileTests
+    {
+        [Fact]
+        public void TriMorphReader_ReadsMorphNamesAndDeltaPayloads()
+        {
+            var bytes = BuildTriPayload(
+                vertexCount: 2,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0.5f, 0.25f, 0.125f)]),
+                ("HideCape_1", [(0f, 0f, 0f), (0.25f, -0.25f, 0.5f)]));
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(2, payload!.VertexCount);
+            Assert.Equal(2, payload.Morphs.Count);
+            Assert.Equal("BreastLift", payload.Morphs[0].Name);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+            Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+        }
+
+        [Fact]
+        public void TriMorphReader_WithTrailingBytes_IsRejected()
+        {
+            byte[] bytes = [.. BuildTriPayload(
+                    vertexCount: 1,
+                    ("BreastLift", [(0.125f, 0f, -0.25f)])), (byte)0x01, 0x02, 0x03];
+
+            Assert.False(TriMorphReader.TryRead(bytes, out _));
+        }
+
+        [Fact]
+        public void TriMorphReader_WithDeltaCountGreaterThanVertexCount_IsRejected()
+        {
+            var bytes = BuildTriPayload(
+                vertexCount: 1,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0.5f, 0.25f, 0.125f)]));
+
+            Assert.False(TriMorphReader.TryRead(bytes, out _));
+        }
+
+        [Fact]
+        public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
+        {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
         Directory.CreateDirectory(workingDirectory);
@@ -4154,6 +6264,35 @@ public sealed class TriMorphFileTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    private static byte[] BuildTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (x, y, z) in morph.Deltas)
+            {
+                writer.Write((short)Math.Round(x * 2048f));
+                writer.Write((short)Math.Round(y * 2048f));
+                writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
+    }
 }
 
 public sealed class BodySignatureVertexCountTests
@@ -4161,9 +6300,18 @@ public sealed class BodySignatureVertexCountTests
     [Theory]
     [InlineData("CBBE",  6942)] // within 6800-7100
     [InlineData("UNP",   6032)] // within 5900-6200
+    [InlineData("UUNP",  9000)] // within 8200-9800
+    [InlineData("COCO CBBE", 9800)] // within 9000-10400
+    [InlineData("COCO UUNP", 10032)] // within 9400-10800
     [InlineData("HIMBO", 6820)] // within 6600-7100
     [InlineData("BHUNP", 10080)] // within 9800-10400
     [InlineData("3BA",   10032)] // within 9800-10400
+    [InlineData("TBD",   7680)] // within 7400-7900
+    [InlineData("SAM",   5984)] // within 5800-6200
+    [InlineData("SOS",   6274)] // within 6100-6500
+    [InlineData("TNG",   6640)] // within 6400-6900
+    [InlineData("UBE",   7000)] // within 6800-7200
+    [InlineData("Vanilla", 5000)] // within 4000-6100
     public void BodySignatureTemplate_VertexCountRanges_IncludeTypicalCounts(string bodyName, int typicalCount)
     {
         var template = VanillaBodySignatureDatabase.Templates
@@ -4250,6 +6398,33 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_UsesReferenceSignatureDatabaseFor3BBBReferenceAssets()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mystery_armor.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "3bbb_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("3BA", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("reference:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_UsesUvSignatureEvidence()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4290,6 +6465,100 @@ public sealed class BodySignatureVertexCountTests
         var result = await service.DetectAsync(armor, CancellationToken.None);
 
         Assert.Equal("CUSTOM", result.Body);
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_ReturnsUnknownForAmbiguousCocoFamilyMatch()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "coco_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "cocobody_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("UNKNOWN", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("ambiguous:COCO CBBE|COCO UUNP", StringComparison.Ordinal)
+                                                       || evidence.StartsWith("ambiguous:COCO UUNP|COCO CBBE", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_ReturnsUnknownForReferenceOnlyCocoFamilyMatch()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "mystery_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "cocobody_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("UNKNOWN", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.Equals("confidence-band:ambiguous", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SignatureBodyDetectionService_GroupsUnpbIntoUnpFamily()
+    {
+        var method = typeof(SignatureBodyDetectionService).GetMethod("GetBodyFamily", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var family = Assert.IsType<string>(method!.Invoke(null, ["UNPB"]));
+
+        Assert.Equal("unp-family", family);
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_PrefersDirectReferenceSpecificityAndAddsConfidenceBand()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "coco_outfit.nif");
+        var bodyRefPath = Path.Combine(workingDirectory, "coco_uunp_7base_reference.tri");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(bodyRefPath, "bodyref");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [bodyRefPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("COCO UUNP", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.Equals("reference-priority:direct-source", StringComparison.Ordinal));
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("confidence-band:", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 }
 
@@ -4417,11 +6686,57 @@ public sealed class PluginPatchGuidanceTests
             Assert.Contains("\"XEditAction\"",        content, StringComparison.Ordinal);
             Assert.Contains("\"PlacementNote\"",      content, StringComparison.Ordinal);
             Assert.Contains("\"RewriteMappings\"",    content, StringComparison.Ordinal);
-            Assert.Contains("meshes/slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("xEdit",                  content, StringComparison.Ordinal);
 
-            var rewrittenMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+            var rewrittenMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
             Assert.True(File.Exists(rewrittenMeshPath), "Converted mesh should be staged at the rewritten plugin path.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_IncludeInstallHintsForMastersAndLoadOrder()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "MasteredArmor.esp");
+        var pluginBytes = BuildSsePluginWithMasters(
+            ["Skyrim.esm", "ArmorPack.esm"],
+            BuildSseRecord(
+                "ARMA",
+                BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MasteredArmorAddon\0"))
+                    .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                    .ToArray(),
+                formId: 0x02000801u));
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"PluginInstallHints\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"SourcePlugin\": \"MasteredArmor.esp\"", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"InheritedMasters\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("Skyrim.esm", patchJson, StringComparison.Ordinal);
+            Assert.Contains("ArmorPack.esm", patchJson, StringComparison.Ordinal);
+            Assert.Contains("MasteredArmor_SlidesmithPatch.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("RecommendedPluginLoadAfter", patchJson, StringComparison.Ordinal);
+            Assert.Contains("Mod Organizer 2 or Vortex", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"RecommendedPluginLoadAfter\": [\n        \"Skyrim.esm\",\n        \"ArmorPack.esm\",\n        \"MasteredArmor.esp\"\n      ]", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingPatchPluginMasters\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"PatchPluginMasterOrderMismatches\": []", patchJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -4456,11 +6771,778 @@ public sealed class PluginPatchGuidanceTests
 
             var content = await File.ReadAllTextAsync(patchPath);
             Assert.Contains("armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("meshes/slidesmith/cbbe/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("slidesmith/cbbe/armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("meshes/slidesmith/cbbe/armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
 
-            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "ironarmor_0.nif");
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
             Assert.True(File.Exists(stagedMeshPath), "Converted mesh should still stage under Data/meshes root.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesSourcePathContext_ToResolveDuplicateFileNames()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "iron"));
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "steel"));
+
+        var espPath = Path.Combine(workingDirectory, "ContextualPaths.esp");
+        var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("meshes/armor/iron/ironarmor_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "meshes", "armor", "iron", "ironarmor_0.nif"), "iron-mesh");
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "meshes", "armor", "steel", "ironarmor_0.nif"), "steel-mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var content = await File.ReadAllTextAsync(patchPath);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/iron/ironarmor_0.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", content, StringComparison.Ordinal);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesMatchedSourceFileName_ForNonstandardPluginLayout()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "outfits", "nordic", "world"));
+
+        var espPath = Path.Combine(workingDirectory, "NonstandardPaths.esp");
+        var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("meshes/world/variant/nordic/nordic_cuirass.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "outfits", "nordic", "world", "nordic_cuirass_0.nif"),
+            "nonstandard-mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var content = await File.ReadAllTextAsync(patchPath);
+            Assert.Contains("meshes/world/variant/nordic/nordic_cuirass.nif", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/world/variant/nordic/nordic_cuirass_0.nif", content, StringComparison.OrdinalIgnoreCase);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "world", "variant", "nordic", "nordic_cuirass_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_PrefersSourceDirectoryWithFullWeightPair_WhenDuplicateExactFileNamesExist()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "nordic"));
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "duplicates", "nordic"));
+
+        var espPath = Path.Combine(workingDirectory, "WeightedAmbiguous.esp");
+        var pluginBytes = BuildMinimalSsePluginWithArmaMod2Path("meshes/armor/common/nordic_cuirass_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_0.nif"),
+            "primary-0");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_1.nif"),
+            "primary-1");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "duplicates", "nordic", "nordic_cuirass_0.nif"),
+            "duplicate-0");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "common", "nordic_cuirass_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesLinkedArmoContext_ToResolveAmbiguousArmaMeshPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "iron"));
+        Directory.CreateDirectory(Path.Combine(workingDirectory, "meshes", "armor", "steel"));
+
+        var espPath = Path.Combine(workingDirectory, "LinkedContext.esp");
+        var pluginBytes = BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+            armoEditorId: "LinkedWorldArmor",
+            armoFormId: 0x00000801u,
+            armoWorldMeshPath: "meshes/armor/iron/iron_ground.nif",
+            linkedArmaFormId: 0x00000802u,
+            armaEditorId: "LinkedSharedAddon",
+            armaMeshPath: "meshes/armor/common/shared_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "iron", "iron_ground.nif"),
+            "iron-ground");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "iron", "shared_0.nif"),
+            "iron-shared");
+        await File.WriteAllTextAsync(
+            Path.Combine(workingDirectory, "meshes", "armor", "steel", "shared_0.nif"),
+            "steel-shared");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/armor/common/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/shared_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "common", "shared_0.nif");
+            Assert.True(File.Exists(stagedMeshPath));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesLinkedGroupInference_WhenAllRelatedPluginPathsAreIndividuallyAmbiguous()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var espPath = Path.Combine(workingDirectory, "LinkedGroupInference.esp");
+        var pluginBytes = BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+            armoEditorId: "LinkedGroupArmor",
+            armoFormId: 0x00000801u,
+            armoWorldMeshPath: "meshes/armor/common/skyguard_ground.nif",
+            linkedArmaFormId: 0x00000802u,
+            armaEditorId: "LinkedGroupAddon",
+            armaMeshPath: "meshes/armor/common/skyguard_0.nif");
+        await File.WriteAllBytesAsync(espPath, pluginBytes);
+
+        var preferredFamily = Path.Combine(workingDirectory, "meshes", "source", "skyguard");
+        var decoyWorldFamily = Path.Combine(workingDirectory, "meshes", "decoy-world");
+        var decoyEquipFamily = Path.Combine(workingDirectory, "meshes", "decoy-equipped");
+        Directory.CreateDirectory(preferredFamily);
+        Directory.CreateDirectory(decoyWorldFamily);
+        Directory.CreateDirectory(decoyEquipFamily);
+
+        await File.WriteAllTextAsync(Path.Combine(preferredFamily, "skyguard_ground.nif"), "preferred-world");
+        await File.WriteAllTextAsync(Path.Combine(preferredFamily, "skyguard_0.nif"), "preferred-equipped");
+        await File.WriteAllTextAsync(Path.Combine(decoyWorldFamily, "skyguard_ground.nif"), "decoy-world");
+        await File.WriteAllTextAsync(Path.Combine(decoyEquipFamily, "skyguard_0.nif"), "decoy-equipped");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/skyguard_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/cbbe/armor/common/skyguard_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_VerifiesLinkedArmoToArmaRewriteCoverage()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var pluginPath = Path.Combine(workingDirectory, "LinkedArmor.esp");
+        await File.WriteAllBytesAsync(
+            pluginPath,
+            BuildMinimalSsePluginWithLinkedArmoAndArma(
+                armoEditorId: "LinkedArmor",
+                armoFormId: 0x00000801u,
+                linkedArmaFormId: 0x00000802u,
+                armaEditorId: "LinkedAddon",
+                armaMeshPath: "meshes/armor/iron/ironarmor_0.nif"));
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedStagedMeshes\": []", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_ReportsMissingLinkedArmaRecord()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var pluginPath = Path.Combine(workingDirectory, "BrokenLinkedArmor.esp");
+        await File.WriteAllBytesAsync(
+            pluginPath,
+            BuildMinimalSsePluginWithLinkedArmoAndArma(
+                armoEditorId: "BrokenArmor",
+                armoFormId: 0x00000801u,
+                linkedArmaFormId: 0x00009999u,
+                armaEditorId: "UnusedAddon",
+                armaMeshPath: "meshes/armor/iron/ironarmor_0.nif",
+                includeArmaRecord: false));
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("0x00009999", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-link-missing-arma-record", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_VerifiesCrossPluginLinkedArmaUsingMasters()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseAddon.esp"),
+            BuildSsePluginWithMasters(
+                ["Skyrim.esm"],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("BaseLinkedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossLinkedArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedStagedMeshes\": []", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesMasterAwareLinkedResolution_WhenDifferentPluginsShareFormId()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "AAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("WrongAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/steel/steelarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RightAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("ChoosesRightAddon\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/steel/steelarmor_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ChoosesRightAddon (0x01000801) -> WrongAddon", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesIndexedMasterLinkedResolution_WhenSecondMasterSharesLocalFormId()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "FirstAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("WrongIndexedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/steel/steelarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "SecondAddon.esp"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RightIndexedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["FirstAddon.esp", "SecondAddon.esp"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("IndexedMasterArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x01000802u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("IndexedMasterArmor (0x00000801) -> WrongIndexedAddon", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_UsesLightMasterLinkedResolution_WhenFeReferenceTargetsSecondMaster()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseMaster.esm"),
+            BuildSsePluginWithMasters([]));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "LightAddon.esl"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("LightLinkedAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "TargetArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseMaster.esm", "LightAddon.esl"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("LightMasterArmor\0"))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0xFE001802u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 1", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("LightMasterArmor (0x02000801) -> LightAddon.esl::0x00001802", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PluginPatches_LegacyLinkedFormIds_FallBackToOwningPluginScope()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var stagedMeshPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "armor", "iron", "ironarmor_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(stagedMeshPath)!);
+        File.WriteAllText(stagedMeshPath, "mesh");
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "meshes/slidesmith/cbbe/armor/iron/ironarmor_0.nif"
+                },
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["meshes/armor/iron/ironarmor_0.nif"] = "armor/iron/ironarmor_0.nif"
+                },
+                [],
+                [],
+                1);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["LegacyArmor.esp [ESP; confidence=1.00]"],
+                [
+                    new PluginArmorAddon(
+                        "LegacyArmor.esp [ESP; confidence=1.00]",
+                        ["meshes/armor/iron/ironarmor_0.nif"],
+                        FormId: 0x00000802u,
+                        EditorId: "LegacyAddon",
+                        OwningPluginFileName: Path.Combine(outputDirectory, "LegacyArmor.esp"),
+                        LocalFormId: 0x00000802u)
+                ],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "LegacyArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x00000801u,
+                        EditorId: "LegacyArmor",
+                        LinkedArmorAddonFormIds: [0x00000802u],
+                        OwningPluginFileName: "LegacyArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences: null)
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase) { stagedMeshPath },
+                    Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    Array.Empty<NifSupportReport>()
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(1, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Empty(report.MissingLinkedStagedMeshes ?? []);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void PluginPatches_UnscannedMasterLinkedArmorAddons_AreReportedSeparatelyFromMissingRecords()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var rewritePlan = new PluginRewritePlan(
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                [],
+                [],
+                0);
+
+            var pluginAnalysis = new PluginAnalysisResult(
+                ["TargetArmor.esp [ESP; confidence=1.00]"],
+                [],
+                string.Empty,
+                [
+                    new PluginArmorRecord(
+                        "TargetArmor.esp [ESP; confidence=1.00]",
+                        [],
+                        FormId: 0x01000801u,
+                        EditorId: "TargetArmor",
+                        OwningPluginFileName: "TargetArmor.esp",
+                        LocalFormId: 0x00000801u,
+                        LinkedArmorAddonReferences:
+                        [
+                            new PluginLinkedFormReference(
+                                RawFormId: 0x02001802u,
+                                OwningPluginFileName: "ExternalAddon.esm",
+                                LocalFormId: 0x00001802u)
+                        ])
+                ],
+                null);
+
+            var method = typeof(LocalExportService).GetMethod(
+                "BuildPluginRewriteVerificationReport",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            var report = Assert.IsType<PluginRewriteVerificationReport>(method!.Invoke(
+                null,
+                new object?[]
+                {
+                    rewritePlan,
+                    pluginAnalysis,
+                    outputDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                    Array.Empty<string>(),
+                    Array.Empty<NifSupportReport>()
+                }));
+
+            Assert.Equal(1, report.LinkedArmorReferenceCount);
+            Assert.Equal(0, report.VerifiedLinkedArmorReferenceCount);
+            Assert.Empty(report.MissingLinkedArmorAddonRecords ?? []);
+            Assert.Contains(
+                "TargetArmor (0x01000801) -> ExternalAddon.esm::0x00001802",
+                report.UnscannedLinkedArmorAddonReferences ?? []);
+            Assert.Empty(report.MissingLinkedConvertedMatches ?? []);
+            Assert.Empty(report.MissingLinkedStagedMeshes ?? []);
+        }
+        finally
+        {
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PluginPatches_RicherCrossPluginMasterFailureFixture_ReportsAmbiguousAndMissingLinkedOutputs()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "BaseLinked.esm"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RelicAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000802u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "SecondLinked.esm"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("MissingBootAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_boots_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000803u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "RelicArmor.esp"),
+            BuildSsePluginWithMasters(
+                ["BaseLinked.esm", "SecondLinked.esm"],
+                BuildSseRecord(
+                    "ARMO",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RelicArmor\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/common/relic_ground.nif\0")))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u)))
+                        .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0x01000803u)))
+                        .ToArray(),
+                    formId: 0x02000801u)));
+
+        var packA = Path.Combine(workingDirectory, "meshes", "pack-a");
+        var packB = Path.Combine(workingDirectory, "meshes", "pack-b");
+        Directory.CreateDirectory(packA);
+        Directory.CreateDirectory(packB);
+        await File.WriteAllTextAsync(Path.Combine(packA, "relic_ground.nif"), "pack-a-ground");
+        await File.WriteAllTextAsync(Path.Combine(packA, "relic_0.nif"), "pack-a-equipped");
+        await File.WriteAllTextAsync(Path.Combine(packB, "relic_ground.nif"), "pack-b-ground");
+        await File.WriteAllTextAsync(Path.Combine(packB, "relic_0.nif"), "pack-b-equipped");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"LinkedArmorReferenceCount\": 2", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"VerifiedLinkedArmorReferenceCount\": 0", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedConvertedMatches\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/armor/common/relic_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/armor/common/relic_boots_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("plugin-link-missing-converted-match", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -4474,6 +7556,73 @@ public sealed class PluginPatchGuidanceTests
         var tes4 = BuildSseRecord("TES4", []);
         var arma = BuildSseRecord("ARMA", mod2Data, formId: 0x00001234u);
         return [..tes4, ..arma];
+    }
+
+    private static byte[] BuildMinimalSsePluginWithLinkedArmoAndArma(
+        string armoEditorId,
+        uint armoFormId,
+        uint linkedArmaFormId,
+        string armaEditorId,
+        string armaMeshPath,
+        bool includeArmaRecord = true)
+    {
+        var tes4 = BuildSseRecord("TES4", []);
+        var armoEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armoEditorId + "\0"));
+        var armoLinkData = BuildSubrecord("ARMA", BitConverter.GetBytes(linkedArmaFormId));
+        var armoData = armoEditorData.Concat(armoLinkData).ToArray();
+        var armo = BuildSseRecord("ARMO", armoData, formId: armoFormId);
+        if (!includeArmaRecord)
+        {
+            return [..tes4, ..armo];
+        }
+
+        var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
+        var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));
+        var armaData = armaEditorData.Concat(armaMeshData).ToArray();
+        var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
+        return [..tes4, ..armo, ..arma];
+    }
+
+    private static byte[] BuildMinimalSsePluginWithLinkedArmoWorldAndArma(
+        string armoEditorId,
+        uint armoFormId,
+        string armoWorldMeshPath,
+        uint linkedArmaFormId,
+        string armaEditorId,
+        string armaMeshPath)
+    {
+        var tes4 = BuildSseRecord("TES4", []);
+        var armoEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armoEditorId + "\0"));
+        var armoWorldData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armoWorldMeshPath + "\0"));
+        var armoLinkData = BuildSubrecord("ARMA", BitConverter.GetBytes(linkedArmaFormId));
+        var armoData = armoEditorData.Concat(armoWorldData).Concat(armoLinkData).ToArray();
+        var armo = BuildSseRecord("ARMO", armoData, formId: armoFormId);
+
+        var armaEditorData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(armaEditorId + "\0"));
+        var armaMeshData = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(armaMeshPath + "\0"));
+        var armaData = armaEditorData.Concat(armaMeshData).ToArray();
+        var arma = BuildSseRecord("ARMA", armaData, formId: linkedArmaFormId);
+        return [..tes4, ..armo, ..arma];
+    }
+
+    private static byte[] BuildSsePluginWithMasters(IReadOnlyList<string> masters, params byte[][] records)
+    {
+        var tes4 = BuildSseRecord("TES4", BuildTes4DataWithMasters(masters));
+        return [..tes4, ..records.SelectMany(static record => record)];
+    }
+
+    private static byte[] BuildTes4DataWithMasters(IReadOnlyList<string> masters)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(BuildSubrecord("HEDR", new byte[12]));
+        ms.Write(BuildSubrecord("CNAM", [0x00]));
+        foreach (var master in masters)
+        {
+            ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+            ms.Write(BuildSubrecord("DATA", new byte[8]));
+        }
+
+        return ms.ToArray();
     }
 
     private static byte[] BuildSseRecord(string tag, byte[] data, uint formId = 0u)
@@ -4639,6 +7788,105 @@ public sealed class PhysicsMeshTypeTuningTests
             Assert.DoesNotContain("NPC L Breast01", config.SmpConfigXml, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public async Task BuildAsync_CustomSpecialBones_EmitsExtendedSmpNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "mixed",
+            "default",
+            true,
+            TargetPhysicsBones: ["Vagina", "Anus", "HDT Mouth", "NPC Head", "HDT HighHeel_L"]);
+
+        var config = await service.BuildAsync(mesh, "UBE", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Vagina", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Anus", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("HDT Mouth", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("NPC Head", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("HDT HighHeel_L", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BuildAsync_BeastAppendageBones_EmitsTailWingHornAndHairNodes()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "mixed",
+            "default",
+            true,
+            TargetPhysicsBones: ["Tail4", "WingTip.L", "Horn.L", "ManeFront"]);
+
+        var config = await service.BuildAsync(mesh, "Goat Humanoid", "smp", CancellationToken.None);
+
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Tail4", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("WingTip.L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("Horn.L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("ManeFront", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuiltInBodyCatalog_ExposesUbeAndSosSpecialBones()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("UBE", out var ube));
+        Assert.Contains("Vagina", ube.AvailablePhysicsBones);
+        Assert.Contains("Anus", ube.AvailablePhysicsBones);
+        Assert.Contains("BellyLower", ube.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
+        Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
+        Assert.Contains("SOS Scrotum", sos.AvailablePhysicsBones);
+    }
+
+    [Fact]
+    public void BuiltInBodyCatalog_ExposesBeastAppendageBones()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Goat Humanoid", out var goat));
+        Assert.Contains("Horn.L", goat.AvailablePhysicsBones);
+        Assert.Contains("Hock.L", goat.AvailablePhysicsBones);
+        Assert.Contains("Tail3", goat.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hagraven", out var hagraven));
+        Assert.Contains("WingTip.L", hagraven.AvailablePhysicsBones);
+        Assert.Contains("Feather.L", hagraven.AvailablePhysicsBones);
+    }
+
+    [Fact]
+    public void DataDrivenCatalogs_LoadCurrentDetectionAndMeshBehaviorTuning()
+    {
+        Assert.Equal(0.35d, BodyDetectionTuningCatalog.Current.MeshTokenWeight);
+        Assert.Equal(0.12d, BodyDetectionTuningCatalog.Current.AmbiguityMargin);
+
+        var plate = MeshBehaviorCatalog.Get("plate");
+        Assert.Equal(1.12d, plate.ClippingThreshold);
+        Assert.Equal(0.072d, plate.BaseInflation);
+        Assert.Contains("SAM", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("SAM Light", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("TNG", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
+        Assert.Contains("NPC L Breast02", fallbacks);
+        Assert.True(RaceCompatibilityCatalog.TryGetRace(0x00023FE9u, out var khajiitRace));
+        Assert.Contains("beast", khajiitRace.Groups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));
+        Assert.Equal("COCO CBBE", cocoRule.Body);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Goat Humanoid", out var goatRule));
+        Assert.Contains("humanoid", goatRule.CompatibleGroups);
+        Assert.Contains("beast", goatRule.CompatibleGroups);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HornTip.L", "horned-humanoid", out var hornFallbacks));
+        Assert.Contains("Horn.L", hornFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingTip.L", "winged-humanoid", out var wingFallbacks));
+        Assert.Contains("Wing.L", wingFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Tail4", "equine-humanoid", out var equineTailFallbacks));
+        Assert.Contains("Tail3", equineTailFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Hock.L", "digitigrade-beast", out var digitigradeFallbacks));
+        Assert.Contains("NPC L Calf", digitigradeFallbacks);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
+        Assert.Equal("tail", groupName);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4657,6 +7905,8 @@ public sealed class ExpandedPresetTests
     [InlineData("SAM Muscular",  "SAM")]
     [InlineData("SOS Lean",      "SOS")]
     [InlineData("SOS Athletic",  "SOS")]
+    [InlineData("TNG Athletic",  "TNG")]
+    [InlineData("TNG Muscular",  "TNG")]
     [InlineData("UBE Petite",    "UBE")]
     [InlineData("UBE Curvy",     "UBE")]
     [InlineData("CBBE Zeroed",   "CBBE")]
@@ -4667,9 +7917,17 @@ public sealed class ExpandedPresetTests
     [InlineData("HIMBO Zeroed",  "HIMBO")]
     [InlineData("SAM Zeroed",    "SAM")]
     [InlineData("SOS Zeroed",    "SOS")]
+    [InlineData("TNG Zeroed",    "TNG")]
     [InlineData("UBE Zeroed",    "UBE")]
     [InlineData("Vanilla Zeroed","Vanilla")]
     [InlineData("Vanilla Balanced", "Vanilla")]
+    [InlineData("Goat Humanoid Balanced", "Goat Humanoid")]
+    [InlineData("Hagraven Balanced", "Hagraven")]
+    [InlineData("Spriggan Balanced", "Spriggan")]
+    [InlineData("Vanilla to TNG","TNG")]
+    [InlineData("Vanilla to Goat Humanoid","Goat Humanoid")]
+    [InlineData("Vanilla to Hagraven","Hagraven")]
+    [InlineData("Vanilla to Spriggan","Spriggan")]
     [InlineData("HIMBO Athletic","HIMBO")]
     public void PresetCatalog_NewPresets_ResolvesToCorrectBody(string presetName, string expectedBody)
     {
@@ -4678,9 +7936,9 @@ public sealed class ExpandedPresetTests
     }
 
     [Fact]
-    public void PresetCatalog_AllCount_AtLeast27()
+    public void PresetCatalog_AllCount_AtLeast36()
     {
-        Assert.True(PresetCatalog.All.Count >= 27, $"Expected >= 27 presets, got {PresetCatalog.All.Count}");
+        Assert.True(PresetCatalog.All.Count >= 36, $"Expected >= 36 presets, got {PresetCatalog.All.Count}");
     }
 }
 
@@ -4696,7 +7954,12 @@ public sealed class BodyTransformationFieldTests
     [InlineData("HIMBO")]
     [InlineData("SAM")]
     [InlineData("SOS")]
+    [InlineData("TNG")]
     [InlineData("Vanilla")]
+    [InlineData("Vanilla Beast")]
+    [InlineData("Goat Humanoid")]
+    [InlineData("Hagraven")]
+    [InlineData("Spriggan")]
     public void BodyTransformationFieldCatalog_AllBodyTypes_Have11Regions(string body)
     {
         var fields = BodyTransformationFieldCatalog.Resolve(body);
@@ -4819,7 +8082,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.Contains(expected, names);
         }
@@ -4837,7 +8100,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "HIMBO", "SAM", "SOS", "UBE", "Vanilla" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -4883,10 +8146,16 @@ public sealed class BodyTypeCatalogTests
             ("3BA",     "smp+cbpc"),
             ("BHUNP",   "smp+cbpc"),
             ("UNP",     "cbpc"),
+            ("UNPB",    "cbpc"),
+            ("UUNP",    "cbpc"),
+            ("COCO CBBE", "smp+cbpc"),
+            ("COCO UUNP", "smp+cbpc"),
             ("TBD",     "cbpc"),
             ("HIMBO",   "smp"),
             ("SAM",     "smp"),
+            ("SAM Light", "smp"),
             ("SOS",     "smp"),
+            ("TNG",     "smp"),
             ("UBE",     "smp+cbpc"),
         })
         {
@@ -4898,7 +8167,7 @@ public sealed class BodyTypeCatalogTests
         }
 
         // Bodies without built-in physics must report DefaultPhysics = "none".
-        foreach (var bodyName in new[] { "CBBE", "Vanilla" })
+        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast", "Goat Humanoid", "Hagraven", "Spriggan" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
                 $"No profile for {bodyName}");
@@ -4906,6 +8175,73 @@ public sealed class BodyTypeCatalogTests
             Assert.False(profile.HasSoftBodyPhysicsByDefault, $"{bodyName} should report HasSoftBodyPhysicsByDefault=false");
             Assert.Equal("smp+cbpc", profile.RecommendedPhysicsProfile, StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    [Theory]
+    [InlineData("3BBB", "3BA")]
+    [InlineData("CBBE 3BBB", "3BA")]
+    [InlineData("UNP Blessed", "UNPB")]
+    [InlineData("PB", "UNPB")]
+    [InlineData("Blessed Body", "UNPB")]
+    [InlineData("7B Oppai", "UUNP")]
+    [InlineData("Wench Body 7B Oppai", "UUNP")]
+    [InlineData("SevenBase Bombshell", "UUNP")]
+    [InlineData("Shiva UUNP", "UUNP")]
+    [InlineData("Shiva CBBE", "CBBE")]
+    [InlineData("Shiva TBD", "TBD")]
+    [InlineData("SAMLight", "SAM Light")]
+    [InlineData("Schlongs of Skyrim", "SOS")]
+    [InlineData("The New Gentleman", "TNG")]
+    [InlineData("Ultimate Body Enhancer", "UBE")]
+    [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
+    [InlineData("Hag Raven", "Hagraven")]
+    [InlineData("Schlongs-of-Skyrim", "SOS")]
+    [InlineData("Sam-Light", "SAM Light")]
+    public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
+    {
+        Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));
+        Assert.True(BodyTypeCatalog.TryResolve(requested, out var body));
+        Assert.Equal(expected, body.Name);
+    }
+
+    [Theory]
+    [InlineData("3BBB", "3BA")]
+    [InlineData("Touched By Dibella", "TBD")]
+    [InlineData("Shiva TBD", "TBD")]
+    [InlineData("PB body", "UNPB")]
+    [InlineData("7BO", "UUNP")]
+    [InlineData("TNG Extended", "TNG")]
+    [InlineData("Vanilla Body", "Vanilla")]
+    [InlineData("Goat Reborn", "Goat Humanoid")]
+    [InlineData("Spriggan Body", "Spriggan")]
+    public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
+    {
+        Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
+        Assert.Equal(expected, profile.Name);
+    }
+
+    [Theory]
+    [InlineData("Shiva")]
+    [InlineData("Bombshell")]
+    [InlineData("Shizo's body")]
+    public void BodyTypeCatalog_ResolveName_DoesNotForceUnsafeAmbiguousMappings(string requested)
+    {
+        Assert.Equal(requested, BodyTypeCatalog.ResolveName(requested));
+        Assert.False(BodyTechnicalProfileCatalog.TryGet(requested, out _));
+    }
+
+    [Theory]
+    [InlineData("HIMBO", true)]
+    [InlineData("SAM", true)]
+    [InlineData("SAM Light", true)]
+    [InlineData("SOS", true)]
+    [InlineData("TNG", true)]
+    [InlineData("The New Gentleman", true)]
+    [InlineData("CBBE", false)]
+    [InlineData("3BA", false)]
+    public void BodyTypeCatalog_IsMaleBody_RecognizesBuiltInMaleTargetsAndAliases(string requested, bool expected)
+    {
+        Assert.Equal(expected, BodyTypeCatalog.IsMaleBody(requested));
     }
 
     [Fact]
@@ -4928,6 +8264,23 @@ public sealed class BodyTypeCatalogTests
         Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("off", "none")]
+    [InlineData("disabled", "none")]
+    [InlineData("cbp", "cbpc")]
+    [InlineData("cbpc only", "cbpc")]
+    [InlineData("hdt-smp", "smp")]
+    [InlineData("FSMP", "smp")]
+    [InlineData("faster hdt-smp", "smp")]
+    [InlineData("hdt-smp + cbpc", "smp+cbpc")]
+    [InlineData("cbpc + fsmp", "smp+cbpc")]
+    [InlineData("full soft body", "smp+cbpc")]
+    public void PhysicsProfileCatalog_TryNormalize_CommonRealWorldAliasesNormalizes(string value, string expected)
+    {
+        Assert.True(PhysicsProfileCatalog.TryNormalize(value, out var normalized));
+        Assert.Equal(expected, normalized, StringComparer.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void PhysicsProfileCatalog_ToDisplayName_ShowsSoftBodyLabelForSmpCbpc()
     {
@@ -4943,6 +8296,28 @@ public sealed class BodyTypeCatalogTests
             Assert.True(PhysicsProfileCatalog.Descriptions.ContainsKey(profile),
                 $"Missing description for physics profile '{profile}'");
         }
+    }
+}
+
+public sealed class RuntimeReadinessReporterTests
+{
+    [Fact]
+    public void CreateCliReport_IncludesCatalogDataHealthCheck()
+    {
+        var checks = RuntimeReadinessReporter.CreateCliReport(Environment.ProcessPath);
+
+        var catalogCheck = Assert.Single(checks, check => check.Area == "Catalog data");
+        Assert.Equal("OK", catalogCheck.Status);
+        Assert.Contains("body aliases", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skeleton frameworks", catalogCheck.Details, StringComparison.OrdinalIgnoreCase);
+
+        var nifCheck = Assert.Single(checks, check => check.Area == "NIF parsing");
+        Assert.Equal("OK", nifCheck.Status);
+        Assert.Contains("readable NIF modes", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bslod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bsmeshlod-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bssegmented-half-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nimesh-float", nifCheck.Details, StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -5078,6 +8453,95 @@ public sealed class SourceTargetDeltaTests
         var expectedDelta = unpField[region] / cbbeField[region];
         Assert.Equal(expectedDelta, result.RegionalMorphing[region], precision: 5);
     }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_CrossGenderTuning_AdjustsMaleToFemaleDelta()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var himboField = BodyTransformationFieldCatalog.Resolve("HIMBO");
+        var ubeField = BodyTransformationFieldCatalog.Resolve("UBE");
+        var baseBreastDelta = ubeField["breasts"] / himboField["breasts"];
+        var baseShoulderDelta = ubeField["shoulders"] / himboField["shoulders"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "UBE", null, "HIMBO", CancellationToken.None);
+
+        Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
+        Assert.True(Math.Abs(result.RegionalMorphing["shoulders"] - 1d) < Math.Abs(baseShoulderDelta - 1d));
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_AmplifiesUbeDelta()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        var ubeField = BodyTransformationFieldCatalog.Resolve("UBE");
+        var baseBreastDelta = ubeField["breasts"] / cbbeField["breasts"];
+        var baseButtDelta = ubeField["butt"] / cbbeField["butt"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "UBE", null, "CBBE", CancellationToken.None);
+
+        Assert.True(Math.Abs(result.RegionalMorphing["breasts"] - 1d) > Math.Abs(baseBreastDelta - 1d));
+        Assert.True(Math.Abs(result.RegionalMorphing["butt"] - 1d) > Math.Abs(baseButtDelta - 1d));
+    }
+
+    [Theory]
+    [InlineData("CBBE", "UNP", "breasts")]
+    [InlineData("UNPB", "UNP", "breasts")]
+    [InlineData("UUNP", "UNP", "butt")]
+    [InlineData("COCO CBBE", "CBBE", "breasts")]
+    [InlineData("COCO UUNP", "UUNP", "butt")]
+    [InlineData("TBD", "UNP", "thighs")]
+    [InlineData("Vanilla Beast", "Vanilla", "pelvis")]
+    [InlineData("Goat Humanoid", "Vanilla Beast", "calves")]
+    [InlineData("Hagraven", "CBBE", "arms")]
+    [InlineData("Spriggan", "CBBE", "waist")]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_CoversAdditionalBodies(
+        string targetBody,
+        string sourceBody,
+        string region)
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var sourceField = BodyTransformationFieldCatalog.Resolve(sourceBody);
+        var targetField = BodyTransformationFieldCatalog.Resolve(targetBody);
+        var baseDelta = targetField[region] / sourceField[region];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, targetBody, null, sourceBody, CancellationToken.None);
+
+        Assert.True(
+            Math.Abs(result.RegionalMorphing[region] - 1d) > Math.Abs(baseDelta - 1d),
+            $"{targetBody} should tune the {region} region beyond the untuned base delta from {sourceBody}.");
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_TargetBodySpecificTuning_LeavesVanillaUntuned()
+    {
+        var service = new StrategyMeshConversionService();
+        var armor = new ImportedArmor("test.nif", ["test.nif"], [], [], []);
+        var analysis = new MeshAnalysis("leather", false, 1);
+        var cage = new DeformationCage("hybrid-cage");
+
+        var cbbeField = BodyTransformationFieldCatalog.Resolve("CBBE");
+        var vanillaField = BodyTransformationFieldCatalog.Resolve("Vanilla");
+        var baseChestDelta = vanillaField["chest"] / cbbeField["chest"];
+        var baseWaistDelta = vanillaField["waist"] / cbbeField["waist"];
+
+        var result = await service.ConvertAsync(armor, analysis, cage, "Vanilla", null, "CBBE", CancellationToken.None);
+
+        Assert.Equal(baseChestDelta, result.RegionalMorphing["chest"], precision: 5);
+        Assert.Equal(baseWaistDelta, result.RegionalMorphing["waist"], precision: 5);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5111,7 +8575,7 @@ public sealed class ArmorRegionBindingTests
 
     [Theory]
     [InlineData("cuirass.nif",   "chest")]
-    [InlineData("boots.nif",     "legs")]
+    [InlineData("boots.nif",     "feet")]
     [InlineData("gauntlets.nif", "arms")]
     [InlineData("helmet.nif",    "shoulders")]
     public async Task BasicArmorRegionBindingService_FilenameHints_DetectsCorrectRegion(string fileName, string expectedRegion)
@@ -5134,6 +8598,35 @@ public sealed class ArmorRegionBindingTests
         finally
         {
             Directory.Delete(workingDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicArmorRegionBindingService_FootPartitions_DetectFeetAndCalves()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "heel_boots.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+                meshPath,
+                SyntheticNifTestData.CreateFootwearVertices(),
+                partitionSlots: [37, 38]);
+
+            var service = new BasicArmorRegionBindingService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var analysis = new MeshAnalysis("leather", false, 1);
+
+            var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+            Assert.Contains("feet", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("calves", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
@@ -5276,6 +8769,1489 @@ public sealed class BatchReportTests
     }
 }
 
+public sealed class RealisticModPackFixtureTests
+{
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_PreservesModReadyOutputs()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass_n.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "hdtSMP64", "nordic_cuirass.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "femalebody_0.nif")));
+            var sliderSetsDirectory = Path.Combine(cuirassOutput.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "dependency-map.json")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "fomod", "ModuleConfig.xml")));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(Path.Combine(bootsOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_boots_0.nif")));
+            Assert.True(File.Exists(Path.Combine(bootsOutput.OutputDirectory, "meshes", "slidesmith", "3ba", "nordic_boots_1.nif")));
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "batch-report.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithLegacyAliasTarget_PreservesModReadyOutputs()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Wench Body 7B Oppai", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "uunp", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "slidesmith", "uunp", "nordic_cuirass_1.nif")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "fomod", "ModuleConfig.xml")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
+
+            var readme = await File.ReadAllTextAsync(Path.Combine(cuirassOutput.OutputDirectory, "README.txt"));
+            Assert.Contains("Target body:    UUNP", readme, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackZip_WritesBatchReadinessArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var archivePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.zip");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            ZipFile.CreateFromDirectory(workingDirectory, archivePath, CompressionLevel.Optimal, includeBaseDirectory: false);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(archivePath, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var validationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json"));
+            Assert.Contains("\"TotalCount\": 2", validationJson, StringComparison.Ordinal);
+            Assert.Contains("\"PackReadinessStatus\"", validationJson, StringComparison.Ordinal);
+
+            var cuirassOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("nordic_cuirass"), StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "textures", "armor", "nordic", "nordic_cuirass.dds")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meshes", "actors", "character", "character assets", "skeleton_female.nif")));
+        }
+        finally
+        {
+            if (Directory.Exists(workingDirectory))
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+
+            if (File.Exists(archivePath))
+            {
+                File.Delete(archivePath);
+            }
+
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithOutputZip_PackagesInstallableMirrorOfFolderOutput()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory, OutputZip: true));
+            Assert.True(result.Success);
+
+            var zipPath = outputDirectory + ".zip";
+            Assert.True(File.Exists(zipPath), $"Expected packaged ZIP at {zipPath}.");
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            AssertZipMatchesDirectory(archive, outputDirectory);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithMixedPlugins_PreservesContextualPluginMeshes()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        var pluginLocalEsp = Path.Combine(workingDirectory, "NordicAddon.esp");
+        await File.WriteAllBytesAsync(pluginLocalEsp, BuildFixtureArmaPlugin("armor/nordic/nordic_cuirass_0.nif"));
+
+        var worldModelEsp = Path.Combine(workingDirectory, "NordicWorld.esp");
+        await File.WriteAllBytesAsync(worldModelEsp, BuildFixtureArmoPlugin("meshes/armor/nordic/nordic_boots_0.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("slidesmith/3ba/armor/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/armor/nordic/nordic_boots_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "armor", "nordic", "nordic_boots_0.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModPackDirectory_WithNonstandardPluginLayout_StagesTngMeshes()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace();
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        var sourceMeshPath = Path.Combine(workingDirectory, "meshes", "variants", "nordic", "world", "nordic_cuirass_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceMeshPath)!);
+        File.Copy(
+            Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_0.nif"),
+            sourceMeshPath,
+            overwrite: true);
+
+        var pluginPath = Path.Combine(workingDirectory, "NordicVariant.esp");
+        await File.WriteAllBytesAsync(pluginPath, BuildFixtureArmaPlugin("meshes/world/variant/nordic/nordic_cuirass.nif"));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "TNG", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/tng/world/variant/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "world", "variant", "nordic", "nordic_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "nordic_cuirass_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureModPackDirectory_FlagsUnsupportedLayoutAndPreservesGuidanceArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("Conversion Readiness &amp; Next Actions", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("Recommended next actions", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("preview-workbench.html", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("conversion-quality.json", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("supported Skyrim NIF layout", previewHtml, StringComparison.OrdinalIgnoreCase);
+
+            var workbenchHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview-workbench.html"));
+            Assert.Contains("Recommended next actions", workbenchHtml, StringComparison.Ordinal);
+            Assert.Contains("conversion-quality.json", workbenchHtml, StringComparison.Ordinal);
+
+            using var packValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+            var packReadinessStatus = packValidation.RootElement.GetProperty("PackReadinessStatus").GetString();
+            Assert.True(
+                string.Equals(packReadinessStatus, "needs-review", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(packReadinessStatus, "high-risk", StringComparison.OrdinalIgnoreCase),
+                $"Expected reviewable pack readiness status but found '{packReadinessStatus}'.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureAmbiguousTieModPackDirectory_PrefersCanonicalFamilyWhileKeepingFailureGuidance()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureAmbiguousTieModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/3ba/common/nordic/nordic_cuirass_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/common/nordic/nordic_cuirass_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("BSSubIndexTriShape", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("BSSubIndexTriShape", previewHtml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureNiLinesModPackDirectory_FlagsUnsupportedLineFamilyInDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureNiLinesModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+
+            Assert.Equal(2, results.Count);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var bootsOutput = results.Single(result =>
+                result.OutputDirectory.EndsWith(Path.Combine("output", "nordic_boots"), StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("NiLinesData", qualityJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(bootsOutput.OutputDirectory, "preview.html"));
+            Assert.Contains("manual review", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("NiLines", previewHtml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("geometry-family", previewHtml, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureCrossPluginLinkedTieModPackDirectory_EmitsUnresolvedTieGroupDiagnostics()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginLinkedTieModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var tieGroups = patchJson.RootElement.GetProperty("UnresolvedTieGroups");
+            Assert.True(tieGroups.GetArrayLength() >= 2);
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                string.Equals(element.GetProperty("PluginMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-a", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains(tieGroups.EnumerateArray(), element =>
+                element.GetProperty("CandidateSourceFamilies").EnumerateArray().Any(value =>
+                    string.Equals(value.GetString(), "meshes/pack-b", StringComparison.OrdinalIgnoreCase)));
+
+            var proposedSteps = patchJson.RootElement.GetProperty("ProposedPatchSteps");
+            var tiedStep = proposedSteps.EnumerateArray().First(element =>
+                string.Equals(element.GetProperty("OriginalMeshPath").GetString(), "meshes/armor/common/relic_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(
+                "No linked ARMO/ARMA neighbor produced a unique source-family match.",
+                tiedStep.GetProperty("ManualReviewReason").GetString());
+            Assert.True(tiedStep.GetProperty("SharedCandidateFamilies").GetArrayLength() > 0);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/pack-a", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailureCrossPluginUnscannedMasterModPackDirectory_ReportsLinkedMasterGap()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureCrossPluginUnscannedMasterModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("\"UnscannedLinkedArmorAddonReferences\": [", patchJson, StringComparison.Ordinal);
+            Assert.Contains("MissingLinkedMaster.esp", patchJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_RealisticModularFrameworkFixture_PrefersSiblingSourceFamilyOverLeafDirectoryCollision()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticModularFrameworkModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DeviousDevices.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    [
+                        "meshes/devious/devices/devious_panel_0.nif",
+                        "meshes/devious/devices/restraint_0.nif",
+                        "meshes/devious/devices/restraint_1.nif"
+                    ],
+                    FormId: 0x00004321u,
+                    EditorId: "DeviousHarnessAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/devices/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_1.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_1.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_PrefersNonFirstPersonSourceMesh_WhenPluginPathIsUnsuffixed()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_1stperson_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_0.nif", sourceMeshMap["meshes/armor/common/steelboots.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_PrefersFirstPersonSourceMesh_WhenPluginPathUsesFirstPersonStem()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_1stperson_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots_1stperson.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_1stperson_0.nif", sourceMeshMap["meshes/armor/common/steelboots_1stperson.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_PrefersFirstPersonSourceMesh_WhenPluginPathUsesFpAlias()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_1stperson_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots_fp.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_1stperson_0.nif", sourceMeshMap["meshes/armor/common/steelboots_fp.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_MatchesGroundAliasBetweenGndAndGround()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_ground.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots_gnd.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_ground.nif", sourceMeshMap["meshes/armor/common/steelboots_gnd.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_MatchesShortGenderAliasBetweenFAndFemale()
+    {
+        var sourceMeshPaths = new[]
+        {
+            "/tmp/meshes/armor/steel/steelboots_male_0.nif",
+            "/tmp/meshes/armor/steel/steelboots_female_0.nif",
+        };
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["SteelBoots.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ArmorAddon (ARMA)",
+                    ["meshes/armor/common/steelboots_f_0.nif"],
+                    FormId: 0x00004321u,
+                    EditorId: "SteelBootsAddon")
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal("/tmp/meshes/armor/steel/steelboots_female_0.nif", sourceMeshMap["meshes/armor/common/steelboots_f_0.nif"]);
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticModularStandaloneAddonModPackDirectory_ResolvesStandaloneArmaFamilyContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModularStandaloneAddonModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/devious_panel_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            using var patchReport = JsonDocument.Parse(patchJson);
+            Assert.Equal(0, patchReport.RootElement.GetProperty("UnresolvedTieGroups").GetArrayLength());
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "devious_panel_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_StandaloneMasterChainFixture_UsesMasterChainFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticMasterChainStandaloneAddonModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["MasterChainStandaloneChild.esp", "MasterChainStandaloneMaster.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "MasterChainStandaloneMaster.esp",
+                    ["meshes/devious/ebonite/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "LinkedDeviousHarnessPanelAA",
+                    OwningPluginFileName: "MasterChainStandaloneMaster.esp",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "MasterChainStandaloneChild.esp",
+                    ["meshes/devious/devices/restraint_0.nif"],
+                    FormId: 0x02000801u,
+                    EditorId: "LinkedDeviousHarnessRestraintAA",
+                    OwningPluginFileName: "MasterChainStandaloneChild.esp",
+                    LocalFormId: 0x00000801u,
+                    DeclaredMasterFileNames: ["MasterChainStandaloneMaster.esp"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var unresolvedTieGroups = Assert.IsAssignableFrom<IReadOnlyList<object>>(
+            plan.GetType().GetProperty("UnresolvedTieGroups")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Empty(unresolvedTieGroups);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/ebonite/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_RealisticLinkedModularFrameworkFixture_UsesLinkedMasterChildFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticLinkedModularFrameworkModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["LinkedDeviousChild.esp", "LinkedDeviousMaster.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "LinkedDeviousMaster.esp",
+                    ["meshes/devious/devices/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "LinkedDeviousPanelAA",
+                    OwningPluginFileName: "LinkedDeviousMaster.esp",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "LinkedDeviousMaster.esp",
+                    [
+                        "meshes/devious/devices/restraint_0.nif",
+                        "meshes/devious/devices/restraint_1.nif"
+                    ],
+                    FormId: 0x00000801u,
+                    EditorId: "LinkedDeviousRestraintAA",
+                    OwningPluginFileName: "LinkedDeviousMaster.esp",
+                    LocalFormId: 0x00000801u)
+            ],
+            PatchGuidance: string.Empty,
+            ArmorRecords:
+            [
+                new PluginArmorRecord(
+                    "LinkedDeviousChild.esp",
+                    ["meshes/devious/devices/restraint_ground.nif"],
+                    FormId: 0x00000810u,
+                    EditorId: "LinkedDeviousHarnessArmor",
+                    LinkedArmorAddonReferences:
+                    [
+                        new PluginLinkedFormReference(0x00000800u, "LinkedDeviousMaster.esp", 0x00000800u),
+                        new PluginLinkedFormReference(0x00000801u, "LinkedDeviousMaster.esp", 0x00000801u)
+                    ],
+                    OwningPluginFileName: "LinkedDeviousChild.esp",
+                    LocalFormId: 0x00000810u,
+                    DeclaredMasterFileNames: ["LinkedDeviousMaster.esp"])
+            ]);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/devices/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_1.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_1.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "world", "restraint_ground.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_ground.nif"]);
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticLinkedModularFrameworkModPackDirectory_ResolvesCrossPluginFamilyContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticLinkedModularFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousMaster.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/devious_panel_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_0.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_1.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("meshes/slidesmith/3ba/devious/devices/restraint_ground.nif", patchJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"MissingLinkedArmorAddonRecords\": []", patchJson, StringComparison.Ordinal);
+
+            using var patchReport = JsonDocument.Parse(patchJson);
+            Assert.Equal(0, patchReport.RootElement.GetProperty("UnresolvedTieGroups").GetArrayLength());
+            Assert.Equal(0, patchReport.RootElement
+                .GetProperty("RewriteVerification")
+                .GetProperty("UnscannedLinkedArmorAddonReferences")
+                .GetArrayLength());
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "devious_panel_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_ground.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticMultiBlockLinkedFrameworkModPackDirectory_TransformsEveryExplicitHalfFloatBlock()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMultiBlockLinkedFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var sourceNifPath = Path.Combine(workingDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif");
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector().InspectAsync(sourceNifPath, "CBBE");
+            var nifSupport = (inspection.NifSupport ?? [])
+                .Single(report => string.Equals(report.MeshPath, sourceNifPath, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+            Assert.True(result.Success);
+
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe", "devious", "devices", "restraint_0.nif");
+            Assert.True(File.Exists(writtenPath), "Converted multi-block framework NIF was not written.");
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("\"AmbiguousConvertedMatches\": []", patchJson, StringComparison.Ordinal);
+
+            var sourceBytes = await File.ReadAllBytesAsync(sourceNifPath);
+            var transformMethod = typeof(LocalExportService).GetMethod(
+                "TryApplyNifHalfFloatVertexTransform",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(transformMethod);
+
+            var transformedBytes = Assert.IsType<byte[]>(transformMethod!.Invoke(null, new object[]
+            {
+                sourceBytes,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = 1.32d,
+                    ["breasts"] = 1.28d,
+                    ["waist"] = 0.84d,
+                    ["belly"] = 1.18d,
+                    ["thighs"] = 1.22d,
+                },
+                BasicCageGenerationService.CreatePresetCage("mixed")
+            }));
+
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            Assert.NotEqual(sourceBytes, transformedBytes);
+            Assert.NotEqual(sourceBytes, writtenBytes);
+
+            var sourceSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(sourceBytes);
+            var transformedSubIndex = SyntheticNifTestData.ReadBsSubIndexTriShapeVertices(transformedBytes);
+            Assert.Equal(sourceSubIndex.Count, transformedSubIndex.Count);
+            Assert.True(
+                sourceSubIndex.Zip(transformedSubIndex, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected the BSSubIndexTriShape block to be transformed.");
+
+            var sourceSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(sourceBytes);
+            var transformedSegmented = SyntheticNifTestData.ReadBsSegmentedTriShapeVertices(transformedBytes);
+            Assert.Equal(sourceSegmented.Count, transformedSegmented.Count);
+            Assert.True(
+                sourceSegmented.Zip(transformedSegmented, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected the BSSegmentedTriShape block to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticMasterChainBodyFrameworkModPackDirectory_ResolvesStandaloneMasterChainFamilyContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMasterChainBodyFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        static byte[] BuildSubrecordLocal(string tag, byte[] data)
+        {
+            var buf = new byte[6 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            buf[4] = (byte)(data.Length & 0xFF);
+            buf[5] = (byte)((data.Length >> 8) & 0xFF);
+            data.CopyTo(buf, 6);
+            return buf;
+        }
+
+        static void WriteUInt32LeLocal(byte[] buf, int offset, uint value)
+        {
+            buf[offset] = (byte)value;
+            buf[offset + 1] = (byte)(value >> 8);
+            buf[offset + 2] = (byte)(value >> 16);
+            buf[offset + 3] = (byte)(value >> 24);
+        }
+
+        static byte[] BuildSseRecordLocal(string tag, byte[] data, uint formId = 0u)
+        {
+            var buf = new byte[24 + data.Length];
+            System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(buf, 0);
+            WriteUInt32LeLocal(buf, 4, (uint)data.Length);
+            WriteUInt32LeLocal(buf, 8, 0u);
+            WriteUInt32LeLocal(buf, 12, formId);
+            data.CopyTo(buf, 24);
+            return buf;
+        }
+
+        static byte[] BuildTes4DataWithMastersLocal(IReadOnlyList<string> masters)
+        {
+            using var ms = new MemoryStream();
+            ms.Write(BuildSubrecordLocal("HEDR", new byte[12]));
+            ms.Write(BuildSubrecordLocal("CNAM", new byte[] { 0 }));
+            foreach (var master in masters)
+            {
+                ms.Write(BuildSubrecordLocal("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+                ms.Write(BuildSubrecordLocal("DATA", new byte[8]));
+            }
+
+            return ms.ToArray();
+        }
+
+        static byte[] BuildSsePluginWithMastersLocal(IReadOnlyList<string> masters, params byte[][] records)
+        {
+            var tes4 = BuildSseRecordLocal("TES4", BuildTes4DataWithMastersLocal(masters));
+            return [..tes4, ..records.SelectMany(static record => record)];
+        }
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneRoot.esp"),
+            BuildSsePluginWithMastersLocal(
+                [],
+                BuildSseRecordLocal(
+                    "ARMA",
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessPanelAA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/ebonite/devious_panel_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000800u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneBridge.esp"),
+            BuildSsePluginWithMastersLocal(
+                ["MasterChainStandaloneRoot.esp"],
+                BuildSseRecordLocal(
+                    "ARMA",
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraintAA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChainStandaloneChild.esp"),
+            BuildSsePluginWithMastersLocal(
+                ["MasterChainStandaloneBridge.esp"],
+                BuildSseRecordLocal(
+                    "ARMA",
+                    BuildSubrecordLocal("EDID", System.Text.Encoding.ASCII.GetBytes("MasterChainHarnessRestraint1AA\0"))
+                        .Concat(BuildSubrecordLocal("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/devious/devices/restraint_1.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000802u)));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var root = patchReport.RootElement;
+            Assert.Equal(0, root.GetProperty("UnresolvedTieGroups").GetArrayLength());
+            Assert.Equal(0, root.GetProperty("LinkedArmorFamilyReviewSteps").GetArrayLength());
+
+            var rewriteMappings = root.GetProperty("RewriteMappings").EnumerateArray().ToList();
+            Assert.Contains(rewriteMappings, mapping =>
+                string.Equals(mapping.GetProperty("OriginalMeshPath").GetString(), "meshes/devious/devices/restraint_0.nif", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(mapping.GetProperty("RewrittenMeshPath").GetString(), "meshes/slidesmith/3ba/devious/devices/restraint_0.nif", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(rewriteMappings, mapping =>
+                string.Equals(mapping.GetProperty("OriginalMeshPath").GetString(), "meshes/devious/devices/restraint_1.nif", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(mapping.GetProperty("RewrittenMeshPath").GetString(), "meshes/slidesmith/3ba/devious/devices/restraint_1.nif", StringComparison.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "ebonite", "devious_panel_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailurePartialLinkedFamilyModPackDirectory_ReportsMixedFamilyVerification()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailurePartialLinkedFamilyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var partialFamilies = patchReport.RootElement
+                .GetProperty("RewriteVerification")
+                .GetProperty("PartialLinkedArmorFamilyFailures");
+            Assert.Single(partialFamilies.EnumerateArray());
+
+            var linkedArmorFamilyReviewSteps = patchReport.RootElement.GetProperty("LinkedArmorFamilyReviewSteps");
+            Assert.Single(linkedArmorFamilyReviewSteps.EnumerateArray());
+            var reviewStep = linkedArmorFamilyReviewSteps.EnumerateArray().First();
+            Assert.Equal("partial-linked-family-failure", reviewStep.GetProperty("VerificationStatus").GetString());
+            Assert.Contains("xEdit", reviewStep.GetProperty("SuggestedXEditAction").GetString(), StringComparison.Ordinal);
+
+            var partialFamily = partialFamilies.EnumerateArray().First();
+            Assert.Equal("LinkedDeviousHarnessArmor (0x01000810)", partialFamily.GetProperty("ArmorRecord").GetString());
+            Assert.Equal("LinkedDeviousChild.esp", partialFamily.GetProperty("OwningPluginFileName").GetString());
+            Assert.Equal(2, partialFamily.GetProperty("TotalLinkedArmorAddonReferences").GetInt32());
+            Assert.Equal(1, partialFamily.GetProperty("VerifiedLinkedArmorAddonReferences").GetInt32());
+            Assert.Contains(
+                partialFamily.GetProperty("FailureCategories").EnumerateArray().Select(element => element.GetString()),
+                value => string.Equals(value, "missing-converted-match", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                partialFamily.GetProperty("VerifiedLinkedArmorAddonRecords").EnumerateArray().Select(element => element.GetString()),
+                value => value is not null && value.Contains("LinkedDeviousPanelAA", StringComparison.Ordinal));
+            Assert.Contains(
+                partialFamily.GetProperty("UnresolvedLinkedArmorAddonReferences").EnumerateArray().Select(element => element.GetString()),
+                value => value is not null && value.Contains("LinkedDeviousMissingRestraintAA", StringComparison.Ordinal));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousHarnessArmor", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticFailurePartialLinkedFamilyModPackDirectory_WithOutputZip_PackagesReviewArtifactsForModManagers()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailurePartialLinkedFamilyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory, OutputZip: true));
+            Assert.True(result.Success);
+
+            var zipPath = outputDirectory + ".zip";
+            Assert.True(File.Exists(zipPath), $"Expected packaged ZIP at {zipPath}.");
+
+            var stagedMeshPath = Directory
+                .EnumerateFiles(Path.Combine(outputDirectory, "meshes", "slidesmith"), "*.nif", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(outputDirectory, path).Replace('\\', '/'))
+                .FirstOrDefault();
+            Assert.False(string.IsNullOrWhiteSpace(stagedMeshPath), "Expected at least one staged converted mesh in the output folder.");
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            AssertZipContainsEntry(archive, "README.txt");
+            AssertZipContainsEntry(archive, "conversion-quality.json");
+            AssertZipContainsEntry(archive, "plugin-patches.json");
+            AssertZipContainsEntry(archive, "preview.html");
+            AssertZipContainsEntry(archive, "preview-workbench.html");
+            AssertZipContainsEntry(archive, "fomod/ModuleConfig.xml");
+            AssertZipContainsEntry(archive, "fomod/info.xml");
+            AssertZipContainsEntry(archive, "SKSE/Plugins/hdtSMP64/devious_restraint.xml");
+            AssertZipContainsEntry(archive, stagedMeshPath!);
+
+            var zippedQualityJson = ReadZipEntryText(archive, "conversion-quality.json");
+            Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", zippedQualityJson, StringComparison.Ordinal);
+
+            var zippedPatchJson = ReadZipEntryText(archive, "plugin-patches.json");
+            Assert.Contains("LinkedArmorFamilyReviewSteps", zippedPatchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousHarnessArmor", zippedPatchJson, StringComparison.Ordinal);
+
+            var zippedReadme = ReadZipEntryText(archive, "README.txt");
+            Assert.Contains("Mod Organizer 2 / Vortex", zippedReadme, StringComparison.Ordinal);
+            Assert.Contains("preview-workbench.html", zippedReadme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("plugin-patches.json", zippedReadme, StringComparison.OrdinalIgnoreCase);
+
+            AssertZipMatchesDirectory(archive, outputDirectory);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticHeadgearFullHelmetModPackDirectory_PreservesHeadgearPartitionsAndGroundMesh()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHeadgearFullHelmetModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "HeadgearAddon.esp"),
+            BuildFixtureArmaPlugin("meshes/armor/daedric/daedric_greathelm_0.nif"));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "HeadgearWorld.esp"),
+            BuildFixtureArmoPlugin("meshes/armor/daedric/daedric_greathelm_ground.nif"));
+
+        try
+        {
+            var inspector = StandaloneConversionModules.CreateInspector();
+            var inspection = await inspector.InspectAsync(workingDirectory, "CBBE");
+            Assert.Equal("headgear", inspection.Analysis.MeshType);
+            Assert.Equal(HeadgearSubTypes.FullHelmet, inspection.Analysis.HeadgearSubType);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            var result = Assert.Single(results);
+            Assert.True(result.Success);
+
+            var partitionsStep = Assert.Single(result.Steps, step => step.StartsWith("partitions:", StringComparison.Ordinal));
+            Assert.Contains("30:Head", partitionsStep, StringComparison.Ordinal);
+            Assert.Contains("31:Hair", partitionsStep, StringComparison.Ordinal);
+            Assert.DoesNotContain("42:Circlet", partitionsStep, StringComparison.Ordinal);
+
+            var stagedHelmet0Candidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_0.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_0.nif"),
+            };
+            var stagedHelmet1Candidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_1.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1.nif"),
+            };
+            var stagedGroundCandidates = new[]
+            {
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "armor", "daedric", "daedric_greathelm_ground.nif"),
+                Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_ground.nif"),
+            };
+            Assert.True(stagedHelmet0Candidates.Any(File.Exists), "Expected converted headgear low-weight mesh to be staged.");
+            Assert.True(stagedHelmet1Candidates.Any(File.Exists), "Expected converted headgear high-weight mesh to be staged.");
+            Assert.True(stagedGroundCandidates.Any(File.Exists), "Expected converted headgear ground mesh to be staged.");
+
+            Assert.True(
+                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_0.nif")),
+                "Expected first-person fallback headgear mesh to be staged.");
+            Assert.True(
+                File.Exists(Path.Combine(result.OutputDirectory, "meshes", "slidesmith", "cbbe", "daedric_greathelm_1stperson_1.nif")),
+                "Expected first-person high-weight fallback headgear mesh to be staged.");
+            Assert.True(
+                File.Exists(Path.Combine(outputDirectory, "SlideSmith_daedric_greathelm_0.esp")),
+                "Expected scratch plugin output for the staged headgear package.");
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(result.OutputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("missing-plugin-partitions", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("unknown-export-partitions", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_SingleInput_ReportsStageProgressBeforeCompletion()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputFile = Path.Combine(workingDirectory, "single_armor.nif");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        await File.WriteAllTextAsync(inputFile, "mesh");
+        var updates = new System.Collections.Concurrent.ConcurrentQueue<BatchProgressUpdate>();
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var progress = new Progress<BatchProgressUpdate>(updates.Enqueue);
+
+            var results = await runner.ConvertAsync(
+                new ConversionRequest(inputFile, "CBBE", outputDirectory),
+                progress: progress);
+
+            Assert.Single(results);
+            await Task.Delay(50);
+            Assert.Contains(updates, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Importing input", StringComparison.Ordinal));
+            Assert.Contains(updates, update =>
+                !update.IsItemCompleted &&
+                string.Equals(update.Stage, "Exporting outputs", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    private static string CopyFixtureToTemporaryWorkspace(string fixtureName = "RealisticModPack")
+    {
+        var sourceDirectory = GetFixtureDirectory(fixtureName);
+        var destinationDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        CopyDirectory(sourceDirectory, destinationDirectory);
+        return destinationDirectory;
+    }
+
+    private static string GetFixtureDirectory(string fixtureName = "RealisticModPack", [CallerFilePath] string currentFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(currentFilePath)!,
+            "Fixtures",
+            fixtureName);
+    }
+
+    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        Directory.CreateDirectory(destinationDirectory);
+
+        foreach (var directory in Directory.GetDirectories(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, directory);
+            Directory.CreateDirectory(Path.Combine(destinationDirectory, relative));
+        }
+
+        foreach (var file in Directory.GetFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDirectory, file);
+            var destinationPath = Path.Combine(destinationDirectory, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(file, destinationPath, overwrite: true);
+        }
+    }
+
+    private static void AssertZipContainsEntry(ZipArchive archive, string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        Assert.Contains(
+            archive.Entries,
+            entry => entry.FullName.Replace('\\', '/').Equals(normalizedRelativePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ReadZipEntryText(ZipArchive archive, string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        var entry = archive.Entries.FirstOrDefault(entry =>
+            entry.FullName.Replace('\\', '/').Equals(normalizedRelativePath, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(entry);
+
+        using var stream = entry!.Open();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static void AssertZipMatchesDirectory(ZipArchive archive, string directory)
+    {
+        var expectedFiles = Directory
+            .GetFiles(directory, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(directory, path).Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var archiveEntries = archive.Entries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Name))
+            .Select(static entry => entry.FullName.Replace('\\', '/'))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Equal(expectedFiles, archiveEntries);
+
+        foreach (var relativePath in expectedFiles)
+        {
+            var entry = archive.Entries.FirstOrDefault(candidate =>
+                candidate.FullName.Replace('\\', '/').Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(entry);
+
+            var expectedBytes = File.ReadAllBytes(Path.Combine(directory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            using var archiveStream = entry!.Open();
+            using var ms = new MemoryStream();
+            archiveStream.CopyTo(ms);
+            Assert.Equal(expectedBytes, ms.ToArray());
+        }
+    }
+
+    private static byte[] BuildFixtureArmaPlugin(string meshPath)
+    {
+        var mod2Data = BuildFixtureSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
+        var tes4 = BuildFixtureRecord("TES4", []);
+        var arma = BuildFixtureRecord("ARMA", mod2Data, 0x00001234u);
+        return [.. tes4, .. arma];
+    }
+
+    private static byte[] BuildFixtureArmoPlugin(string meshPath)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+
+        var hedrData = new byte[24];
+        BitConverter.GetBytes(1.70f).CopyTo(hedrData, 0);
+        BitConverter.GetBytes(1).CopyTo(hedrData, 4);
+        BitConverter.GetBytes(0x00000800u).CopyTo(hedrData, 8);
+
+        byte[] tes4Data;
+        using (var ts = new MemoryStream())
+        using (var tw = new BinaryWriter(ts))
+        {
+            tw.Write(System.Text.Encoding.ASCII.GetBytes("HEDR"));
+            tw.Write((ushort)12);
+            tw.Write(hedrData, 0, 12);
+            tes4Data = ts.ToArray();
+        }
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("TES4"));
+        writer.Write((uint)tes4Data.Length);
+        writer.Write(0u);
+        writer.Write(0u);
+        writer.Write(0u);
+        writer.Write((ushort)44);
+        writer.Write((ushort)0);
+        writer.Write(tes4Data);
+
+        var meshPathBytes = System.Text.Encoding.UTF8.GetBytes(meshPath + "\0");
+        byte[] armoPayload;
+        using (var ams = new MemoryStream())
+        using (var aw = new BinaryWriter(ams))
+        {
+            var editorIdBytes = System.Text.Encoding.ASCII.GetBytes("NordicArmo\0");
+            aw.Write(System.Text.Encoding.ASCII.GetBytes("EDID"));
+            aw.Write((ushort)editorIdBytes.Length);
+            aw.Write(editorIdBytes);
+            aw.Write(System.Text.Encoding.ASCII.GetBytes("MODL"));
+            aw.Write((ushort)meshPathBytes.Length);
+            aw.Write(meshPathBytes);
+            armoPayload = ams.ToArray();
+        }
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("GRUP"));
+        var grupSizeOffset = writer.BaseStream.Position;
+        writer.Write(0u);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("ARMO"));
+        writer.Write(1);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+        writer.Write((ushort)0);
+
+        var groupBodyStart = writer.BaseStream.Position;
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("ARMO"));
+        writer.Write((uint)armoPayload.Length);
+        writer.Write(0u);
+        writer.Write(0x00000801u);
+        writer.Write(0u);
+        writer.Write((ushort)44);
+        writer.Write((ushort)0);
+        writer.Write(armoPayload);
+
+        var grupEnd = writer.BaseStream.Position;
+        writer.BaseStream.Position = grupSizeOffset;
+        writer.Write((uint)(grupEnd - grupSizeOffset + 4));
+        writer.BaseStream.Position = grupEnd;
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildFixtureRecord(string tag, byte[] data, uint formId = 0u)
+    {
+        var bytes = new byte[24 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(bytes, 0);
+        BitConverter.GetBytes((uint)data.Length).CopyTo(bytes, 4);
+        BitConverter.GetBytes(formId).CopyTo(bytes, 12);
+        BitConverter.GetBytes((ushort)44).CopyTo(bytes, 20);
+        data.CopyTo(bytes, 24);
+        return bytes;
+    }
+
+    private static byte[] BuildFixtureSubrecord(string tag, byte[] data)
+    {
+        var bytes = new byte[6 + data.Length];
+        System.Text.Encoding.ASCII.GetBytes(tag).CopyTo(bytes, 0);
+        BitConverter.GetBytes((ushort)data.Length).CopyTo(bytes, 4);
+        data.CopyTo(bytes, 6);
+        return bytes;
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pose simulation, preview.html, and xEdit script tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5401,6 +10377,31 @@ public sealed class PoseSimulationAndPreviewTests
             var svg = await File.ReadAllTextAsync(previewSvgPath);
             Assert.Contains("<svg ", svg, StringComparison.Ordinal);
             Assert.Contains("region-box-", svg, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithBsTriShapeStyleNif_WritesWorkbenchPreviewFromHalfFloatVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "out");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "preview_half_float.nif");
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(320));
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            var html = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
+            Assert.Contains("\"Mode\":\"real-3d-point-cloud\"", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"VertexCount\":320", html, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Conversion Readiness &amp; Next Actions", html, StringComparison.Ordinal);
         }
         finally
         {
@@ -5934,6 +10935,36 @@ public sealed class AnimationDrivenGeometrySolverTests
 
         Assert.Equal(8, result.TestedPoses.Count);
         Assert.True(result.TotalPosesAtRisk > 0, "Heuristic fallback should flag high thigh morph.");
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateWithMeshDataAsync_HighHeelFallback_AddsHeelAwarePoses()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "ebony_highheel_boots_1.nif");
+        await File.WriteAllTextAsync(meshPath, "not-a-real-nif");
+
+        try
+        {
+            var service = new AnimationDrivenPoseSimulationService();
+            var mesh = new ConvertedMesh("leather", "test", 1, new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.12,
+                ["calves"] = 1.04
+            });
+
+            var result = await service.SimulateWithMeshDataAsync(mesh, "3BA", [meshPath], CancellationToken.None);
+
+            Assert.Contains(result.TestedPoses, pose => string.Equals(pose, "Heel-Idle", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.TestedPoses, pose => string.Equals(pose, "Heel-Walk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.PoseClippingRisk.Keys, pose => string.Equals(pose, "Heel-Walk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.HighRiskRegions, region => string.Equals(region, "feet", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     // ── Integration: animation-driven path in full pipeline ───────────────────
@@ -7058,6 +12089,111 @@ public sealed class BinaryArmaParserTests
     }
 
     [Fact]
+    public void ExtractArmoRecords_ExtractsBipedSlotsAndLinkedArmorAddons()
+    {
+        using var bod2Ms = new MemoryStream();
+        WriteUInt32Le(bod2Ms, 0x2001u); // slots 30 and 43
+        WriteUInt32Le(bod2Ms, 0u);
+
+        byte[] bod2 = BuildSubrecord("BOD2", bod2Ms.ToArray());
+        byte[] armaA = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u));
+        byte[] armaB = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000803u));
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/iron_w.nif\0"));
+        byte[] data = [..bod2, ..armaA, ..armaB, ..mod2];
+
+        var plugin = BuildMinimalPlugin_SseWithArmo(data);
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin);
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal([30, 43], descriptor.BipedSlots);
+        Assert.Equal([0x00000802u, 0x00000803u], descriptor.LinkedArmorAddonFormIds);
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_ResolvesLinkedArmorAddonReferenceAcrossMasters()
+    {
+        byte[] linkedArma = BuildSubrecord("ARMA", BitConverter.GetBytes(0x00000802u));
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossPluginArmor\0"));
+        byte[] data = [..edid, ..linkedArma];
+
+        var plugin = BuildMinimalPlugin_SseWithArmoAndMasters(
+            data,
+            formId: 0x01000801u,
+            masters: ["BaseAddon.esp"]);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "TargetArmor.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal("TargetArmor.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000801u, descriptor.LocalFormId);
+        var linkedReference = Assert.Single(descriptor.LinkedArmorAddonReferences!);
+        Assert.Equal(0x00000802u, linkedReference.RawFormId);
+        Assert.Equal("BaseAddon.esp", linkedReference.OwningPluginFileName);
+        Assert.Equal(0x00000802u, linkedReference.LocalFormId);
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_ExtractsAllLinkedArmorAddonsFromSingleArmaSubrecord()
+    {
+        using var armaMs = new MemoryStream();
+        WriteUInt32Le(armaMs, 0x00000802u);
+        WriteUInt32Le(armaMs, 0x00000803u);
+        byte[] linkedArmas = BuildSubrecord("ARMA", armaMs.ToArray());
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("PackedLinksArmor\0"));
+        byte[] data = [..edid, ..linkedArmas];
+
+        var plugin = BuildMinimalPlugin_SseWithArmo(data);
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "PackedLinks.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal([0x00000802u, 0x00000803u], descriptor.LinkedArmorAddonFormIds);
+        Assert.Equal("PackedLinks.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000002u, descriptor.LocalFormId);
+        var linkedReferences = Assert.IsAssignableFrom<IReadOnlyList<PluginLinkedFormReference>>(descriptor.LinkedArmorAddonReferences);
+        Assert.Equal(["PackedLinks.esp", "PackedLinks.esp"], linkedReferences.Select(static reference => reference.OwningPluginFileName));
+        Assert.Equal([0x00000802u, 0x00000803u], linkedReferences.Select(static reference => reference.LocalFormId!.Value));
+    }
+
+    [Fact]
+    public void ExtractArmoRecords_ResolvesAllLinkedArmorAddonReferencesAcrossMastersFromSingleArmaSubrecord()
+    {
+        using var armaMs = new MemoryStream();
+        WriteUInt32Le(armaMs, 0x00000802u);
+        WriteUInt32Le(armaMs, 0x01000803u);
+        byte[] linkedArmas = BuildSubrecord("ARMA", armaMs.ToArray());
+        byte[] edid = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("CrossPluginPackedArmor\0"));
+        byte[] data = [..edid, ..linkedArmas];
+
+        var plugin = BuildMinimalPlugin_SseWithArmoAndMasters(
+            data,
+            formId: 0x02000801u,
+            masters: ["BaseAddon.esp", "SecondAddon.esm"]);
+
+        var descriptors = BinaryArmaParser.ExtractArmoRecords(plugin, "TargetArmor.esp");
+
+        var descriptor = Assert.Single(descriptors);
+        Assert.Equal("TargetArmor.esp", descriptor.OwningPluginFileName);
+        Assert.Equal(0x00000801u, descriptor.LocalFormId);
+        Assert.Equal([0x00000802u, 0x01000803u], descriptor.LinkedArmorAddonFormIds);
+
+        var linkedReferences = Assert.IsAssignableFrom<IReadOnlyList<PluginLinkedFormReference>>(descriptor.LinkedArmorAddonReferences);
+        Assert.Collection(linkedReferences,
+            first =>
+            {
+                Assert.Equal(0x00000802u, first.RawFormId);
+                Assert.Equal("BaseAddon.esp", first.OwningPluginFileName);
+                Assert.Equal(0x00000802u, first.LocalFormId);
+            },
+            second =>
+            {
+                Assert.Equal(0x01000803u, second.RawFormId);
+                Assert.Equal("SecondAddon.esm", second.OwningPluginFileName);
+                Assert.Equal(0x00000803u, second.LocalFormId);
+            });
+    }
+
+    [Fact]
     public void ExtractArmoRecords_EmptyInput_ReturnsEmpty()
     {
         var result = BinaryArmaParser.ExtractArmoRecords([]);
@@ -7103,6 +12239,20 @@ public sealed class BinaryArmaParserTests
 
         Assert.Single(descriptors);
         Assert.Contains("meshes/armor/comp/comp_w.nif", descriptors[0].MeshPaths);
+    }
+
+    [Fact]
+    public void ExtractArmaRecords_PartiallyDecompressedCompressedRecord_IsRejected()
+    {
+        byte[] mod2    = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/armor/comp/bad_0.nif\0"));
+        byte[] armaRec = BuildCompressedRecord(mod2, tag: "ARMA", headerSize: 24);
+        WriteUInt32Le(armaRec, 24, (uint)(mod2.Length + 8));
+        byte[] plugin  = [..BuildMinimalPlugin_SseNoArma(), ..armaRec];
+
+        var descriptors = BinaryArmaParser.ExtractArmaRecords(plugin);
+
+        Assert.Empty(descriptors);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -7171,6 +12321,28 @@ public sealed class BinaryArmaParserTests
         return buf;
     }
 
+    private static byte[] BuildMinimalPlugin_SseNoArmaWithMasters(IReadOnlyList<string> masters)
+    {
+        byte[] hedrData = new byte[12];
+        byte[] hedr = BuildSubrecord("HEDR", hedrData);
+        byte[] cnam = BuildSubrecord("CNAM", [0x00]);
+        using var ms = new MemoryStream();
+        ms.Write(hedr);
+        ms.Write(cnam);
+        foreach (var master in masters)
+        {
+            ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+            ms.Write(BuildSubrecord("DATA", new byte[8]));
+        }
+
+        byte[] tes4Data = ms.ToArray();
+        var buf = new byte[24 + tes4Data.Length];
+        System.Text.Encoding.ASCII.GetBytes("TES4").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)tes4Data.Length);
+        tes4Data.CopyTo(buf, 24);
+        return buf;
+    }
+
     private static byte[] BuildMinimalPlugin_SseWithArma(byte[] armaSubrecords)
     {
         byte[] tes4 = BuildMinimalPlugin_SseNoArma();
@@ -7214,6 +12386,20 @@ public sealed class BinaryArmaParserTests
         System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
         WriteUInt32Le(buf, 4, (uint)armoSubrecords.Length);
         WriteUInt32Le(buf, 12, 0x00000002u); // FormID
+        armoSubrecords.CopyTo(buf, 24);
+        return [..tes4, ..buf];
+    }
+
+    private static byte[] BuildMinimalPlugin_SseWithArmoAndMasters(
+        byte[] armoSubrecords,
+        uint formId,
+        IReadOnlyList<string> masters)
+    {
+        byte[] tes4 = BuildMinimalPlugin_SseNoArmaWithMasters(masters);
+        var buf = new byte[24 + armoSubrecords.Length];
+        System.Text.Encoding.ASCII.GetBytes("ARMO").CopyTo(buf, 0);
+        WriteUInt32Le(buf, 4, (uint)armoSubrecords.Length);
+        WriteUInt32Le(buf, 12, formId);
         armoSubrecords.CopyTo(buf, 24);
         return [..tes4, ..buf];
     }
@@ -7443,6 +12629,28 @@ public sealed class PatchPluginWriterTests
         var asLatin1 = System.Text.Encoding.Latin1.GetString(patchBytes);
         Assert.Contains("MAST", asLatin1);
         Assert.Contains(masterName, asLatin1);
+    }
+
+    [Fact]
+    public void BuildPatchPlugin_Tes4DataPreservesInheritedMastersBeforeSourcePlugin()
+    {
+        byte[] mod2 = BuildSubrecord("MOD2",
+            System.Text.Encoding.ASCII.GetBytes("meshes/orig/a.nif\0"));
+        var descriptor = BuildDescriptor(0x02000001u, "ArmorRec", mod2);
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/orig/a.nif"] = "meshes/slidesmith/new/a.nif"
+        };
+
+        var (patchBytes, _) = PatchPluginWriter.BuildPatchPlugin(
+            "OriginalArmor.esp",
+            [descriptor],
+            rewriteMap,
+            headerSize: 24,
+            inheritedMasterFileNames: ["Skyrim.esm", "BaseAddon.esp"]);
+
+        var masters = BinaryArmaParser.ExtractMasterFileNames(patchBytes);
+        Assert.Equal(["Skyrim.esm", "BaseAddon.esp", "OriginalArmor.esp"], masters);
     }
 
     [Fact]
@@ -7785,6 +12993,8 @@ public sealed class ConversionReadmeGeneratorTests
         var readme = BuildReadme(patchEspGenerated: true, espPath: "/out/MyMod_SlidesmithPatch.esp");
         Assert.Contains("SlidesmithPatch", readme);
         Assert.Contains("override patch", readme);
+        Assert.Contains("Mod Organizer 2 / Vortex", readme, StringComparison.Ordinal);
+        Assert.Contains("after the source armor mod", readme, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -7803,6 +13013,175 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public void Generate_WithValidationIssues_IncludesIssueSpecificNextSteps()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            72,
+            2,
+            0,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "unsupported-nif-layout",
+                    "high",
+                    "Some NIF meshes could not be parsed with supported geometry readers and require manual review: boots_0.nif."),
+                new ConversionValidationIssue(
+                    "plugin-link-missing-converted-match",
+                    "high",
+                    "A linked ARMA path could not be matched to a converted mesh.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("Validation summary:", readme);
+        Assert.Contains("Status: needs-review (score 72)", readme);
+        Assert.Contains("[HIGH] unsupported-nif-layout", readme);
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conversion-quality.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("supported Skyrim NIF layout", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[HIGH] plugin-link-missing-converted-match", readme);
+        Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("xEdit context", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("patch-armor.pas", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithCleanValidationSummary_StatesNoFollowUpIssues()
+    {
+        var readme = BuildReadme(validationSummary: new ConversionValidationSummary("ready", 100, 0, 0, 0, []));
+        Assert.Contains("Status: ready (score 100)", readme);
+        Assert.Contains("No follow-up issues were reported", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithPluginInstallHints_ListsPatchMastersAndLoadOrder()
+    {
+        var readme = BuildReadme(
+            pluginInstallHints:
+            [
+                new PluginInstallHint(
+                    "ArmorPack.esp",
+                    ["BaseMaster.esm", "SharedAddon.esm"],
+                    "ArmorPack_SlidesmithPatch.esp",
+                    ["BaseMaster.esm", "SharedAddon.esm", "ArmorPack.esp"],
+                    "Keep the SlideSmith output mod below the source armor mod.",
+                    false,
+                    ["ArmorPack_SlidesmithPatch.esp should load after ArmorPack.esp."])
+            ]);
+
+        Assert.Contains("PLUGIN LOAD ORDER & REVIEW", readme);
+        Assert.Contains("Source plugin: ArmorPack.esp", readme);
+        Assert.Contains("Generated patch: ArmorPack_SlidesmithPatch.esp", readme);
+        Assert.Contains("Inherited masters: BaseMaster.esm -> SharedAddon.esm", readme);
+        Assert.Contains("Load-after chain: BaseMaster.esm -> SharedAddon.esm -> ArmorPack.esp", readme);
+        Assert.Contains("Manual review required: no", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithManualReviewPluginInstallHint_FlagsManualReview()
+    {
+        var readme = BuildReadme(
+            pluginInstallHints:
+            [
+                new PluginInstallHint(
+                    "AmbiguousAddon.esl",
+                    [],
+                    null,
+                    ["AmbiguousAddon.esl"],
+                    "Keep the SlideSmith output mod below the source armor mod.",
+                    true,
+                    ["Automated rewrite was skipped because the plugin uses an ambiguous ESL/ESPFE layout and should be reviewed in xEdit before installing any override patch."])
+            ]);
+
+        Assert.Contains("Source plugin: AmbiguousAddon.esl", readme);
+        Assert.Contains("Generated patch: none", readme);
+        Assert.Contains("Manual review required: yes", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ambiguous ESL/ESPFE layout", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithFootwearPoseAndSkeletonIssues_ReferencesExactFollowUpReports()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            68,
+            2,
+            1,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "pose-risk",
+                    "high",
+                    "Stress poses showed elevated collision risk in calf and foot regions."),
+                new ConversionValidationIssue(
+                    "heel-offset-review",
+                    "medium",
+                    "Raised-heel footwear should be checked after conversion."),
+                new ConversionValidationIssue(
+                    "unsupported-bones",
+                    "high",
+                    "The target rig is missing custom follower heel bones.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("pose-simulation-report.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("world-physics.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("heel offset", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skeleton-compatibility.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unsupported custom-rig bones", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithMissingPreviewIssue_TellsUserToRegenerateVisualReviewBundle()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            81,
+            0,
+            0,
+            1,
+            [
+                new ConversionValidationIssue(
+                    "missing-preview-workbench",
+                    "low",
+                    "preview-workbench.html was not generated, so the side-by-side review workbench is missing.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("preview-workbench.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview.html", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview.svg", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("re-run the conversion", readme, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_WithUnmappedPluginIssue_FallsBackToExactPluginReviewGuidance()
+    {
+        var validationSummary = new ConversionValidationSummary(
+            "needs-review",
+            63,
+            1,
+            0,
+            0,
+            [
+                new ConversionValidationIssue(
+                    "plugin-master-chain-edge-case",
+                    "high",
+                    "Follower addon chain still points at an unresolved master record after rewrite planning.")
+            ]);
+
+        var readme = BuildReadme(validationSummary: validationSummary);
+
+        Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("xEdit", readme, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Follower addon chain still points at an unresolved master record after rewrite planning.", readme, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Generate_IsNonEmptyString()
     {
         var readme = BuildReadme();
@@ -7814,7 +13193,9 @@ public sealed class ConversionReadmeGeneratorTests
     private static string BuildReadme(
         bool patchEspGenerated = false,
         string? espPath = null,
-        bool includeBsd = false)
+        bool includeBsd = false,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints = null,
+        ConversionValidationSummary? validationSummary = null)
     {
         var request    = new ConversionRequest("/src", "CBBE");
         var armor      = new ImportedArmor(
@@ -7844,7 +13225,7 @@ public sealed class ConversionReadmeGeneratorTests
 
         return ConversionReadmeGenerator.Generate(
             request, armor, mesh, bsProject,
-            pluginResult, files, rewriteMap, patchEspGenerated);
+            pluginResult, files, rewriteMap, patchEspGenerated, pluginInstallHints, validationSummary);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -8145,6 +13526,7 @@ public sealed class ConversionReadmeGeneratorTests
     [InlineData("Vanilla to CBBE",  "CBBE",    "balanced")]
     [InlineData("Vanilla to 3BA",   "3BA",     "balanced")]
     [InlineData("Vanilla to HIMBO", "HIMBO",   "balanced")]
+    [InlineData("Vanilla to TNG",   "TNG",     "balanced")]
     [InlineData("Vanilla to UNP",   "UNP",     "balanced")]
     public void PresetCatalog_ContainsVanillaPreset(string presetName, string expectedBody, string expectedProfile)
     {
@@ -8360,10 +13742,14 @@ public sealed class ConversionReadmeGeneratorTests
     {
         IReadOnlyList<uint> kwIds = [0x111u, 0x222u];
         const uint raceId = 0x019u;
-        var record = new PluginArmorRecord("test.esp", [], 0xBEEFu, "TestArmo", kwIds, raceId);
+        IReadOnlyList<int> slots = [32, 45];
+        IReadOnlyList<uint> linkedArmorAddons = [0x0802u, 0x0803u];
+        var record = new PluginArmorRecord("test.esp", [], 0xBEEFu, "TestArmo", kwIds, raceId, slots, linkedArmorAddons);
 
         Assert.Equal(kwIds, record.KeywordFormIds);
         Assert.Equal(raceId, record.RaceFormId);
+        Assert.Equal(slots, record.BipedSlots);
+        Assert.Equal(linkedArmorAddons, record.LinkedArmorAddonFormIds);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -9219,20 +14605,24 @@ public sealed class BipedSlotPassthroughTests
             => Task.FromResult(new PartitionRebuildingResult(true, ["32:Body"], []));
     }
 
-    // Fake plugin analysis that injects biped slots into returned armor addons.
-    private sealed class FakePluginAnalysisService(IReadOnlyList<int> slots) : IPluginAnalysisService
+    // Fake plugin analysis that injects biped slots into returned armor addon and armor records.
+    private sealed class FakePluginAnalysisService(IReadOnlyList<int> addonSlots, IReadOnlyList<int>? armorRecordSlots = null) : IPluginAnalysisService
     {
         public Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken ct)
         {
-            var addon = new PluginArmorAddon("ARMA", [], FormId: 1, EditorId: "FakeARMA", BipedSlots: slots);
+            var addon = new PluginArmorAddon("ARMA", [], FormId: 1, EditorId: "FakeARMA", BipedSlots: addonSlots);
+            var armorRecord = armorRecordSlots is { Count: > 0 }
+                ? new PluginArmorRecord("ARMO", [], FormId: 2, EditorId: "FakeARMO", BipedSlots: armorRecordSlots)
+                : null;
             return Task.FromResult(new PluginAnalysisResult(
                 ScannedPlugins: ["FakePlugin.esp"],
                 ArmorAddons: [addon],
-                PatchGuidance: string.Empty));
+                PatchGuidance: string.Empty,
+                ArmorRecords: armorRecord is null ? null : [armorRecord]));
         }
     }
 
-    private static ConversionOrchestrator BuildOrchestrator(IReadOnlyList<int> pluginBipedSlots)
+    private static ConversionOrchestrator BuildOrchestrator(IReadOnlyList<int> pluginBipedSlots, IReadOnlyList<int>? armorRecordSlots = null)
     {
         return new ConversionOrchestrator(
             new LocalArmorImportService(),
@@ -9249,7 +14639,7 @@ public sealed class BipedSlotPassthroughTests
             new BasicPhysicsSupportService(),
             new BodySlideOspProjectService(),
             new BasicTextureAnalysisService(),
-            new FakePluginAnalysisService(pluginBipedSlots),
+            new FakePluginAnalysisService(pluginBipedSlots, armorRecordSlots),
             new VanillaArmorLookupService(),
             new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
@@ -9335,6 +14725,33 @@ public sealed class BipedSlotPassthroughTests
             var passthroughStep = result.Steps.FirstOrDefault(s =>
                 s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
             Assert.Null(passthroughStep);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WhenArmoDefinesExtraSlots_StepContainsArmorRecordBipedSlots()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        try
+        {
+            var orchestrator = BuildOrchestrator([], [45, 49]);
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: tmpDir);
+            var result = await orchestrator.ConvertAsync(request);
+
+            var passthroughStep = result.Steps.FirstOrDefault(s =>
+                s.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal));
+
+            Assert.NotNull(passthroughStep);
+            Assert.Contains("45", passthroughStep);
+            Assert.Contains("49", passthroughStep);
         }
         finally
         {
@@ -9722,7 +15139,7 @@ public sealed class OutputCompletenessTests
             var armor        = new ImportedArmor(nifPath, [nifPath], [], [], []);
             var analysis     = new MeshAnalysis("plate", false, 1);
             var mesh         = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
-            var morphs       = new MorphSet("low", "high", true);
+            var morphs       = new MorphSet("low", "high", true, SourceMorphQuality: new SourceMorphQualityMetrics(3, 2, 0.6667d, 0.58d));
             var physics      = new PhysicsConfig("none");
             var clipping     = new ClippingReport(false, [], []);
             var correction   = new CorrectionResult(false, "not-required");
@@ -9815,10 +15232,651 @@ public sealed class OutputCompletenessTests
             Assert.Contains("ValidationSummary", json);
             Assert.Contains("HighRiskPoseCount", json);
             Assert.Contains("MissingNormalCount", json);
+            Assert.Contains("SourceMorphQuality", json);
+            Assert.Contains("SourceAssetSupport", json);
+            Assert.Contains("PayloadReuse", json);
         }
         finally
         {
             Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingExpectedArtifacts()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "3BA",
+                OutputDirectory: outputDirectory,
+                OutputZip: true,
+                GenerateBodySlideFiles: true);
+            var bodySlideProject = new BodySlideProject("NordicProject", "3BA", ["Belly"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult(
+                [Path.Combine(outputDirectory, "Armor.esp")],
+                [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
+                "patch");
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                bodySlideProject,
+                pluginAnalysis);
+
+            var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("missing-readme", codes);
+            Assert.Contains("missing-dependency-map", codes);
+            Assert.Contains("missing-conversion-quality-report", codes);
+            Assert.Contains("missing-skeleton-compatibility-report", codes);
+            Assert.Contains("missing-preview-html", codes);
+            Assert.Contains("missing-preview-workbench", codes);
+            Assert.Contains("missing-fomod-module-config", codes);
+            Assert.Contains("missing-bodyslide-osp", codes);
+            Assert.Contains("missing-bodyslide-shape-data", codes);
+            Assert.Contains("missing-staged-mesh-output", codes);
+            Assert.Contains("missing-xedit-script", codes);
+            Assert.Contains("missing-plugin-patch-report", codes);
+            Assert.Contains("missing-output-zip", codes);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_SkipsOptionalFamiliesWhenDisabled()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: false);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-bodyslide-osp", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-bodyslide-shape-data", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-xedit-script", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-plugin-patch-report", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(issues, issue => issue.Code.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsBrokenFomodAndZipContents()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(Path.Combine(sliderSetDirectory, "NordicProject.osp"), "<osp/>");
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "NordicProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "Belly.bsd"), "bsd");
+
+            var pluginPath = Path.Combine(outputDirectory, "Armor_patched.esm");
+            File.WriteAllText(pluginPath, "plugin");
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<cbpc/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "smp-config.xml"), "<smp/>");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var zipPath = outputDirectory + ".zip";
+            using (ZipFile.Open(zipPath, ZipArchiveMode.Create))
+            {
+            }
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                OutputZip: true,
+                GenerateBodySlideFiles: true);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [pluginPath, zipPath],
+                new BodySlideProject("NordicProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult(
+                    [Path.Combine(outputDirectory, "Armor.esp")],
+                    [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
+                    "patch"));
+
+            var codes = issues.Select(issue => issue.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("fomod-missing-folder-entry", codes);
+            Assert.Contains("fomod-missing-root-plugin-entry", codes);
+            Assert.Contains("missing-bodyslide-reference-nif", codes);
+            Assert.Contains("zip-missing-readme", codes);
+            Assert.Contains("zip-missing-dependency-map", codes);
+            Assert.Contains("zip-missing-conversion-quality-report", codes);
+            Assert.Contains("zip-missing-skeleton-compatibility-report", codes);
+            Assert.Contains("zip-missing-pose-report", codes);
+            Assert.Contains("zip-missing-world-physics-report", codes);
+            Assert.Contains("zip-missing-preview-svg", codes);
+            Assert.Contains("zip-missing-preview-html", codes);
+            Assert.Contains("zip-missing-preview-workbench", codes);
+            Assert.Contains("zip-missing-fomod-module-config", codes);
+            Assert.Contains("zip-missing-fomod-info", codes);
+            Assert.Contains("zip-missing-staged-mesh-output", codes);
+            Assert.Contains("missing-staged-cbpc-config", codes);
+            Assert.Contains("missing-staged-smp-config", codes);
+            Assert.Contains("zip-missing-staged-cbpc-config", codes);
+            Assert.Contains("zip-missing-staged-smp-config", codes);
+            Assert.Contains("zip-missing-bodyslide-osp", codes);
+            Assert.Contains("zip-missing-bodyslide-shape-data", codes);
+            Assert.Contains("zip-missing-root-plugin", codes);
+            Assert.Contains("zip-missing-xedit-script", codes);
+            Assert.Contains("zip-missing-plugin-patch-report", codes);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingBodySlideSliderPayloads()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(Path.Combine(sliderSetDirectory, "PayloadProject.osp"), "<osp/>");
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "PayloadProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                new BodySlideProject("PayloadProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("missing-bodyslide-slider-payload", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_WhenOutputZipEnabled_ReturnsZipAlongsideGeneratedArtifacts()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "cuirass.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory, OutputZip: true));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(outputDirectory + ".zip"));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+            var zipPath = outputDirectory + ".zip";
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_ReusesSourceMorphPayloads_WhenVertexCountsMatch()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(2));
+
+        var lowDeltas = new (float X, float Y, float Z)[]
+        {
+            (0.125f, -0.25f, 0.375f),
+            (0.5f, 0.625f, -0.75f)
+        };
+        var highDeltas = new (float X, float Y, float Z)[]
+        {
+            (0.25f, -0.125f, 0.5f),
+            (0.75f, 0.125f, -0.25f)
+        };
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Belly"] = new(
+                        new SourceMorphPayload("Belly", false, "bsd", 2, lowDeltas),
+                        new SourceMorphPayload("Belly", true, "bsd", 2, highDeltas))
+                },
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1, null, null, null));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
+            var highBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly_1.bsd", StringComparison.OrdinalIgnoreCase));
+            var lowTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject.tri", StringComparison.OrdinalIgnoreCase));
+            var highTriPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}TestProject_1.tri", StringComparison.OrdinalIgnoreCase));
+
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(lowBsdPath), out var lowBsdPayload));
+            Assert.NotNull(lowBsdPayload);
+            AssertDeltasEqual(lowDeltas, lowBsdPayload!.Deltas);
+
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(highBsdPath), out var highBsdPayload));
+            Assert.NotNull(highBsdPayload);
+            AssertDeltasEqual(highDeltas, highBsdPayload!.Deltas);
+
+            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(lowTriPath), out var lowTriPayload));
+            Assert.NotNull(lowTriPayload);
+            Assert.Equal("Belly", lowTriPayload!.Morphs.Single().Name);
+            AssertDeltasEqual(lowDeltas, lowTriPayload.Morphs.Single().Deltas);
+
+            Assert.True(TriMorphReader.TryRead(await File.ReadAllBytesAsync(highTriPath), out var highTriPayload));
+            Assert.NotNull(highTriPayload);
+            Assert.Equal("Belly_1", highTriPayload!.Morphs.Single().Name);
+            AssertDeltasEqual(highDeltas, highTriPayload.Morphs.Single().Deltas);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"ReusedVariantCount\": 2", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_IncompleteSourceFallback_SurfacesQualityIssues()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                SourceAssetSupport: new SourceAssetSupportMetrics(
+                    false,
+                    false,
+                    false,
+                    false,
+                    true,
+                    ["osp", "morph-payloads", "reference-assets"],
+                    0,
+                    "3BA",
+                    ["reference:3bbb"],
+                    "curvy"));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"incomplete-source-fallback\"", qualityJson);
+            Assert.Contains("\"MissingAssets\": [", qualityJson);
+            Assert.Contains("\"osp\"", qualityJson);
+            Assert.Contains("\"morph-payloads\"", qualityJson);
+            Assert.Contains("\"reference-assets\"", qualityJson);
+            Assert.Contains("\"InferredSourceBody\": \"3BA\"", qualityJson);
+            Assert.Contains("\"reference:3bbb\"", qualityJson);
+            Assert.Contains("\"InferredDeformationProfile\": \"curvy\"", qualityJson);
+            Assert.Contains("\"RequestedVariantCount\": 0", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 0", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_SourcePayloadVertexMismatch_SurfacesSyntheticFallback()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(2));
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet(
+                "low",
+                "high",
+                true,
+                ReusableSourceMorphPayloads: new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Belly"] = new(
+                        new SourceMorphPayload("Belly", false, "bsd", 1, [(0.125f, -0.25f, 0.375f)]),
+                        null)
+                },
+                SourceAssetSupport: new SourceAssetSupportMetrics(true, false, true, true, false, [], 1, null, null, null));
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CBBE", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, voxel,
+                CancellationToken.None);
+
+            var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
+            Assert.True(BsdMorphReader.TryRead(await File.ReadAllBytesAsync(lowBsdPath), out var lowBsdPayload));
+            Assert.NotNull(lowBsdPayload);
+            Assert.Equal(2, lowBsdPayload!.Deltas.Count);
+            Assert.Equal(0.125f, lowBsdPayload.Deltas[0].X, 3);
+            Assert.Equal(0.125f, lowBsdPayload.Deltas[1].X, 3);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"synthetic-morph-fallback\"", qualityJson);
+            Assert.Contains("\"RequestedVariantCount\": 2", qualityJson);
+            Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
+            Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
+            Assert.Contains("\"RetargetedVariantCount\": 1", qualityJson);
+            Assert.Contains("\"Code\": \"retargeted-morph-reuse\"", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RetargetMorphPayload_UsesNearestSurfaceMappingWhenVertexGeometryIsAvailable()
+    {
+        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source.nif");
+            var targetPath = Path.Combine(tmpDir, "target.nif");
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (0f, 0f, 0f),
+                (10f, 0f, 0f),
+                (20f, 0f, 0f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (19.9f, 0f, 0f),
+                (0.1f, 0f, 0f)
+            ]);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = new (float X, float Y, float Z)[]
+            {
+                (1f, 0f, 0f),
+                (2f, 0f, 0f),
+                (3f, 0f, 0f)
+            };
+
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                method!.Invoke(null, [sourceDeltas, 2, context]));
+
+            Assert.Equal(3f, result[0].X, 3);
+            Assert.Equal(1f, result[1].X, 3);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RetargetMorphPayload_UsesNormalizedGeometryTransferForReorderedScaledTargets()
+    {
+        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-large.nif");
+            var targetPath = Path.Combine(tmpDir, "target-large.nif");
+            var sourceVertices = Enumerable.Range(0, 2048)
+                .Select(index =>
+                {
+                    var t = index / 2047f;
+                    return (
+                        X: ((index % 9) - 4) * 0.05f,
+                        Y: ((index % 7) - 3) * 0.035f,
+                        Z: t * 4.0f);
+                })
+                .ToList();
+            var targetVertices = sourceVertices
+                .Where((_, index) => index % 2 == 0)
+                .Reverse()
+                .Select(vertex => (
+                    X: (vertex.X * 1.8f) + 2.5f,
+                    Y: (vertex.Y * 0.65f) - 1.25f,
+                    Z: (vertex.Z * 2.2f) + 9f))
+                .ToList();
+
+            await SyntheticNifTestData.WriteAsync(sourcePath, sourceVertices);
+            await SyntheticNifTestData.WriteAsync(targetPath, targetVertices);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = Enumerable.Range(0, sourceVertices.Count)
+                .Select(index => (X: (float)(index + 1), Y: 0f, Z: 0f))
+                .ToArray();
+
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                method!.Invoke(null, [sourceDeltas, targetVertices.Count, context]));
+
+            Assert.Equal(targetVertices.Count, result.Count);
+            for (var targetIndex = 0; targetIndex < result.Count; targetIndex++)
+            {
+                var expectedSourceIndex = (sourceVertices.Count - 2) - (targetIndex * 2);
+                Assert.Equal(sourceDeltas[expectedSourceIndex].X, result[targetIndex].X, 3);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    private static void AssertDeltasEqual(
+        IReadOnlyList<(float X, float Y, float Z)> expected,
+        IReadOnlyList<(float X, float Y, float Z)> actual)
+    {
+        Assert.Equal(expected.Count, actual.Count);
+        for (var index = 0; index < expected.Count; index++)
+        {
+            Assert.Equal(expected[index].X, actual[index].X, 3);
+            Assert.Equal(expected[index].Y, actual[index].Y, 3);
+            Assert.Equal(expected[index].Z, actual[index].Z, 3);
         }
     }
 
@@ -9997,6 +16055,8 @@ public sealed class BasicWeightTransferServicePhysicsTests
     [Theory]
     [InlineData("HIMBO")]
     [InlineData("SAM")]
+    [InlineData("SAM Light")]
+    [InlineData("TNG")]
     public async Task TransferAsync_MalePhysicsTarget_PopulatesMaleSmpBones(string targetBody)
     {
         var svc      = new BasicWeightTransferService();
@@ -10020,7 +16080,6 @@ public sealed class BasicWeightTransferServicePhysicsTests
 
         var result = await svc.TransferAsync(mesh, analysis, "CBBE", null, CancellationToken.None);
 
-        // CBBE is not in the physics-bone map; target bones should be null.
         Assert.Null(result.TargetPhysicsBones);
     }
 
@@ -10049,6 +16108,20 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.NotNull(result.TargetPhysicsBones);
         Assert.Contains("BreastUpper", result.TargetPhysicsBones!);
         Assert.Contains("NPC L Breast01", result.TargetPhysicsBones!);
+    }
+
+    [Fact]
+    public void RepairTargetBones_PreservesMatchingCustomChains()
+    {
+        var repaired = PhysicsRepairCatalog.RepairTargetBones(
+            ["NPC L Breast01", "NPC R Breast01"],
+            ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
+            ["Custom Breast Swing L", "Custom Breast Swing R", "Custom Tail Chain"]);
+
+        Assert.Contains("NPC Belly", repaired);
+        Assert.Contains("Custom Breast Swing L", repaired);
+        Assert.Contains("Custom Breast Swing R", repaired);
+        Assert.DoesNotContain("Custom Tail Chain", repaired);
     }
 }
 
@@ -10436,6 +16509,7 @@ public sealed class MorphGenerationServiceTests
     [InlineData("CBBE",  12)]
     [InlineData("BHUNP", 14)]
     [InlineData("HIMBO",  8)]
+    [InlineData("TNG",    9)]
     [InlineData("Vanilla", 5)]
     public async Task GenerateAsync_KnownBody_ReturnsCorrectSliderCount(string targetBody, int expectedSliders)
     {
@@ -10475,6 +16549,36 @@ public sealed class MorphGenerationServiceTests
 
         Assert.True(physResult.SourceBodyMatchRatio > plainResult.SourceBodyMatchRatio,
             "Physics mesh with transferred weights should score higher match ratio.");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PayloadBackedSliders_SurfaceSourceMorphQualityAndImproveMatchRatio()
+    {
+        var service = new BasicMorphGenerationService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var bsdPath = Path.Combine(tmpDir, "WaistMagic_0.bsd");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("WaistMagic", isHighWeight: false, [(0.12f, 0.01f, 0f)]));
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bsdPath]);
+            var mesh = new WeightedMesh("cloth", "heat-map", false);
+
+            var result = await service.GenerateAsync(mesh, armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(result.SourceMorphQuality);
+            Assert.Equal(1, result.SourceMorphQuality!.PayloadMorphCount);
+            Assert.Equal(1, result.SourceMorphQuality.MeaningfulPayloadMorphCount);
+            Assert.True(result.SourceMorphQuality.PayloadStrengthScore > 0d);
+            Assert.True(result.SourceBodyMatchRatio > 0.82d);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     [Fact]
@@ -10651,6 +16755,225 @@ public sealed class VanillaBodyOspSliderTests
 
         Assert.Contains("<Slider", project.OspXml, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GenerateAsync_InfersZapSlidersFromMeshNames()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mage_cape_sleeves_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("HideCape", project.ZapSliders ?? []);
+        Assert.Contains("HideSleeves", project.ZapSliders ?? []);
+        Assert.Contains("zap=\"true\"", project.OspXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_MergesSourceOspAndBsdSliders()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var ospPath = Path.Combine(tmpDir, "source_sliders.osp");
+        var bsdPath = Path.Combine(tmpDir, "WaistMagic_0.bsd");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <SliderSetInfo version="1">
+              <SliderSet name="SourceSet" baseShape="Base Shape" bsversion="20">
+                <Slider name="SourceBust" invert="false" zap="false" uv="false">
+                  <Low value="0" />
+                  <High value="100" />
+                </Slider>
+                <Slider name="HideAmulet" invert="false" zap="true" uv="false">
+                  <Low value="0" />
+                  <High value="100" />
+                </Slider>
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("WaistMagic", isHighWeight: false, [(0.1f, 0f, 0f)]));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [ospPath, bsdPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("SourceBust", project.Sliders);
+        Assert.Contains("WaistMagic", project.Sliders);
+        Assert.Contains("HideAmulet", project.ZapSliders ?? []);
+        Assert.Contains("name=\"SourceBust\"", project.OspXml, StringComparison.Ordinal);
+        Assert.Contains("name=\"HideAmulet\"", project.OspXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_InfersBuiltInSourceBodySliders_WhenSourceAssetsAreMissing()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mystery_outfit_0.nif");
+        var bodyReferencePath = Path.Combine(tmpDir, "3bbb_reference_body.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bodyReferencePath, new byte[64]);
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bodyReferencePath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("BreastsPhysics", project.Sliders);
+        Assert.Contains("ButtPhysics", project.Sliders);
+        Assert.Contains("name=\"BreastsPhysics\"", project.OspXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_UsesTriAndBsdPayloadNames()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "traveler_outfit_0.nif");
+        var bsdPath = Path.Combine(tmpDir, "unhelpful_name.bsd");
+        var triPath = Path.Combine(tmpDir, "traveler_outfit.tri");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(bsdPath, BuildBsdPayload("PayloadBust", isHighWeight: false, [(0.25f, 0f, 0f)]));
+        await File.WriteAllBytesAsync(triPath, BuildTriPayload(
+            1,
+            ("TravelerLift", [(0.125f, 0.25f, 0.375f)]),
+            ("UnusedMorph", [(0f, 0f, 0f)]),
+            ("TravelerHideCape_1", [(0f, 0f, 0f)])));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath, bsdPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("PayloadBust", project.Sliders);
+        Assert.Contains("TravelerLift", project.Sliders);
+        Assert.Contains("TravelerHideCape", project.ZapSliders ?? []);
+        Assert.DoesNotContain("UnusedMorph", project.Sliders);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PrioritizesStrongerPayloadSlidersAheadOfWeakerOnes()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "priority_outfit_0.nif");
+        var triPath = Path.Combine(tmpDir, "priority_outfit.tri");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(triPath, BuildTriPayload(
+            3,
+            ("SoftLift", [(0.001f, 0f, 0f), (0f, 0f, 0f), (0f, 0f, 0f)]),
+            ("StrongLift", [(0.35f, 0.25f, 0.15f), (0.30f, 0.20f, 0.10f), (0.25f, 0.15f, 0.05f)])));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+        var strongIndex = project.Sliders.ToList().IndexOf("StrongLift");
+        var weakIndex = project.Sliders.ToList().IndexOf("SoftLift");
+
+        Assert.True(strongIndex >= 0);
+        Assert.True(weakIndex >= 0);
+        Assert.True(strongIndex < weakIndex);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_SkipsUnreadableBsdSliderNamesUnlessTheyLookLikeZaps()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var meshPath = Path.Combine(tmpDir, "traveler_1.nif");
+        await File.WriteAllBytesAsync(meshPath, new byte[64]);
+
+        var unreadableSliderPath = Path.Combine(tmpDir, "TravelerWaistMagic_0.bsd");
+        Directory.CreateDirectory(Path.GetDirectoryName(unreadableSliderPath)!);
+        await File.WriteAllBytesAsync(unreadableSliderPath, [1, 2, 3, 4]);
+
+        var unreadableZapPath = Path.Combine(tmpDir, "TravelerHideSleeves_1.bsd");
+        await File.WriteAllBytesAsync(unreadableZapPath, [1, 2, 3, 4]);
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], [unreadableSliderPath, unreadableZapPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.DoesNotContain("TravelerWaistMagic", project.Sliders);
+        Assert.Contains("TravelerHideSleeves", project.ZapSliders ?? []);
+    }
+
+    private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
+    {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write((byte)'B');
+        writer.Write((byte)'S');
+        writer.Write((byte)'D');
+        writer.Write((byte)0);
+        writer.Write((ushort)1);
+        writer.Write(isHighWeight ? (byte)1 : (byte)0);
+        writer.Write((ushort)nameBytes.Length);
+        writer.Write(nameBytes);
+        writer.Write((uint)deltas.Count);
+        foreach (var (x, y, z) in deltas)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildTriPayload(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (x, y, z) in morph.Deltas)
+            {
+                writer.Write((short)Math.Round(x * 2048f));
+                writer.Write((short)Math.Round(y * 2048f));
+                writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
+    }
 }
 
 public sealed class CustomBodyProfileSupportTests
@@ -10667,7 +16990,9 @@ public sealed class CustomBodyProfileSupportTests
             {
               "name": "MyFollower",
               "detectionTokens": ["myfollower", "customshape"],
+              "referenceTokens": ["myfollowerbody", "myfollowertri"],
               "sliderNames": ["Waist", "Hips", "Bust"],
+              "zapSliderNames": ["HideCape", "HideSleeves"],
               "physicsProfile": "smp",
               "gender": "male",
               "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
@@ -10689,6 +17014,8 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Equal("smp", profile.PhysicsProfile);
             Assert.Contains("NPC L Pec", profile.PhysicsBones ?? []);
             Assert.Equal(3, profile.SliderNames?.Count);
+            Assert.Contains("myfollowerbody", profile.ReferenceTokens ?? []);
+            Assert.Contains("HideCape", profile.ZapSliderNames ?? []);
             Assert.Equal(1.14, profile.TransformationField["chest"]);
         }
         finally
@@ -10744,7 +17071,9 @@ public sealed class CustomBodyProfileSupportTests
             {
               "name": "MyFollower",
               "detectionTokens": ["myfollower"],
+              "referenceTokens": ["myfollowertri"],
               "sliderNames": ["Waist", "Hips", "Bust"],
+              "zapSliderNames": ["HideCape"],
               "physicsProfile": "smp",
               "gender": "male",
               "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
@@ -10772,6 +17101,8 @@ public sealed class CustomBodyProfileSupportTests
             var ospXml = await File.ReadAllTextAsync(ospFile);
             Assert.Contains("Waist", ospXml, StringComparison.Ordinal);
             Assert.Contains("Bust", ospXml, StringComparison.Ordinal);
+            Assert.Contains("HideCape", ospXml, StringComparison.Ordinal);
+            Assert.Contains("zap=\"true\"", ospXml, StringComparison.Ordinal);
             Assert.Contains(@"CalienteTools\BodySlide\ShapeData\myfollower_armor\myfollower_armor_0.nif", ospXml, StringComparison.Ordinal);
             Assert.Contains("<OutputPath>meshes\\</OutputPath>", ospXml, StringComparison.Ordinal);
 
@@ -10836,6 +17167,377 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesSemanticFallbackForExtendedBones()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LeftBreastUpper\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LeftBreastLift", "RightBreastLift", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LeftBreastUpper", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("LeftBreastLift", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("LeftBreastUpper", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_RecognizesDotSuffixSideNotation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"BreastUpper.L\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["BreastSupport.L", "BreastSupport.R", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("BreastUpper.L", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("BreastSupport.L", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("BreastUpper.L", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_RecognizesCompactPrefixSideNotation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LBreastUpper\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "MyCustom",
+                        ["mycustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LBreastSupport", "RBreastSupport", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "MyCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("LBreastUpper", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("LBreastSupport", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("LBreastUpper", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesFollowerCollisionAliases()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"LeftBreastCollision\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "FollowerCustom",
+                        ["followercustom"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        PhysicsBones: ["LeftBreastSupport", "RightBreastSupport", "BellyCore"])
+                ]);
+
+            var result = await service.MapAsync(armor, "FollowerCustom", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, mapping =>
+                mapping.SourceBone.Equals("LeftBreastCollision", StringComparison.OrdinalIgnoreCase) &&
+                mapping.TargetBone.Equals("LeftBreastSupport", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_SlugifiesBodyNamesWithSpaces()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor("input", [], [], [], []);
+
+        var result = await service.MapAsync(armor, "COCO CBBE", CancellationToken.None);
+
+        Assert.Equal("xpmsse-coco-weighting-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_KeepsGenericXpmsseForStandardBuiltIns()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor("input", [], [], [], []);
+
+        var result = await service.MapAsync(armor, "3BA", CancellationToken.None);
+
+        Assert.Equal("xpmsse-physics", result.TargetSkeleton);
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PrefersCustomSkeletonFoundation()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "MyFollower",
+                    DetectionTokens: ["myfollower"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.05 },
+                    SliderNames: ["Waist"],
+                    PhysicsBones: ["NPC L Breast01", "NPC R Breast01"],
+                    PhysicsProfile: "smp",
+                    BodyOutputPath: @"meshes\actors\character\character assets\",
+                    Gender: "female",
+                    SkeletonFoundation: "TNG Extended")
+            ]);
+
+        var result = await service.MapAsync(armor, "MyFollower", CancellationToken.None);
+
+        Assert.Equal("tng-extended-physics", result.TargetSkeleton);
+    }
+
+    [Theory]
+    [InlineData("XP32 Maximum Skeleton Special Extended", true, "xpmsse-physics")]
+    [InlineData("Shape Atlas for Men", true, "sam-light-physics")]
+    [InlineData("Ultimate Body Enhancer", true, "ube-extended-physics")]
+    [InlineData("Vanilla Beast", false, "beast-humanoid")]
+    [InlineData("Horse Follower", false, "equine-humanoid")]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_ResolvesSkeletonFoundationAliases(
+        string skeletonFoundation,
+        bool withPhysicsBones,
+        string expectedTargetSkeleton)
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "AliasTarget",
+                    DetectionTokens: ["aliastarget"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.02 },
+                    PhysicsBones: withPhysicsBones ? ["NPC L Breast01"] : [],
+                    SkeletonFoundation: skeletonFoundation)
+            ]);
+
+        var result = await service.MapAsync(armor, "AliasTarget", CancellationToken.None);
+
+        Assert.Equal(expectedTargetSkeleton, result.TargetSkeleton);
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_PreservesFoundationWithoutPhysicsSuffix()
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor(
+            "input",
+            [],
+            [],
+            [],
+            [],
+            CustomBodyProfiles:
+            [
+                new CustomBodyProfile(
+                    Name: "MyFollower",
+                    DetectionTokens: ["myfollower"],
+                    TextureTokens: [],
+                    PhysicsTokens: [],
+                    VertexCountMin: 0,
+                    VertexCountMax: 0,
+                    TransformationField: new Dictionary<string, double> { ["chest"] = 1.05 },
+                    SliderNames: ["Waist"],
+                    PhysicsBones: [],
+                    PhysicsProfile: "none",
+                    BodyOutputPath: @"meshes\actors\character\character assets\",
+                    Gender: "female",
+                    SkeletonFoundation: "TNG Extended")
+            ]);
+
+        var result = await service.MapAsync(armor, "MyFollower", CancellationToken.None);
+
+        Assert.Equal("tng-extended", result.TargetSkeleton);
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesCatalogFrameworkBonesForFollowerSkeletons()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"NPC L Lat\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "FollowerTng",
+                        ["followertng"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        SkeletonFoundation: "TNG Extended")
+                ]);
+
+            var result = await service.MapAsync(armor, "FollowerTng", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("NPC L Lat", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("NPC L Pec", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("NPC L Lat", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicSkeletonMappingService_CustomTarget_UsesCatalogFallbacksForBeastTailBones()
+    {
+        var service = new BasicSkeletonMappingService();
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var physicsPath = Path.Combine(tempDir, "armor.xml");
+            await File.WriteAllTextAsync(physicsPath, "<system><bone name=\"TailTip\" /></system>");
+            var armor = new ImportedArmor(
+                tempDir,
+                [],
+                [],
+                [physicsPath],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        "BeastFollower",
+                        ["beastfollower"],
+                        [],
+                        [],
+                        0,
+                        0,
+                        BodyTransformationFieldCatalog.CreateFallbackField(),
+                        SkeletonFoundation: "Beast Humanoid")
+                ]);
+
+            var result = await service.MapAsync(armor, "BeastFollower", CancellationToken.None);
+
+            Assert.Contains(result.BoneMappings, m => m.SourceBone.Equals("TailTip", StringComparison.OrdinalIgnoreCase)
+                                                      && m.TargetBone.Equals("Tail3", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("TailTip", result.UnsupportedBones);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_TryParseStringTable_ExtractsBoneNames()
     {
         var nifBytes = BuildMinimalNifWithStrings(["NPC Root [Root]", "NPC Spine [Spn0]", "Sword_Back", "notabone"]);
@@ -10862,6 +17564,19 @@ public sealed class CustomBodyProfileSupportTests
     }
 
     [Fact]
+    public void SkeletonNifBoneParser_ExtractBoneNames_IncludesFrameworkCatalogBones()
+    {
+        var nifBytes = BuildMinimalNifWithStrings(
+            ["SAM Genitals", "SOS GenitalsBase", "BreastUpper", "randomstring"]);
+        var bones = SkeletonNifBoneParser.ExtractBoneNames(nifBytes);
+
+        Assert.Contains("SAM Genitals", bones);
+        Assert.Contains("SOS GenitalsBase", bones);
+        Assert.Contains("BreastUpper", bones);
+        Assert.DoesNotContain("randomstring", bones);
+    }
+
+    [Fact]
     public void SkeletonNifBoneParser_DetectSkeletonLabel_PhysicsBonesYieldPhysicsLabel()
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(
@@ -10874,6 +17589,81 @@ public sealed class CustomBodyProfileSupportTests
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Bip01 Spine", "Bip01 L Arm"]);
         Assert.Equal("fo4-biped", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_SamLightBonesYieldSamLightLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["SAM Genitals", "SOS GenitalsBase", "NPC Belly"]);
+        Assert.Equal("sam-light", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_UbeBonesYieldExtendedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["BreastUpper", "BreastOuter", "NPC Belly"]);
+
+        Assert.Equal("ube-extended", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_TngBonesYieldExtendedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["TNG Genitals", "TNG Balls", "NPC Belly"]);
+
+        Assert.Equal("tng-extended", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_BeastBonesYieldBeastFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Tail1", "Tail2", "NPC Spine"]);
+
+        Assert.Equal("beast-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_HornBonesYieldHornedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Horn.L", "Horn.R", "NPC Spine"]);
+
+        Assert.Equal("horned-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_WingBonesYieldWingedFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Wing.L", "Wing.R", "NPC Spine"]);
+
+        Assert.Equal("winged-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_SingleExtendedSignatureDoesNotOverrideXpmsse()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["NPC L Breast", "NPC Butt", "SAM Genitals"]);
+        Assert.Equal("xpmsse-physics", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_DigitigradeBonesYieldDigitigradeFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Hock.L", "Hock.R", "NPC Spine"]);
+        Assert.Equal("digitigrade-beast", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_EquineBonesYieldEquineFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Tail4", "Tail5", "NPC Spine"]);
+        Assert.Equal("equine-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_AvianBonesYieldAvianFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["WingMid.L", "WingMid.R", "NPC Spine"]);
+        Assert.Equal("avian-humanoid", label);
     }
 
     [Fact]
@@ -11192,12 +17982,81 @@ public async Task ConversionInspector_InspectAsync_ReturnsDetectionAnalysisAndCu
             inspection.Analysis.MeshType is "mixed" or "physics-enabled",
             $"Unexpected mesh type: {inspection.Analysis.MeshType}");
         Assert.NotNull(inspection.SkeletonMapping);
-        Assert.Equal("xpmsse-myfollower-physics", inspection.SkeletonMapping!.TargetSkeleton);
+        Assert.Equal("xpmsse-physics", inspection.SkeletonMapping!.TargetSkeleton);
         Assert.Contains("MyFollower", inspection.Armor.CustomBodyProfiles?.Select(profile => profile.Name) ?? []);
+        var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+        Assert.Equal("unsupported", nifSupport.Status);
+        Assert.Equal("missing-header", nifSupport.ParseMode);
     }
     finally
     {
         Directory.Delete(tmpDir, recursive: true);
+    }
+}
+
+[Fact]
+public async Task ConvertAsync_WithUnsupportedNif_RecordsNifSupportValidation()
+{
+    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    var outputDirectory = Path.Combine(workingDirectory, "output");
+    Directory.CreateDirectory(workingDirectory);
+    var inputFile = Path.Combine(workingDirectory, "unsupported_mesh.nif");
+    await File.WriteAllBytesAsync(inputFile, Enumerable.Repeat((byte)'X', 64).ToArray());
+
+    try
+    {
+        var orchestrator = StandaloneConversionModules.CreateDefault();
+        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+        Assert.True(result.Success);
+        var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+        Assert.Contains("\"NifSupport\"", qualityJson);
+        Assert.Contains("\"Status\": \"unsupported\"", qualityJson);
+        Assert.Contains("\"Code\": \"unsupported-nif-layout\"", qualityJson);
+        Assert.Contains("source-nif-unsupported:unsupported_mesh.nif", qualityJson);
+    }
+    finally
+    {
+        Directory.Delete(workingDirectory, recursive: true);
+    }
+}
+
+[Fact]
+public async Task ConvertAsync_WithSkinPartitionNif_SurfacesParsedPartitionMetadata()
+{
+    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    var outputDirectory = Path.Combine(workingDirectory, "output");
+    Directory.CreateDirectory(workingDirectory);
+    var inputFile = Path.Combine(workingDirectory, "partitioned_cuirass_0.nif");
+    await SyntheticNifTestData.WriteBlockGraphStyleWithSkinPartitionsAsync(
+        inputFile,
+        SyntheticNifTestData.CreateUpperBodyArmorVertices(),
+        [32, 37]);
+
+    try
+    {
+        var inspector = StandaloneConversionModules.CreateInspector();
+        var inspection = await inspector.InspectAsync(inputFile, "CBBE");
+        var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+        Assert.Equal("BSDismemberSkinInstance", nifSupport.SkinInstanceType);
+        Assert.Equal([32, 37], nifSupport.PartitionSlots);
+
+        var orchestrator = StandaloneConversionModules.CreateDefault();
+        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+        Assert.True(result.Success);
+        Assert.Contains(result.Steps, step => step == "nif-skin-partitions:32,37");
+
+        var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+        Assert.Contains("\"SkinInstanceType\": \"BSDismemberSkinInstance\"", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"PartitionSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"PartitionSignals\":", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"SourceNifSlots\": [", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"FinalSlots\": [", qualityJson, StringComparison.Ordinal);
+    }
+    finally
+    {
+        Directory.Delete(workingDirectory, recursive: true);
     }
 }
 }

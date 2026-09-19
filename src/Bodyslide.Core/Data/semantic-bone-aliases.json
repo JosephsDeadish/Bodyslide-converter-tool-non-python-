@@ -1,0 +1,100 @@
+{
+  "breast": [
+    "breast",
+    "bust",
+    "chest",
+    "pec",
+    "boob",
+    "bosom",
+    "nipple",
+    "support",
+    "lift",
+    "pushup",
+    "cleavage",
+    "twist",
+    "collider",
+    "collision"
+  ],
+  "butt": [
+    "butt",
+    "glute",
+    "rear",
+    "cheek",
+    "rump",
+    "hip",
+    "booty",
+    "collision"
+  ],
+  "belly": [
+    "belly",
+    "abdomen",
+    "stomach",
+    "tummy",
+    "gut",
+    "navel",
+    "torsofront"
+  ],
+  "thigh": [
+    "thigh",
+    "leg",
+    "upperleg",
+    "hamstring"
+  ],
+  "genitals": [
+    "genital",
+    "schlong",
+    "penis",
+    "vagina",
+    "anus",
+    "anal",
+    "groin",
+    "crotch",
+    "pubic"
+  ],
+  "mouth": [
+    "mouth",
+    "lip",
+    "jaw",
+    "tongue",
+    "teeth"
+  ],
+  "head": [
+    "head",
+    "face",
+    "brow",
+    "ear",
+    "horn"
+  ],
+  "heel": [
+    "heel",
+    "ankle",
+    "foot"
+  ],
+  "hair": [
+    "hair",
+    "bang",
+    "mane",
+    "forelock",
+    "crest",
+    "ponytail",
+    "tail",
+    "strand",
+    "lock",
+    "pigtail"
+  ],
+  "tail": [
+    "tail",
+    "tails",
+    "pony",
+    "tassel",
+    "tentacle",
+    "tendril",
+    "plume"
+  ],
+  "wing": [
+    "wing",
+    "feather",
+    "pinion",
+    "vane"
+  ]
+}

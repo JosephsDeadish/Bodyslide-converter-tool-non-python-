@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
@@ -131,7 +132,7 @@ if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
             : $"{display} [{profile}]";
         Console.WriteLine($" - {label,-34}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
-    Console.WriteLine("Alias accepted: soft-body => smp+cbpc");
+    Console.WriteLine("Aliases accepted: soft-body / full-soft-body / hdt-smp / fsmp / cbp => canonical physics profiles");
     Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;
@@ -197,6 +198,9 @@ try
         {
             Console.WriteLine($" - {step}");
         }
+
+        WritePostConversionGuidance(result);
+        Console.WriteLine();
     }
 }
 catch (Exception ex)
@@ -522,8 +526,7 @@ static void WriteBodyReference(string bodyName)
         return;
     }
 
-    var body = BodyTypeCatalog.All.FirstOrDefault(b => string.Equals(b.Name, requested, StringComparison.OrdinalIgnoreCase));
-    if (body is null)
+    if (!BodyTypeCatalog.TryResolve(requested, out var body))
     {
         Console.WriteLine($"Unknown body '{bodyName}'. Use --list-bodies to view valid names.");
         var suggestions = BodyTypeCatalog.All
@@ -583,4 +586,88 @@ static void WriteConversionGuide()
     Console.WriteLine();
     Console.WriteLine("Recommended command pattern:");
     Console.WriteLine("  SlideSmith --input <armor> --source <known body> --target <destination body> --physics auto --skeleton-nif <path> --output <folder>");
+}
+
+static void WritePostConversionGuidance(ConversionResult result)
+{
+    var qualityReport = TryReadConversionQualityReport(result);
+    var targetBody = qualityReport?.TargetBody ?? "target body";
+    var validationSummary = qualityReport?.ValidationSummary;
+    if (validationSummary is null)
+    {
+        return;
+    }
+
+    Console.WriteLine(
+        $"Validation: {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} " +
+        $"(machine status: {validationSummary.Status}; " +
+        $"score {validationSummary.Score}; " +
+        $"high {validationSummary.HighSeverityCount}, " +
+        $"medium {validationSummary.MediumSeverityCount}, " +
+        $"low {validationSummary.LowSeverityCount})");
+    Console.WriteLine(ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status));
+
+    var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3);
+    if (prioritizedIssues.Count > 0)
+    {
+        Console.WriteLine("Warnings:");
+        foreach (var issue in prioritizedIssues)
+        {
+            Console.WriteLine($" ! [{issue.Severity.ToUpperInvariant()}] {issue.Message}");
+        }
+    }
+    else if (validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("No immediate follow-up actions detected.");
+    }
+
+    var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
+        validationSummary,
+        targetBody,
+        maxActions: 4);
+    if (followUpActions.Count > 0)
+    {
+        Console.WriteLine("Next actions:");
+        foreach (var action in followUpActions)
+        {
+            Console.WriteLine($" -> {action}");
+        }
+    }
+}
+
+static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
+{
+    var qualityPath = result.OutputFiles.FirstOrDefault(path =>
+        path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase))
+        ?? Path.Combine(result.OutputDirectory, "conversion-quality.json");
+
+    if (string.IsNullOrWhiteSpace(qualityPath) || !File.Exists(qualityPath))
+    {
+        return null;
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<ConversionQualityReport>(
+            File.ReadAllText(qualityPath),
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+    }
+    catch (JsonException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
 }

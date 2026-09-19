@@ -3,7 +3,8 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast, Goat Humanoid, Hagraven, Spriggan + CUSTOM fallback); bone-name scoring from physics XML
+- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `TNG Extended` → `TNG`, `Touched By Dibella` → `TBD`, `Shape Atlas for Men` → `SAM`, and `Beast Vanilla` → `Vanilla Beast`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -12,14 +13,16 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
-- physics profile generation (CBPC + SMP XML config file output)
-- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (`soft-body` is accepted as an alias for `smp+cbpc`)
+- physics profile generation (CBPC + SMP XML config file output, including extra target-specific secondary/genital bones when the target ecosystem exposes them)
+- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (common aliases like `soft-body`, `full-soft-body`, `hdt-smp`, `fsmp`, and `cbp` are accepted and normalized automatically)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
+- incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
+- topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
-- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
+- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - real 3D preview/workbench output (`preview-workbench.html`) rendered from converted mesh vertices, plus diagnostics report (`preview.html`)
@@ -118,8 +121,8 @@ dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 # skeleton foundation, and soft-body physics bone reference data
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
-# show deep reference info for one body (tokens, skeleton, SupportsPhysics, required physics bones, default/recommended physics, matching presets)
-dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BA"
+# show deep reference info for one body (canonical names and common aliases both work)
+dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BBB"
 
 # show available physics profiles
 dotnet run --project src/Bodyslide.Standalone -- --list-physics
@@ -191,9 +194,11 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `detectionTokens`
 - `textureTokens`
 - `physicsTokens`
+- `referenceTokens`
 - `vertexCountMin` / `vertexCountMax`
 - `transformationField` (`chest`, `waist`, `pelvis`, `legs`, `shoulders`, `breasts`, `butt`, `belly`, `arms`, `thighs`, `calves`)
 - `sliderNames`
+- `zapSliderNames`
 - `physicsBones`
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
 - `gender` (`female` or `male`)
@@ -226,9 +231,13 @@ output/
   <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
   fomod/
     info.xml
-    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
-  cbpc-config.xml                ← CBPC physics XML (when selected physics profile includes CBPC)
-  smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
+    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/ + SKSE/
+  SKSE/Plugins/CBPCSystem/
+    cbpc-config.xml              ← staged CBPC physics XML for mod-manager/manual Data installs
+  SKSE/Plugins/hdtSMP64/
+    smp-config.xml               ← staged SMP physics XML for mod-manager/manual Data installs
+  cbpc-config.xml                ← compatibility/root copy of generated CBPC physics XML
+  smp-config.xml                 ← compatibility/root copy of generated SMP physics XML
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
@@ -246,10 +255,12 @@ output/
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
-| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
+| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
-| `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
-| `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
+| `SKSE/Plugins/CBPCSystem/cbpc-config.xml` | Data-relative staged CBPC physics config for direct installation into Skyrim's SKSE plugin layout |
+| `SKSE/Plugins/hdtSMP64/smp-config.xml` | Data-relative staged SMP physics config for direct installation into Skyrim's SKSE plugin layout |
+| `cbpc-config.xml` | Compatibility/root copy of the generated CBPC physics config for inspection or manual relocation |
+| `smp-config.xml` | Compatibility/root copy of the generated SMP physics config for inspection or manual relocation |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
 | `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
@@ -275,7 +286,7 @@ When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each
 Implemented from issue scope:
 - import scan across single mesh, folder, and archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`)
 - batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
-- body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
+- body detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs

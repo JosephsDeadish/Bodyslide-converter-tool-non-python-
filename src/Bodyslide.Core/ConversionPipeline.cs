@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Formats.Tar;
+using System.Globalization;
 using System.IO.Compression;
 using System.Numerics;
 using System.Security;
@@ -60,7 +61,16 @@ public static class HeadgearSubTypes
     public const string Circlet    = "circlet";
 }
 
-public sealed record MeshAnalysis(string MeshType, bool PhysicsEnabled, int MeshCount, string? HeadgearSubType = null);
+public sealed record MeshAnalysis(
+    string MeshType,
+    bool PhysicsEnabled,
+    int MeshCount,
+    string? HeadgearSubType = null,
+    bool HasSplitMeshes = false,
+    bool HasAccessoryPieces = false,
+    bool HasStrapLikePieces = false,
+    bool HasRigidSubMeshes = false,
+    bool IsFootwear = false);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -82,7 +92,48 @@ public sealed record ConvertedMesh(
 public sealed record WeightedMesh(string MeshType, string WeightProfile, bool PhysicsWeightsTransferred, IReadOnlyList<string>? SourceSmpBones = null, IReadOnlyList<string>? TargetPhysicsBones = null);
 /// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
 /// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
-public sealed record MorphSet(string LowMorph, string HighMorph, bool BodySlideCompatible, int SliderCount = 0, double SourceBodyMatchRatio = 0.0);
+public sealed record SourceMorphQualityMetrics(
+    int PayloadMorphCount,
+    int MeaningfulPayloadMorphCount,
+    double PayloadCoverageRatio,
+    double PayloadStrengthScore);
+public sealed record SourceMorphPayload(
+    string SliderName,
+    bool IsHighWeight,
+    string PayloadKind,
+    int VertexCount,
+    IReadOnlyList<(float X, float Y, float Z)> Deltas);
+public sealed record SourceMorphPayloadVariants(
+    SourceMorphPayload? LowWeight = null,
+    SourceMorphPayload? HighWeight = null);
+public sealed record SourceAssetSupportMetrics(
+    bool HasOsp,
+    bool HasTriPayloads,
+    bool HasBsdPayloads,
+    bool HasReferenceAssets,
+    bool UsedFallbackSliders,
+    IReadOnlyList<string>? MissingAssets = null,
+    int ReusablePayloadSliderCount = 0,
+    string? InferredSourceBody = null,
+    IReadOnlyList<string>? InferenceSignals = null,
+    string? InferredDeformationProfile = null);
+public sealed record MorphPayloadReuseSummary(
+    int RequestedVariantCount,
+    int ReusedVariantCount,
+    int FallbackVariantCount,
+    int RetargetedVariantCount = 0,
+    IReadOnlyList<string>? ReusedVariants = null,
+    IReadOnlyList<string>? FallbackVariants = null,
+    IReadOnlyList<string>? RetargetedVariants = null);
+public sealed record MorphSet(
+    string LowMorph,
+    string HighMorph,
+    bool BodySlideCompatible,
+    int SliderCount = 0,
+    double SourceBodyMatchRatio = 0.0,
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableSourceMorphPayloads = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null);
 public sealed record ClippingReport(bool HasClipping, IReadOnlyList<string> Regions, IReadOnlyList<string> DetectionMethods);
 /// <param name="CorrectedMorphing">
 /// Per-region morphing factors after applying local inflation and adaptive normal offset.
@@ -111,7 +162,28 @@ public sealed record ConversionInspectionResult(
     ImportedArmor Armor,
     BodyDetectionReport Detection,
     MeshAnalysis Analysis,
-    SkeletonMappingResult? SkeletonMapping);
+    SkeletonMappingResult? SkeletonMapping,
+    IReadOnlyList<NifSupportReport>? NifSupport = null);
+
+public sealed record HeelAnalysisReport(
+    string Profile,
+    double Confidence,
+    IReadOnlyList<string> Evidence,
+    bool HasFootPartition = false,
+    bool HasCalfPartition = false,
+    bool HasFootwearKeywords = false,
+    double? GroundContactRatio = null);
+
+public sealed record NifSupportReport(
+    string MeshPath,
+    string Status,
+    string ParseMode,
+    int? VertexCount,
+    IReadOnlyList<string> Messages,
+    string? SkinInstanceType = null,
+    IReadOnlyList<int>? PartitionSlots = null,
+    int? BoneCount = null,
+    HeelAnalysisReport? HeelAnalysis = null);
 
 /// <summary>
 /// Machine-readable quality summary for a single conversion, written to
@@ -125,6 +197,300 @@ public sealed record ConversionValidationSummary(
     int MediumSeverityCount,
     int LowSeverityCount,
     IReadOnlyList<ConversionValidationIssue> Issues);
+
+public static class ConversionValidationPresentation
+{
+    public static string GetGateLabel(string? status) =>
+        status?.Trim() switch
+        {
+            var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) => "PASS",
+            var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) => "REVIEW REQUIRED",
+            var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) => "FAIL",
+            _ => "CHECK"
+        };
+
+    public static string GetDispositionMessage(string? status) =>
+        status?.Trim() switch
+        {
+            var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) =>
+                "Install-ready after one final preview pass and a normal in-game or mod-manager smoke test.",
+            var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) =>
+                "Review required before install/share. Work through the flagged preview and report items, then validate again.",
+            var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) =>
+                "Do not install/share yet. Fix the blocking conversion issues, re-run the conversion, and validate the regenerated output again.",
+            _ =>
+                "Open the preview and generated validation reports before install/share."
+        };
+}
+
+internal static class ConversionValidationGuidance
+{
+    public static IReadOnlyList<ConversionValidationIssue> PrioritizeIssues(
+        ConversionValidationSummary? validationSummary,
+        int maxIssues = int.MaxValue)
+    {
+        if (validationSummary?.Issues is not { Count: > 0 } issues)
+        {
+            return [];
+        }
+
+        return issues
+            .OrderByDescending(static issue => GetIssueSeverityRank(issue.Severity))
+            .ThenBy(static issue => issue.Code, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxIssues))
+            .ToList();
+    }
+
+    public static IReadOnlyList<string> BuildFollowUpActions(
+        ConversionValidationSummary? validationSummary,
+        string targetBody,
+        int maxActions = 6)
+    {
+        if (validationSummary?.Issues is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        return PrioritizeIssues(validationSummary)
+            .Select(issue => GetIssueFollowUp(issue, targetBody))
+            .Where(static action => !string.IsNullOrWhiteSpace(action))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxActions))
+            .Cast<string>()
+            .ToList();
+    }
+
+    public static int GetIssueSeverityRank(string severity) =>
+        severity.Equals("high", StringComparison.OrdinalIgnoreCase) ? 3
+        : severity.Equals("medium", StringComparison.OrdinalIgnoreCase) ? 2
+        : severity.Equals("low", StringComparison.OrdinalIgnoreCase) ? 1
+        : 0;
+
+    public static string? GetIssueFollowUp(ConversionValidationIssue issue, string targetBody)
+    {
+        var mapped = GetIssueFollowUp(issue.Code, targetBody);
+        return string.IsNullOrWhiteSpace(mapped)
+            ? GetFallbackIssueFollowUp(issue, targetBody)
+            : mapped;
+    }
+
+    public static string? GetIssueFollowUp(string code, string targetBody) =>
+        code switch
+        {
+            "low-detection-confidence" or "low-body-match" =>
+                "Open conversion-quality.json and preview-workbench.html, confirm the detected/source body is correct, then re-run with an explicit source-body override or better reference assets if the armor was matched to the wrong body family.",
+            "bodyslide-incompatible" =>
+                "Open conversion-quality.json, verify the target body has compatible BodySlide slider support for this outfit, and re-run with slider export disabled or with matching BodySlide OSP/TRI/BSD/reference assets before release.",
+            "unsupported-nif-layout" =>
+                "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
+            "heuristic-nif-read" =>
+                "Use preview-workbench.html plus conversion-quality.json to identify heuristic-read meshes, then confirm vertex order, skinning, UVs, and partitions in NifSkope before shipping.",
+            "incomplete-source-fallback" =>
+                "Locate the original BodySlide OSP/TRI/BSD/reference assets for this outfit, place them beside the mod or under BodySlide/ShapeData, then re-run so conversion-quality.json no longer reports source-asset fallback.",
+            "synthetic-morph-fallback" =>
+                "Build the generated project in BodySlide at low and high weights, then compare the results in preview-workbench.html or Outfit Studio for slider drift before release.",
+            "retargeted-morph-reuse" =>
+                "Build the generated BodySlide project at low/high weights, then compare the reused morph result in Outfit Studio and preview-workbench.html to catch slider drift caused by vertex-count retargeting.",
+            "topology-mismatch-risk" =>
+                "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
+            "clipping-detected" or "voxel-penetration" or "pose-risk" =>
+                $"Review preview-workbench.html and pose-simulation-report.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
+            "auto-correction-applied" =>
+                "Open preview-workbench.html and pose-simulation-report.json, compare the corrected regions against the source mesh, and confirm the automatic push-out did not bloat seams, straps, or rigid details before shipping.",
+            "heel-offset-review" =>
+                "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
+            "unsupported-bones" =>
+                "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
+            "unknown-export-partitions" =>
+                "Open conversion-quality.json and the converted mesh in Outfit Studio or NifSkope, verify the exported BSDismember partitions match the outfit coverage, and compare them against any plugin biped-slot hints before release.",
+            "missing-normal-maps" =>
+                "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
+            "race-compatibility-warning" =>
+                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
+            "plugin-rewrite-ambiguous-filename" or
+            "plugin-rewrite-missing-converted-match" or
+            "plugin-rewrite-missing-staged-mesh" or
+            "plugin-rewrite-verification-warning" or
+            "plugin-link-missing-converted-match" or
+            "plugin-link-missing-staged-mesh" =>
+                "Open plugin-patches.json and patch-armor.pas in xEdit context, verify each ARMO/ARMA mesh path and master-chain warning, and ensure any generated *_SlidesmithPatch.esp loads after the source plugin before release.",
+            "plugin-link-missing-arma-record" =>
+                "Open plugin-patches.json in xEdit context, find the linked ARMA FormID that did not resolve, and repair the source plugin/master dependency chain before re-running the conversion.",
+            "plugin-link-partial-family-failure" =>
+                "Open plugin-patches.json and compare every linked armor family variant (world, first-person, female/male, and addon-specific meshes), then re-run only after each linked ARMO/ARMA record resolves to a converted counterpart.",
+            "plugin-link-unscanned-master-reference" =>
+                "Install or extract the missing plugin masters, then re-run with the full master chain available so linked ARMA references stop being skipped during rewrite verification.",
+            "plugin-patch-missing-master-chain" or
+            "plugin-patch-master-order-mismatch" =>
+                "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
+            "plugin-link-unsupported-nif-layout" =>
+                "Identify the linked ARMA meshes called out in conversion-quality.json or plugin-patches.json, compare the whole linked family (world, first-person, female/male, and addon variants) in preview-workbench.html, then re-save those source NIFs into a supported Skyrim layout before re-running so linked armor families stop falling back on unsupported geometry reads.",
+            "missing-conversion-quality-report" =>
+                "Re-run the conversion and confirm conversion-quality.json is present before release so the validation score, issue list, and next-action guidance remain available outside the app.",
+            "missing-skeleton-compatibility-report" =>
+                "Re-run the conversion and confirm skeleton-compatibility.json is present before release so skeleton requirements and unsupported-bone warnings remain reviewable.",
+            "missing-staged-cbpc-config" =>
+                "Re-run the conversion or copy the generated cbpc-config.xml into SKSE/Plugins/CBPCSystem, then confirm the staged mod output contains the expected CBPC config before packaging.",
+            "missing-staged-smp-config" =>
+                "Re-run the conversion or copy the generated smp-config.xml into SKSE/Plugins/hdtSMP64, then confirm the staged mod output contains the expected SMP config before packaging.",
+            "missing-staged-mesh-output" =>
+                "Open dependency-map.json and the meshes/slidesmith output folder, re-run the conversion for the missing variants, and do not package the mod until every referenced staged mesh exists under the Data-relative output path.",
+            "fomod-missing-folder-entry" or
+            "fomod-missing-root-plugin-entry" or
+            "fomod-missing-root-support-entry" =>
+                "Open fomod/ModuleConfig.xml, add the missing meshes/plugins/support-file install entries, and test the package in MO2 or Vortex before release.",
+            "missing-bodyslide-osp" =>
+                "Re-run with slider export enabled and confirm CalienteTools/BodySlide/SliderSets contains the generated .osp project before publishing BodySlide-capable output.",
+            "missing-bodyslide-shape-data" =>
+                "Inspect CalienteTools/BodySlide/ShapeData and re-run before release so the generated outfit ships with its full BodySlide ShapeData folder instead of a partial slider package.",
+            "missing-bodyslide-reference-nif" =>
+                "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
+            "missing-bodyslide-slider-payload" =>
+                "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+            "missing-preview-workbench" =>
+                "Re-run the conversion to regenerate preview-workbench.html, then confirm preview.html and preview.svg are also present so the converted mesh, ground mesh, and flagged risk regions remain reviewable outside the app before release.",
+            "missing-preview-html" or
+            "missing-preview-svg" =>
+                "Re-run the conversion to regenerate preview.html and preview.svg, then confirm the visual review bundle opens before release.",
+            "missing-output-zip" =>
+                "Re-run with output-zip enabled or rebuild the distributable archive, then confirm the final zip contains the same staged meshes, support files, and reports as the output folder before sharing it.",
+            "zip-missing-readme" or
+            "zip-missing-fomod-module-config" or
+            "zip-missing-fomod-info" or
+            "zip-missing-dependency-map" or
+            "zip-missing-conversion-quality-report" or
+            "zip-missing-skeleton-compatibility-report" or
+            "zip-missing-pose-report" or
+            "zip-missing-world-physics-report" or
+            "zip-missing-preview-svg" or
+            "zip-missing-preview-html" or
+            "zip-missing-preview-workbench" or
+            "zip-missing-staged-cbpc-config" or
+            "zip-missing-staged-smp-config" or
+            "zip-missing-root-plugin" or
+            "zip-missing-root-support-file" or
+            "zip-missing-bodyslide-osp" or
+            "zip-missing-bodyslide-shape-data" or
+            "zip-missing-bodyslide-reference-nif" or
+            "zip-missing-bodyslide-slider-payload" or
+            "zip-missing-xedit-script" or
+            "zip-missing-plugin-patch-report" =>
+                "Open armor-pack-validation.json, rebuild the distributable zip, and verify the archive includes every staged mesh, plugin/support file, BodySlide payload, and report before sharing it through a mod manager.",
+            "zip-missing-staged-mesh-output" =>
+                "Open armor-pack-validation.json, rebuild the distributable zip, and verify the archive contains the full meshes/slidesmith Data-relative output so mod managers install the same meshes that were validated in the folder build.",
+            "invalid-output-zip" =>
+                "Delete the broken distributable zip, regenerate it from the validated output folder, and verify it can be opened and installed by your mod manager before release.",
+            _ => null
+        };
+
+    private static string? GetFallbackIssueFollowUp(ConversionValidationIssue issue, string targetBody)
+    {
+        if (string.IsNullOrWhiteSpace(issue.Code) && string.IsNullOrWhiteSpace(issue.Message))
+        {
+            return null;
+        }
+
+        var code = issue.Code?.Trim() ?? string.Empty;
+        var message = issue.Message?.Trim() ?? string.Empty;
+        var detailsSuffix = string.IsNullOrWhiteSpace(message)
+            ? string.Empty
+            : $" Problem reported: {message}";
+
+        if (code.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open plugin-patches.json and conversion-quality.json, then review this plugin edge case in xEdit before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("preview", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Re-run the conversion or restore the missing preview artifact, then confirm preview-workbench.html, preview.html, and preview.svg are present before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("bodyslide", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("slider", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("morph", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open conversion-quality.json and inspect the generated BodySlide/slider payloads before release, then rebuild the output if anything is partial or missing.{detailsSuffix}";
+        }
+
+        if (code.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-output-", StringComparison.OrdinalIgnoreCase) ||
+            code.StartsWith("missing-staged-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open armor-pack-validation.json and the staged output folder, then rebuild the package until the missing generated/install artifact is present.{detailsSuffix}";
+        }
+
+        if (code.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("world", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open world-physics.json and preview-workbench.html, then validate world-drop placement, footwear offsets, and ground contact on the converted {targetBody} output.{detailsSuffix}";
+        }
+
+        if (code.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Open skeleton-compatibility.json and conversion-quality.json, then patch the target skeleton or outfit bone names before release.{detailsSuffix}";
+        }
+
+        if (code.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("uv", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("clipping", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("voxel", StringComparison.OrdinalIgnoreCase) ||
+            code.Contains("pose", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Review preview-workbench.html, pose-simulation-report.json, and conversion-quality.json, then manually inspect the converted {targetBody} mesh for deformation cleanup before release.{detailsSuffix}";
+        }
+
+        return string.IsNullOrWhiteSpace(message)
+            ? "Open conversion-quality.json and review the reported validation issue before release."
+            : $"Open conversion-quality.json and address this validation issue before release: {message}";
+    }
+}
+
+public sealed record PluginRewriteVerificationReport(
+    int DetectedMeshPathCount,
+    int RewriteReadyCount,
+    int VerifiedPluginPathCount,
+    int StagedMeshCount,
+    int LinkedArmorReferenceCount = 0,
+    int VerifiedLinkedArmorReferenceCount = 0,
+    IReadOnlyList<string>? MissingConvertedMatches = null,
+    IReadOnlyList<string>? AmbiguousConvertedMatches = null,
+    IReadOnlyList<string>? MissingStagedMeshes = null,
+    IReadOnlyList<string>? MissingLinkedArmorAddonRecords = null,
+    IReadOnlyList<string>? UnscannedLinkedArmorAddonReferences = null,
+    IReadOnlyList<string>? UnsupportedLinkedArmorAddonMeshes = null,
+    IReadOnlyList<string>? MissingLinkedConvertedMatches = null,
+    IReadOnlyList<string>? MissingLinkedStagedMeshes = null,
+    IReadOnlyList<PartialLinkedArmorFamilyFailure>? PartialLinkedArmorFamilyFailures = null,
+    IReadOnlyList<string>? MissingPatchPluginMasters = null,
+    IReadOnlyList<string>? PatchPluginMasterOrderMismatches = null,
+    IReadOnlyList<string>? UnverifiedPatchedPlugins = null,
+    IReadOnlyList<string>? Warnings = null,
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
+
+internal sealed record PluginInstallHint(
+    string SourcePlugin,
+    IReadOnlyList<string> InheritedMasters,
+    string? GeneratedPatchPlugin,
+    IReadOnlyList<string> RecommendedPluginLoadAfter,
+    string RecommendedModManagerPlacement,
+    bool ManualReviewRequired,
+    IReadOnlyList<string> Notes);
+
+public sealed record PartitionSignalReport(
+    IReadOnlyList<int> SourceNifSlots,
+    IReadOnlyList<int> PluginSlots,
+    IReadOnlyList<int> FinalSlots,
+    IReadOnlyList<string> Regions,
+    string RegionBindingMethod,
+    IReadOnlyList<int>? MissingSourceSlots = null,
+    IReadOnlyList<int>? MissingPluginSlots = null,
+    IReadOnlyList<string>? UnknownFinalPartitions = null,
+    IReadOnlyList<string>? Warnings = null);
 
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
@@ -155,12 +521,18 @@ public sealed record ConversionQualityReport(
     int HighRiskPoseCount = 0,
     IReadOnlyList<string>? HighRiskPoseRegions = null,
     int MissingNormalCount = 0,
-    ConversionValidationSummary? ValidationSummary = null);
+    ConversionValidationSummary? ValidationSummary = null,
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null,
+    MorphPayloadReuseSummary? PayloadReuse = null,
+    IReadOnlyList<NifSupportReport>? NifSupport = null,
+    PluginRewriteVerificationReport? PluginRewriteVerification = null,
+    PartitionSignalReport? PartitionSignals = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
 
-public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml);
+public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml, IReadOnlyList<string>? ZapSliders = null);
 public sealed record TextureSummary(
     int TotalCount,
     IReadOnlyList<string> DiffuseFiles,
@@ -184,8 +556,18 @@ public sealed record RaceCompatibilityReport(
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> IncompatibleRaces);
 
+public sealed record ConversionStageProgressUpdate(string Stage, int StepIndex, int StepCount);
+
 /// <summary>Reports progress during a batch conversion run.</summary>
-public sealed record BatchProgressUpdate(int Completed, int Total, string CurrentFile, bool Success);
+public sealed record BatchProgressUpdate(
+    int Completed,
+    int Total,
+    string CurrentFile,
+    bool Success,
+    string? Stage = null,
+    int StageIndex = 0,
+    int StageCount = 0,
+    bool IsItemCompleted = true);
 
 public sealed record ArmorPackValidationIssueCount(string Code, int Count);
 public sealed record ArmorPackValidationItem(
@@ -259,7 +641,15 @@ public sealed record PluginArmorAddon(
     uint FormId = 0,
     string? EditorId = null,
     IReadOnlyList<int>? BipedSlots = null,
-    uint? RaceFormId = null);
+    uint? RaceFormId = null,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null,
+    IReadOnlyList<string>? DeclaredMasterFileNames = null);
+
+public sealed record PluginLinkedFormReference(
+    uint RawFormId,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null);
 
 /// <summary>
 /// Describes a single ARMO (Armor) record found in a plugin file.
@@ -272,7 +662,13 @@ public sealed record PluginArmorRecord(
     uint FormId = 0,
     string? EditorId = null,
     IReadOnlyList<uint>? KeywordFormIds = null,
-    uint? RaceFormId = null);
+    uint? RaceFormId = null,
+    IReadOnlyList<int>? BipedSlots = null,
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null,
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null,
+    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null,
+    IReadOnlyList<string>? DeclaredMasterFileNames = null);
 
 /// <summary>
 /// Plugin analysis result — carries scanned plugins, ARMA armor-addon records,
@@ -366,6 +762,51 @@ public sealed record PluginRewriteResult(
     IReadOnlyList<string> Warnings,
     int ArmoRecordsPatched = 0);
 
+internal sealed record PluginRewritePlan(
+    IReadOnlyDictionary<string, string> RewriteMap,
+    IReadOnlyDictionary<string, string> SourceMeshMap,
+    IReadOnlyList<string> MissingConvertedMatches,
+    IReadOnlyList<string> AmbiguousConvertedMatches,
+    int DetectedMeshPathCount,
+    IReadOnlyList<UnresolvedPluginTieGroup>? UnresolvedTieGroups = null);
+
+public sealed record PluginTieFamilyHint(
+    string FamilyPath,
+    int SupportCount);
+
+public sealed record UnresolvedPluginTieGroup(
+    string PluginMeshPath,
+    IReadOnlyList<string> CandidateSourceMeshPaths,
+    IReadOnlyList<string> CandidateSourceFamilies,
+    IReadOnlyList<string> RelatedPluginMeshPaths,
+    IReadOnlyList<string> ResolvedNeighborSourceMeshPaths,
+    IReadOnlyList<PluginTieFamilyHint> SharedCandidateFamilies,
+    string ManualReviewReason);
+
+internal readonly record struct MeshPathVariantSignals(
+    bool IsFirstPerson,
+    bool IsWorld,
+    bool IsFemale,
+    bool IsMale,
+    bool IsLowWeight,
+    bool IsHighWeight);
+
+public sealed record PartialLinkedArmorFamilyFailure(
+    string ArmorRecord,
+    string OwningPluginFileName,
+    int TotalLinkedArmorAddonReferences,
+    int VerifiedLinkedArmorAddonReferences,
+    IReadOnlyList<string> VerifiedLinkedArmorAddonRecords,
+    IReadOnlyList<string> UnresolvedLinkedArmorAddonReferences,
+    IReadOnlyList<string> CandidateSourceFamilies,
+    IReadOnlyList<string> FailureCategories,
+    string ManualReviewReason);
+
+internal sealed record ConvertedNifWriteResult(
+    IReadOnlyList<string> WrittenPaths,
+    IReadOnlyDictionary<string, string> WrittenPathBySourceMesh,
+    int SynthesizedCount);
+
 /// <summary>
 /// Outcome of generating a minimal Bethesda override patch ESP that lists the original
 /// plugin as its master and contains only the patched ARMA records (no full-copy).
@@ -389,7 +830,9 @@ internal sealed record ArmaRecordDescriptor(
     IReadOnlyList<string> MeshPaths,
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
     byte[] OriginalDataBytes,           // The record data payload (not including header)
-    uint? RaceFormId = null);           // RNAM — the race this ArmorAddon applies to
+    uint? RaceFormId = null,            // RNAM — the race this ArmorAddon applies to
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null);
 
 /// <summary>
 /// Full parsed descriptor for a single ARMO (Armor) record — carries everything the
@@ -405,7 +848,12 @@ internal sealed record ArmoRecordDescriptor(
     byte[] OriginalRecordHeaderBytes,   // The record header (24 or 20 bytes)
     byte[] OriginalDataBytes,           // The record data payload (not including header)
     IReadOnlyList<uint>? KeywordFormIds = null,  // KWDA — keyword FormIDs
-    uint? RaceFormId = null);                    // RNAM — race FormID
+    uint? RaceFormId = null,                    // RNAM — race FormID
+    IReadOnlyList<int>? BipedSlots = null,      // BOD2/BODT — decoded equipment slots
+    IReadOnlyList<uint>? LinkedArmorAddonFormIds = null, // ARMA — linked ArmorAddon FormIDs
+    string? OwningPluginFileName = null,
+    uint? LocalFormId = null,
+    IReadOnlyList<PluginLinkedFormReference>? LinkedArmorAddonReferences = null);
 
 public sealed record MeshDependencyMapEntry(
     string Mesh,
@@ -438,7 +886,8 @@ public sealed record WorldObjectPhysicsReport(
     bool SourcePhysicsDetected,
     bool RuntimePhysicsProfileGenerated,
     bool GroundMeshAvailable,
-    IReadOnlyList<string> Recommendations);
+    IReadOnlyList<string> Recommendations,
+    HeelAnalysisReport? HeelAnalysis = null);
 
 public sealed record PreviewWorkbenchPayload(
     string MeshFile,
@@ -486,6 +935,24 @@ public static class PresetCatalog
         ["UNP Curvy"]         = new("UNP Curvy",          "UNP",   "curvy",    "cbpc"),
         ["UNP Slim"]          = new("UNP Slim",           "UNP",   "slim",     "cbpc"),
         ["UNP Zeroed"]        = new("UNP Zeroed",         "UNP",   "zeroed",   "cbpc"),
+        ["UNPB Curvy"]        = new("UNPB Curvy",         "UNPB",  "curvy",    "cbpc"),
+        ["UNPB Slim"]         = new("UNPB Slim",          "UNPB",  "slim",     "cbpc"),
+        ["UNPB Athletic"]     = new("UNPB Athletic",      "UNPB",  "athletic", "cbpc"),
+        ["UNPB Zeroed"]       = new("UNPB Zeroed",        "UNPB",  "zeroed",   "cbpc"),
+        // ── UUNP ────────────────────────────────────────────────────────────
+        ["UUNP Curvy"]        = new("UUNP Curvy",         "UUNP",  "curvy",    "cbpc"),
+        ["UUNP Slim"]         = new("UUNP Slim",          "UUNP",  "slim",     "cbpc"),
+        ["UUNP Athletic"]     = new("UUNP Athletic",      "UUNP",  "athletic", "cbpc"),
+        ["UUNP Zeroed"]       = new("UUNP Zeroed",        "UUNP",  "zeroed",   "cbpc"),
+        // ── COCO variants ───────────────────────────────────────────────────
+        ["COCO CBBE Curvy"]    = new("COCO CBBE Curvy",    "COCO CBBE", "curvy",    "smp+cbpc"),
+        ["COCO CBBE Slim"]     = new("COCO CBBE Slim",     "COCO CBBE", "slim",     "smp+cbpc"),
+        ["COCO CBBE Athletic"] = new("COCO CBBE Athletic", "COCO CBBE", "athletic", "smp+cbpc"),
+        ["COCO CBBE Zeroed"]   = new("COCO CBBE Zeroed",   "COCO CBBE", "zeroed",   "smp+cbpc"),
+        ["COCO UUNP Curvy"]    = new("COCO UUNP Curvy",    "COCO UUNP", "curvy",    "smp+cbpc"),
+        ["COCO UUNP Slim"]     = new("COCO UUNP Slim",     "COCO UUNP", "slim",     "smp+cbpc"),
+        ["COCO UUNP Athletic"] = new("COCO UUNP Athletic", "COCO UUNP", "athletic", "smp+cbpc"),
+        ["COCO UUNP Zeroed"]   = new("COCO UUNP Zeroed",   "COCO UUNP", "zeroed",   "smp+cbpc"),
         // ── TBD ─────────────────────────────────────────────────────────────
         ["TBD Lean"]          = new("TBD Lean",           "TBD",   "lean",     "cbpc"),
         ["TBD Curvy"]         = new("TBD Curvy",          "TBD",   "curvy",    "cbpc"),
@@ -496,6 +963,10 @@ public static class PresetCatalog
         ["SAM Lean"]          = new("SAM Lean",           "SAM",   "lean",     "smp"),
         ["SAM Muscular"]      = new("SAM Muscular",       "SAM",   "muscular", "smp"),
         ["SAM Zeroed"]        = new("SAM Zeroed",         "SAM",   "zeroed",   "smp"),
+        ["SAM Light Lean"]    = new("SAM Light Lean",     "SAM Light", "lean",     "smp"),
+        ["SAM Light Athletic"] = new("SAM Light Athletic","SAM Light", "athletic", "smp"),
+        ["SAM Light Muscular"] = new("SAM Light Muscular","SAM Light", "muscular", "smp"),
+        ["SAM Light Zeroed"]  = new("SAM Light Zeroed",   "SAM Light", "zeroed",   "smp"),
         // ── SOS ─────────────────────────────────────────────────────────────
         ["SOS Lean"]          = new("SOS Lean",           "SOS",   "lean",     "smp"),
         ["SOS Athletic"]      = new("SOS Athletic",       "SOS",   "athletic", "smp"),
@@ -512,15 +983,33 @@ public static class PresetCatalog
         // ── Vanilla ─────────────────────────────────────────────────────────
         ["Vanilla Balanced"]  = new("Vanilla Balanced",   "Vanilla", "balanced", "none"),
         ["Vanilla Zeroed"]    = new("Vanilla Zeroed",     "Vanilla", "zeroed",   "none"),
+        ["Vanilla Beast Balanced"] = new("Vanilla Beast Balanced", "Vanilla Beast", "balanced", "none"),
+        ["Vanilla Beast Zeroed"] = new("Vanilla Beast Zeroed", "Vanilla Beast", "zeroed", "none"),
+        ["Goat Humanoid Balanced"] = new("Goat Humanoid Balanced", "Goat Humanoid", "balanced", "none"),
+        ["Goat Humanoid Zeroed"] = new("Goat Humanoid Zeroed", "Goat Humanoid", "zeroed", "none"),
+        ["Hagraven Balanced"] = new("Hagraven Balanced", "Hagraven", "balanced", "none"),
+        ["Hagraven Zeroed"] = new("Hagraven Zeroed", "Hagraven", "zeroed", "none"),
+        ["Spriggan Balanced"] = new("Spriggan Balanced", "Spriggan", "balanced", "none"),
+        ["Spriggan Zeroed"] = new("Spriggan Zeroed", "Spriggan", "zeroed", "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
         ["Vanilla to 3BA"]    = new("Vanilla to 3BA",     "3BA",     "balanced", "smp+cbpc"),
         ["Vanilla to HIMBO"]  = new("Vanilla to HIMBO",   "HIMBO",   "balanced", "smp"),
         ["Vanilla to UNP"]    = new("Vanilla to UNP",     "UNP",     "balanced", "cbpc"),
+        ["Vanilla to UNPB"]   = new("Vanilla to UNPB",    "UNPB",    "balanced", "cbpc"),
+        ["Vanilla to Goat Humanoid"] = new("Vanilla to Goat Humanoid", "Goat Humanoid", "balanced", "none"),
+        ["Vanilla to Hagraven"] = new("Vanilla to Hagraven", "Hagraven", "balanced", "none"),
+        ["Vanilla to Spriggan"] = new("Vanilla to Spriggan", "Spriggan", "balanced", "none"),
         // ── HIMBO ───────────────────────────────────────────────────────────
         ["HIMBO Lean"]        = new("HIMBO Lean",         "HIMBO", "lean",     "smp"),
         ["HIMBO Muscular"]    = new("HIMBO Muscular",     "HIMBO", "muscular", "smp"),
         ["HIMBO Athletic"]    = new("HIMBO Athletic",     "HIMBO", "athletic", "smp"),
         ["HIMBO Zeroed"]      = new("HIMBO Zeroed",       "HIMBO", "zeroed",   "smp"),
+        // ── TNG ─────────────────────────────────────────────────────────────
+        ["TNG Lean"]          = new("TNG Lean",           "TNG",   "lean",     "smp"),
+        ["TNG Muscular"]      = new("TNG Muscular",       "TNG",   "muscular", "smp"),
+        ["TNG Athletic"]      = new("TNG Athletic",       "TNG",   "athletic", "smp"),
+        ["TNG Zeroed"]        = new("TNG Zeroed",         "TNG",   "zeroed",   "smp"),
+        ["Vanilla to TNG"]    = new("Vanilla to TNG",     "TNG",   "balanced", "smp"),
     };
 
     public static IReadOnlyCollection<ConversionPreset> All => Presets.Values;
@@ -531,21 +1020,6 @@ public static class PresetCatalog
 
 public static class PhysicsProfileCatalog
 {
-    private static readonly IReadOnlyDictionary<string, string> BuiltInDefaults =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"] = "smp+cbpc",
-            ["BHUNP"] = "smp+cbpc",
-            ["UNP"] = "cbpc",
-            ["TBD"] = "cbpc",
-            ["HIMBO"] = "smp",
-            ["SAM"] = "smp",
-            ["SOS"] = "smp",
-            ["CBBE"] = "none",
-            ["UBE"] = "smp+cbpc",
-            ["Vanilla"] = "none",
-        };
-
     /// <summary>
     /// Canonical physics engine profile identifiers.
     /// Any profile can be applied to any body via the Physics override option.
@@ -558,7 +1032,7 @@ public static class PhysicsProfileCatalog
         {
             ["none"]      = "No soft-body bone injection. Armor uses static mesh weights only; safe for all bodies.",
             ["cbpc"]      = "CBPC (C++ Based Physics for Cloth) bone injection. Fast CPU-side soft-body simulation; lighter mod requirement.",
-            ["smp"]       = "Spriggan MeshPhysics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
+            ["smp"]       = "Skinned Mesh Physics (SMP) bone injection. GPU-accelerated soft-body simulation; recommended for HIMBO / SAM / SOS.",
             ["smp+cbpc"]  = "Soft Body (CBPC + SMP). Combined SMP + CBPC bone injection with full soft-body coverage; used by default for 3BA, BHUNP, and UBE.",
         };
 
@@ -570,15 +1044,13 @@ public static class PhysicsProfileCatalog
             return false;
         }
 
-        var candidate = value.Trim().ToLowerInvariant();
+        var candidate = CanonicalizePhysicsProfileAlias(value);
         normalized = candidate switch
         {
-            "none"                                                  => "none",
-            "cbpc"                                                  => "cbpc",
-            "smp"                                                   => "smp",
-            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp"  => "smp+cbpc",
-            // "soft-body" is a behavior-facing alias; it normalises to canonical smp+cbpc.
-            "soft-body" or "soft body" or "softbody" or "soft_body" or "soft body (cbpc + smp)" => "smp+cbpc",
+            "none" or "off" or "disabled" or "static" => "none",
+            "cbpc" or "cbp" or "cbpconly" or "clothphysics" => "cbpc",
+            "smp" or "smponly" or "hdtsmp" or "fsmp" or "fasterhdtsmp" => "smp",
+            "smpcbpc" or "cbpcsmp" or "softbody" or "softbodycbpcsmp" or "fullsoftbody" or "fullsoftbodycbpcsmp" or "hdtsmpcbpc" or "cbpchdtsmp" or "fsmpcbpc" or "cbpcfsmp" => "smp+cbpc",
             _ => string.Empty
         };
 
@@ -599,9 +1071,24 @@ public static class PhysicsProfileCatalog
 
     public static string GetDefaultForTargetBody(string? targetBody) =>
         !string.IsNullOrWhiteSpace(targetBody) &&
-        BuiltInDefaults.TryGetValue(targetBody.Trim(), out var profile)
-            ? profile
+        BuiltInBodyMetadataCatalog.TryGet(targetBody.Trim(), out var metadata)
+            ? metadata.DefaultPhysics
             : "none";
+
+    private static string CanonicalizePhysicsProfileAlias(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        var length = 0;
+        foreach (var ch in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                buffer[length++] = ch;
+            }
+        }
+
+        return new string(buffer[..length]);
+    }
 }
 
 public static class WorldDropModeCatalog
@@ -726,7 +1213,7 @@ public static class RequestNormalizer
 
     private static IEnumerable<string> ExpandTargetSelection(string targetBody)
     {
-        var normalized = targetBody.Trim();
+        var normalized = BodyTypeCatalog.ResolveName(targetBody);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return [];
@@ -776,7 +1263,10 @@ public sealed record CustomBodyProfile(
     IReadOnlyList<string>? PhysicsBones = null,
     string? PhysicsProfile = null,
     string? BodyOutputPath = null,
-    string Gender = "female");
+    string Gender = "female",
+    IReadOnlyList<string>? ReferenceTokens = null,
+    IReadOnlyList<string>? ZapSliderNames = null,
+    string? SkeletonFoundation = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -787,6 +1277,53 @@ public static class BodyTypeCatalog
             .ToList());
 
     public static IReadOnlyList<BodyTypeInfo> All => _all.Value;
+
+    public static string ResolveName(string? requestedName)
+    {
+        if (BuiltInBodyMetadataCatalog.TryResolveCanonicalName(requestedName, out var canonicalName))
+        {
+            return canonicalName;
+        }
+
+        return requestedName?.Trim() ?? string.Empty;
+    }
+
+    public static bool TryResolve(string? requestedName, out BodyTypeInfo body)
+    {
+        body = default!;
+        var resolvedName = ResolveName(requestedName);
+        if (string.IsNullOrWhiteSpace(resolvedName))
+        {
+            return false;
+        }
+
+        var match = All.FirstOrDefault(candidate => string.Equals(candidate.Name, resolvedName, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            return false;
+        }
+
+        body = match;
+        return true;
+    }
+
+    public static bool TryGetGender(string? requestedName, out string gender)
+    {
+        gender = string.Empty;
+        var resolvedName = ResolveName(requestedName);
+        if (string.IsNullOrWhiteSpace(resolvedName) ||
+            !BuiltInBodyMetadataCatalog.TryGet(resolvedName, out var metadata))
+        {
+            return false;
+        }
+
+        gender = metadata.Gender;
+        return true;
+    }
+
+    public static bool IsMaleBody(string? requestedName) =>
+        TryGetGender(requestedName, out var gender) &&
+        string.Equals(gender, "male", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -1060,44 +1597,28 @@ public sealed record BodyTechnicalProfileInfo(
 
 public static class BodyTechnicalProfileCatalog
 {
-    private static readonly IReadOnlyDictionary<string, BodyTechnicalProfileInfo> Profiles =
-        new Dictionary<string, BodyTechnicalProfileInfo>(StringComparer.OrdinalIgnoreCase)
-        {
-            // DefaultPhysics mirrors PhysicsProfileCatalog.BuiltInDefaults.
-            // AvailablePhysicsBones lists all bones that become active when a soft-body physics
-            // profile is applied — even for bodies whose default is "none".
-            ["CBBE"]    = new("CBBE",    "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                      "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.", "none"),
-            ["3BA"]     = new("3BA",     "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",                                                                                            "smp+cbpc"),
-            ["BHUNP"]   = new("BHUNP",   "XPMSSE",                   ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],                                                "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",                                                                       "smp+cbpc"),
-            ["UNP"]     = new("UNP",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",                                                                                       "cbpc"),
-            ["TBD"]     = new("TBD",     "XPMSSE",                   ["NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],                                                                                                                                                  "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",                                                                                               "cbpc"),
-            ["HIMBO"]   = new("HIMBO",   "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Modern male body with pec-driven physics. SMP enabled by default.",                                                                                                                "smp"),
-            ["SAM"]     = new("SAM",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"],                                                                                                                                                              "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",                                                                                            "smp"),
-            ["SOS"]     = new("SOS",     "XPMSSE",                   ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],                                                                                                                                "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",                                                                                             "smp"),
-            ["UBE"]     = new("UBE",     "XPMSSE + custom UBE bones",["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower"], "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",                                                          "smp+cbpc"),
-            ["Vanilla"] = new("Vanilla", "Vanilla Skyrim skeleton",  ["NPC Belly"],                                                                                                                                                                                                                  "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",                                           "none"),
-        };
-
     public static bool TryGet(string bodyName, out BodyTechnicalProfileInfo profile) =>
-        Profiles.TryGetValue(bodyName, out profile!);
-}
+        BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata)
+            ? ReturnBuiltIn(metadata, out profile)
+            : ReturnMissing(out profile);
 
-/// <summary>
-/// Defines token signatures used to match imported assets to known body families.
-/// Mesh, texture, and physics token hit ratios are combined with optional vertex count
-/// range hints into a confidence score.
-/// </summary>
-internal sealed record BodySignatureTemplate(
-    string Body,
-    IReadOnlyList<string> MeshTokens,
-    IReadOnlyList<string> TextureTokens,
-    IReadOnlyList<string> PhysicsTokens,
-    int VertexCountMin = 0,
-    int VertexCountMax = 0,
-    double HeightToWidthRatioMin = 0,
-    double HeightToWidthRatioMax = 0,
-    double DepthToWidthRatioMin = 0,
-    double DepthToWidthRatioMax = 0);
+    private static bool ReturnBuiltIn(BuiltInBodyMetadata metadata, out BodyTechnicalProfileInfo profile)
+    {
+        profile = new BodyTechnicalProfileInfo(
+            metadata.Name,
+            metadata.SkeletonFoundation,
+            metadata.AvailablePhysicsBones,
+            metadata.Notes,
+            metadata.DefaultPhysics);
+        return true;
+    }
+
+    private static bool ReturnMissing(out BodyTechnicalProfileInfo profile)
+    {
+        profile = default!;
+        return false;
+    }
+}
 
 internal readonly record struct MeshVertex(float X, float Y, float Z);
 
@@ -1260,7 +1781,7 @@ internal static class NifBlockGraphParser
         var scanStart = Math.Max(startOffset, 0);
         var scanEnd = Math.Min(endOffset - sizeof(int), bytes.Length - sizeof(int));
 
-        for (var offset = scanStart; offset <= scanEnd; offset += sizeof(int))
+        for (var offset = scanStart; offset <= scanEnd; offset++)
         {
             var candidate = BitConverter.ToInt32(bytes, offset);
             if (candidate >= 0 && candidate < blockCount)
@@ -1326,6 +1847,9 @@ internal static class SkeletonNifBoneParser
 
         if (hasBip01)
             return "fo4-biped";
+        var extendedFramework = DetectExtendedFramework(boneNames);
+        if (!string.IsNullOrWhiteSpace(extendedFramework))
+            return extendedFramework;
         if (hasFemaleSmpBones || hasMaleSmpBones)
             return "xpmsse-physics";
         return "xpmsse-vanilla";
@@ -1342,7 +1866,18 @@ internal static class SkeletonNifBoneParser
          s.StartsWith("Equip",    StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("Camera",   StringComparison.OrdinalIgnoreCase) ||
          s.StartsWith("HDT",      StringComparison.OrdinalIgnoreCase) ||
-         s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase));
+         s.StartsWith("Tail",     StringComparison.OrdinalIgnoreCase) ||
+         SkeletonFrameworkCatalog.MatchesKnownBonePattern(s));
+
+    private static string? DetectExtendedFramework(IReadOnlyList<string> boneNames)
+    {
+        var normalizedBones = boneNames
+            .Where(static bone => !string.IsNullOrWhiteSpace(bone))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return SkeletonFrameworkCatalog.DetectFramework(normalizedBones);
+    }
 
     /// <summary>
     /// Locates and reads the NIF header string table.
@@ -1434,39 +1969,73 @@ internal static class SkeletonNifBoneParser
     }
 }
 
-internal static class VanillaBodySignatureDatabase
-{
-    // Typical vertex counts per body type are well-known in the modding community.
-    // These ranges are used as additional scoring hints when NIF data is available.
-    // CBBE:  ~6942 vertices (standard), UNP: ~6032, HIMBO: ~6820, BHUNP: ~10080,
-    // 3BA:   ~10032 (CBBE base with physics), TBD: ~7680, SAM: ~5984, SOS: ~6274, UBE: ~7000
-    public static readonly IReadOnlyList<BodySignatureTemplate> Templates =
-    [
-        new("CBBE",    ["cbbe", "caliente"],         ["femalebody_1", "femalebody_0"], [],            6800, 7100, 4.2, 7.2, 0.30, 0.80),
-        new("UNP",     ["unp", "unpb"],              ["femalebody"],                  [],            5900, 6200, 4.3, 7.4, 0.28, 0.75),
-        new("HIMBO",   ["himbo", "male"],            ["malebody"],                    [],            6600, 7100, 3.2, 6.8, 0.32, 0.95),
-        new("BHUNP",   ["bhunp"],                    ["femalebody"],                  [],            9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("3BA",     ["3ba", "cbbe", "bodyslide"],["femalebody"],                  ["smp", "cbpc", "3bbb"], 9800, 10400, 4.0, 7.0, 0.33, 0.85),
-        new("TBD",     ["tbd"],                      ["femalebody"],                  [],            7400, 7900, 4.1, 7.2, 0.30, 0.82),
-        new("SAM",     ["sam", "samlight"],          ["malebody"],                    [],            5800, 6200, 3.3, 6.8, 0.32, 0.95),
-        new("SOS",     ["sos", "soslight"],          ["malebody"],                    ["smp"],       6100, 6500, 3.2, 6.8, 0.32, 0.95),
-        new("UBE",     ["ube", "ubebody", "ultimatebodyenhancer"], ["ube", "ubebody"], ["smp", "cbpc", "breastupper", "breastouter", "buttupper"], 6800, 7200, 4.3, 7.4, 0.30, 0.80),
-        new("Vanilla", ["vanilla", "femalebody", "malebody"], ["femalebody", "malebody"], [],        4000, 6100, 4.0, 7.5, 0.28, 0.90),
-    ];
-}
-
 internal static class NifGeometrySignatureReader
 {
     // Lightweight heuristics for plausible body/armor meshes.
-    private const int MinPlausibleVertexCount = 256;
+    private const int MinPlausibleExplicitVertexCount = 24;
+    private const int MinPlausibleHeuristicVertexCount = 256;
     private const int MaxPlausibleVertexCount = 250_000;
     private const float MaxPlausibleCoordinateValue = 8192f;
     private const float MaxPlausibleUvValue = 4f;
     private const int HeuristicScanByteLimit = 64 * 1024;
+    private const int GeometryTokenScanByteLimit = 192 * 1024;
     private static readonly byte[] EmbeddedVertexMarker = System.Text.Encoding.ASCII.GetBytes("VERT");
     private static readonly byte[] EmbeddedUvMarker = System.Text.Encoding.ASCII.GetBytes("UVS ");
     private static readonly byte[] NifHeaderToken = System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format");
-    private static readonly byte[] BsTriShapeToken = System.Text.Encoding.ASCII.GetBytes("BSTriShape");
+    private static readonly byte[][] DirectSseHalfFloatShapeTokens =
+    [
+        System.Text.Encoding.ASCII.GetBytes("BSTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"),
+    ];
+    private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
+    [
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
+    ];
+    private static readonly (byte[] TokenBytes, string TypeName)[] GeometryFamilyHintTokens =
+    [
+        (System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"), "BSSubIndexTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSTriShape"), "BSTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"), "BSDynamicTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"), "BSLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"), "BSMeshLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiGeometryData"), "NiGeometryData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
+        (System.Text.Encoding.ASCII.GetBytes("NiLinesData"), "NiLinesData"),
+        (System.Text.Encoding.ASCII.GetBytes("NiLines"), "NiLines"),
+    ];
+    private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
+    private const int MaxFloatVertexStride = 160;
+    private static readonly int[] CommonFloatVertexPrefixPaddings = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96];
+    private static readonly string[] FootwearKeywords = ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "footwear", "heel", "heels"];
+    private static readonly string[] HighHeelKeywords = ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
+    private static readonly IReadOnlySet<int> SupportedPartitionSlots = new HashSet<int>
+    {
+        30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56
+    };
+
+    internal sealed record NifMeshMetadata(
+        string? SkinInstanceType,
+        IReadOnlyList<int> PartitionSlots,
+        IReadOnlyList<string> BoneNames);
+
+    internal readonly record struct HalfFloatVertexBlockCandidate(
+        int VertexDataOffset,
+        int VertexCount,
+        int VertexStride,
+        int Score,
+        int TrailingBytes);
 
     public static MeshGeometrySignature? TryReadBest(IEnumerable<string> meshFiles)
     {
@@ -1491,6 +2060,58 @@ internal static class NifGeometrySignatureReader
         return best;
     }
 
+    public static IReadOnlyList<NifSupportReport> Inspect(IEnumerable<string> meshFiles)
+    {
+        var reports = new List<NifSupportReport>();
+        foreach (var meshFile in meshFiles
+                     .Where(path => !string.IsNullOrWhiteSpace(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            reports.Add(Inspect(meshFile));
+        }
+
+        return reports;
+    }
+
+    public static NifSupportReport Inspect(string meshFile)
+    {
+        if (!File.Exists(meshFile))
+        {
+            return new NifSupportReport(
+                meshFile,
+                "unsupported",
+                "missing-file",
+                null,
+                ["file-not-found"]);
+        }
+
+        if (!Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return new NifSupportReport(
+                meshFile,
+                "unsupported",
+                "not-a-nif",
+                null,
+                ["unsupported-extension"]);
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(meshFile);
+        }
+        catch (IOException)
+        {
+            return new NifSupportReport(meshFile, "unsupported", "read-failed", null, ["io-read-failed"]);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new NifSupportReport(meshFile, "unsupported", "read-failed", null, ["access-denied"]);
+        }
+
+        return Inspect(bytes, meshFile);
+    }
+
     public static MeshGeometrySignature? TryRead(string meshFile)
     {
         if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
@@ -1512,12 +2133,60 @@ internal static class NifGeometrySignatureReader
             return null;
         }
 
-        if (bytes.Length < 32)
+        return TryRead(bytes);
+    }
+
+    public static MeshGeometrySignature? TryRead(byte[] bytes) => Inspect(bytes, null).Status switch
+    {
+        "supported" or "degraded" => TryReadWithMode(bytes).Signature,
+        _ => null
+    };
+
+    public static IReadOnlyList<int> ExtractPartitionSlots(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        try
+        {
+            return ExtractMetadata(File.ReadAllBytes(meshFile)).PartitionSlots;
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    public static IReadOnlyList<MeshVertex>? TryReadFullVertices(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        try
+        {
+            return TryReadFullVertices(File.ReadAllBytes(meshFile));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public static IReadOnlyList<MeshVertex>? TryReadFullVertices(byte[] bytes)
+    {
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
         {
             return null;
         }
@@ -1525,20 +2194,95 @@ internal static class NifGeometrySignatureReader
         var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
         if (embeddedMarkerOffset >= 0)
         {
-            var embeddedSignature = TryReadEmbeddedVertexBlock(bytes, embeddedMarkerOffset);
-            if (embeddedSignature is not null)
+            var countOffset = embeddedMarkerOffset + EmbeddedVertexMarker.Length;
+            if (countOffset + sizeof(int) <= bytes.Length)
             {
-                return embeddedSignature;
+                var embeddedCount = BitConverter.ToInt32(bytes, countOffset);
+                var embeddedVertices = ReadFloatVertices(bytes, countOffset + sizeof(int), embeddedCount);
+                if (embeddedVertices is not null)
+                {
+                    return embeddedVertices;
+                }
             }
         }
 
-        var graphSignature = TryReadBlockGraphVertexBlock(bytes);
-        if (graphSignature is not null)
+        if (TryLocateHalfFloatVertexBlock(bytes, out var halfDataOffset, out var halfVertexCount, out var vertexStride))
         {
-            return graphSignature;
+            var halfVertices = ReadHalfFloatVertices(bytes, halfDataOffset, halfVertexCount, vertexStride);
+            if (halfVertices is not null)
+            {
+                return halfVertices;
+            }
         }
 
-        return TryReadHeuristicVertexBlock(bytes);
+        if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
+        {
+            var interleavedVertices = ReadFloatStrideVertices(bytes, interleavedDataOffset, interleavedVertexCount, interleavedVertexStride);
+            if (interleavedVertices is not null)
+            {
+                return interleavedVertices;
+            }
+        }
+
+        if (TryLocateVertexBlock(bytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return ReadFloatVertices(bytes, vertexDataOffset, vertexCount);
+        }
+
+        return null;
+    }
+
+    internal static string GetCapabilitySummary()
+    {
+        var supportedModes = new List<string>();
+        if (Inspect(CreateEmbeddedProbeBytes(), "embedded-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("embedded");
+        }
+
+        if (Inspect(CreateBlockGraphProbeBytes(), "block-graph-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("block-graph");
+        }
+
+        if (Inspect(CreateTriStripsProbeBytes(), "tristrips-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("tristrips-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSTriShape"), "bstri-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bstri-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSLODTriShape"), "bslod-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bslod-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSMeshLODTriShape"), "bsmeshlod-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bsmeshlod-half-float");
+        }
+
+        if (Inspect(CreateBsHalfFloatProbeBytes("BSSegmentedTriShape"), "bssegmented-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("bssegmented-half-float");
+        }
+
+        if (Inspect(CreateInterleavedFloatProbeBytes(), "interleaved-float-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("interleaved-float");
+        }
+
+        if (Inspect(CreateTokenGuidedFloatProbeBytes("NiMesh"), "nimesh-probe").Status is "supported" or "degraded")
+        {
+            supportedModes.Add("nimesh-float");
+        }
+
+        return supportedModes.Count == 0
+            ? "no readable NIF parsing modes detected"
+            : $"readable NIF modes: {string.Join(", ", supportedModes)}";
     }
 
     public static bool TryLocateVertexBlock(byte[] bytes, out int vertexDataOffset, out int vertexCount)
@@ -1574,6 +2318,13 @@ internal static class NifGeometrySignatureReader
             return true;
         }
 
+        if (TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var tokenVertexDataOffset, out var tokenVertexCount))
+        {
+            vertexDataOffset = tokenVertexDataOffset;
+            vertexCount = tokenVertexCount;
+            return true;
+        }
+
         var scanLimit = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
         var bestCount = 0;
         var bestOffset = -1;
@@ -1581,7 +2332,7 @@ internal static class NifGeometrySignatureReader
         for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+            if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
             {
                 continue;
             }
@@ -1604,6 +2355,159 @@ internal static class NifGeometrySignatureReader
         vertexDataOffset = bestOffset;
         vertexCount = bestCount;
         return true;
+    }
+
+    public static bool TryLocateInterleavedFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        {
+            var bestNodeScore = int.MinValue;
+            var bestVertexCount = 0;
+            var bestOffset = -1;
+            var bestStride = 0;
+            var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
+
+            foreach (var node in preferredNodes)
+            {
+                var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+                if (nodeScore <= 0)
+                {
+                    continue;
+                }
+
+                var scanStart = Math.Max(node.StartOffset, 0);
+                var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
+
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    foreach (var prefixPadding in CommonFloatVertexPrefixPaddings)
+                    {
+                        var candidateDataOffset = offset + sizeof(int) + prefixPadding;
+                        foreach (var stride in EnumerateCandidateFloatVertexStrides())
+                        {
+                            var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
+                            if (candidate is null)
+                            {
+                                continue;
+                            }
+
+                            if (nodeScore > bestNodeScore ||
+                                (nodeScore == bestNodeScore && candidate.VertexCount > bestVertexCount) ||
+                                (nodeScore == bestNodeScore && candidate.VertexCount == bestVertexCount && (bestStride == 0 || stride < bestStride)))
+                            {
+                                bestNodeScore = nodeScore;
+                                bestVertexCount = candidate.VertexCount;
+                                bestOffset = candidateDataOffset;
+                                bestStride = stride;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bestOffset >= 0)
+            {
+                vertexDataOffset = bestOffset;
+                vertexCount = bestVertexCount;
+                vertexStride = bestStride;
+                return true;
+            }
+        }
+
+        return TryLocateHeuristicInterleavedFloatVertexBlock(bytes, out vertexDataOffset, out vertexCount, out vertexStride);
+    }
+
+    private static bool TryLocateHeuristicInterleavedFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        var scanEnd = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
+        var bestOffset = -1;
+        var bestVertexCount = 0;
+        var bestStride = 0;
+        var bestPaddingIndex = int.MaxValue;
+
+        for (var offset = NifHeaderToken.Length; offset <= scanEnd; offset++)
+        {
+            var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+            if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+            {
+                continue;
+            }
+
+            for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+            {
+                var candidateDataOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                foreach (var stride in EnumerateCandidateFloatVertexStrides())
+                {
+                    var candidate = BuildFloatStrideSignature(bytes, candidateDataOffset, candidateVertexCount, stride);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
+
+                    if (candidate.VertexCount > bestVertexCount ||
+                        (candidate.VertexCount == bestVertexCount && paddingIndex < bestPaddingIndex) ||
+                        (candidate.VertexCount == bestVertexCount && paddingIndex == bestPaddingIndex && (bestStride == 0 || stride < bestStride)))
+                    {
+                        bestOffset = candidateDataOffset;
+                        bestVertexCount = candidate.VertexCount;
+                        bestStride = stride;
+                        bestPaddingIndex = paddingIndex;
+                    }
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestVertexCount;
+        vertexStride = bestStride;
+        return true;
+    }
+
+    private static IEnumerable<int> EnumerateCandidateFloatVertexStrides()
+    {
+        foreach (var stride in CommonFloatVertexStrides)
+        {
+            yield return stride;
+        }
+
+        for (var stride = CommonFloatVertexStrides[^1] + sizeof(float);
+             stride <= MaxFloatVertexStride;
+             stride += sizeof(float))
+        {
+            yield return stride;
+        }
     }
 
     /// <summary>
@@ -1629,14 +2533,36 @@ internal static class NifGeometrySignatureReader
         if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
             return false;
 
-        // Must be an SSE NIF containing at least one BSTriShape block type string.
-        if (bytes.AsSpan().IndexOf(BsTriShapeToken) < 0)
+        // Must be an SSE-style NIF containing a BS*TriShape block type that uses BSVertexData.
+        if (!ContainsSupportedSseHalfFloatShape(bytes))
             return false;
 
-        var bestScore = 0;
-        var bestOffset = -1;
-        var bestCount = 0;
-        var bestStride = 0;
+        var candidates = LocateHalfFloatVertexBlocks(bytes);
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestCandidate = candidates
+            .OrderByDescending(static candidate => candidate.Score)
+            .ThenBy(static candidate => candidate.TrailingBytes)
+            .ThenByDescending(static candidate => candidate.VertexCount)
+            .First();
+
+        vertexDataOffset = bestCandidate.VertexDataOffset;
+        vertexCount = bestCandidate.VertexCount;
+        vertexStride = bestCandidate.VertexStride;
+        return true;
+    }
+
+    internal static IReadOnlyList<HalfFloatVertexBlockCandidate> LocateHalfFloatVertexBlocks(byte[] bytes)
+    {
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0 || !ContainsSupportedSseHalfFloatShape(bytes))
+        {
+            return [];
+        }
+
+        var candidates = new Dictionary<(int Offset, int Count, int Stride), HalfFloatVertexBlockCandidate>();
 
         // Scan for BSVertexDesc (uint64).  Bits 44-47 encode stride / 4.
         // Layout following a valid BSVertexDesc:
@@ -1651,11 +2577,17 @@ internal static class NifGeometrySignatureReader
         var scanEnd = bytes.Length - 16;
         for (var offset = 32; offset <= scanEnd; offset++)
         {
+            if (LooksLikeAsciiTokenWindow(bytes, offset, sizeof(ulong)))
+            {
+                continue;
+            }
+
             var desc = BitConverter.ToUInt64(bytes, offset);
             var strideDiv4 = (int)((desc >> 44) & 0xF);
 
-            // Accept strides 12–40 bytes (common SSE armor: 20 non-skinned, 32 skinned).
-            if (strideDiv4 < 3 || strideDiv4 > 10)
+            // Accept strides 12–60 bytes. Real-world SSE armor meshes can include
+            // larger BSVertexData payloads than the most common 20/32-byte layouts.
+            if (strideDiv4 < 3 || strideDiv4 > 15)
                 continue;
 
             var candidateStride = strideDiv4 * 4;
@@ -1665,7 +2597,7 @@ internal static class NifGeometrySignatureReader
                 continue;
 
             var numVertices = (int)BitConverter.ToUInt16(bytes, offset + 12);
-            if (numVertices < MinPlausibleVertexCount)
+            if (numVertices < MinPlausibleExplicitVertexCount)
                 continue;
 
             var vertStart = offset + 14 + numTriangles * 6;
@@ -1674,22 +2606,32 @@ internal static class NifGeometrySignatureReader
                 continue;
 
             var score = ScoreHalfFloatVertexBlock(bytes, vertStart, numVertices, candidateStride);
-            if (score > bestScore)
+            var trailingBytes = bytes.Length - (int)(vertStart + vertSize);
+            if (score < Math.Max(1, numVertices / 2))
             {
-                bestScore = score;
-                bestOffset = vertStart;
-                bestCount = numVertices;
-                bestStride = candidateStride;
+                continue;
+            }
+
+            var key = (vertStart, numVertices, candidateStride);
+            var candidate = new HalfFloatVertexBlockCandidate(
+                VertexDataOffset: vertStart,
+                VertexCount: numVertices,
+                VertexStride: candidateStride,
+                Score: score,
+                TrailingBytes: trailingBytes);
+
+            if (!candidates.TryGetValue(key, out var existing) ||
+                candidate.Score > existing.Score ||
+                (candidate.Score == existing.Score && candidate.TrailingBytes < existing.TrailingBytes))
+            {
+                candidates[key] = candidate;
             }
         }
 
-        if (bestOffset < 0 || bestScore < bestCount / 2)
-            return false;
-
-        vertexDataOffset = bestOffset;
-        vertexCount = bestCount;
-        vertexStride = bestStride;
-        return true;
+        return candidates.Values
+            .OrderBy(static candidate => candidate.VertexDataOffset)
+            .ThenByDescending(static candidate => candidate.Score)
+            .ToList();
     }
 
     /// <summary>
@@ -1724,6 +2666,48 @@ internal static class NifGeometrySignatureReader
 
     private static bool IsPlausibleHalfCoordinate(float value) =>
         float.IsFinite(value) && MathF.Abs(value) <= 512f;
+
+    private static bool LooksLikeAsciiTokenWindow(byte[] bytes, int offset, int length)
+    {
+        if (offset < 0 || length <= 0 || offset + length > bytes.Length)
+        {
+            return false;
+        }
+
+        var printableCount = 0;
+        for (var index = 0; index < length; index++)
+        {
+            var value = bytes[offset + index];
+            if (value is >= 32 and <= 126)
+            {
+                printableCount++;
+            }
+        }
+
+        return printableCount >= length - 1;
+    }
+
+    private static bool ContainsSupportedSseHalfFloatShape(byte[] bytes)
+    {
+        if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
+        {
+            return true;
+        }
+
+        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        {
+            return false;
+        }
+
+        return graph.GeometryCandidates
+            .Concat(graph.Nodes)
+            .Any(static node => LooksLikeSupportedSseHalfFloatShapeType(node.TypeName));
+    }
+
+    private static bool LooksLikeSupportedSseHalfFloatShapeType(string typeName) =>
+        !string.IsNullOrWhiteSpace(typeName) &&
+        typeName.StartsWith("BS", StringComparison.Ordinal) &&
+        typeName.Contains("TriShape", StringComparison.Ordinal);
 
     private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
     {
@@ -1760,7 +2744,31 @@ internal static class NifGeometrySignatureReader
         return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
     }
 
-    private static bool TryLocateVertexBlockFromGraph(byte[] bytes, out int vertexDataOffset, out int vertexCount)
+    private static MeshGeometrySignature? TryReadTriStripsVertexBlock(byte[] bytes)
+    {
+        if (!TryLocateVertexBlockFromGraph(
+                bytes,
+                out var vertexDataOffset,
+                out var vertexCount,
+                static typeName => typeName.Contains("TriStripsData", StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+    }
+
+    private static bool TryLocateVertexBlockFromGraph(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        Func<string, bool>? nodeFilter = null)
     {
         vertexDataOffset = 0;
         vertexCount = 0;
@@ -1777,8 +2785,13 @@ internal static class NifGeometrySignatureReader
 
         foreach (var node in preferredNodes)
         {
-            var score = GetBlockVertexCandidateScore(node.TypeName);
-            if (score <= 0)
+            if (nodeFilter is not null && !nodeFilter(node.TypeName))
+            {
+                continue;
+            }
+
+            var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+            if (nodeScore <= 0)
             {
                 continue;
             }
@@ -1789,22 +2802,27 @@ internal static class NifGeometrySignatureReader
             for (var offset = scanStart; offset <= scanEnd; offset++)
             {
                 var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-                if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
                 {
                     continue;
                 }
 
-                var candidate = BuildSignature(bytes, offset + sizeof(int), candidateVertexCount);
-                if (candidate is null)
+                for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
                 {
-                    continue;
-                }
+                    var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                    var candidate = BuildSignature(bytes, candidateOffset, candidateVertexCount);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
 
-                if (score > bestScore || (score == bestScore && candidate.VertexCount > bestCount))
-                {
-                    bestScore = score;
-                    bestCount = candidate.VertexCount;
-                    bestOffset = offset + sizeof(int);
+                    var score = nodeScore - paddingIndex;
+                    if (score > bestScore || (score == bestScore && candidate.VertexCount > bestCount))
+                    {
+                        bestScore = score;
+                        bestCount = candidate.VertexCount;
+                        bestOffset = candidateOffset;
+                    }
                 }
             }
         }
@@ -1829,6 +2847,11 @@ internal static class NifGeometrySignatureReader
         if (typeName.Contains("TriStripsData", StringComparison.Ordinal))
         {
             return 9;
+        }
+
+        if (typeName.Contains("TriBasedGeomData", StringComparison.Ordinal))
+        {
+            return 8;
         }
 
         if (typeName.Contains("GeometryData", StringComparison.Ordinal))
@@ -1862,7 +2885,7 @@ internal static class NifGeometrySignatureReader
         for (var offset = 0; offset <= scanLimit; offset += sizeof(int))
         {
             var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
-            if (candidateVertexCount is < MinPlausibleVertexCount or > MaxPlausibleVertexCount)
+            if (candidateVertexCount is < MinPlausibleHeuristicVertexCount or > MaxPlausibleVertexCount)
             {
                 continue;
             }
@@ -1880,6 +2903,601 @@ internal static class NifGeometrySignatureReader
         }
 
         return best;
+    }
+
+    private static MeshGeometrySignature? TryReadKnownGeometryTokenVertexBlock(byte[] bytes)
+    {
+        if (!TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var vertexDataOffset, out var vertexCount))
+        {
+            return null;
+        }
+
+        var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+    }
+
+    private static bool TryLocateVertexBlockNearKnownGeometryTokens(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var bestScore = int.MinValue;
+        var bestCount = 0;
+        var bestOffset = -1;
+        var bestDistance = int.MaxValue;
+
+        foreach (var (tokenBytes, typeName) in KnownFloatGeometryTokens)
+        {
+            var tokenSearchStart = 0;
+            var tokenScore = GetBlockVertexCandidateScore(typeName);
+            while (tokenSearchStart <= bytes.Length - tokenBytes.Length)
+            {
+                var relativeIndex = bytes.AsSpan(tokenSearchStart).IndexOf(tokenBytes);
+                if (relativeIndex < 0)
+                {
+                    break;
+                }
+
+                var tokenOffset = tokenSearchStart + relativeIndex;
+                var scanStart = tokenOffset + tokenBytes.Length;
+                var scanEnd = Math.Min(bytes.Length - sizeof(int), scanStart + GeometryTokenScanByteLimit);
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                    {
+                        var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                        var candidate = BuildSignature(bytes, candidateOffset, candidateVertexCount);
+                        if (candidate is null)
+                        {
+                            continue;
+                        }
+
+                        var distance = Math.Max(0, candidateOffset - tokenOffset);
+                        var score = tokenScore * 1000 - distance - paddingIndex;
+                        if (score > bestScore ||
+                            (score == bestScore && candidate.VertexCount > bestCount) ||
+                            (score == bestScore && candidate.VertexCount == bestCount && distance < bestDistance))
+                        {
+                            bestScore = score;
+                            bestCount = candidate.VertexCount;
+                            bestOffset = candidateOffset;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+
+                tokenSearchStart = tokenOffset + tokenBytes.Length;
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
+    private static NifSupportReport Inspect(byte[] bytes, string? meshPath)
+    {
+        var path = string.IsNullOrWhiteSpace(meshPath) ? "(in-memory)" : meshPath;
+        if (bytes.Length < 32)
+        {
+            return new NifSupportReport(path, "unsupported", "too-small", null, ["file-too-small"]);
+        }
+
+        if (bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return new NifSupportReport(path, "unsupported", "missing-header", null, ["missing-nif-header"]);
+        }
+
+        var metadata = ExtractMetadata(bytes);
+        var result = TryReadWithMode(bytes);
+        var heelAnalysis = AnalyzeHeelProfile(path, metadata, result.Signature);
+        if (result.Signature is not null)
+        {
+            var status = result.Mode == "heuristic-float" ? "degraded" : "supported";
+            var messages = BuildMetadataMessages(
+                status == "degraded"
+                    ? ["heuristic-geometry-read", "manual-review-recommended"]
+                    : [],
+                metadata,
+                heelAnalysis);
+            return new NifSupportReport(
+                path,
+                status,
+                result.Mode,
+                result.Signature.VertexCount,
+                messages,
+                metadata.SkinInstanceType,
+                metadata.PartitionSlots,
+                metadata.BoneNames.Count,
+                heelAnalysis);
+        }
+
+        var unsupportedMessages = new List<string>();
+        NifBlockGraph? graph = null;
+        if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
+        {
+            unsupportedMessages.Add("bstri-layout-unreadable");
+        }
+
+        if (NifBlockGraphParser.TryParse(bytes, out graph) && graph is not null)
+        {
+            unsupportedMessages.Add($"graph-blocks:{graph.Nodes.Count}");
+            if (graph.GeometryCandidates.Count == 0)
+            {
+                unsupportedMessages.Add("no-geometry-block-candidates");
+            }
+        }
+
+        unsupportedMessages.AddRange(ExtractUnsupportedGeometryFamilyMessages(bytes, graph));
+
+        if (unsupportedMessages.Count == 0)
+        {
+            unsupportedMessages.Add("unrecognized-geometry-layout");
+        }
+
+        unsupportedMessages.Add("manual-review-required");
+        return new NifSupportReport(
+            path,
+            "unsupported",
+            "unreadable-geometry",
+            null,
+            BuildMetadataMessages(unsupportedMessages, metadata, heelAnalysis),
+            metadata.SkinInstanceType,
+            metadata.PartitionSlots,
+            metadata.BoneNames.Count,
+            heelAnalysis);
+    }
+
+    private static IReadOnlyList<string> BuildMetadataMessages(
+        IReadOnlyList<string> baseMessages,
+        NifMeshMetadata metadata,
+        HeelAnalysisReport? heelAnalysis = null)
+    {
+        var messages = new List<string>(baseMessages);
+        if (!string.IsNullOrWhiteSpace(metadata.SkinInstanceType))
+        {
+            messages.Add($"skin-instance:{metadata.SkinInstanceType}");
+        }
+
+        if (metadata.PartitionSlots.Count > 0)
+        {
+            messages.Add($"partition-slots:{string.Join('+', metadata.PartitionSlots)}");
+        }
+
+        if (metadata.BoneNames.Count > 0)
+        {
+            messages.Add($"bone-count:{metadata.BoneNames.Count}");
+        }
+
+        if (heelAnalysis is not null && !string.Equals(heelAnalysis.Profile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            messages.Add($"heel-profile:{heelAnalysis.Profile}");
+        }
+
+        return messages;
+    }
+
+    private static IReadOnlyList<string> ExtractUnsupportedGeometryFamilyMessages(byte[] bytes, NifBlockGraph? graph)
+    {
+        var families = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (graph is not null)
+        {
+            foreach (var node in graph.GeometryCandidates.Concat(graph.Nodes))
+            {
+                if (LooksLikeGeometryFamily(node.TypeName))
+                {
+                    families.Add(node.TypeName);
+                }
+            }
+        }
+
+        foreach (var (tokenBytes, typeName) in GeometryFamilyHintTokens)
+        {
+            if (bytes.AsSpan().IndexOf(tokenBytes) >= 0)
+            {
+                families.Add(typeName);
+            }
+        }
+
+        return families
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .Select(static family => $"geometry-family:{family}")
+            .ToList();
+    }
+
+    private static bool LooksLikeGeometryFamily(string typeName) =>
+        !string.IsNullOrWhiteSpace(typeName) &&
+        (typeName.Contains("TriShape", StringComparison.Ordinal) ||
+         typeName.Contains("TriStrips", StringComparison.Ordinal) ||
+         typeName.Contains("Geometry", StringComparison.Ordinal) ||
+         typeName.Contains("Mesh", StringComparison.Ordinal) ||
+         typeName.Contains("Lines", StringComparison.Ordinal));
+
+    private static HeelAnalysisReport? AnalyzeHeelProfile(
+        string meshPath,
+        NifMeshMetadata metadata,
+        MeshGeometrySignature? signature)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(meshPath)?.ToLowerInvariant() ?? string.Empty;
+        var hasFootPartition = metadata.PartitionSlots.Contains(37);
+        var hasCalfPartition = metadata.PartitionSlots.Contains(38);
+        var hasFootwearKeywords = FootwearKeywords.Any(fileName.Contains);
+        var hasHighHeelKeywords = HighHeelKeywords.Any(fileName.Contains);
+        var evidence = new List<string>();
+
+        if (hasFootPartition)
+        {
+            evidence.Add("partition-slot:37");
+        }
+
+        if (hasCalfPartition)
+        {
+            evidence.Add("partition-slot:38");
+        }
+
+        if (hasFootwearKeywords)
+        {
+            evidence.Add("filename:footwear");
+        }
+
+        if (hasHighHeelKeywords)
+        {
+            evidence.Add("filename:heel");
+        }
+
+        if (!hasFootPartition && !hasFootwearKeywords && !hasHighHeelKeywords)
+        {
+            return null;
+        }
+
+        double? groundContactRatio = null;
+        if (signature is not null && signature.Height > 0.001f && signature.SampleVertices.Count > 0)
+        {
+            groundContactRatio = EstimateGroundContactRatio(signature);
+            if (groundContactRatio is <= 0.18d)
+            {
+                evidence.Add($"low-ground-contact:{groundContactRatio.Value:P0}");
+            }
+        }
+
+        if (hasHighHeelKeywords)
+        {
+            return new HeelAnalysisReport(
+                Profile: "high-heel",
+                Confidence: groundContactRatio is <= 0.18d ? 0.98d : 0.95d,
+                Evidence: evidence,
+                HasFootPartition: hasFootPartition,
+                HasCalfPartition: hasCalfPartition,
+                HasFootwearKeywords: hasFootwearKeywords,
+                GroundContactRatio: groundContactRatio);
+        }
+
+        if ((hasCalfPartition || hasFootwearKeywords) && groundContactRatio is <= 0.18d)
+        {
+            return new HeelAnalysisReport(
+                Profile: "raised-heel",
+                Confidence: hasCalfPartition ? 0.72d : 0.62d,
+                Evidence: evidence,
+                HasFootPartition: hasFootPartition,
+                HasCalfPartition: hasCalfPartition,
+                HasFootwearKeywords: hasFootwearKeywords,
+                GroundContactRatio: groundContactRatio);
+        }
+
+        return new HeelAnalysisReport(
+            Profile: "footwear",
+            Confidence: hasFootPartition ? 0.55d : 0.40d,
+            Evidence: evidence,
+            HasFootPartition: hasFootPartition,
+            HasCalfPartition: hasCalfPartition,
+            HasFootwearKeywords: hasFootwearKeywords,
+            GroundContactRatio: groundContactRatio);
+    }
+
+    private static double EstimateGroundContactRatio(MeshGeometrySignature signature)
+    {
+        if (signature.SampleVertices.Count == 0 || signature.Height <= 0.001f)
+        {
+            return 1d;
+        }
+
+        var bandHeight = Math.Max(signature.Height * 0.12f, 0.005f);
+        var limit = signature.MinZ + bandHeight;
+        var bottomVertices = signature.SampleVertices.Count(vertex => vertex.Z <= limit);
+        return Math.Clamp(bottomVertices / (double)signature.SampleVertices.Count, 0d, 1d);
+    }
+
+    private static NifMeshMetadata ExtractMetadata(byte[] bytes)
+    {
+        var boneNames = SkeletonNifBoneParser.ExtractBoneNames(bytes);
+        var partitionSlots = new HashSet<int>();
+        string? skinInstanceType = null;
+
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        {
+            var skinNodes = graph.Nodes
+                .Where(static node =>
+                    node.TypeName.Contains("Skin", StringComparison.Ordinal) ||
+                    node.TypeName.Contains("Dismember", StringComparison.Ordinal))
+                .ToList();
+
+            skinInstanceType = skinNodes
+                .Select(static node => node.TypeName)
+                .FirstOrDefault(static typeName => typeName.Contains("BSDismemberSkinInstance", StringComparison.Ordinal))
+                ?? skinNodes
+                    .Select(static node => node.TypeName)
+                    .FirstOrDefault(static typeName => typeName.Contains("NiSkinInstance", StringComparison.Ordinal))
+                ?? skinNodes
+                    .Select(static node => node.TypeName)
+                    .FirstOrDefault();
+
+            foreach (var node in skinNodes)
+            {
+                CollectLikelyPartitionSlots(bytes, node.StartOffset, node.EndOffset, partitionSlots);
+                foreach (var referenceIndex in node.ReferencedBlockIndices)
+                {
+                    if (referenceIndex >= 0 && referenceIndex < graph.Nodes.Count)
+                    {
+                        var referenced = graph.Nodes[referenceIndex];
+                        CollectLikelyPartitionSlots(bytes, referenced.StartOffset, referenced.EndOffset, partitionSlots);
+                    }
+                }
+            }
+        }
+
+        return new NifMeshMetadata(
+            skinInstanceType,
+            partitionSlots.OrderBy(static slot => slot).ToList(),
+            boneNames);
+    }
+
+    private static void CollectLikelyPartitionSlots(
+        byte[] bytes,
+        int startOffset,
+        int endOffset,
+        ISet<int> slots)
+    {
+        var scanStart = Math.Max(0, startOffset);
+        var scanEnd = Math.Min(bytes.Length - sizeof(int), endOffset);
+        for (var offset = scanStart; offset <= scanEnd; offset++)
+        {
+            var candidate = BitConverter.ToInt32(bytes, offset);
+            if (SupportedPartitionSlots.Contains(candidate))
+            {
+                slots.Add(candidate);
+            }
+        }
+    }
+
+    private static (MeshGeometrySignature? Signature, string Mode) TryReadWithMode(byte[] bytes)
+    {
+        var embeddedMarkerOffset = bytes.AsSpan().IndexOf(EmbeddedVertexMarker);
+        if (embeddedMarkerOffset >= 0)
+        {
+            var embeddedSignature = TryReadEmbeddedVertexBlock(bytes, embeddedMarkerOffset);
+            if (embeddedSignature is not null)
+            {
+                return (embeddedSignature, "embedded-float");
+            }
+        }
+
+        if (TryLocateHalfFloatVertexBlock(bytes, out var halfDataOffset, out var halfVertexCount, out var vertexStride))
+        {
+            var halfSignature = BuildHalfFloatSignature(bytes, halfDataOffset, halfVertexCount, vertexStride);
+            if (halfSignature is not null)
+            {
+                return (halfSignature, "bstri-half-float");
+            }
+        }
+
+        var triStripsSignature = TryReadTriStripsVertexBlock(bytes);
+        if (triStripsSignature is not null)
+        {
+            return (triStripsSignature, "tristrips-float");
+        }
+
+        var graphSignature = TryReadBlockGraphVertexBlock(bytes);
+        if (graphSignature is not null)
+        {
+            return (graphSignature, "block-graph-float");
+        }
+
+        var tokenGuidedSignature = TryReadKnownGeometryTokenVertexBlock(bytes);
+        if (tokenGuidedSignature is not null)
+        {
+            return (tokenGuidedSignature, "geometry-token-float");
+        }
+
+        if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
+        {
+            var interleavedSignature = BuildFloatStrideSignature(bytes, interleavedDataOffset, interleavedVertexCount, interleavedVertexStride);
+            if (interleavedSignature is not null)
+            {
+                return (interleavedSignature, "interleaved-float");
+            }
+        }
+
+        var heuristicSignature = TryReadHeuristicVertexBlock(bytes);
+        if (heuristicSignature is not null)
+        {
+            return (heuristicSignature, "heuristic-float");
+        }
+
+        return (null, "unreadable-geometry");
+    }
+
+    private static MeshGeometrySignature? BuildHalfFloatSignature(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        var vertices = ReadHalfFloatVertices(bytes, vertexDataOffset, vertexCount, vertexStride);
+        if (vertices is null || vertices.Count == 0)
+        {
+            return null;
+        }
+
+        var sampleVertices = vertices.Count > 256
+            ? vertices.Where((_, index) => index % Math.Max(1, vertices.Count / 256) == 0).Take(256).ToList()
+            : vertices.ToList();
+
+        var minX = vertices.Min(static vertex => vertex.X);
+        var minY = vertices.Min(static vertex => vertex.Y);
+        var minZ = vertices.Min(static vertex => vertex.Z);
+        var maxX = vertices.Max(static vertex => vertex.X);
+        var maxY = vertices.Max(static vertex => vertex.Y);
+        var maxZ = vertices.Max(static vertex => vertex.Z);
+        return new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ, null);
+    }
+
+    private static byte[] CreateEmbeddedProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[24]);
+        writer.Write(EmbeddedVertexMarker);
+        writer.Write(3);
+        writer.Write(0f); writer.Write(0f); writer.Write(0f);
+        writer.Write(1f); writer.Write(0f); writer.Write(0f);
+        writer.Write(0f); writer.Write(1f); writer.Write(1f);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateBlockGraphProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[4]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateTriStripsProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"));
+        writer.Write(new byte[4]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateBsHalfFloatProbeBytes(string blockTypeName)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(blockTypeName));
+        writer.Write(new byte[8]);
+        var strideDiv4 = 5UL;
+        var desc = strideDiv4 << 44;
+        writer.Write(desc);
+        writer.Write(0);
+        writer.Write((ushort)256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write((Half)(index / 32f));
+            writer.Write((Half)((index % 32) / 32f));
+            writer.Write((Half)(index / 64f));
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+            writer.Write((ushort)0);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateInterleavedFloatProbeBytes()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"));
+        writer.Write(new byte[8]);
+        writer.Write(256);
+        writer.Write(new byte[16]);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+            writer.Write(float.NaN);
+            writer.Write(float.PositiveInfinity);
+            writer.Write(float.NegativeInfinity);
+            writer.Write(float.MaxValue);
+            writer.Write(float.MinValue);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateTokenGuidedFloatProbeBytes(string geometryToken)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.ASCII, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
+        writer.Write(new byte[32]);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        writer.Write(new byte[8]);
+        writer.Write(256);
+        for (var index = 0; index < 256; index++)
+        {
+            writer.Write(index / 16f);
+            writer.Write((index % 16) / 16f);
+            writer.Write(index / 32f);
+        }
+
+        writer.Flush();
+        return stream.ToArray();
     }
 
     private static MeshGeometrySignature? BuildSignature(byte[] bytes, int vertexDataOffset, int vertexCount)
@@ -1937,8 +3555,144 @@ internal static class NifGeometrySignatureReader
         return new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ);
     }
 
+    private static IReadOnlyList<MeshVertex>? ReadFloatVertices(byte[] bytes, int vertexDataOffset, int vertexCount)
+    {
+        if (vertexCount <= 0)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * 12;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * 12);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPlausibleCoordinate(x) || !IsPlausibleCoordinate(y) || !IsPlausibleCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
+    }
+
+    private static IReadOnlyList<MeshVertex>? ReadFloatStrideVertices(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        if (vertexCount <= 0 || vertexStride < 12)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPlausibleCoordinate(x) || !IsPlausibleCoordinate(y) || !IsPlausibleCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
+    }
+
+    private static IReadOnlyList<MeshVertex>? ReadHalfFloatVertices(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return null;
+        }
+
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > bytes.Length)
+        {
+            return null;
+        }
+
+        var vertices = new MeshVertex[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = (float)BitConverter.ToHalf(bytes.AsSpan(offset));
+            var y = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 2));
+            var z = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 4));
+            if (!IsPlausibleHalfCoordinate(x) || !IsPlausibleHalfCoordinate(y) || !IsPlausibleHalfCoordinate(z))
+            {
+                return null;
+            }
+
+            vertices[index] = new MeshVertex(x, y, z);
+        }
+
+        return vertices;
+    }
+
     private static bool IsPlausibleCoordinate(float value) =>
         float.IsFinite(value) && Math.Abs(value) <= MaxPlausibleCoordinateValue;
+
+    private static MeshGeometrySignature? BuildFloatStrideSignature(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
+    {
+        var vertices = ReadFloatStrideVertices(bytes, vertexDataOffset, vertexCount, vertexStride);
+        if (vertices is null || vertices.Count == 0)
+        {
+            return null;
+        }
+
+        var sampleVertices = vertices.Count > 256
+            ? vertices.Where((_, index) => index % Math.Max(1, vertices.Count / 256) == 0).Take(256).ToList()
+            : vertices.ToList();
+        var minX = vertices.Min(static vertex => vertex.X);
+        var minY = vertices.Min(static vertex => vertex.Y);
+        var minZ = vertices.Min(static vertex => vertex.Z);
+        var maxX = vertices.Max(static vertex => vertex.X);
+        var maxY = vertices.Max(static vertex => vertex.Y);
+        var maxZ = vertices.Max(static vertex => vertex.Z);
+        if ((maxX - minX) < 0.001f || (maxZ - minZ) < 0.001f)
+        {
+            return null;
+        }
+
+        var geometry = new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ, null);
+        return AttachUvSignatureForFloatStride(bytes, vertexDataOffset, vertexCount, vertexStride, geometry);
+    }
+
+    private static MeshGeometrySignature AttachUvSignatureForFloatStride(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        MeshGeometrySignature geometry)
+    {
+        if (vertexStride < 20)
+        {
+            return geometry;
+        }
+
+        return TryReadUvSignatureFromLayout(bytes, vertexDataOffset + 12, vertexStride, vertexCount, out var interleaved)
+            ? geometry with { UvSignature = interleaved }
+            : geometry;
+    }
 
     private static MeshGeometrySignature AttachUvSignature(
         byte[] bytes,
@@ -2070,92 +3824,6 @@ internal static class NifGeometrySignatureReader
 
 internal static class BodyTransformationFieldCatalog
 {
-    private static readonly IReadOnlyDictionary<string, double> FallbackField =
-        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["chest"]     = 1.02,  ["waist"]    = 0.99,  ["pelvis"]   = 1.02,
-            ["legs"]      = 1.01,  ["shoulders"] = 1.00,
-            ["breasts"]   = 1.02,  ["butt"]     = 1.01,  ["belly"]    = 1.01,
-            ["arms"]      = 1.00,  ["thighs"]   = 1.01,  ["calves"]   = 1.01
-        };
-
-    // Regions match the BodySlide slider taxonomy: 5 structural + 6 shape-specific.
-    // Values are expansion multipliers relative to the vanilla body (1.0 = no change).
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> Fields =
-        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CBBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,  ["waist"]    = 0.96,  ["pelvis"]   = 1.05,
-                ["legs"]      = 1.03,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.09,  ["butt"]     = 1.06,  ["belly"]    = 1.02,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.04,  ["calves"]   = 1.02
-            },
-            ["3BA"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.12,  ["waist"]    = 0.95,  ["pelvis"]   = 1.06,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.13,  ["butt"]     = 1.08,  ["belly"]    = 1.03,
-                ["arms"]      = 1.02,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["BHUNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,  ["waist"]    = 0.94,  ["pelvis"]   = 1.07,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.11,  ["butt"]     = 1.07,  ["belly"]    = 1.03,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.05,  ["calves"]   = 1.03
-            },
-            ["UNP"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.04,  ["waist"]    = 0.97,  ["pelvis"]   = 1.02,
-                ["legs"]      = 1.01,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.04,  ["butt"]     = 1.02,  ["belly"]    = 1.01,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.02,  ["calves"]   = 1.01
-            },
-            ["TBD"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.06,  ["waist"]    = 0.96,  ["pelvis"]   = 1.04,
-                ["legs"]      = 1.02,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.07,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
-            },
-            ["UBE"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.06,  ["waist"]    = 0.97,  ["pelvis"]   = 1.03,
-                ["legs"]      = 1.02,  ["shoulders"] = 1.01,
-                ["breasts"]   = 1.06,  ["butt"]     = 1.03,  ["belly"]    = 1.02,
-                ["arms"]      = 1.01,  ["thighs"]   = 1.03,  ["calves"]   = 1.02
-            },
-            ["HIMBO"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.10,  ["waist"]    = 1.02,  ["pelvis"]   = 1.04,
-                ["legs"]      = 1.06,  ["shoulders"] = 1.12,
-                ["breasts"]   = 1.08,  ["butt"]     = 1.05,  ["belly"]    = 1.03,
-                ["arms"]      = 1.10,  ["thighs"]   = 1.07,  ["calves"]   = 1.05
-            },
-            ["SAM"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.08,  ["waist"]    = 1.01,  ["pelvis"]   = 1.03,
-                ["legs"]      = 1.05,  ["shoulders"] = 1.10,
-                ["breasts"]   = 1.05,  ["butt"]     = 1.04,  ["belly"]    = 1.02,
-                ["arms"]      = 1.08,  ["thighs"]   = 1.06,  ["calves"]   = 1.04
-            },
-            ["SOS"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.05,  ["waist"]    = 1.00,  ["pelvis"]   = 1.02,
-                ["legs"]      = 1.04,  ["shoulders"] = 1.06,
-                ["breasts"]   = 1.03,  ["butt"]     = 1.03,  ["belly"]    = 1.01,
-                ["arms"]      = 1.05,  ["thighs"]   = 1.04,  ["calves"]   = 1.03
-            },
-            ["Vanilla"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["chest"]     = 1.00,  ["waist"]    = 1.00,  ["pelvis"]   = 1.00,
-                ["legs"]      = 1.00,  ["shoulders"] = 1.00,
-                ["breasts"]   = 1.00,  ["butt"]     = 1.00,  ["belly"]    = 1.00,
-                ["arms"]      = 1.00,  ["thighs"]   = 1.00,  ["calves"]   = 1.00
-            }
-        };
-
     public static IReadOnlyDictionary<string, double> Resolve(string targetBody) => Resolve(targetBody, armor: null);
 
     public static IReadOnlyDictionary<string, double> Resolve(string targetBody, ImportedArmor? armor)
@@ -2165,16 +3833,16 @@ internal static class BodyTransformationFieldCatalog
             return customProfile.TransformationField;
         }
 
-        if (Fields.TryGetValue(targetBody, out var profile))
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
         {
-            return profile;
+            return metadata.TransformationField;
         }
 
-        return FallbackField;
+        return BuiltInBodyMetadataCatalog.CreateFallbackTransformationField();
     }
 
     internal static IReadOnlyDictionary<string, double> CreateFallbackField() =>
-        new Dictionary<string, double>(FallbackField, StringComparer.OrdinalIgnoreCase);
+        BuiltInBodyMetadataCatalog.CreateFallbackTransformationField();
 }
 
 internal static class CustomBodyProfileSupport
@@ -2278,7 +3946,8 @@ internal static class CustomBodyProfileSupport
             3.0,
             8.5,
             0.25,
-            1.20)) ?? [];
+            1.20,
+            profile.ReferenceTokens)) ?? [];
 
     private static CustomBodyProfile? TryLoadProfile(string filePath)
     {
@@ -2324,7 +3993,10 @@ internal static class CustomBodyProfileSupport
             NormalizeNullableStringList(dto.PhysicsBones),
             physicsProfile,
             string.IsNullOrWhiteSpace(dto.BodyOutputPath) ? null : dto.BodyOutputPath.Trim(),
-            gender);
+            gender,
+            NormalizeNullableStringList(dto.ReferenceTokens),
+            NormalizeNullableStringList(dto.ZapSliderNames),
+            string.IsNullOrWhiteSpace(dto.SkeletonFoundation) ? null : dto.SkeletonFoundation.Trim());
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -2378,6 +4050,9 @@ internal static class CustomBodyProfileSupport
         public string? PhysicsProfile { get; init; }
         public string? BodyOutputPath { get; init; }
         public string? Gender { get; init; }
+        public string[]? ReferenceTokens { get; init; }
+        public string[]? ZapSliderNames { get; init; }
+        public string? SkeletonFoundation { get; init; }
     }
 }
 
@@ -2662,7 +4337,10 @@ public sealed class ConversionOrchestrator(
     IWeightSolverService? weightSolverService = null,
     IRigidIslandDetectionService? rigidIslandService = null)
 {
-    public async Task<ConversionResult> ConvertAsync(ConversionRequest request, CancellationToken cancellationToken = default)
+    public async Task<ConversionResult> ConvertAsync(
+        ConversionRequest request,
+        CancellationToken cancellationToken = default,
+        IProgress<ConversionStageProgressUpdate>? progress = null)
     {
         if (string.IsNullOrWhiteSpace(request.InputPath))
         {
@@ -2685,6 +4363,10 @@ public sealed class ConversionOrchestrator(
 
         try
         {
+            const int totalStages = 18;
+            void ReportStage(string stage, int stepIndex) =>
+                progress?.Report(new ConversionStageProgressUpdate(stage, stepIndex, totalStages));
+
             var deformationProfile = normalized.Preset?.DeformationProfile ?? normalized.Request.DeformationProfile;
             if (!string.IsNullOrWhiteSpace(deformationProfile))
             {
@@ -2692,6 +4374,7 @@ public sealed class ConversionOrchestrator(
             }
 
             var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
+            ReportStage("Importing input", 1);
             armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories);
 
             // Merge any explicitly-provided custom profile paths from the request with the
@@ -2760,6 +4443,22 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"vanilla-profile:{deformationProfile}");
             }
 
+            if (string.IsNullOrWhiteSpace(deformationProfile))
+            {
+                var fallbackInference = BodySlideSourceProjectSupport.InferFallbackSupport(armor, normalized.Request.TargetBody, vanillaEntry);
+                if (!string.IsNullOrWhiteSpace(fallbackInference?.DeformationProfile))
+                {
+                    deformationProfile = fallbackInference.DeformationProfile;
+                    steps.Add($"fallback-profile:{deformationProfile}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(fallbackInference?.BodyName))
+                {
+                    steps.Add($"fallback-body:{fallbackInference.BodyName}");
+                }
+            }
+
+            ReportStage("Analyzing textures", 2);
             var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
             if (textureSummary.MissingNormals.Count > 0)
             {
@@ -2771,6 +4470,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"material-textures:{textureSummary.MaterialTexturePaths.Count}");
             }
 
+            ReportStage("Scanning plugins", 3);
             var pluginAnalysis = await pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken);
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
@@ -2788,6 +4488,7 @@ public sealed class ConversionOrchestrator(
 
             if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
             {
+                ReportStage("Checking plugin race compatibility", 4);
                 var raceReport = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
                 if (raceReport.IncompatibleRaces.Count > 0)
                 {
@@ -2799,6 +4500,7 @@ public sealed class ConversionOrchestrator(
                 }
             }
 
+            ReportStage("Detecting source body", 5);
             var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
             steps.Add($"detected-body:{detectedBody.Body}@{detectedBody.Confidence:P0}");
@@ -2813,12 +4515,45 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"source-body-override:{normalized.Request.SourceBodyOverride}");
             }
 
+            ReportStage("Analyzing mesh", 6);
             var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
             steps.Add($"mesh-type:{analysis.MeshType}");
+            var meshFeatures = new List<string>();
+            if (analysis.HasSplitMeshes)
+            {
+                meshFeatures.Add("split");
+            }
 
+            if (analysis.HasAccessoryPieces)
+            {
+                meshFeatures.Add("accessory");
+            }
+
+            if (analysis.HasStrapLikePieces)
+            {
+                meshFeatures.Add("strap");
+            }
+
+            if (analysis.HasRigidSubMeshes)
+            {
+                meshFeatures.Add("rigid");
+            }
+
+            if (analysis.IsFootwear)
+            {
+                meshFeatures.Add("footwear");
+            }
+
+            if (meshFeatures.Count > 0)
+            {
+                steps.Add($"mesh-features:{string.Join('+', meshFeatures)}");
+            }
+
+            ReportStage("Binding armor regions", 7);
             var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
 
+            ReportStage("Building deformation cage", 8);
             var cage = await cageGenerator.BuildAsync(analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"cage:{cage.Mode}");
 
@@ -2828,6 +4563,14 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"conversion-delta:{sourceBodyForDelta}→{normalized.Request.TargetBody}");
             }
 
+            if (BodyTypeCatalog.TryGetGender(sourceBodyForDelta, out var sourceGender) &&
+                BodyTypeCatalog.TryGetGender(normalized.Request.TargetBody, out var targetGender) &&
+                !string.Equals(sourceGender, targetGender, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add($"cross-gender-conversion:{sourceGender}→{targetGender}");
+            }
+
+            ReportStage("Converting mesh", 9);
             var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, sourceBodyForDelta, cancellationToken);
             if (cachedEntry is not null && cachedEntry.RegionalMorphing.Count > 0)
             {
@@ -2863,6 +4606,7 @@ public sealed class ConversionOrchestrator(
                     : "rigid-islands:none");
             }
 
+            ReportStage("Transferring weights", 10);
             var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken);
             steps.Add($"weights:{weighted.WeightProfile}");
             if (weighted.SourceSmpBones is { Count: > 0 } smpBones)
@@ -2900,6 +4644,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"normals:{normalRecalc.SmoothingMethod},recalculated={normalRecalc.RecalculatedCount},groups={normalRecalc.SmoothingGroupCount}");
             }
 
+            ReportStage("Mapping skeleton", 11);
             var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
             if (skeletonMapping.UnsupportedBones.Count > 0)
@@ -2907,11 +4652,24 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"skeleton-warnings:unsupported-bones={string.Join('+', skeletonMapping.UnsupportedBones)}");
             }
 
+            ReportStage("Generating morphs", 12);
             var morphs = await morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
+            ReportStage("Rebuilding partitions", 13);
             var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
-            steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
+
+            var nifPartitionSlots = armor.MeshFiles
+                .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (nifPartitionSlots.Count > 0)
+            {
+                partitions = AugmentPartitionsWithSlots(partitions, nifPartitionSlots);
+                steps.Add($"nif-skin-partitions:{string.Join(',', nifPartitionSlots)}");
+            }
 
             // Biped slot passthrough — supplement the mesh-analysis-driven partition list with any
             // additional equipment slots declared in the source plugin's BOD2/BODT subrecords.
@@ -2920,39 +4678,25 @@ public sealed class ConversionOrchestrator(
             var pluginBipedSlots = pluginAnalysis.ArmorAddons
                 .Where(a => a.BipedSlots is not null)
                 .SelectMany(a => a.BipedSlots!)
+                .Concat((pluginAnalysis.ArmorRecords ?? [])
+                    .Where(r => r.BipedSlots is not null)
+                    .SelectMany(r => r.BipedSlots!))
                 .Distinct()
                 .Order()
                 .ToList();
             if (pluginBipedSlots.Count > 0)
             {
-                var existingSlotNumbers = new HashSet<int>(
-                    partitions.Partitions.Select(label =>
-                    {
-                        var colon = label.IndexOf(':');
-                        return colon > 0 && int.TryParse(label[..colon], out var n) ? n : -1;
-                    }).Where(n => n >= 0));
-
-                var augmented = partitions.Partitions.ToList();
-                foreach (var slot in pluginBipedSlots)
-                {
-                    if (!existingSlotNumbers.Contains(slot) &&
-                        KnownPartitionSlotNames.TryGetValue(slot, out var slotName))
-                    {
-                        augmented.Add($"{slot}:{slotName}");
-                    }
-                }
-
-                if (augmented.Count > partitions.Partitions.Count)
-                {
-                    partitions = new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions);
-                }
-
+                partitions = AugmentPartitionsWithSlots(partitions, pluginBipedSlots);
                 steps.Add($"biped-slots-passthrough:{string.Join(',', pluginBipedSlots)}");
             }
 
+            steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
+
+            ReportStage("Detecting clipping", 14);
             var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
 
+            ReportStage("Correcting mesh fit", 15);
             var correction = await autoCorrection.CorrectAsync(converted, clipping, cancellationToken);
             steps.Add($"correction:{(correction.Applied ? correction.Method : "not-required")}");
 
@@ -2972,6 +4716,7 @@ public sealed class ConversionOrchestrator(
 
             // Voxel collision offset pass — detects body/armor penetrations using a
             // simplified voxel grid and computes per-region push-out magnitudes.
+            ReportStage("Running collision and pose checks", 16);
             var voxelResult = await voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
             steps.Add(voxelResult.HasPenetrations
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
@@ -3008,6 +4753,7 @@ public sealed class ConversionOrchestrator(
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
 
+            ReportStage("Building physics and BodySlide data", 17);
             var physicsProfile = ResolvePhysicsProfile(normalized.Request, armor, normalized.Preset);
             if (!string.IsNullOrWhiteSpace(normalized.Request.PhysicsProfileOverride))
             {
@@ -3027,6 +4773,7 @@ public sealed class ConversionOrchestrator(
                 steps.Add("bodyslide-export:disabled");
             }
 
+            ReportStage("Exporting outputs", 18);
             var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
@@ -3054,6 +4801,37 @@ public sealed class ConversionOrchestrator(
             [48] = "Dragon Tail", [49] = "Dragon Leg", [50] = "Dragon Claws",
             [54] = "DecapHead",  [55] = "Decap",     [56] = "Genitals"
         };
+
+    private static PartitionRebuildingResult AugmentPartitionsWithSlots(
+        PartitionRebuildingResult partitions,
+        IReadOnlyList<int> slots)
+    {
+        if (slots.Count == 0)
+        {
+            return partitions;
+        }
+
+        var existingSlotNumbers = new HashSet<int>(
+            partitions.Partitions.Select(label =>
+            {
+                var colon = label.IndexOf(':');
+                return colon > 0 && int.TryParse(label[..colon], out var n) ? n : -1;
+            }).Where(n => n >= 0));
+
+        var augmented = partitions.Partitions.ToList();
+        foreach (var slot in slots)
+        {
+            if (!existingSlotNumbers.Contains(slot) &&
+                KnownPartitionSlotNames.TryGetValue(slot, out var slotName))
+            {
+                augmented.Add($"{slot}:{slotName}");
+            }
+        }
+
+        return augmented.Count > partitions.Partitions.Count
+            ? new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions)
+            : partitions;
+    }
 
     private static string ResolvePhysicsProfile(ConversionRequest request, ImportedArmor armor, ConversionPreset? preset)
     {
@@ -3142,18 +4920,44 @@ public sealed class ConversionInspector(
             skeletonMapping = await skeletonMapper.MapAsync(armor, normalizedTargetBody, cancellationToken);
         }
 
+        var nifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
+
         return new ConversionInspectionResult(
             inputPath,
             normalizedTargetBody,
             armor,
             detection,
             analysis,
-            skeletonMapping);
+            skeletonMapping,
+            nifSupport);
     }
 }
 
 public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 {
+    private static IProgress<ConversionStageProgressUpdate>? CreateStageProgressReporter(
+        IProgress<BatchProgressUpdate>? progress,
+        string currentFile,
+        int completed,
+        int total)
+    {
+        if (progress is null)
+        {
+            return null;
+        }
+
+        return new Progress<ConversionStageProgressUpdate>(update =>
+            progress.Report(new BatchProgressUpdate(
+                completed,
+                total,
+                currentFile,
+                Success: false,
+                Stage: update.Stage,
+                StageIndex: update.StepIndex,
+                StageCount: update.StepCount,
+                IsItemCompleted: false)));
+    }
+
     public async Task<IReadOnlyList<ConversionResult>> ConvertAsync(
         ConversionRequest request,
         CancellationToken cancellationToken = default,
@@ -3193,7 +4997,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
     {
         if (variants.Count <= 1)
         {
-            var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken);
+            var currentFile = Path.GetFileName(originalRequest.InputPath);
+            var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: 0, total: 1);
+            var single = await orchestrator.ConvertAsync(originalRequest, cancellationToken, stageProgress);
             progress?.Report(new BatchProgressUpdate(1, 1, Path.GetFileName(originalRequest.InputPath), single.Success));
             return [single];
         }
@@ -3208,9 +5014,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var variantRootOutput = BuildVariantRootOutput(originalRequest, variant, batchMode: false);
             var variantOutput = Path.Combine(variantRootOutput, armorName);
             var variantRequest = variant.Request with { OutputDirectory = variantOutput };
-            var result = await orchestrator.ConvertAsync(variantRequest, cancellationToken);
+            var currentFile = $"{fileName} [{variant.DisplayName}]";
+            var stageProgress = CreateStageProgressReporter(progress, currentFile, completed: index, total: variants.Count);
+            var result = await orchestrator.ConvertAsync(variantRequest, cancellationToken, stageProgress);
             results.Add(result);
-            progress?.Report(new BatchProgressUpdate(index + 1, variants.Count, $"{fileName} [{variant.DisplayName}]", result.Success));
+            progress?.Report(new BatchProgressUpdate(index + 1, variants.Count, currentFile, result.Success));
         }
 
         return results;
@@ -3740,84 +5548,75 @@ public static class StandaloneConversionModules
 /// </summary>
 internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
 {
-    // Standard Skyrim.esm race FormIDs for the common playable races.
-    // These base FormIDs are stable across load orders (no mod-index prefix applied).
-    private static readonly IReadOnlyDictionary<uint, string> KnownRaces =
-        new Dictionary<uint, string>
-        {
-            [0x00013741] = "DefaultRace",
-            [0x00013742] = "NordRace",
-            [0x00013744] = "ImperialRace",
-            [0x00013745] = "BretonRace",
-            [0x00013746] = "RedguardRace",
-            [0x00013747] = "AltmerRace",
-            [0x00013748] = "BosmerRace",
-            [0x00013749] = "DunmerRace",
-            [0x0001397A] = "OrcRace",
-            [0x00023FE9] = "KhajiitRace",
-            [0x00013BB9] = "ArgonianRace",
-        };
-
-    // Races whose body shapes differ significantly from the standard humanoid skeleton.
-    // Standard body replacers (CBBE, 3BA, BHUNP, UNP, SAM, HIMBO, …) target only
-    // humanoid races and do NOT replace Khajiit or Argonian body meshes.
-    private static readonly HashSet<string> SpecialRaces =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "KhajiitRace",
-            "ArgonianRace",
-        };
-
-    // Body types that only replace the standard humanoid form and cannot be used
-    // directly for Khajiit/Argonian armor without additional race-specific patches.
-    private static readonly HashSet<string> HumanoidOnlyBodies =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "CBBE", "3BA", "BHUNP", "UNP", "TBD", "UBE", "SAM", "SOS", "HIMBO"
-        };
-
     public Task<RaceCompatibilityReport> CheckAsync(
         PluginAnalysisResult pluginAnalysis,
         string targetBody,
         CancellationToken cancellationToken)
     {
-        // Only emit warnings for body types known to be humanoid-only.
-        if (!HumanoidOnlyBodies.Contains(targetBody))
+        var referencedRaces = new List<(RaceCompatibilityRace Race, bool IsInferred)>();
+        var seenRaceNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddReferencedRace(uint? formId, string? editorId, IReadOnlyList<string>? meshPaths)
         {
-            return Task.FromResult(new RaceCompatibilityReport(true, [], []));
+            RaceCompatibilityRace? race = null;
+            var isInferred = false;
+            if (formId is uint rawFormId && RaceCompatibilityCatalog.TryGetRace(rawFormId, out var explicitRace))
+            {
+                race = explicitRace;
+            }
+            else if (RaceCompatibilityCatalog.TryInferRaceFromContext(editorId, meshPaths, out var inferredRace))
+            {
+                race = inferredRace;
+                isInferred = true;
+            }
+
+            if (race is not null && seenRaceNames.Add(race.Name))
+            {
+                referencedRaces.Add((race, isInferred));
+            }
         }
 
-        // Collect all race FormIDs referenced by ARMA or ARMO records.
-        var referencedFormIds = pluginAnalysis.ArmorAddons
-            .Where(a => a.RaceFormId is not null)
-            .Select(a => a.RaceFormId!.Value)
-            .Concat(
-                (pluginAnalysis.ArmorRecords ?? [])
-                    .Where(r => r.RaceFormId is not null)
-                    .Select(r => r.RaceFormId!.Value))
-            .Distinct()
-            .ToList();
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            AddReferencedRace(addon.RaceFormId, addon.EditorId, addon.DetectedMeshPaths);
+        }
 
-        if (referencedFormIds.Count == 0)
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            AddReferencedRace(armorRecord.RaceFormId, armorRecord.EditorId, armorRecord.DetectedMeshPaths);
+        }
+
+        if (referencedRaces.Count == 0)
         {
             return Task.FromResult(new RaceCompatibilityReport(true, [], []));
         }
 
         var incompatible = new List<string>();
         var warnings = new List<string>();
+        var hasRule = RaceCompatibilityCatalog.TryGetBodyRule(targetBody, out var targetRule);
 
-        foreach (var formId in referencedFormIds)
+        foreach (var referencedRace in referencedRaces)
         {
-            if (!KnownRaces.TryGetValue(formId & 0x00FFFFFFu, out var raceName))
+            var race = referencedRace.Race;
+            if (!hasRule)
             {
                 continue;
             }
 
-            if (SpecialRaces.Contains(raceName))
+            var matchesCompatibleGroup = race.Groups.Any(group => targetRule.CompatibleGroups.Contains(group, StringComparer.OrdinalIgnoreCase));
+            if (!matchesCompatibleGroup)
             {
-                incompatible.Add(raceName);
-                warnings.Add(
-                    $"{raceName} is not covered by {targetBody}; a race-specific body patch may be required.");
+                incompatible.Add(race.Name);
+                warnings.Add($"{race.Name} is not covered by {targetRule.Body}; a race-specific body patch may be required.");
+                continue;
+            }
+
+            var shouldWarn = referencedRace.IsInferred &&
+                !string.IsNullOrWhiteSpace(targetRule.WarningMessage) &&
+                race.Groups.Any(group => targetRule.WarningGroups.Contains(group, StringComparer.OrdinalIgnoreCase));
+            if (shouldWarn)
+            {
+                warnings.Add($"{race.Name} uses {targetRule.Body} compatibility: {targetRule.WarningMessage}");
             }
         }
 
@@ -4507,7 +6306,19 @@ internal static class ConversionLearningCache
 
         try
         {
-            return JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+            var entries = JsonSerializer.Deserialize<List<ConversionCacheEntry>>(raw) ?? [];
+            return entries
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Key))
+                .Select(static entry => new ConversionCacheEntry(
+                    entry.Key,
+                    entry.LastSuccessfulConversion,
+                    string.IsNullOrWhiteSpace(entry.TargetBody) ? "unknown" : entry.TargetBody,
+                    string.IsNullOrWhiteSpace(entry.MeshType) ? "unknown" : entry.MeshType,
+                    string.IsNullOrWhiteSpace(entry.Strategy) ? "unknown" : entry.Strategy,
+                    entry.RegionalMorphing ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
+                    entry.HadClipping,
+                    string.IsNullOrWhiteSpace(entry.CorrectionMethod) ? "unknown" : entry.CorrectionMethod))
+                .ToList();
         }
         catch (JsonException)
         {
@@ -4851,31 +6662,9 @@ internal static class ArchiveExtractionHelper
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
-    private const double MeshTokenWeight = 0.35;
-    private const double TextureTokenWeight = 0.20;
-    private const double PhysicsTokenWeight = 0.10;
-    private const double PhysicsExpectationBoostValue = 0.10;
-    private const double BoneSignatureWeight = 0.10;
-    private const double VertexCountWeight = 0.15;
-    private const double BoundingRatioWeight = 0.05;
-    private const double UvSignatureWeight = 0.04;
-    private const double BodyReferenceTokenWeight = 0.08;
-
-    // Physics bone names that appear in SMP/CBPC XML configs and strongly identify a body type.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodyBoneSignatures =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC Belly01", "NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-            ["BHUNP"] = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast02", "NPC R Breast02", "NPC Belly", "NPC L Butt", "NPC R Butt", "NPC LBreast01", "NPC RBreast01", "NPC L Thigh", "NPC R Thigh"],
-            ["HIMBO"] = ["NPC L Pec", "NPC R Pec", "NPC LPec", "NPC RPec"],
-            ["SOS"]   = ["NPC GenitalsBase", "NPC Genitals01", "NPC Genitals02"],
-            ["SAM"]   = ["SOS GenitalsBase", "SAM Genitals", "NPC L Breast01"],
-            ["TBD"]   = ["TBD Breast", "NPC Belly01", "NPC L Butt"],
-            ["UBE"]   = ["BreastUpper", "BreastLower", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "NPC L Breast01", "NPC R Breast01", "NPC Belly", "NPC L Butt", "NPC R Butt"],
-        };
-
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
+        var tuning = BodyDetectionTuningCatalog.Current;
         var meshNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var textureNames = armor.TextureFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
         var physicsNames = armor.PhysicsFiles.Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty).ToArray();
@@ -4885,21 +6674,38 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         // Read physics file contents once for bone signature matching.
         var physicsContents = await ReadPhysicsContentsAsync(armor.PhysicsFiles, cancellationToken);
+        var physicsBoneNames = ExtractPhysicsBoneNames(physicsContents);
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
             .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, physicsBoneNames, geometrySignature))
             .OrderByDescending(result => result.Score)
+            .ThenByDescending(result => result.ReferenceHitRatio)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < 0.25)
+        if (scoredCandidates.Count == 0 || scoredCandidates[0].Score < tuning.AmbiguityScoreFloor)
         {
-            return new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]);
+            return new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold", "confidence-band:unknown"]);
+        }
+
+        if (TryCreateAmbiguousResult(scoredCandidates, out var ambiguousResult))
+        {
+            return ambiguousResult;
         }
 
         var top = scoredCandidates[0];
-        return new BodyDetectionReport(top.Template.Body, top.Score, top.Evidence);
+        var evidence = top.Evidence.ToList();
+        evidence.Add($"confidence-band:{GetConfidenceBand(top.Score, tuning)}");
+        var sameFamilyRunnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
+        if (sameFamilyRunnerUp is { } familyCandidate && HasReferencePriority(top, familyCandidate, tuning))
+        {
+            evidence.Add("reference-priority:direct-source");
+        }
+
+        return new BodyDetectionReport(top.Template.Body, top.Score, evidence
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray());
     }
 
     private static async Task<string> ReadPhysicsContentsAsync(IReadOnlyList<string> physicsFiles, CancellationToken cancellationToken)
@@ -4920,15 +6726,253 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         return sb.ToString();
     }
 
-    private static (BodySignatureTemplate Template, double Score, IReadOnlyList<string> Evidence) Score(
+    private static IReadOnlySet<string> ExtractPhysicsBoneNames(string physicsContents)
+    {
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(physicsContents))
+        {
+            return bones;
+        }
+
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                     physicsContents,
+                     "<bone[^>]*\\bname\\s*=\\s*\"([^\"]+)\"",
+                     System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            var value = match.Groups.Count > 1 ? match.Groups[1].Value : string.Empty;
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                bones.Add(value.Trim());
+            }
+        }
+
+        return bones;
+    }
+
+    private static int CountBoneSignatureMatches(
+        IReadOnlySet<string> sourceBones,
+        IReadOnlyList<string> expectedBones)
+    {
+        if (sourceBones.Count == 0 || expectedBones.Count == 0)
+        {
+            return 0;
+        }
+
+        var remainingSources = sourceBones.ToList();
+        var hits = 0;
+        var matchedExpectedIndexes = new HashSet<int>();
+
+        for (var i = 0; i < expectedBones.Count; i++)
+        {
+            var expectedBone = expectedBones[i];
+            var exactIndex = remainingSources.FindIndex(sourceBone =>
+                sourceBone.Equals(expectedBone, StringComparison.OrdinalIgnoreCase));
+            if (exactIndex >= 0)
+            {
+                remainingSources.RemoveAt(exactIndex);
+                matchedExpectedIndexes.Add(i);
+                hits++;
+            }
+        }
+
+        for (var i = 0; i < expectedBones.Count; i++)
+        {
+            if (matchedExpectedIndexes.Contains(i))
+            {
+                continue;
+            }
+
+            var expectedBone = expectedBones[i];
+            var semanticIndex = remainingSources.FindIndex(sourceBone =>
+                BonesSemanticallyMatch(sourceBone, expectedBone));
+            if (semanticIndex >= 0)
+            {
+                remainingSources.RemoveAt(semanticIndex);
+                hits++;
+            }
+        }
+
+        return hits;
+    }
+
+    private static bool BonesSemanticallyMatch(string sourceBone, string expectedBone)
+    {
+        if (sourceBone.Equals(expectedBone, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var sourceSlot = ClassifySemanticBone(sourceBone);
+        var expectedSlot = ClassifySemanticBone(expectedBone);
+        if (!sourceSlot.Key.Equals(expectedSlot.Key, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (sourceSlot.Side is not null && expectedSlot.Side is not null)
+        {
+            return sourceSlot.Side.Equals(expectedSlot.Side, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
+    }
+
+    private static (string Key, string? Side) ClassifySemanticBone(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        var side = DetectSemanticSide(lower);
+
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
+        {
+            if (aliases.Any(lower.Contains))
+            {
+                return (key, side);
+            }
+        }
+
+        return (lower, side);
+    }
+
+    private static string? DetectSemanticSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains("left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(".l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("-l", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "l") ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.EndsWith(" l", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l_", StringComparison.Ordinal))
+        {
+            return "left";
+        }
+
+        if (lowerBoneName.Contains("right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(".r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("-r", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "r") ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.EndsWith(" r", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r_", StringComparison.Ordinal))
+        {
+            return "right";
+        }
+
+        return null;
+    }
+
+    private static bool StartsWithCompactSidePrefix(string lowerBoneName, string sidePrefix) =>
+        lowerBoneName.StartsWith($"{sidePrefix}breast", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}pec", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}butt", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}glute", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}rear", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}thigh", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}boob", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}nipple", StringComparison.Ordinal);
+
+    private static bool TryCreateAmbiguousResult(
+        IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
+        out BodyDetectionReport result)
+    {
+        var tuning = BodyDetectionTuningCatalog.Current;
+        result = default!;
+        if (scoredCandidates.Count < 2)
+        {
+            return false;
+        }
+
+        var top = scoredCandidates[0];
+        var runnerUp = FindSameFamilyRunnerUp(scoredCandidates, top.Template.Body);
+        if (runnerUp is not { } familyRunnerUp)
+        {
+            return false;
+        }
+
+        var hasMinimumTopScore = top.Score >= tuning.AmbiguityScoreFloor;
+        var hasStrongSharedReference =
+            top.ReferenceHitRatio >= tuning.SharedReferenceConfidenceFloor &&
+            familyRunnerUp.ReferenceHitRatio >= tuning.SharedReferenceConfidenceFloor;
+        var runnerUpScoreFloor = hasStrongSharedReference ? tuning.AmbiguityScoreFloor : tuning.MediumConfidenceThreshold;
+        var runnerUpClearsFloor = familyRunnerUp.Score >= runnerUpScoreFloor;
+        var topIsNotDefinitive = top.Score < tuning.HighConfidenceThreshold;
+        var lacksReferencePriority = !HasReferencePriority(top, familyRunnerUp, tuning);
+        var withinAmbiguityMargin = Math.Abs(top.Score - familyRunnerUp.Score) <= tuning.AmbiguityMargin;
+
+        if (!hasMinimumTopScore ||
+            !runnerUpClearsFloor ||
+            !topIsNotDefinitive ||
+            !lacksReferencePriority ||
+            !withinAmbiguityMargin)
+        {
+            return false;
+        }
+
+        var ambiguityConfidence = Math.Round((top.Score + familyRunnerUp.Score) / 2d, 4);
+        result = new BodyDetectionReport(
+            "UNKNOWN",
+            ambiguityConfidence,
+            top.Evidence
+                .Concat(familyRunnerUp.Evidence)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Append("confidence-band:ambiguous")
+                .Append($"ambiguous:{top.Template.Body}|{familyRunnerUp.Template.Body}")
+                .ToArray());
+        return true;
+    }
+
+    private static bool HasReferencePriority(ScoredBodyCandidate top, ScoredBodyCandidate runnerUp, BodyDetectionTuning tuning) =>
+        top.ReferenceHitRatio > 0 &&
+        (top.ReferenceHitRatio - runnerUp.ReferenceHitRatio) >= tuning.ReferencePriorityMargin;
+
+    private static ScoredBodyCandidate? FindSameFamilyRunnerUp(
+        IReadOnlyList<ScoredBodyCandidate> scoredCandidates,
+        string topBody)
+    {
+        foreach (var candidate in scoredCandidates.Skip(1))
+        {
+            if (GetBodyFamily(candidate.Template.Body).Equals(GetBodyFamily(topBody), StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetConfidenceBand(double score, BodyDetectionTuning tuning) =>
+        score >= tuning.HighConfidenceThreshold ? "high"
+        : score >= tuning.MediumConfidenceThreshold ? "medium"
+        : score >= tuning.AmbiguityScoreFloor ? "low"
+        : "unknown";
+
+    private static string GetBodyFamily(string bodyName) =>
+        bodyName switch
+        {
+            "COCO CBBE" or "COCO UUNP" => "coco-family",
+            "CBBE" or "3BA" => "cbbe-family",
+            "UNP" or "UNPB" or "UUNP" or "BHUNP" or "TBD" => "unp-family",
+            "HIMBO" or "SAM" or "SAM Light" or "SOS" or "TNG" => "male-family",
+            "UBE" => "ube-family",
+            _ => bodyName
+        };
+
+    private static ScoredBodyCandidate Score(
         BodySignatureTemplate template,
         IReadOnlyList<string> meshNames,
         IReadOnlyList<string> textureNames,
         IReadOnlyList<string> physicsNames,
         IReadOnlyList<string> bodyReferenceNames,
         string physicsContents,
+        IReadOnlySet<string> physicsBoneNames,
         MeshGeometrySignature? geometrySignature)
     {
+        var tuning = BodyDetectionTuningCatalog.Current;
         var evidence = new List<string>();
 
         var meshHitRatio = MatchRatio(meshNames, template.MeshTokens);
@@ -4949,7 +6993,18 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             evidence.Add($"physics:{physicsHitRatio:P0}");
         }
 
-        var referenceHitRatio = MatchRatio(bodyReferenceNames, template.TextureTokens);
+        var referenceTokens = template.ReferenceTokens is { Count: > 0 }
+            ? template.ReferenceTokens
+            : ReferenceBodySignatureDatabase.GetTokens(template.Body);
+        if (referenceTokens.Count == 0)
+        {
+            referenceTokens = template.TextureTokens
+                .Concat(template.MeshTokens)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        var referenceHitRatio = MatchRatio(bodyReferenceNames, referenceTokens);
         if (referenceHitRatio > 0)
         {
             evidence.Add($"reference:{referenceHitRatio:P0}");
@@ -4962,10 +7017,12 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         // Bone signature: check if specific physics bone names appear in XML content.
         double boneSignatureScore = 0;
-        if (physicsContents.Length > 0 && BodyBoneSignatures.TryGetValue(template.Body, out var boneNames))
+        if (physicsContents.Length > 0 &&
+            BuiltInBodyMetadataCatalog.TryGet(template.Body, out var metadata) &&
+            metadata.PhysicsBoneSignatures.Count > 0)
         {
-            var hits = boneNames.Count(bone => physicsContents.Contains(bone, StringComparison.OrdinalIgnoreCase));
-            boneSignatureScore = (double)hits / boneNames.Count;
+            var hits = CountBoneSignatureMatches(physicsBoneNames, metadata.PhysicsBoneSignatures);
+            boneSignatureScore = (double)hits / metadata.PhysicsBoneSignatures.Count;
             if (boneSignatureScore > 0)
             {
                 evidence.Add($"bone-sig:{boneSignatureScore:P0}");
@@ -5003,17 +7060,19 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
         }
 
-        var physicsExpectationBoost = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? PhysicsExpectationBoostValue : 0;
+        var physicsExpectationSignal = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 1d : 0d;
+        var referenceBoostSignal = referenceHitRatio >= 0.5 ? 1d : 0d;
         var score = Math.Clamp(
-            (meshHitRatio * MeshTokenWeight) +
-            (textureHitRatio * TextureTokenWeight) +
-            (physicsHitRatio * PhysicsTokenWeight) +
-            (referenceHitRatio * BodyReferenceTokenWeight) +
-            (boneSignatureScore * BoneSignatureWeight) +
-            (vertexSignatureScore * VertexCountWeight) +
-            (boundingRatioScore * BoundingRatioWeight) +
-            (uvSignatureScore * UvSignatureWeight) +
-            physicsExpectationBoost,
+            (meshHitRatio * tuning.MeshTokenWeight) +
+            (textureHitRatio * tuning.TextureTokenWeight) +
+            (physicsHitRatio * tuning.PhysicsTokenWeight) +
+            (referenceHitRatio * tuning.BodyReferenceTokenWeight) +
+            (boneSignatureScore * tuning.BoneSignatureWeight) +
+            (vertexSignatureScore * tuning.VertexCountWeight) +
+            (boundingRatioScore * tuning.BoundingRatioWeight) +
+            (uvSignatureScore * tuning.UvSignatureWeight) +
+            (physicsExpectationSignal * tuning.PhysicsExpectationBoostValue) +
+            (referenceBoostSignal * tuning.BodyReferenceBoostValue),
             0,
             1);
 
@@ -5027,8 +7086,14 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             evidence.Add("gated:needs-explicit-ube-token");
         }
 
-        return (template, score, evidence);
+        return new ScoredBodyCandidate(template, score, referenceHitRatio, evidence);
     }
+
+    private readonly record struct ScoredBodyCandidate(
+        BodySignatureTemplate Template,
+        double Score,
+        double ReferenceHitRatio,
+        IReadOnlyList<string> Evidence);
 
     private static double ScoreUvSignature(BodySignatureTemplate template, MeshUvSignature uv)
     {
@@ -5171,9 +7236,24 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
     private static readonly string[] CircletKeywords =
         ["circlet", "crown", "diadem", "tiara", "hat", "cap", "headgear"];
 
+    private static readonly string[] FootwearKeywords =
+        ["boot", "boots", "shoe", "shoes", "sandal", "sandals", "slipper", "slippers", "heel", "heels", "sabaton", "greave"];
+
+    private static readonly string[] StrapKeywords =
+        ["strap", "straps", "belt", "belts", "harness", "garter", "garters", "wrap", "wraps", "band", "bands"];
+
+    private static readonly string[] AccessoryKeywords =
+        ["pauldron", "pauldrons", "shoulder", "shoulders", "cape", "cloak", "scarf", "shawl", "sleeve", "sleeves", "glove", "gloves", "gauntlet", "gauntlets", "bracer", "bracers", "buckle", "buckles", "clasp", "clasps", "accessory", "accessories"];
+
+    private static readonly string[] RigidPieceKeywords =
+        ["plate", "plates", "pauldron", "pauldrons", "buckle", "buckles", "clasp", "clasps", "guard", "guards", "greave", "greaves", "sabaton", "sabatons", "shield", "shields", "rigid"];
+
     public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
+        var partitionSlots = armor.MeshFiles
+            .SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots)
+            .ToHashSet();
 
         // Determine whether any filename matches a headgear keyword (all sub-type groups combined).
         bool IsHeadgear(string name) =>
@@ -5211,7 +7291,28 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 headgearSubType = HeadgearSubTypes.Circlet;
         }
 
-        return Task.FromResult(new MeshAnalysis(finalMeshType, physicsEnabled, armor.MeshFiles.Count, headgearSubType));
+        var hasSplitMeshes = armor.MeshFiles.Count > 1;
+        var hasStrapLikePieces = fileNames.Any(name => StrapKeywords.Any(name.Contains));
+        var isFootwear = fileNames.Any(name => FootwearKeywords.Any(name.Contains)) ||
+            partitionSlots.Contains(37) ||
+            partitionSlots.Contains(38);
+        var hasAccessoryPieces = fileNames.Any(name => AccessoryKeywords.Any(name.Contains)) ||
+            hasStrapLikePieces ||
+            isFootwear ||
+            hasSplitMeshes;
+        var hasRigidSubMeshes = finalMeshType == "plate" ||
+            fileNames.Any(name => RigidPieceKeywords.Any(name.Contains));
+
+        return Task.FromResult(new MeshAnalysis(
+            finalMeshType,
+            physicsEnabled,
+            armor.MeshFiles.Count,
+            headgearSubType,
+            HasSplitMeshes: hasSplitMeshes,
+            HasAccessoryPieces: hasAccessoryPieces,
+            HasStrapLikePieces: hasStrapLikePieces,
+            HasRigidSubMeshes: hasRigidSubMeshes,
+            IsFootwear: isFootwear));
     }
 }
 
@@ -5302,17 +7403,67 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RegionalAdjacency =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
+            ["feet"] = ["calves", "legs"],
             ["chest"] = ["breasts", "shoulders", "arms", "waist"],
             ["breasts"] = ["chest", "shoulders", "waist"],
             ["waist"] = ["chest", "belly", "pelvis", "arms"],
             ["belly"] = ["waist", "pelvis", "butt"],
             ["pelvis"] = ["waist", "belly", "butt", "legs", "thighs"],
             ["butt"] = ["pelvis", "thighs", "legs"],
-            ["legs"] = ["pelvis", "thighs", "calves"],
+            ["legs"] = ["pelvis", "thighs", "calves", "feet"],
             ["thighs"] = ["pelvis", "butt", "legs", "calves"],
-            ["calves"] = ["legs", "thighs"],
+            ["calves"] = ["legs", "thighs", "feet"],
             ["shoulders"] = ["chest", "arms", "breasts"],
             ["arms"] = ["shoulders", "chest", "waist"]
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> FootwearRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["feet"] = 0.42d,
+            ["calves"] = 0.58d,
+            ["legs"] = 0.72d,
+            ["thighs"] = 0.86d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> StrapRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 0.72d,
+            ["breasts"] = 0.60d,
+            ["waist"] = 0.64d,
+            ["belly"] = 0.68d,
+            ["pelvis"] = 0.72d,
+            ["butt"] = 0.78d,
+            ["thighs"] = 0.82d,
+            ["shoulders"] = 0.76d,
+            ["arms"] = 0.80d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> AccessoryRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.84d,
+            ["arms"] = 0.86d,
+            ["chest"] = 0.90d,
+            ["waist"] = 0.90d,
+            ["pelvis"] = 0.90d,
+            ["thighs"] = 0.88d,
+            ["calves"] = 0.84d,
+            ["feet"] = 0.84d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> RigidPieceRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.72d,
+            ["arms"] = 0.72d,
+            ["chest"] = 0.80d,
+            ["waist"] = 0.82d,
+            ["pelvis"] = 0.82d,
+            ["thighs"] = 0.80d,
+            ["calves"] = 0.76d,
+            ["feet"] = 0.74d,
         };
 
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
@@ -5361,7 +7512,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             baseField = BodyTransformationFieldCatalog.Resolve(targetBody, armor);
         }
 
-        var profileField = DeformationProfileModifier.Apply(baseField, deformationProfile);
+        var tunedField = ApplyBodySpecificTuning(baseField, targetBody, sourceBody);
+        var profileField = DeformationProfileModifier.Apply(tunedField, deformationProfile);
         var regionalMorphing = analysis.MeshType switch
         {
             "plate" => ApplyRigidityConstraints(profileField),
@@ -5373,7 +7525,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var solverRefinedMorphing = !string.IsNullOrWhiteSpace(sourceBody)
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, solverRefinedMorphing, cage));
+        var featureAdjustedMorphing = ApplyMeshFeatureTuning(solverRefinedMorphing, analysis);
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, featureAdjustedMorphing, cage));
     }
 
     /// <summary>
@@ -5395,6 +7548,125 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 1.15), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, double> ApplyBodySpecificTuning(
+        IReadOnlyDictionary<string, double> field,
+        string targetBody,
+        string? sourceBody)
+    {
+        if (field.Count == 0)
+        {
+            return field;
+        }
+
+        var tuned = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+        ApplyDirectionalTuning(tuned, GetTargetBodyTuning(targetBody));
+
+        if (!string.IsNullOrWhiteSpace(sourceBody) &&
+            BodyTypeCatalog.TryGetGender(sourceBody, out var sourceGender) &&
+            BodyTypeCatalog.TryGetGender(targetBody, out var targetGender) &&
+            !string.Equals(sourceGender, targetGender, StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyDirectionalTuning(tuned, GetCrossGenderTuning(sourceGender, targetGender));
+        }
+
+        return tuned;
+    }
+
+    private static void ApplyDirectionalTuning(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, double> tuning)
+    {
+        foreach (var (region, scale) in tuning)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(1d + ((value - 1d) * scale), 6);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, double> GetCrossGenderTuning(string sourceGender, string targetGender)
+    {
+        if (string.Equals(sourceGender, "male", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetGender, "female", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["breasts"] = 1.22d,
+                ["waist"] = 1.08d,
+                ["pelvis"] = 1.12d,
+                ["butt"] = 1.14d,
+                ["thighs"] = 1.12d,
+                ["shoulders"] = 0.88d,
+                ["arms"] = 0.90d,
+                ["chest"] = 0.94d
+            };
+        }
+
+        if (string.Equals(sourceGender, "female", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(targetGender, "male", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.10d,
+                ["shoulders"] = 1.16d,
+                ["arms"] = 1.12d,
+                ["waist"] = 1.06d,
+                ["belly"] = 1.05d,
+                ["breasts"] = 0.78d,
+                ["pelvis"] = 0.88d,
+                ["butt"] = 0.86d,
+                ["thighs"] = 0.90d
+            };
+        }
+
+        return EmptyTuning;
+    }
+
+    private static IReadOnlyDictionary<string, double> GetTargetBodyTuning(string targetBody)
+    {
+        if (!BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalName))
+        {
+            return EmptyTuning;
+        }
+
+        return TargetBodyTunings.TryGetValue(canonicalName, out var tuning)
+            ? tuning
+            : EmptyTuning;
+    }
+
+    private static readonly IReadOnlyDictionary<string, double> EmptyTuning =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> TargetBodyTunings =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["CBBE"] = CreateTuning(("breasts", 1.03d), ("butt", 1.02d), ("thighs", 1.02d)),
+            ["3BA"] = CreateTuning(("breasts", 1.06d), ("butt", 1.04d), ("thighs", 1.04d)),
+            ["BHUNP"] = CreateTuning(("breasts", 1.06d), ("butt", 1.04d), ("thighs", 1.04d)),
+            ["UNP"] = CreateTuning(("breasts", 1.02d), ("butt", 1.01d)),
+            ["UNPB"] = CreateTuning(("breasts", 1.04d), ("butt", 1.03d), ("thighs", 1.03d)),
+            ["UUNP"] = CreateTuning(("breasts", 1.04d), ("butt", 1.03d), ("thighs", 1.03d)),
+            ["COCO CBBE"] = CreateTuning(("breasts", 1.06d), ("butt", 1.05d), ("thighs", 1.04d), ("belly", 1.03d)),
+            ["COCO UUNP"] = CreateTuning(("breasts", 1.06d), ("butt", 1.05d), ("thighs", 1.04d), ("belly", 1.03d)),
+            ["TBD"] = CreateTuning(("breasts", 1.03d), ("butt", 1.02d), ("thighs", 1.02d)),
+            ["HIMBO"] = CreateTuning(("chest", 1.05d), ("shoulders", 1.08d), ("arms", 1.06d)),
+            ["SAM"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["SAM Light"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["SOS"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["TNG"] = CreateTuning(("chest", 1.04d), ("shoulders", 1.06d), ("arms", 1.05d), ("waist", 0.96d)),
+            ["UBE"] = CreateTuning(("breasts", 1.08d), ("belly", 1.05d), ("butt", 1.05d)),
+            ["Vanilla Beast"] = CreateTuning(("pelvis", 1.02d), ("butt", 1.02d), ("thighs", 1.03d), ("calves", 1.03d)),
+            ["Goat Humanoid"] = CreateTuning(("chest", 1.03d), ("breasts", 1.05d), ("legs", 1.04d), ("calves", 1.06d)),
+            ["Hagraven"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.05d), ("shoulders", 1.06d), ("arms", 1.07d)),
+            ["Spriggan"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.07d), ("shoulders", 1.05d), ("arms", 1.06d)),
+        };
+
+    private static IReadOnlyDictionary<string, double> CreateTuning(params (string Region, double Scale)[] entries) =>
+        entries.ToDictionary(static entry => entry.Region, static entry => entry.Scale, StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlyDictionary<string, double> ApplyRegionAwareSolver(IReadOnlyDictionary<string, double> field, string meshType)
     {
@@ -5464,64 +7736,149 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         return current;
     }
+
+    private static IReadOnlyDictionary<string, double> ApplyMeshFeatureTuning(
+        IReadOnlyDictionary<string, double> field,
+        MeshAnalysis analysis)
+    {
+        if (field.Count == 0)
+        {
+            return field;
+        }
+
+        var tuned = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+
+        if (analysis.HasSplitMeshes)
+        {
+            ApplySeamContinuity(tuned, maxGap: 0.24d, blendStrength: 0.70d);
+        }
+
+        if (analysis.HasAccessoryPieces)
+        {
+            ApplyDampingProfile(tuned, AccessoryRegionDamping);
+        }
+
+        if (analysis.HasStrapLikePieces)
+        {
+            ApplyDampingProfile(tuned, StrapRegionDamping);
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.18d,
+                blendStrength: 0.80d,
+                constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
+        }
+
+        if (analysis.HasRigidSubMeshes && !string.Equals(analysis.MeshType, "plate", StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyDampingProfile(tuned, RigidPieceRegionDamping);
+        }
+
+        if (analysis.IsFootwear)
+        {
+            ApplyDampingProfile(tuned, FootwearRegionDamping);
+            ApplyClampProfile(
+                tuned,
+                new Dictionary<string, (double Minimum, double Maximum)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["feet"] = (0.92d, 1.18d),
+                    ["calves"] = (0.88d, 1.22d),
+                    ["legs"] = (0.84d, 1.24d),
+                });
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.12d,
+                blendStrength: 0.85d,
+                constrainedRegions: ["feet", "calves", "legs", "thighs"]);
+        }
+
+        return tuned;
+    }
+
+    private static void ApplyDampingProfile(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, double> dampingProfile)
+    {
+        foreach (var (region, damping) in dampingProfile)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(1d + ((value - 1d) * damping), 6);
+        }
+    }
+
+    private static void ApplyClampProfile(
+        IDictionary<string, double> field,
+        IReadOnlyDictionary<string, (double Minimum, double Maximum)> clampProfile)
+    {
+        foreach (var (region, limits) in clampProfile)
+        {
+            if (!field.TryGetValue(region, out var value))
+            {
+                continue;
+            }
+
+            field[region] = Math.Round(Math.Clamp(value, limits.Minimum, limits.Maximum), 6);
+        }
+    }
+
+    private static void ApplySeamContinuity(
+        IDictionary<string, double> field,
+        double maxGap,
+        double blendStrength,
+        IReadOnlyCollection<string>? constrainedRegions = null)
+    {
+        var visitedPairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, neighbors) in RegionalAdjacency)
+        {
+            if (!field.ContainsKey(region) ||
+                (constrainedRegions is not null && !constrainedRegions.Contains(region)))
+            {
+                continue;
+            }
+
+            foreach (var neighbor in neighbors)
+            {
+                if (!field.ContainsKey(neighbor) ||
+                    (constrainedRegions is not null && !constrainedRegions.Contains(neighbor)))
+                {
+                    continue;
+                }
+
+                var pairKey = string.Compare(region, neighbor, StringComparison.OrdinalIgnoreCase) <= 0
+                    ? $"{region}|{neighbor}"
+                    : $"{neighbor}|{region}";
+                if (!visitedPairs.Add(pairKey))
+                {
+                    continue;
+                }
+
+                var left = field[region];
+                var right = field[neighbor];
+                var gap = left - right;
+                if (Math.Abs(gap) <= maxGap)
+                {
+                    continue;
+                }
+
+                var midpoint = (left + right) / 2d;
+                var direction = Math.Sign(gap);
+                var targetLeft = midpoint + (direction * maxGap / 2d);
+                var targetRight = midpoint - (direction * maxGap / 2d);
+                field[region] = Math.Round(Lerp(left, targetLeft, blendStrength), 6);
+                field[neighbor] = Math.Round(Lerp(right, targetRight, blendStrength), 6);
+            }
+        }
+    }
+
+    private static double Lerp(double from, double to, double amount) =>
+        from + ((to - from) * amount);
 }
 
 internal sealed class BasicWeightTransferService : IWeightTransferService
 {
-    // Physics bones required on the TARGET body for SMP/CBPC simulation to work.
-    // When the converted mesh lacks these influences, the physics system skips the armor.
-    // Female SMP bodies (3BA / BHUNP / TBD) use the breast + butt + belly chain.
-    private static readonly IReadOnlyList<string> FemaleSmpBones =
-    [
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC L Breast03", "NPC R Breast03",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly",
-        "NPC L Thigh", "NPC R Thigh",
-    ];
-
-    // CBPC-only female bodies (UNP / TBD-lite) use a smaller set — just the leaf bones.
-    private static readonly IReadOnlyList<string> FemaleCbpcBones =
-    [
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly",
-    ];
-
-    // Male physics bodies (HIMBO / SAM / SOS) drive pec and belly simulation.
-    private static readonly IReadOnlyList<string> MaleSmpBones =
-    [
-        "NPC L Pec", "NPC R Pec",
-        "NPC Belly",
-    ];
-
-    private static readonly IReadOnlyList<string> UbeSoftBodyBones =
-    [
-        "NPC L Breast", "NPC R Breast",
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC Belly",
-        "NPC L Butt", "NPC R Butt",
-        "NPC L Thigh", "NPC R Thigh",
-        "BreastUpper", "BreastLower", "BreastOuter", "BreastInner",
-        "ButtUpper", "ButtLower",
-    ];
-
-    // Map each target body to the physics bones it requires in the converted mesh.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> TargetPhysicsBoneMap =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = FemaleSmpBones,
-            ["BHUNP"] = FemaleSmpBones,
-            ["UNP"]   = FemaleCbpcBones,
-            ["TBD"]   = FemaleCbpcBones,
-            ["HIMBO"] = MaleSmpBones,
-            ["SAM"]   = MaleSmpBones,
-            ["SOS"]   = MaleSmpBones,
-            ["UBE"]   = UbeSoftBodyBones,
-        };
-
     public Task<WeightedMesh> TransferAsync(
         ConvertedMesh mesh,
         MeshAnalysis analysis,
@@ -5542,8 +7899,21 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
         var hasCustomProfile = CustomBodyProfileSupport.TryGetProfile(sourceArmor, targetBody, out var customProfile);
         var targetPhysBones = hasCustomProfile
             ? customProfile.PhysicsBones
-            : TargetPhysicsBoneMap.TryGetValue(targetBody, out var builtInBones) ? builtInBones : null;
-        if (analysis.HeadgearSubType is not null)
+            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInBody)
+                ? builtInBody.AvailablePhysicsBones
+                : null;
+
+        if (analysis.PhysicsEnabled && targetPhysBones is not null)
+        {
+            var supportedBones = hasCustomProfile
+                ? customProfile.PhysicsBones
+                : BodyTechnicalProfileCatalog.TryGet(targetBody, out var profileInfo)
+                    ? profileInfo.AvailablePhysicsBones
+                    : targetPhysBones;
+            targetPhysBones = PhysicsRepairCatalog.RepairTargetBones(targetPhysBones, supportedBones, smpBones);
+        }
+
+        if (!analysis.PhysicsEnabled || analysis.HeadgearSubType is not null)
             targetPhysBones = null;
 
         return Task.FromResult(new WeightedMesh(mesh.MeshType, profile, analysis.PhysicsEnabled, smpBones, targetPhysBones));
@@ -5595,28 +7965,10 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
 /// </summary>
 internal sealed class BasicMorphGenerationService : IMorphGenerationService
 {
-    // Number of standard BodySlide sliders defined per target body family.
-    // Kept in sync with BodySlideOspProjectService.BodySliders.
-    private static readonly IReadOnlyDictionary<string, int> SliderCounts =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CBBE"]          = 12,
-            ["3BA"]           = 15,
-            ["BHUNP"]         = 14,
-            ["UNP"]           = 12,
-            ["HIMBO"]         = 8,
-            ["SAM"]           = 7,
-            ["SOS"]           = 7,
-            ["TBD"]           = 9,
-            ["UBE"]           = 9,
-            ["Vanilla"]       = 5,
-        };
-
-    public Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
+    public async Task<MorphSet> GenerateAsync(WeightedMesh mesh, ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
-        var sliderCount = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile)
-            ? customProfile.SliderNames?.Count ?? 5
-            : SliderCounts.TryGetValue(targetBody, out var builtInCount) ? builtInCount : 5;
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken);
+        var sliderCount = resolved.Sliders.Count;
 
         // Source-body match ratio: how closely the mesh weight profile matches expected
         // vertex weighting for the target body.  Physics-enabled meshes with transferred
@@ -5632,9 +7984,31 @@ internal sealed class BasicMorphGenerationService : IMorphGenerationService
             _                                                      => 0.75,
         };
 
+        if (resolved.SourceMorphQuality is { PayloadMorphCount: > 0 } sourceMorphQuality)
+        {
+            matchRatio = ApplySourceMorphQuality(matchRatio, sourceMorphQuality);
+        }
+
         var lowLabel  = $"low-weight:{sliderCount}-sliders";
         var highLabel = $"high-weight:{sliderCount}-sliders";
-        return Task.FromResult(new MorphSet(lowLabel, highLabel, true, sliderCount, matchRatio));
+        return new MorphSet(
+            lowLabel,
+            highLabel,
+            true,
+            sliderCount,
+            matchRatio,
+            resolved.SourceMorphQuality,
+            resolved.ReusableMorphPayloads,
+            resolved.SourceAssetSupport);
+    }
+
+    private static double ApplySourceMorphQuality(double baseMatchRatio, SourceMorphQualityMetrics sourceMorphQuality)
+    {
+        var payloadSignal =
+            (sourceMorphQuality.PayloadStrengthScore * 0.65d) +
+            (sourceMorphQuality.PayloadCoverageRatio * 0.35d);
+        var adjustment = (payloadSignal - 0.50d) * 0.10d;
+        return Math.Round(Math.Clamp(baseMatchRatio + adjustment, 0.35d, 0.99d), 4);
     }
 }
 
@@ -5642,16 +8016,7 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
 {
     public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
-        var threshold = mesh.MeshType switch
-        {
-            "physics-enabled" => 1.04,
-            "skin-tight" => 1.05,
-            "cloth" => 1.07,
-            "leather" => 1.09,
-            "mixed" => 1.08,
-            "plate" => 1.12,
-            _ => 1.10
-        };
+        var threshold = MeshBehaviorCatalog.Get(mesh.MeshType).ClippingThreshold;
 
         var regionScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var (region, morphFactor) in mesh.RegionalMorphing)
@@ -5723,20 +8088,6 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
 /// </summary>
 internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 {
-    // Base inflation per mesh type applied to each clipping region's morph factor.
-    // The factor is added to the existing morphing value so that the BSD/TRI vertex
-    // deltas push the armor outward by an appropriate amount.
-    private static readonly IReadOnlyDictionary<string, double> BaseInflation =
-        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["plate"]           = 0.072,
-            ["leather"]         = 0.048,
-            ["mixed"]           = 0.055,
-            ["cloth"]           = 0.030,
-            ["skin-tight"]      = 0.022,
-            ["physics-enabled"] = 0.028,
-        };
-
     // Clipping regions whose correction has a secondary "spill" effect on neighbouring
     // regions (e.g. correcting the chest region also slightly inflates armpits).
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> InflationSpill =
@@ -5759,8 +8110,7 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 
         // Start from the current regional morphing values and build a corrected copy.
         var corrected = new Dictionary<string, double>(mesh.RegionalMorphing, StringComparer.OrdinalIgnoreCase);
-        BaseInflation.TryGetValue(mesh.MeshType, out var baseInflation);
-        if (baseInflation == 0) baseInflation = 0.040;
+        var baseInflation = MeshBehaviorCatalog.Get(mesh.MeshType).BaseInflation;
 
         foreach (var region in clipping.Regions)
         {
@@ -5791,11 +8141,6 @@ internal sealed class BasicAutoCorrectionService : IAutoCorrectionService
 
 internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 {
-    private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "HIMBO", "SAM", "SOS"
-    };
-
     private readonly record struct PhysicsSolverTuning(
         double StiffnessMultiplier,
         double OffsetMultiplier,
@@ -5808,28 +8153,27 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     {
         var hasCbpc = physicsProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase);
         var hasSmp  = physicsProfile.Contains("smp",  StringComparison.OrdinalIgnoreCase);
-        var isMale  = MaleBodies.Contains(targetBody) ||
+        var isMale  = MeshBehaviorCatalog.MaleBodyTargets.Contains(targetBody, StringComparer.OrdinalIgnoreCase) ||
             (mesh.TargetPhysicsBones?.Any(static bone => bone.Contains("pec", StringComparison.OrdinalIgnoreCase)) ?? false);
 
         var tuning = BuildSolverTuning(mesh);
 
         var cbpcXml = hasCbpc ? BuildCbpcXml(isMale, tuning) : null;
-        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning) : null;
+        var smpXml  = hasSmp  ? BuildSmpXml(targetBody, isMale, tuning, mesh.TargetPhysicsBones) : null;
 
         return Task.FromResult(new PhysicsConfig(physicsProfile, cbpcXml, smpXml));
     }
 
     private static PhysicsSolverTuning BuildSolverTuning(WeightedMesh mesh)
     {
-        var tuning = mesh.MeshType switch
-        {
-            "cloth" => new PhysicsSolverTuning(0.85, 1.25, 0.90, 1.08, 0.95, 1.15),
-            "physics-enabled" => new PhysicsSolverTuning(1.00, 1.12, 0.82, 1.15, 1.10, 1.20),
-            "skin-tight" => new PhysicsSolverTuning(0.95, 0.90, 1.05, 0.95, 1.00, 0.90),
-            "leather" => new PhysicsSolverTuning(1.05, 0.85, 1.08, 0.92, 1.02, 0.88),
-            "plate" => new PhysicsSolverTuning(1.12, 0.70, 1.15, 0.85, 1.10, 0.75),
-            _ => new PhysicsSolverTuning(1.00, 1.00, 1.00, 1.00, 1.00, 1.00)
-        };
+        var profile = MeshBehaviorCatalog.Get(mesh.MeshType);
+        var tuning = new PhysicsSolverTuning(
+            profile.PhysicsSolver.StiffnessMultiplier,
+            profile.PhysicsSolver.OffsetMultiplier,
+            profile.PhysicsSolver.DampingMultiplier,
+            profile.PhysicsSolver.GravityMultiplier,
+            profile.PhysicsSolver.MassMultiplier,
+            profile.PhysicsSolver.RestitutionMultiplier);
 
         if (!mesh.PhysicsWeightsTransferred)
         {
@@ -5900,46 +8244,96 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         return sb.ToString();
     }
 
-    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning)
+    private static string BuildSmpXml(string targetBody, bool isMale, PhysicsSolverTuning tuning, IReadOnlyList<string>? targetPhysicsBones)
     {
         static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
         var sb = new System.Text.StringBuilder();
+        var emittedBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
         if (isMale)
         {
-            sb.AppendLine($"  <bone name=\"NPC L Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Pec\" mass=\"{F(2.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.85 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.15 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.65 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-8 * tuning.OffsetMultiplier)}\" max=\"{F(8 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
+            AppendBone("NPC L Pec", 2.5, 0.85, 0.60, 15, 0.15);
+            AppendBone("NPC R Pec", 2.5, 0.85, 0.60, 15, 0.15);
+            AppendBone("NPC Belly", 1.5, 0.90, 0.65, 8, 0.10);
         }
         else
         {
-            sb.AppendLine($"  <bone name=\"NPC L Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Breast01\" mass=\"{F(2.0 * tuning.MassMultiplier)}\" stiffness=\"{F(0.80 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.50 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-20 * tuning.OffsetMultiplier)}\" max=\"{F(20 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC Belly\" mass=\"{F(1.5 * tuning.MassMultiplier)}\" stiffness=\"{F(0.90 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.60 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-10 * tuning.OffsetMultiplier)}\" max=\"{F(10 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.10 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC L Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
-            sb.AppendLine($"  <bone name=\"NPC R Butt\" mass=\"{F(1.8 * tuning.MassMultiplier)}\" stiffness=\"{F(0.75 * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(0.55 * tuning.DampingMultiplier, 0.35, 0.95))}\">");
-            sb.AppendLine($"    <angularLimit min=\"{F(-15 * tuning.OffsetMultiplier)}\" max=\"{F(15 * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(0.20 * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
-            sb.AppendLine("  </bone>");
+            AppendBone("NPC L Breast01", 2.0, 0.80, 0.50, 20, 0.20);
+            AppendBone("NPC R Breast01", 2.0, 0.80, 0.50, 20, 0.20);
+            AppendBone("NPC Belly", 1.5, 0.90, 0.60, 10, 0.10);
+            AppendBone("NPC L Butt", 1.8, 0.75, 0.55, 15, 0.20);
+            AppendBone("NPC R Butt", 1.8, 0.75, 0.55, 15, 0.20);
+        }
+
+        foreach (var extraBone in targetPhysicsBones ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(extraBone) || emittedBones.Contains(extraBone))
+            {
+                continue;
+            }
+
+            var lowered = extraBone.ToLowerInvariant();
+            if (MatchesSemanticAlias(lowered, "genitals") || lowered.Contains("balls", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 1.25, 0.72, 0.62, 12, 0.12);
+            }
+            else if (lowered.Contains("thigh", StringComparison.Ordinal) || lowered.Contains("butt", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 1.85, 0.74, 0.58, 14, 0.18);
+            }
+            else if (lowered.Contains("breast", StringComparison.Ordinal) || lowered.Contains("pec", StringComparison.Ordinal) || lowered.Contains("lat", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 2.1, 0.78, 0.56, 16, 0.16);
+            }
+            else if (MatchesSemanticAlias(lowered, "hair"))
+            {
+                AppendBone(extraBone, 0.72, 0.68, 0.48, 24, 0.08);
+            }
+            else if (MatchesSemanticAlias(lowered, "tail"))
+            {
+                AppendBone(extraBone, 1.35, 0.81, 0.64, 18, 0.12);
+            }
+            else if (MatchesSemanticAlias(lowered, "wing"))
+            {
+                AppendBone(extraBone, 1.55, 0.83, 0.63, 12, 0.10);
+            }
+            else if (lowered.Contains("horn", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 0.90, 0.96, 0.84, 4, 0.05);
+            }
+            else if (MatchesSemanticAlias(lowered, "mouth") ||
+                     lowered.Contains("jaw", StringComparison.Ordinal) ||
+                     lowered.Contains("tongue", StringComparison.Ordinal) ||
+                     lowered.Contains("lip", StringComparison.Ordinal))
+            {
+                AppendBone(extraBone, 0.85, 0.92, 0.78, 6, 0.06);
+            }
+            else if (MatchesSemanticAlias(lowered, "head"))
+            {
+                AppendBone(extraBone, 1.10, 0.94, 0.82, 5, 0.05);
+            }
+            else if (MatchesSemanticAlias(lowered, "heel"))
+            {
+                AppendBone(extraBone, 0.95, 0.96, 0.86, 4, 0.05);
+            }
         }
 
         sb.AppendLine("</system>");
         return sb.ToString();
+
+        void AppendBone(string boneName, double mass, double stiffness, double damping, double angleLimit, double restitution)
+        {
+            emittedBones.Add(boneName);
+            sb.AppendLine($"  <bone name=\"{boneName}\" mass=\"{F(mass * tuning.MassMultiplier)}\" stiffness=\"{F(stiffness * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"    <angularLimit min=\"{F(-angleLimit * tuning.OffsetMultiplier)}\" max=\"{F(angleLimit * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(restitution * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
+            sb.AppendLine("  </bone>");
+        }
     }
+
+    private static bool MatchesSemanticAlias(string loweredBoneName, string semanticKey) =>
+        SemanticBoneAliasCatalog.All.TryGetValue(semanticKey, out var aliases) &&
+        aliases.Any(loweredBoneName.Contains);
 }
 
 /// <summary>
@@ -5948,87 +8342,9 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
 /// </summary>
 internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 {
-    // Standard vanilla + XPMSSE bones shared by most body types.
-    private static readonly IReadOnlyList<string> CommonBones =
-    [
-        "NPC Root", "NPC COM", "NPC Pelvis", "NPC Spine", "NPC Spine1", "NPC Spine2",
-        "NPC Neck", "NPC Head",
-        "NPC L Clavicle", "NPC L UpperArm", "NPC L ForeArm", "NPC L Hand",
-        "NPC R Clavicle", "NPC R UpperArm", "NPC R ForeArm", "NPC R Hand",
-        "NPC L Thigh", "NPC L Calf", "NPC L Foot",
-        "NPC R Thigh", "NPC R Calf", "NPC R Foot"
-    ];
-
-    // Physics bones added by SMP/3BA/BHUNP on female bodies.
-    private static readonly IReadOnlySet<string> FeaturePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01",
-        "NPC Belly", "NPC Butt", "NPC L Butt", "NPC R Butt",
-        "NPC L Breast02", "NPC R Breast02"
-    };
-
-    private static readonly IReadOnlySet<string> CbpcPhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Butt", "NPC R Butt",
-        "NPC Belly"
-    };
-
-    private static readonly IReadOnlySet<string> UbePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Breast", "NPC R Breast",
-        "NPC L Breast01", "NPC R Breast01",
-        "NPC L Breast02", "NPC R Breast02",
-        "NPC Belly", "NPC L Butt", "NPC R Butt",
-        "NPC L Thigh", "NPC R Thigh",
-        "BreastUpper", "BreastLower", "BreastOuter", "BreastInner",
-        "ButtUpper", "ButtLower"
-    };
-
-    // Physics bones specific to HIMBO/SAM male bodies.
-    private static readonly IReadOnlySet<string> MalePhysicsBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Lat", "NPC R Lat"
-    };
-
-    // Map of which body types support which extra physics bone sets.
-    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> BodyPhysicsBoneSupport =
-        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["3BA"]   = FeaturePhysicsBones,
-            ["BHUNP"] = FeaturePhysicsBones,
-            ["TBD"]   = CbpcPhysicsBones,
-            ["HIMBO"] = MalePhysicsBones,
-            ["SAM"]   = MalePhysicsBones,
-            ["CBBE"]  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            ["UNP"]   = CbpcPhysicsBones,
-            ["UBE"]   = UbePhysicsBones,
-            ["SOS"]   = MalePhysicsBones
-        };
-
-    // Fallback remaps for source physics bones that are missing on the target skeleton.
-    // Ordered by preference: the first candidate present on the target is selected.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> PhysicsBoneFallbacks =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["NPC L Breast03"] = ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
-            ["NPC R Breast03"] = ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"],
-            ["NPC L Breast02"] = ["NPC L Breast01", "NPC L Breast"],
-            ["NPC R Breast02"] = ["NPC R Breast01", "NPC R Breast"],
-            ["NPC L Breast"]   = ["NPC L Breast01"],
-            ["NPC R Breast"]   = ["NPC R Breast01"],
-            ["NPC L Lat"]      = ["NPC L Pec"],
-            ["NPC R Lat"]      = ["NPC R Pec"],
-            ["BreastUpper"]    = ["NPC L Breast02", "NPC R Breast02", "NPC L Breast01", "NPC R Breast01"],
-            ["BreastLower"]    = ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
-            ["BreastOuter"]    = ["NPC L Breast01", "NPC R Breast01", "NPC L Breast", "NPC R Breast"],
-            ["BreastInner"]    = ["NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01"],
-            ["ButtUpper"]      = ["NPC L Butt", "NPC R Butt", "NPC Pelvis"],
-            ["ButtLower"]      = ["NPC L Butt", "NPC R Butt", "NPC L Thigh", "NPC R Thigh"],
-        };
-
     public async Task<SkeletonMappingResult> MapAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
+        var commonBones = SkeletonMappingCatalog.CommonBones;
         IReadOnlySet<string> targetPhysicsBones;
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
             customProfile.PhysicsBones is { Count: > 0 } customPhysicsBones)
@@ -6037,12 +8353,14 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
         else
         {
-            targetPhysicsBones = BodyPhysicsBoneSupport.TryGetValue(targetBody, out var builtInBones)
-                ? builtInBones
-                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            targetPhysicsBones = GetBuiltInPhysicsBones(targetBody);
         }
 
-        var allTargetBones = CommonBones.Concat(targetPhysicsBones).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targetFrameworkId = ResolveTargetFrameworkId(targetBody, armor, targetPhysicsBones);
+        var allTargetBones = commonBones
+            .Concat(SkeletonMappingCatalog.GetFrameworkBones(targetFrameworkId))
+            .Concat(targetPhysicsBones)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Infer which source physics bones are present from the body reference / physics files.
         var sourcePhysicsBones = await ExtractPhysicsBonesAsync(armor, cancellationToken);
@@ -6074,7 +8392,11 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         if (parsedBones.Count > 0)
             allTargetBones.UnionWith(parsedBones);
 
-        var allSourceBones = CommonBones.Concat(sourcePhysicsBones).Concat(parsedBones).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var allSourceBones = commonBones
+            .Concat(sourcePhysicsBones)
+            .Concat(parsedBones)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var mappings = new List<SkeletonBoneMapping>(allSourceBones.Count);
         var unsupportedBones = new List<string>();
@@ -6083,14 +8405,14 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         {
             if (allTargetBones.Contains(bone))
             {
-                mappings.Add(new SkeletonBoneMapping(bone, bone, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+                mappings.Add(new SkeletonBoneMapping(bone, bone, IsPhysicsBone(bone)));
             }
             else
             {
-                var fallback = ResolveFallbackBone(bone, allTargetBones);
+                var fallback = ResolveFallbackBone(bone, allTargetBones, targetFrameworkId);
                 if (fallback is not null)
                 {
-                    mappings.Add(new SkeletonBoneMapping(bone, fallback, FeaturePhysicsBones.Contains(bone) || MalePhysicsBones.Contains(bone)));
+                    mappings.Add(new SkeletonBoneMapping(bone, fallback, IsPhysicsBone(bone)));
                 }
                 else
                 {
@@ -6100,15 +8422,17 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         var sourceSkeleton = parsedSkeletonLabel;
-        var targetSkeleton = targetPhysicsBones.Count > 0 ? $"xpmsse-{targetBody.ToLowerInvariant()}-physics" : "xpmsse-vanilla";
+        var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, armor, targetPhysicsBones.Count > 0);
 
         return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
     }
 
-    private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
+    private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones, string? frameworkId)
     {
-        if (!PhysicsBoneFallbacks.TryGetValue(sourceBone, out var fallbackCandidates))
-            return null;
+        if (!SkeletonMappingCatalog.TryGetFallbackCandidates(sourceBone, frameworkId, out var fallbackCandidates))
+        {
+            return ResolveSemanticFallbackBone(sourceBone, targetBones);
+        }
 
         foreach (var candidate in fallbackCandidates)
         {
@@ -6116,8 +8440,134 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
                 return candidate;
         }
 
+        return ResolveSemanticFallbackBone(sourceBone, targetBones);
+    }
+
+    private static string? ResolveTargetFrameworkId(string targetBody, ImportedArmor armor, IReadOnlySet<string> targetPhysicsBones)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            var detectedCustomFramework = targetPhysicsBones.Count > 0
+                ? SkeletonFrameworkCatalog.DetectFramework(targetPhysicsBones.ToList())
+                : null;
+            if (!string.IsNullOrWhiteSpace(detectedCustomFramework))
+            {
+                return detectedCustomFramework;
+            }
+
+            if (!string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
+            {
+                return SlugifySkeletonTarget(customProfile.SkeletonFoundation);
+            }
+        }
+
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.SkeletonFramework))
+        {
+            return metadata.SkeletonFramework;
+        }
+
+        return targetPhysicsBones.Count > 0
+            ? SkeletonFrameworkCatalog.DetectFramework(targetPhysicsBones.ToList())
+            : null;
+    }
+
+    private static string? ResolveSemanticFallbackBone(string sourceBone, IReadOnlySet<string> targetBones)
+    {
+        var source = ClassifySemanticBone(sourceBone);
+        if (string.IsNullOrWhiteSpace(source.Key))
+        {
+            return null;
+        }
+
+        string? groupMatchWithoutSide = null;
+        foreach (var targetBone in targetBones)
+        {
+            var target = ClassifySemanticBone(targetBone);
+            if (!target.Key.Equals(source.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (source.Side is not null)
+            {
+                if (source.Side.Equals(target.Side, StringComparison.OrdinalIgnoreCase))
+                {
+                    return targetBone;
+                }
+
+                continue;
+            }
+
+            groupMatchWithoutSide ??= targetBone;
+        }
+
+        if (source.Side is not null)
+        {
+            return null;
+        }
+
+        return groupMatchWithoutSide;
+    }
+
+    private static (string Key, string? Side) ClassifySemanticBone(string boneName)
+    {
+        var lower = boneName.Trim().ToLowerInvariant();
+        var side = DetectSemanticSide(lower);
+
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
+        {
+            if (aliases.Any(lower.Contains))
+            {
+                return (key, side);
+            }
+        }
+
+        return (lower, side);
+    }
+
+    private static string? DetectSemanticSide(string lowerBoneName)
+    {
+        if (lowerBoneName.Contains("left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_left", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(".l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("-l", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "l") ||
+            lowerBoneName.Contains("_l", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" l ", StringComparison.Ordinal) ||
+            lowerBoneName.EndsWith(" l", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("l_", StringComparison.Ordinal))
+        {
+            return "left";
+        }
+
+        if (lowerBoneName.Contains("right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("_right", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(".r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains("-r", StringComparison.Ordinal) ||
+            StartsWithCompactSidePrefix(lowerBoneName, "r") ||
+            lowerBoneName.Contains("_r", StringComparison.Ordinal) ||
+            lowerBoneName.Contains(" r ", StringComparison.Ordinal) ||
+            lowerBoneName.EndsWith(" r", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r ", StringComparison.Ordinal) ||
+            lowerBoneName.StartsWith("r_", StringComparison.Ordinal))
+        {
+            return "right";
+        }
+
         return null;
     }
+
+    private static bool StartsWithCompactSidePrefix(string lowerBoneName, string sidePrefix) =>
+        lowerBoneName.StartsWith($"{sidePrefix}breast", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}pec", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}butt", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}glute", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}rear", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}thigh", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}boob", StringComparison.Ordinal) ||
+        lowerBoneName.StartsWith($"{sidePrefix}nipple", StringComparison.Ordinal);
 
     private static async Task<IReadOnlySet<string>> ExtractPhysicsBonesAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
@@ -6126,9 +8576,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
-        var bones = FeaturePhysicsBones
-            .Concat(MalePhysicsBones)
-            .Concat(UbePhysicsBones)
+        var bones = BuiltInBodyMetadataCatalog.All
+            .SelectMany(static body => body.AvailablePhysicsBones)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in armor.PhysicsFiles)
@@ -6165,6 +8614,86 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
 
         return bones;
     }
+
+    private static IReadOnlySet<string> GetBuiltInPhysicsBones(string targetBody) =>
+        BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata)
+            ? metadata.AvailablePhysicsBones.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsPhysicsBone(string bone) =>
+        BuiltInBodyMetadataCatalog.All.Any(body =>
+            body.AvailablePhysicsBones.Contains(bone, StringComparer.OrdinalIgnoreCase)) ||
+        SkeletonMappingCatalog.ContainsFrameworkBone(bone);
+
+    private static string ResolveTargetSkeletonLabel(string targetBody, ImportedArmor armor, bool hasPhysicsBones)
+    {
+        var prefix = ResolveTargetSkeletonPrefix(targetBody, armor);
+        return hasPhysicsBones
+            ? $"{prefix}-physics"
+            : prefix;
+    }
+
+    private static string ResolveTargetSkeletonPrefix(string targetBody, ImportedArmor armor)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile) &&
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
+        {
+            return ResolveConfiguredSkeletonFoundationLabel(customProfile.SkeletonFoundation);
+        }
+
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation))
+        {
+            return ResolveConfiguredSkeletonFoundationLabel(metadata.SkeletonFoundation);
+        }
+
+        return "xpmsse";
+    }
+
+    private static string ResolveConfiguredSkeletonFoundationLabel(string skeletonFoundation)
+    {
+        if (SkeletonFoundationAliasCatalog.TryResolve(skeletonFoundation, out var canonicalLabel))
+        {
+            return canonicalLabel;
+        }
+
+        var slug = SlugifySkeletonTarget(skeletonFoundation);
+        return IsGenericXpmsseFoundation(slug)
+            ? "xpmsse"
+            : slug;
+    }
+
+    private static string SlugifySkeletonTarget(string targetBody)
+    {
+        if (string.IsNullOrWhiteSpace(targetBody))
+        {
+            return "target";
+        }
+
+        var builder = new System.Text.StringBuilder(targetBody.Length);
+        var lastWasSeparator = false;
+        foreach (var character in targetBody.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-') is { Length: > 0 } slug ? slug : "target";
+    }
+
+    private static bool IsGenericXpmsseFoundation(string foundationSlug) =>
+        foundationSlug.Equals("xpmsse", StringComparison.OrdinalIgnoreCase) ||
+        foundationSlug.Equals("xpmse", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -6297,9 +8826,11 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
         ("Spine",     "chest"),
         ("Pelvis",    "pelvis"),
         ("Thigh",     "legs"),
-        ("Calf",      "legs"),
-        ("Foot",      "legs"),
-        ("Toe",       "legs"),
+        ("Calf",      "calves"),
+        ("Foot",      "feet"),
+        ("Toe",       "feet"),
+        ("Heel",      "feet"),
+        ("Ankle",     "feet"),
         ("UpperArm",  "arms"),
         ("ForeArm",   "arms"),
         ("Hand",      "arms"),
@@ -6309,34 +8840,55 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
     ];
 
     // Maps filename keyword substrings to regions (checked when bone names are unavailable).
-    private static readonly (string FileToken, string Region)[] FileRegionRules =
+    private static readonly (string FileToken, IReadOnlyList<string> Regions)[] FileRegionRules =
     [
-        ("cuirass",     "chest"),
-        ("breastplate", "chest"),
-        ("chestplate",  "chest"),
-        ("torso",       "chest"),
-        ("robe",        "chest"),
-        ("gauntlet",    "arms"),
-        ("glove",       "arms"),
-        ("forearm",     "arms"),
-        ("bracer",      "arms"),
-        ("sabatons",    "legs"),
-        ("greave",      "legs"),
-        ("boot",        "legs"),
-        ("legging",     "legs"),
-        ("trouser",     "legs"),
-        ("pauldron",    "shoulders"),
-        ("spaulder",    "shoulders"),
-        ("shoulder",    "shoulders"),
-        ("helm",        "shoulders"),
-        ("hood",        "shoulders"),
-        ("crown",       "shoulders"),
-        ("skirt",       "pelvis"),
-        ("kilt",        "pelvis"),
-        ("loincloth",   "pelvis"),
-        ("pelvis",      "pelvis"),
-        ("body",        "chest"),
+        ("cuirass",     ["chest"]),
+        ("breastplate", ["chest"]),
+        ("chestplate",  ["chest"]),
+        ("torso",       ["chest"]),
+        ("robe",        ["chest"]),
+        ("gauntlet",    ["arms"]),
+        ("glove",       ["arms"]),
+        ("forearm",     ["arms"]),
+        ("bracer",      ["arms"]),
+        ("sabatons",    ["feet"]),
+        ("greave",      ["calves", "legs"]),
+        ("boot",        ["feet", "calves"]),
+        ("shoe",        ["feet"]),
+        ("sandal",      ["feet"]),
+        ("slipper",     ["feet"]),
+        ("heel",        ["feet", "calves"]),
+        ("pump",        ["feet"]),
+        ("legging",     ["calves", "legs"]),
+        ("trouser",     ["legs"]),
+        ("pauldron",    ["shoulders"]),
+        ("spaulder",    ["shoulders"]),
+        ("shoulder",    ["shoulders"]),
+        ("helm",        ["shoulders"]),
+        ("hood",        ["shoulders"]),
+        ("crown",       ["shoulders"]),
+        ("skirt",       ["pelvis"]),
+        ("kilt",        ["pelvis"]),
+        ("loincloth",   ["pelvis"]),
+        ("pelvis",      ["pelvis"]),
+        ("body",        ["chest"]),
     ];
+
+    private static readonly IReadOnlyDictionary<int, IReadOnlyList<string>> PartitionRegionRules =
+        new Dictionary<int, IReadOnlyList<string>>
+        {
+            [30] = ["shoulders"],
+            [31] = ["shoulders"],
+            [32] = ["chest", "waist", "pelvis"],
+            [33] = ["arms"],
+            [34] = ["arms"],
+            [37] = ["feet"],
+            [38] = ["calves"],
+            [40] = ["pelvis", "legs"],
+            [42] = ["shoulders"],
+            [43] = ["shoulders"],
+            [56] = ["pelvis"],
+        };
 
     public Task<ArmorRegionBinding> BindAsync(ImportedArmor armor, MeshAnalysis analysis, CancellationToken cancellationToken)
     {
@@ -6374,7 +8926,14 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "bone-names"));
         }
 
-        // Phase 2: use sampled mesh geometry when readable to infer coverage by vertical band
+        // Phase 2: use parsed NIF skin partition slots when available.
+        var partitionBinding = TryBindFromPartitions(armor.MeshFiles);
+        if (partitionBinding is not null)
+        {
+            return Task.FromResult(partitionBinding);
+        }
+
+        // Phase 3: use sampled mesh geometry when readable to infer coverage by vertical band
         // and lateral spread rather than relying on filenames alone.
         var geometryBinding = TryBindFromGeometry(armor.MeshFiles);
         if (geometryBinding is not null)
@@ -6382,16 +8941,19 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(geometryBinding);
         }
 
-        // Phase 3: fall back to filename keyword scoring.
+        // Phase 4: fall back to filename keyword scoring.
         var fileScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var meshFile in armor.MeshFiles)
         {
             var name = Path.GetFileNameWithoutExtension(meshFile).ToLowerInvariant();
-            foreach (var (fileToken, region) in FileRegionRules)
+            foreach (var (fileToken, regions) in FileRegionRules)
             {
                 if (name.Contains(fileToken, StringComparison.OrdinalIgnoreCase))
                 {
-                    fileScores[region] = fileScores.GetValueOrDefault(region) + 1;
+                    foreach (var region in regions)
+                    {
+                        fileScores[region] = fileScores.GetValueOrDefault(region) + 1;
+                    }
                 }
             }
         }
@@ -6407,8 +8969,40 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "filename-keywords"));
         }
 
-        // Phase 4: default — full-body coverage when no signals are available.
+        // Phase 5: default — full-body coverage when no signals are available.
         return Task.FromResult(new ArmorRegionBinding(["chest", "waist", "pelvis", "legs"], "default-full-body"));
+    }
+
+    private static ArmorRegionBinding? TryBindFromPartitions(IReadOnlyList<string> meshFiles)
+    {
+        var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var slot in meshFiles.SelectMany(NifGeometrySignatureReader.ExtractPartitionSlots))
+        {
+            if (!PartitionRegionRules.TryGetValue(slot, out var regions))
+            {
+                continue;
+            }
+
+            foreach (var region in regions)
+            {
+                scores[region] = scores.GetValueOrDefault(region) + 2;
+            }
+        }
+
+        if (scores.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = scores
+            .OrderByDescending(static pair => pair.Value)
+            .Select(static pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+        return resolved.Count == 0
+            ? null
+            : new ArmorRegionBinding(resolved, "nif-partitions");
     }
 
     private static ArmorRegionBinding? TryBindFromGeometry(IReadOnlyList<string> meshFiles)
@@ -6429,6 +9023,7 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
 
             // These normalized height bands approximate common humanoid proportions after the
             // mesh bounds are projected into 0..1 space (feet near 0, shoulders/head near 1).
+            AddIfInRange(scores, "feet", normalizedHeight, 0.00, 0.08);
             AddIfInRange(scores, "shoulders", normalizedHeight, 0.82, 1.01);
             AddIfInRange(scores, "chest", normalizedHeight, 0.56, 0.82);
             AddIfInRange(scores, "waist", normalizedHeight, 0.40, 0.60);
@@ -6519,49 +9114,21 @@ public static class DeformationProfileModifier
 /// </summary>
 internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 {
-    // Standard BodySlide sliders per target body family.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> BodySliders =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["CBBE"]    = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
-            ["3BA"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-            ["BHUNP"]   = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
-            ["UNP"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
-            ["HIMBO"]   = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
-            ["SAM"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-            ["SOS"]     = ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-            ["TBD"]     = ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
-            ["UBE"]     = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-            ["Vanilla"] = ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
-        };
-
-    private static readonly IReadOnlySet<string> MaleBodies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "HIMBO", "SAM", "SOS"
-    };
-
-    public Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
+    public async Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
         var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken);
+        var sliders = resolved.Sliders;
+        var zapSliders = resolved.ZapSliders;
+        var gender = resolved.Gender;
+        var ospXml = BuildOspXml(sliders, zapSliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
 
-        var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
-        var sliders = customProfileFound
-            ? customProfile.SliderNames ?? ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"]
-            : BodySliders.TryGetValue(targetBody, out var bodySliders)
-                ? bodySliders
-                : (IReadOnlyList<string>)["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
-
-        var isMale = customProfileFound
-            ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase)
-            : MaleBodies.Contains(targetBody);
-        var gender = isMale ? "male" : "female";
-        var ospXml = BuildOspXml(sliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
-
-        return Task.FromResult(new BodySlideProject(projectName, targetBody, sliders, ospXml));
+        return new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders);
     }
 
     private static string BuildOspXml(
         IReadOnlyList<string> sliders,
+        IReadOnlyList<string> zapSliders,
         IReadOnlyList<BodySlideMeshTarget> targets,
         string gender)
     {
@@ -6583,6 +9150,14 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             foreach (var slider in sliders)
             {
                 sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"false\" uv=\"false\">");
+                sb.AppendLine("            <Low value=\"0\" />");
+                sb.AppendLine("            <High value=\"100\" />");
+                sb.AppendLine("        </Slider>");
+            }
+
+            foreach (var slider in zapSliders)
+            {
+                sb.AppendLine($"        <Slider name=\"{Escape(slider)}\" invert=\"false\" zap=\"true\" uv=\"false\">");
                 sb.AppendLine("            <Low value=\"0\" />");
                 sb.AppendLine("            <High value=\"100\" />");
                 sb.AppendLine("        </Slider>");
@@ -7100,9 +9675,10 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             var pluginKind = ClassifyPluginKind(pluginPath, bytes);
             var pluginName = Path.GetFileName(pluginPath) ?? pluginPath;
             var pluginLabel = $"{pluginName} [{pluginKind.Type}; confidence={pluginKind.Confidence:0.00}]";
+            var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(bytes);
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
-            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes);
+            var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(bytes, pluginName);
             List<PluginArmorAddon> addons;
 
             if (armaDescriptors.Count > 0)
@@ -7114,7 +9690,10 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                         d.FormId,
                         d.EditorId,
                         d.BipedSlots.Count > 0 ? d.BipedSlots : null,
-                        d.RaceFormId))
+                        d.RaceFormId,
+                        d.OwningPluginFileName,
+                        d.LocalFormId,
+                        masterFileNames))
                     .ToList();
             }
             else
@@ -7124,7 +9703,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
 
             // ── ARMO records (Armor — world/inventory models) ──────────────────
-            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes);
+            var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes, pluginName);
             var records = armoDescriptors
                 .Select(d => new PluginArmorRecord(
                     pluginLabel,
@@ -7132,7 +9711,13 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     d.FormId,
                     d.EditorId,
                     d.KeywordFormIds,
-                    d.RaceFormId))
+                    d.RaceFormId,
+                    d.BipedSlots,
+                    d.LinkedArmorAddonFormIds,
+                    d.OwningPluginFileName,
+                    d.LocalFormId,
+                    d.LinkedArmorAddonReferences,
+                    masterFileNames))
                 .ToList();
 
             return (pluginLabel, pluginName, pluginKind.Type, addons, records);
@@ -7976,7 +10561,13 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                 totalRead += n;
             }
 
-            return totalRead > 0 ? result : null;
+            if (totalRead == uncompressedSize)
+            {
+                return result;
+            }
+
+            warnings.Add($"Could not fully decompress {recordTag} record at offset {offset}: expected {uncompressedSize} bytes, read {totalRead}.");
+            return null;
         }
         catch (Exception ex)
         {
@@ -8107,7 +10698,8 @@ internal static class BinaryArmaParser
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
         var pluginFileName = string.Empty;   // filled in by callers that know the filename
-        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     /// <summary>
@@ -8118,7 +10710,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmaRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     /// <summary>Extracts all ARMO record descriptors from a plugin byte array.</summary>
@@ -8126,7 +10719,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, string.Empty);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, string.Empty, masterFiles);
     }
 
     /// <summary>
@@ -8137,7 +10731,8 @@ internal static class BinaryArmaParser
     {
         if (bytes.Length < 4) return [];
         var headerSize = DetectHeaderSize(bytes);
-        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, pluginFileName);
+        var masterFiles = ExtractMasterFileNames(bytes, headerSize);
+        return WalkArmoRecords(bytes, 0, bytes.Length, headerSize, pluginFileName, masterFiles);
     }
 
     // ── Header-size detection (same logic as BinaryPluginRewriteService) ─────
@@ -8159,10 +10754,114 @@ internal static class BinaryArmaParser
         return SseHeaderSize;
     }
 
+    internal static IReadOnlyList<string> ExtractMasterFileNames(byte[] bytes)
+    {
+        if (bytes.Length < 4)
+        {
+            return [];
+        }
+
+        return ExtractMasterFileNames(bytes, DetectHeaderSize(bytes));
+    }
+
+    private static IReadOnlyList<string> ExtractMasterFileNames(byte[] bytes, int headerSize)
+    {
+        if (bytes.Length < headerSize ||
+            bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return [];
+        }
+
+        var dataSize = (int)ReadUInt32Le(bytes, 4);
+        if (dataSize <= 0 || headerSize + dataSize > bytes.Length)
+        {
+            return [];
+        }
+
+        var flags = ReadUInt32Le(bytes, 8);
+        var dataBytes = GetRecordData(bytes, 0, dataSize, headerSize, flags);
+        if (dataBytes.Length == 0)
+        {
+            return [];
+        }
+
+        var masters = new List<string>();
+        int pos = 0;
+        int? pendingExtendedSize = null;
+        while (pos + SubrecordHeaderSize <= dataBytes.Length)
+        {
+            var subTag = ReadTag(dataBytes, pos);
+            var subSize = ReadUInt16Le(dataBytes, pos + 4);
+            if (pos + SubrecordHeaderSize + subSize > dataBytes.Length)
+            {
+                break;
+            }
+
+            if (string.Equals(subTag, ExtendedSizeTag, StringComparison.Ordinal) && subSize == 4)
+            {
+                pendingExtendedSize = (int)ReadUInt32Le(dataBytes, pos + SubrecordHeaderSize);
+                pos += SubrecordHeaderSize + subSize;
+                continue;
+            }
+
+            int effectiveSubSize = pendingExtendedSize ?? subSize;
+            pendingExtendedSize = null;
+            if (pos + SubrecordHeaderSize + effectiveSubSize > dataBytes.Length)
+            {
+                break;
+            }
+
+            if (string.Equals(subTag, "MAST", StringComparison.Ordinal) && effectiveSubSize > 0)
+            {
+                int dataStart = pos + SubrecordHeaderSize;
+                int nullIdx = IndexOfNull(dataBytes, dataStart, effectiveSubSize);
+                int strLen = nullIdx >= 0 ? nullIdx : effectiveSubSize;
+                var master = System.Text.Encoding.ASCII.GetString(dataBytes, dataStart, strLen).Trim();
+                if (!string.IsNullOrWhiteSpace(master))
+                {
+                    masters.Add(Path.GetFileName(master));
+                }
+            }
+
+            pos += SubrecordHeaderSize + effectiveSubSize;
+        }
+
+        return masters;
+    }
+
+    private static string ResolveOwningPluginFileName(uint formId, string pluginFileName, IReadOnlyList<string> masterFiles)
+    {
+        var moduleIndex = (int)((formId >> 24) & 0xFF);
+        if (moduleIndex == 0xFE)
+        {
+            var lightMasterIndex = (int)((formId >> 12) & 0xFFF);
+            if (lightMasterIndex >= 0 &&
+                lightMasterIndex < masterFiles.Count &&
+                !string.IsNullOrWhiteSpace(masterFiles[lightMasterIndex]))
+            {
+                return masterFiles[lightMasterIndex];
+            }
+        }
+
+        if (moduleIndex >= 0 &&
+            moduleIndex < masterFiles.Count &&
+            !string.IsNullOrWhiteSpace(masterFiles[moduleIndex]))
+        {
+            return masterFiles[moduleIndex];
+        }
+
+        return pluginFileName;
+    }
+
+    private static uint GetLocalFormId(uint formId) =>
+        ((formId >> 24) & 0xFF) == 0xFE
+            ? formId & 0x00000FFFu
+            : formId & 0x00FFFFFFu;
+
     // ── ARMA tree walk ────────────────────────────────────────────────────────
 
     private static List<ArmaRecordDescriptor> WalkArmaRecords(
-        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var results = new List<ArmaRecordDescriptor>();
         int pos = start;
@@ -8181,7 +10880,7 @@ internal static class BinaryArmaParser
 
                 // Recurse into GRUP content.
                 results.AddRange(WalkArmaRecords(
-                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName, masterFiles));
 
                 pos += groupTotal;
             }
@@ -8198,7 +10897,7 @@ internal static class BinaryArmaParser
                     if (dataBytes.Length > 0)
                     {
                         var desc = ParseArmaRecord(
-                            bytes, pos, dataBytes, headerSize, pluginFileName);
+                            bytes, pos, dataBytes, headerSize, pluginFileName, masterFiles);
                         if (desc is not null) results.Add(desc);
                     }
                 }
@@ -8213,7 +10912,7 @@ internal static class BinaryArmaParser
     // ── ARMO tree walk ────────────────────────────────────────────────────────
 
     private static List<ArmoRecordDescriptor> WalkArmoRecords(
-        byte[] bytes, int start, int end, int headerSize, string pluginFileName)
+        byte[] bytes, int start, int end, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var results = new List<ArmoRecordDescriptor>();
         int pos = start;
@@ -8231,7 +10930,7 @@ internal static class BinaryArmaParser
                 if (groupTotal < headerSize || pos + groupTotal > end) break;
 
                 results.AddRange(WalkArmoRecords(
-                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName));
+                    bytes, pos + headerSize, pos + groupTotal, headerSize, pluginFileName, masterFiles));
 
                 pos += groupTotal;
             }
@@ -8248,7 +10947,7 @@ internal static class BinaryArmaParser
                     if (dataBytes.Length > 0)
                     {
                         var desc = ParseArmoRecord(
-                            bytes, pos, dataBytes, headerSize, pluginFileName);
+                            bytes, pos, dataBytes, headerSize, pluginFileName, masterFiles);
                         if (desc is not null) results.Add(desc);
                     }
                 }
@@ -8289,7 +10988,7 @@ internal static class BinaryArmaParser
                     if (n == 0) break;
                     totalRead += n;
                 }
-                return totalRead > 0 ? result : [];
+                return totalRead == uncompressedSize ? result : [];
             }
             catch
             {
@@ -8303,9 +11002,11 @@ internal static class BinaryArmaParser
     // ── ARMA record parser ────────────────────────────────────────────────────
 
     private static ArmaRecordDescriptor? ParseArmaRecord(
-        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var formId = ReadUInt32Le(bytes, recordStart + 12);
+        var owningPluginFileName = ResolveOwningPluginFileName(formId, pluginFileName, masterFiles);
+        var localFormId = GetLocalFormId(formId);
 
         string? editorId    = null;
         var bipedSlots      = new List<int>();
@@ -8382,19 +11083,25 @@ internal static class BinaryArmaParser
             meshPaths,
             headerBytes,
             dataBytes,        // decompressed (or raw) data — PatchPluginWriter uses this
-            raceFormId);
+            raceFormId,
+            owningPluginFileName,
+            localFormId);
     }
 
     // ── ARMO record parser ────────────────────────────────────────────────────
 
     private static ArmoRecordDescriptor? ParseArmoRecord(
-        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName)
+        byte[] bytes, int recordStart, byte[] dataBytes, int headerSize, string pluginFileName, IReadOnlyList<string> masterFiles)
     {
         var formId = ReadUInt32Le(bytes, recordStart + 12);
+        var owningPluginFileName = ResolveOwningPluginFileName(formId, pluginFileName, masterFiles);
+        var localFormId = GetLocalFormId(formId);
 
         string? editorId = null;
         var meshPaths    = new List<string>();
         var keywords     = new List<uint>();
+        var bipedSlots   = new List<int>();
+        var linkedArmorAddonFormIds = new List<uint>();
         uint? raceFormId = null;
 
         int pos = 0;
@@ -8437,12 +11144,29 @@ internal static class BinaryArmaParser
                 if (!string.IsNullOrEmpty(path))
                     meshPaths.Add(path);
             }
+            else if (BipedSubrecords.Contains(subTag) && effectiveSubSize >= 4)
+            {
+                var slotFlags = ReadUInt32Le(dataBytes, dataStart);
+                for (int i = 0; i < 32; i++)
+                {
+                    if (((slotFlags >> i) & 1u) != 0)
+                        bipedSlots.Add(30 + i);
+                }
+            }
             else if (string.Equals(subTag, "KWDA", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
                 // KWDA: array of 4-byte FormIDs, one per keyword
                 int count = effectiveSubSize / 4;
                 for (int ki = 0; ki < count; ki++)
                     keywords.Add(ReadUInt32Le(dataBytes, dataStart + ki * 4));
+            }
+            else if (string.Equals(subTag, "ARMA", StringComparison.Ordinal) && effectiveSubSize >= 4)
+            {
+                var linkedCount = effectiveSubSize / 4;
+                for (int linkedIndex = 0; linkedIndex < linkedCount; linkedIndex++)
+                {
+                    linkedArmorAddonFormIds.Add(ReadUInt32Le(dataBytes, dataStart + linkedIndex * 4));
+                }
             }
             else if (string.Equals(subTag, "RNAM", StringComparison.Ordinal) && effectiveSubSize >= 4)
             {
@@ -8462,7 +11186,19 @@ internal static class BinaryArmaParser
             headerBytes,
             dataBytes,     // decompressed (or raw) data
             keywords.Count > 0 ? keywords : null,
-            raceFormId);
+            raceFormId,
+            bipedSlots.Count > 0 ? bipedSlots : null,
+            linkedArmorAddonFormIds.Count > 0 ? linkedArmorAddonFormIds : null,
+            owningPluginFileName,
+            localFormId,
+            linkedArmorAddonFormIds.Count > 0
+                ? linkedArmorAddonFormIds
+                    .Select(linkedFormId => new PluginLinkedFormReference(
+                        linkedFormId,
+                        ResolveOwningPluginFileName(linkedFormId, pluginFileName, masterFiles),
+                        GetLocalFormId(linkedFormId)))
+                    .ToList()
+                : null);
     }
 
     // ── Binary helpers ────────────────────────────────────────────────────────
@@ -8492,9 +11228,9 @@ internal static class BinaryArmaParser
 /// <summary>
 /// Generates a minimal Bethesda override/patch ESP that:
 /// <list type="bullet">
-///   <item>Contains a TES4 header (with ESL flag 0x200) listing the original plugin as its single master file.</item>
+///   <item>Contains a TES4 header (with ESL flag 0x200) listing the source plugin's inherited masters followed by the original plugin file.</item>
 ///   <item>Holds only the ARMA and ARMO records that actually had mesh paths rewritten — no extra records.</item>
-///   <item>Uses the same FormIDs as the originals (master index 0 = original plugin).</item>
+///   <item>Uses the same FormIDs as the originals by preserving the original master ordering context.</item>
 ///   <item>Reports the accurate record count in the HEDR subrecord.</item>
 /// </list>
 /// The result can be placed in the Data folder alongside the original plugin as a standard
@@ -8517,7 +11253,7 @@ internal static class PatchPluginWriter
     /// </summary>
     /// <param name="masterPluginFileName">
     ///   The file name (with extension) of the original plugin, e.g. "MyArmor.esp".
-    ///   Listed as the sole MAST entry in the TES4 header.
+    ///   Listed after any inherited masters so original record FormIDs keep their source meaning.
     /// </param>
     /// <param name="descriptors">
     ///   Parsed ARMA descriptors from <see cref="BinaryArmaParser.ExtractArmaRecords"/>.
@@ -8528,6 +11264,9 @@ internal static class PatchPluginWriter
     ///   Path-rewrite map (lowercase forward-slash normalised keys to new path values).
     /// </param>
     /// <param name="headerSize">Record header size (24 for SSE, 20 for LE).</param>
+    /// <param name="inheritedMasterFileNames">
+    ///   Optional TES4 master files declared by the source plugin, in source order.
+    /// </param>
     /// <param name="armoDescriptors">
     ///   Optional ARMO record descriptors extracted from the same plugin.
     ///   Emitted into a separate ARMO GRUP when any paths match.
@@ -8538,6 +11277,7 @@ internal static class PatchPluginWriter
         IReadOnlyList<ArmaRecordDescriptor> descriptors,
         IReadOnlyDictionary<string, string> rewriteMap,
         int headerSize = SseHeaderSize,
+        IReadOnlyList<string>? inheritedMasterFileNames = null,
         IReadOnlyList<ArmoRecordDescriptor>? armoDescriptors = null)
     {
         // ── 1. Build patched ARMA record buffers ──────────────────────────────
@@ -8569,7 +11309,7 @@ internal static class PatchPluginWriter
 
         // ── 3. TES4 record (ESL-flagged, accurate numRecords) ─────────────────
         using var ms = new MemoryStream();
-        var tes4Data = BuildTes4Data(masterPluginFileName, totalRecords);
+        var tes4Data = BuildTes4Data(masterPluginFileName, inheritedMasterFileNames, totalRecords);
         WriteFlatRecord(ms, "TES4", tes4Data, formId: 0, headerSize: headerSize, flags: EslFlag);
 
         if (totalRecords == 0)
@@ -8594,7 +11334,10 @@ internal static class PatchPluginWriter
 
     // ── TES4 data builder ─────────────────────────────────────────────────────
 
-    private static byte[] BuildTes4Data(string masterPluginFileName, int numRecords = 0)
+    private static byte[] BuildTes4Data(
+        string masterPluginFileName,
+        IReadOnlyList<string>? inheritedMasterFileNames,
+        int numRecords = 0)
     {
         using var ms = new MemoryStream();
 
@@ -8610,12 +11353,44 @@ internal static class PatchPluginWriter
         // CNAM: author name (null-terminated).
         WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
 
-        // MAST + DATA pair: lists the original plugin as a master.
-        WriteSubrecord(ms, "MAST",
-            System.Text.Encoding.ASCII.GetBytes(masterPluginFileName + '\0'));
-        WriteSubrecord(ms, "DATA", new byte[8]);  // 8 zero bytes (always follows MAST)
+        foreach (var masterFileName in BuildOrderedMasterList(masterPluginFileName, inheritedMasterFileNames))
+        {
+            WriteSubrecord(ms, "MAST",
+                System.Text.Encoding.ASCII.GetBytes(masterFileName + '\0'));
+            WriteSubrecord(ms, "DATA", new byte[8]);  // 8 zero bytes (always follows MAST)
+        }
 
         return ms.ToArray();
+    }
+
+    internal static IReadOnlyList<string> BuildOrderedMasterList(
+        string masterPluginFileName,
+        IReadOnlyList<string>? inheritedMasterFileNames)
+    {
+        var orderedMasters = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (inheritedMasterFileNames is not null)
+        {
+            foreach (var inheritedMasterFileName in inheritedMasterFileNames)
+            {
+                var normalizedMasterFileName = Path.GetFileName(inheritedMasterFileName)?.Trim();
+                if (string.IsNullOrWhiteSpace(normalizedMasterFileName) || !seen.Add(normalizedMasterFileName))
+                {
+                    continue;
+                }
+
+                orderedMasters.Add(normalizedMasterFileName);
+            }
+        }
+
+        var normalizedPluginFileName = Path.GetFileName(masterPluginFileName)?.Trim();
+        if (!string.IsNullOrWhiteSpace(normalizedPluginFileName) && seen.Add(normalizedPluginFileName))
+        {
+            orderedMasters.Add(normalizedPluginFileName);
+        }
+
+        return orderedMasters;
     }
 
     // ── GRUP writer ───────────────────────────────────────────────────────────
@@ -8978,7 +11753,9 @@ internal static class ConversionReadmeGenerator
         PluginAnalysisResult pluginAnalysis,
         IReadOnlyList<string> outputFiles,
         IReadOnlyDictionary<string, string> rewriteMap,
-        bool patchEspGenerated)
+        bool patchEspGenerated,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints = null,
+        ConversionValidationSummary? validationSummary = null)
     {
         var sb = new System.Text.StringBuilder();
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "ConvertedArmor";
@@ -9008,7 +11785,7 @@ internal static class ConversionReadmeGenerator
         var nifFiles   = outputFiles.Where(f => f.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)).ToList();
         var bsdFiles   = outputFiles.Where(f => f.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase)).ToList();
         var ospFiles   = outputFiles.Where(f => f.EndsWith(".osp", StringComparison.OrdinalIgnoreCase)).ToList();
-        var espFiles   = outputFiles.Where(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)).ToList();
+        var pluginFiles = outputFiles.Where(IsBethesdaPluginFile).ToList();
         var xmlFiles   = outputFiles.Where(f => f.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)).ToList();
         var pasFiles   = outputFiles.Where(f => f.EndsWith(".pas", StringComparison.OrdinalIgnoreCase)).ToList();
         var fomodFiles = outputFiles.Where(f => f.Contains("fomod", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -9023,7 +11800,7 @@ internal static class ConversionReadmeGenerator
         }
 
         ListFiles(nifFiles,   "Converted Meshes");
-        ListFiles(espFiles,   "Plugin Files");
+        ListFiles(pluginFiles, "Plugin Files");
         ListFiles(ospFiles,   "BodySlide Project");
         ListFiles(bsdFiles,   "BodySlide Slider Data");
         ListFiles(xmlFiles,   "Physics Configs");
@@ -9038,6 +11815,11 @@ internal static class ConversionReadmeGenerator
         sb.AppendLine("    Open your mod manager (Mod Organizer 2, Vortex, etc.) and install");
         sb.AppendLine("    this output folder as a mod.  The included FOMOD installer will");
         sb.AppendLine("    automatically place all files in the correct Data sub-folders.");
+        sb.AppendLine("    A mod manager also keeps the conversion isolated, makes rollback easy,");
+        sb.AppendLine("    and lets the generated meshes/plugins win conflicts without overwriting");
+        sb.AppendLine("    your base armor mod permanently.");
+        sb.AppendLine("    Place the SlideSmith output mod below the original armor/body mod so");
+        sb.AppendLine("    the converted meshes, physics XMLs, and generated plugins take priority.");
         sb.AppendLine();
         sb.AppendLine("  OPTION B — Manual (drop-in):");
         sb.AppendLine("    The output folder is already structured as a Skyrim Data package.");
@@ -9048,27 +11830,37 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderSets\\    ← BodySlide .osp project");
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\  ← .bsd sliders + source NIF");
         }
-        sb.AppendLine("    Also copy any .esp plugin files to Data\\ root.");
-        sb.AppendLine("    Physics configs (.xml) go to:");
-        sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP\\  (SMP)");
-        sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  (CBPC)");
+        if (outputFiles.Any(path => path.EndsWith(Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.AppendLine("      Data\\SKSE\\Plugins\\hdtSMP64\\  ← staged SMP config");
+        }
+        if (outputFiles.Any(path => path.EndsWith(Path.Combine("SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), StringComparison.OrdinalIgnoreCase)))
+        {
+            sb.AppendLine("      Data\\SKSE\\Plugins\\CBPCSystem\\  ← staged CBPC config");
+        }
+        sb.AppendLine("    Also copy any generated plugin files (.esp/.esm/.esl) to Data\\ root.");
+        sb.AppendLine("    Generated physics configs are already staged under SKSE\\Plugins\\.");
+        sb.AppendLine("    Root-level physics XML files are compatibility copies for inspection/manual relocation.");
 
         sb.AppendLine();
 
         // ── Plugin patching instructions ───────────────────────────────────
         sb.AppendLine("PLUGIN PATCH");
         sb.AppendLine("------------");
-        if (patchEspGenerated && espFiles.Count > 0)
+        if (patchEspGenerated && pluginFiles.Count > 0)
         {
-            var patchEspName = espFiles
+            var patchEspName = pluginFiles
                 .FirstOrDefault(f => f.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase))
-                ?? espFiles[0];
+                ?? pluginFiles[0];
             sb.AppendLine($"  A minimal override patch ESP has been generated:");
             sb.AppendLine($"    {Path.GetFileName(patchEspName)}");
             sb.AppendLine();
             sb.AppendLine("  This patch contains ONLY the ARMA records that needed mesh-path updates.");
             sb.AppendLine("  It lists the original plugin as its master and does NOT replace it.");
             sb.AppendLine("  Load order: place this patch AFTER the original plugin.");
+            sb.AppendLine("  In Mod Organizer 2 / Vortex, keep the generated SlideSmith mod enabled");
+            sb.AppendLine("  after the source armor mod, then place this patch after the source plugin");
+            sb.AppendLine("  and any related overrides noted in plugin-patches.json.");
             if (rewriteMap.Count > 0)
             {
                 sb.AppendLine();
@@ -9095,6 +11887,8 @@ internal static class ConversionReadmeGenerator
         }
 
         sb.AppendLine();
+
+        AppendPluginInstallHints(sb, pluginInstallHints);
 
         // ── BodySlide instructions ─────────────────────────────────────────
         if (bsdFiles.Count > 0)
@@ -9125,6 +11919,8 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine("    Run the included xEdit script (patch-armor.pas) manually.");
         }
 
+        AppendValidationFollowUp(sb, request, validationSummary);
+
         sb.AppendLine();
         sb.AppendLine("=============================================================");
         sb.AppendLine("  Generated by SlideSmith — https://github.com/JosephsDeadish/");
@@ -9133,6 +11929,79 @@ internal static class ConversionReadmeGenerator
 
         return sb.ToString();
     }
+
+    private static bool IsBethesdaPluginFile(string path) =>
+        Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
+
+    private static void AppendPluginInstallHints(
+        System.Text.StringBuilder sb,
+        IReadOnlyList<PluginInstallHint>? pluginInstallHints)
+    {
+        if (pluginInstallHints is not { Count: > 0 })
+        {
+            return;
+        }
+
+        sb.AppendLine("PLUGIN LOAD ORDER & REVIEW");
+        sb.AppendLine("--------------------------");
+        foreach (var hint in pluginInstallHints.OrderBy(static hint => hint.SourcePlugin, StringComparer.OrdinalIgnoreCase))
+        {
+            sb.AppendLine($"  Source plugin: {hint.SourcePlugin}");
+            sb.AppendLine($"    Generated patch: {(string.IsNullOrWhiteSpace(hint.GeneratedPatchPlugin) ? "none" : hint.GeneratedPatchPlugin)}");
+            sb.AppendLine($"    Inherited masters: {(hint.InheritedMasters.Count == 0 ? "none" : string.Join(" -> ", hint.InheritedMasters))}");
+            sb.AppendLine($"    Load-after chain: {(hint.RecommendedPluginLoadAfter.Count == 0 ? hint.SourcePlugin : string.Join(" -> ", hint.RecommendedPluginLoadAfter))}");
+            sb.AppendLine($"    Mod manager placement: {hint.RecommendedModManagerPlacement}");
+            sb.AppendLine($"    Manual review required: {(hint.ManualReviewRequired ? "yes" : "no")}");
+            foreach (var note in hint.Notes.Where(static note => !string.IsNullOrWhiteSpace(note)))
+            {
+                sb.AppendLine($"    - {note}");
+            }
+
+            sb.AppendLine();
+        }
+    }
+
+    private static void AppendValidationFollowUp(
+        System.Text.StringBuilder sb,
+        ConversionRequest request,
+        ConversionValidationSummary? validationSummary)
+    {
+        if (validationSummary is null)
+        {
+            return;
+        }
+
+        sb.AppendLine("  * Validation summary:");
+        sb.AppendLine($"    Status: {validationSummary.Status} (score {validationSummary.Score})");
+        sb.AppendLine($"    Gate: {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}");
+        sb.AppendLine($"    {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)}");
+
+        if (validationSummary.Issues.Count == 0)
+        {
+            sb.AppendLine("    No follow-up issues were reported by the conversion checks.");
+            return;
+        }
+
+        foreach (var issue in validationSummary.Issues
+                     .OrderByDescending(static issue => ConversionValidationGuidance.GetIssueSeverityRank(issue.Severity))
+                     .ThenBy(static issue => issue.Code, StringComparer.OrdinalIgnoreCase)
+                     .Take(8))
+        {
+            sb.AppendLine($"  * [{issue.Severity.ToUpperInvariant()}] {issue.Code}: {issue.Message}");
+            var nextStep = ConversionValidationGuidance.GetIssueFollowUp(issue, request.TargetBody);
+            if (!string.IsNullOrWhiteSpace(nextStep))
+            {
+                sb.AppendLine($"    Next step: {nextStep}");
+            }
+        }
+
+        if (validationSummary.Issues.Count > 8)
+        {
+            sb.AppendLine($"  * Additional issues not shown here: {validationSummary.Issues.Count - 8}");
+            sb.AppendLine("    See conversion-quality.json for the complete machine-readable issue list.");
+        }
+    }
+
 }
 
 /// <summary>
@@ -9364,6 +12233,7 @@ internal sealed class LocalExportService(
         Directory.CreateDirectory(outputDirectory);
 
         var outputFiles = new List<string>();
+        MorphTransferContext? morphTransferContext = null;
 
         var manifest = new
         {
@@ -9410,16 +12280,20 @@ internal sealed class LocalExportService(
         // A lightweight vertex-block transform is applied when a readable NIF vertex stream is
         // detected; otherwise the source bytes are copied through unchanged.
         var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
-        var (writtenNifs, synthesizedVariantCount) = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
+        var nifWriteResult = await WriteConvertedNifsAsync(armor, mesh, outputDirectory, safeBodyToken, cancellationToken);
+        var writtenNifs = nifWriteResult.WrittenPaths;
+        var synthesizedVariantCount = nifWriteResult.SynthesizedCount;
         outputFiles.AddRange(writtenNifs);
 
-        var pluginRewriteMap = BuildPluginRewriteMap(pluginAnalysis, request.TargetBody, writtenNifs);
+        var pluginRewritePlan = BuildPluginRewritePlan(pluginAnalysis, armor.MeshFiles, request.TargetBody);
+        var pluginRewriteMap = pluginRewritePlan.RewriteMap;
         var stagedPluginMeshes = await StageConvertedMeshesForPluginRewriteAsync(
             outputDirectory,
-            writtenNifs,
-            pluginRewriteMap,
+            nifWriteResult.WrittenPathBySourceMesh,
+            pluginRewritePlan,
             cancellationToken);
         outputFiles.AddRange(stagedPluginMeshes);
+        var stagedPluginMeshSet = stagedPluginMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var scratchPluginMeshes = pluginAnalysis.ScannedPlugins.Count == 0
             ? await StageScratchPluginMeshesAsync(outputDirectory, writtenNifs, request.TargetBody, cancellationToken)
@@ -9506,58 +12380,29 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
 
+        var payloadReuse = request.GenerateBodySlideFiles
+            ? BuildPayloadReuseSummary(
+                bodySlideProject.Sliders,
+                morphs.ReusableSourceMorphPayloads,
+                EstimateMorphVertexCount(writtenNifs, request.TargetBody),
+                morphTransferContext)
+            : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
+        var sourceNifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
+        var convertedNifSupport = NifGeometrySignatureReader.Inspect(writtenNifs);
+        var nifSupport = sourceNifSupport
+            .Concat(convertedNifSupport)
+            .ToList();
+
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
         var (topologyMismatchRisk, vertexCountDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, qualityWarnings) =
             AssessTopologyAndUvMismatch(armor.MeshFiles, writtenNifs);
-        var validationSummary = BuildValidationSummary(
-            detectedBody,
-            morphs,
-            clipping,
-            correction,
-            voxelResult,
-            skeletonMapping,
-            textureSummary,
-            poseSimulation,
-            topologyMismatchRisk,
-            qualityWarnings,
-            steps);
-        var qualityReport = new ConversionQualityReport(
-            DetectedSourceBody:        detectedBody.Body,
-            BodyDetectionConfidence:   detectedBody.Confidence,
-            BodyDetectionEvidence:     detectedBody.Evidence,
-            TargetBody:                request.TargetBody,
-            MeshType:                  analysis.MeshType,
-            Strategy:                  mesh.Strategy,
-            RegionalMorphing:          mesh.RegionalMorphing,
-            ClippingDetected:          clipping.HasClipping,
-            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
-            CorrectionApplied:         correction.Applied,
-            CorrectionMethod:          correction.Method,
-            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
-            VoxelAffectedRegions:      voxelResult.AffectedRegions,
-            SourceSkeleton:            skeletonMapping.SourceSkeleton,
-            TargetSkeleton:            skeletonMapping.TargetSkeleton,
-            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
-            UnsupportedBones:          skeletonMapping.UnsupportedBones,
-            GeneratedAt:               DateTimeOffset.UtcNow,
-            TopologyMismatchRisk:      topologyMismatchRisk,
-            VertexCountDeltaRatio:     vertexCountDeltaRatio,
-            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
-            UvAspectRatioDelta:        uvAspectRatioDelta,
-            QualityWarnings:           qualityWarnings,
-            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
-            BodySlideCompatible:       morphs.BodySlideCompatible,
-            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
-            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
-            MissingNormalCount:        textureSummary.MissingNormals.Count,
-            ValidationSummary:         validationSummary);
-        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
-        await File.WriteAllTextAsync(
-            qualityPath,
-            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-        outputFiles.Add(qualityPath);
+        qualityWarnings = [.. qualityWarnings, .. BuildNifSupportWarnings(sourceNifSupport, "source"), .. BuildNifSupportWarnings(convertedNifSupport, "converted")];
+        var pluginPatchWarnings = new List<string>();
+        var patchVerificationPaths = new List<string>();
+        var patchMasterValidationExpectations = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var pluginInstallHints = new List<PluginInstallHint>();
+        PluginRewriteVerificationReport? pluginRewriteVerification = null;
 
         var morphPath = Path.Combine(outputDirectory, "morphs.json");
         await File.WriteAllTextAsync(morphPath, JsonSerializer.Serialize(morphs, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
@@ -9573,6 +12418,11 @@ internal sealed class LocalExportService(
             var cbpcPath = Path.Combine(outputDirectory, "cbpc-config.xml");
             await File.WriteAllTextAsync(cbpcPath, physics.CbpcConfigXml, cancellationToken);
             outputFiles.Add(cbpcPath);
+
+            var stagedCbpcPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(stagedCbpcPath)!);
+            await File.WriteAllTextAsync(stagedCbpcPath, physics.CbpcConfigXml, cancellationToken);
+            outputFiles.Add(stagedCbpcPath);
         }
 
         // Write SMP physics config XML when present.
@@ -9581,6 +12431,11 @@ internal sealed class LocalExportService(
             var smpPath = Path.Combine(outputDirectory, "smp-config.xml");
             await File.WriteAllTextAsync(smpPath, physics.SmpConfigXml, cancellationToken);
             outputFiles.Add(smpPath);
+
+            var stagedSmpPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml");
+            Directory.CreateDirectory(Path.GetDirectoryName(stagedSmpPath)!);
+            await File.WriteAllTextAsync(stagedSmpPath, physics.SmpConfigXml, cancellationToken);
+            outputFiles.Add(stagedSmpPath);
         }
 
         if (request.GenerateBodySlideFiles)
@@ -9617,14 +12472,16 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
+            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs);
+
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
             foreach (var slider in bodySlideProject.Sliders)
             {
                 var lowBsdPath  = Path.Combine(shapeDataDirectory, $"{slider}.bsd");
                 var highBsdPath = Path.Combine(shapeDataDirectory, $"{slider}_1.bsd");
-                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+                await File.WriteAllBytesAsync(lowBsdPath,  BuildBsdBytes(slider, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
+                await File.WriteAllBytesAsync(highBsdPath, BuildBsdBytes(slider, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
                 outputFiles.Add(lowBsdPath);
                 outputFiles.Add(highBsdPath);
             }
@@ -9633,8 +12490,8 @@ internal sealed class LocalExportService(
             // The TRI format stores per-morph vertex displacement arrays for in-game slider interpolation.
             var triLowPath  = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}.tri");
             var triHighPath = Path.Combine(shapeDataDirectory, $"{bodySlideProject.ProjectName}_1.tri");
-            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing), cancellationToken);
-            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing),  cancellationToken);
+            await File.WriteAllBytesAsync(triLowPath,  BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: false, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext), cancellationToken);
+            await File.WriteAllBytesAsync(triHighPath, BuildTriBytes(bodySlideProject.ProjectName, bodySlideProject.Sliders, isHighWeight: true, morphVertexCount, mesh.RegionalMorphing, morphs.ReusableSourceMorphPayloads, morphTransferContext),  cancellationToken);
             outputFiles.Add(triLowPath);
             outputFiles.Add(triHighPath);
         }
@@ -9643,27 +12500,6 @@ internal sealed class LocalExportService(
         bool patchEspGenerated = false;
         if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
         {
-            var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
-            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewriteMap);
-            var patchOutput = new
-            {
-                pluginAnalysis.ScannedPlugins,
-                pluginAnalysis.ArmorAddons,
-                pluginAnalysis.PatchGuidance,
-                // Plugins flagged AMBIGUOUS (ESL flag set but no FE-range FormID evidence).
-                // These are listed here so downstream tooling can flag them for manual recheck.
-                // The automated rewrite is intentionally skipped for these plugins.
-                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
-                RewriteMappings = pluginRewriteMap
-                    .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
-                    .ToList(),
-                ProposedPatchSteps = proposedSteps
-            };
-            await File.WriteAllTextAsync(pluginPatchPath,
-                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
-                cancellationToken);
-            outputFiles.Add(pluginPatchPath);
-
             // Also write a runnable xEdit Pascal automation script so users can apply
             // the ARMA record patches directly from SSEEdit / TES5Edit without manual edits.
             var xEditScriptPath = Path.Combine(outputDirectory, "patch-armor.pas");
@@ -9708,10 +12544,12 @@ internal sealed class LocalExportService(
                     var rewriteResult = await rewriter.RewriteAsync(
                         safeSourcePluginPaths, pluginRewriteMap, espDestDirectory, cancellationToken);
                     outputFiles.AddRange(rewriteResult.PatchedPluginPaths);
+                    pluginPatchWarnings.AddRange(rewriteResult.Warnings);
+                    patchVerificationPaths.AddRange(rewriteResult.PatchedPluginPaths);
 
                     // ── New: minimal override patch ESP (_SlidesmithPatch.esp) ─────────
-                    // This patch contains ONLY the touched ARMA/ARMO records and lists the
-                    // original plugin as its single master.  It is a proper Bethesda
+                    // This patch contains ONLY the touched ARMA/ARMO records and carries the
+                    // source plugin's TES4 master chain plus the original plugin. It is a proper Bethesda
                     // override plugin (ESL-flagged) that can be loaded after the original
                     // in any order without consuming a load order slot.
                     foreach (var pluginPath in safeSourcePluginPaths)
@@ -9721,12 +12559,15 @@ internal sealed class LocalExportService(
                             var pluginBytes    = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
                             var headerSize     = BinaryArmaParser.DetectHeaderSize(pluginBytes);
                             var pluginName     = Path.GetFileName(pluginPath) ?? pluginPath;
+                            var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(pluginBytes);
                             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
                             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(pluginBytes, pluginName);
 
                             var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
                                 pluginName, armaDescriptors, normMap, headerSize,
+                                inheritedMasterFileNames: masterFileNames,
                                 armoDescriptors: armoDescriptors);
+                            string? generatedPatchPlugin = null;
 
                             if (included > 0)
                             {
@@ -9735,16 +12576,87 @@ internal sealed class LocalExportService(
                                 await File.WriteAllBytesAsync(patchPath, patchBytes, cancellationToken);
                                 outputFiles.Add(patchPath);
                                 patchEspGenerated = true;
+                                patchVerificationPaths.Add(patchPath);
+                                generatedPatchPlugin = Path.GetFileName(patchPath);
+                                patchMasterValidationExpectations[patchPath] =
+                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, masterFileNames);
                             }
+
+                            pluginInstallHints.Add(BuildPluginInstallHint(
+                                pluginName,
+                                masterFileNames,
+                                generatedPatchPlugin,
+                                manualReviewRequired: false));
                         }
                         catch (Exception ex) when (ex is IOException or InvalidDataException)
                         {
                             // Non-fatal — patch generation skipped for this plugin.
+                            pluginPatchWarnings.Add($"{Path.GetFileName(pluginPath)} patch generation skipped: {ex.Message}");
                         }
                     }
+
+                    foreach (var skippedPluginPath in sourcePluginPaths.Except(safeSourcePluginPaths, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var skippedPluginName = Path.GetFileName(skippedPluginPath) ?? skippedPluginPath;
+                        pluginInstallHints.Add(BuildPluginInstallHint(
+                            skippedPluginName,
+                            [],
+                            null,
+                            manualReviewRequired: true,
+                            manualReviewReason: "Automated rewrite was skipped because the plugin uses an ambiguous ESL/ESPFE layout and should be reviewed in xEdit before installing any override patch."));
+                    }
+
                 }
             }
+
+            pluginRewriteVerification = BuildPluginRewriteVerificationReport(
+                pluginRewritePlan,
+                pluginAnalysis,
+                outputDirectory,
+                stagedPluginMeshSet,
+                patchVerificationPaths,
+                patchMasterValidationExpectations,
+                pluginPatchWarnings,
+                sourceNifSupport);
+
+            var pluginPatchPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var proposedSteps = BuildProposedPatchSteps(pluginAnalysis, request.TargetBody, pluginRewritePlan);
+            var patchOutput = new
+            {
+                pluginAnalysis.ScannedPlugins,
+                pluginAnalysis.ArmorAddons,
+                pluginAnalysis.PatchGuidance,
+                AmbiguousPluginsNeedingRecheck = pluginAnalysis.AmbiguousPlugins ?? [],
+                PluginInstallHints = pluginInstallHints,
+                UnresolvedTieGroups = pluginRewritePlan.UnresolvedTieGroups ?? [],
+                LinkedArmorFamilyReviewSteps = BuildLinkedArmorFamilyReviewSteps(pluginRewriteVerification, request.TargetBody),
+                RewriteMappings = pluginRewriteMap
+                    .Select(kvp => new { OriginalMeshPath = kvp.Key, RewrittenMeshPath = kvp.Value })
+                    .ToList(),
+                ProposedPatchSteps = proposedSteps,
+                RewriteVerification = pluginRewriteVerification
+            };
+            await File.WriteAllTextAsync(pluginPatchPath,
+                JsonSerializer.Serialize(patchOutput, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(pluginPatchPath);
         }
+
+        pluginRewriteVerification ??= BuildPluginRewriteVerificationReport(
+            pluginRewritePlan,
+            pluginAnalysis,
+            outputDirectory,
+            stagedPluginMeshSet,
+            patchVerificationPaths,
+            patchMasterValidationExpectations,
+            pluginPatchWarnings,
+            sourceNifSupport);
+
+        var partitionSignals = BuildPartitionSignalReport(steps);
+        qualityWarnings = qualityWarnings
+            .Concat(partitionSignals?.Warnings ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         // Generate a scratch ESP when no source plugin exists for this armor.
         // This enables the converted meshes to be installed as a new standalone mod without
@@ -9825,7 +12737,14 @@ internal sealed class LocalExportService(
 
         // Write dropped-item/world-object physics guidance.
         var worldPhysicsPath = Path.Combine(outputDirectory, "world-physics.json");
-        var worldPhysics = BuildWorldObjectPhysicsReport(analysis, mesh, physics, armor, groundMeshRelativePath, request.WorldDropModeOverride);
+        var worldPhysics = BuildWorldObjectPhysicsReport(
+            analysis,
+            mesh,
+            physics,
+            armor,
+            groundMeshRelativePath,
+            request.WorldDropModeOverride,
+            sourceNifSupport);
         await File.WriteAllTextAsync(worldPhysicsPath,
             JsonSerializer.Serialize(worldPhysics, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
@@ -9843,14 +12762,14 @@ internal sealed class LocalExportService(
         // in any browser without an additional 3D engine.
         var previewPath = Path.Combine(outputDirectory, "preview.html");
         await File.WriteAllTextAsync(previewPath,
-            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary),
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary, validationSummary: null),
             cancellationToken);
         outputFiles.Add(previewPath);
 
         var previewWorkbenchPath = Path.Combine(outputDirectory, "preview-workbench.html");
         await File.WriteAllTextAsync(
             previewWorkbenchPath,
-            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs),
+            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs, validationSummary: null),
             cancellationToken);
         outputFiles.Add(previewWorkbenchPath);
 
@@ -9884,12 +12803,15 @@ internal sealed class LocalExportService(
         var fomodDataFolders = knownDataFolders
             .Where(f => Directory.Exists(Path.Combine(outputDirectory, f)))
             .ToList();
-        // ESP files at the output root are plugins and must be installed directly to Data\.
+        // Root install files are placed directly under Data\ by mod managers.
+        // Keep only files that remain useful after install (plugins + human/manual support files).
         var fomodRootFiles = outputFiles
             .Where(f => string.Equals(
                             Path.GetDirectoryName(f), outputDirectory, StringComparison.OrdinalIgnoreCase)
-                        && Path.GetExtension(f).Equals(".esp", StringComparison.OrdinalIgnoreCase))
+                        && IsFomodRootInstallFile(Path.GetFileName(f)))
             .Select(f => Path.GetFileName(f)!)
+            .Concat(["README.txt"])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         await File.WriteAllTextAsync(
             fomodModuleConfigPath,
@@ -9898,7 +12820,7 @@ internal sealed class LocalExportService(
             cancellationToken);
         await File.WriteAllTextAsync(
             fomodInfoPath,
-            BuildFomodInfoXml(packageName),
+            BuildFomodInfoXml(packageName, fomodRootFiles),
             cancellationToken);
         outputFiles.Add(fomodModuleConfigPath);
         outputFiles.Add(fomodInfoPath);
@@ -9911,7 +12833,7 @@ internal sealed class LocalExportService(
             readmePath,
             ConversionReadmeGenerator.Generate(
                 request, armor, mesh, bodySlideProject,
-                pluginAnalysis, outputFiles, pluginRewriteMap, patchEspGenerated),
+                pluginAnalysis, outputFiles, pluginRewriteMap, patchEspGenerated, pluginInstallHints),
             cancellationToken);
         outputFiles.Add(readmePath);
 
@@ -9931,17 +12853,125 @@ internal sealed class LocalExportService(
         await ConversionLearningCache.SaveToGlobalAndLocalAsync(cache, cachePath, cancellationToken);
         outputFiles.Add(cachePath);
 
+        string? zipPath = null;
         if (request.OutputZip)
         {
-            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             if (File.Exists(zipPath))
             {
                 File.Delete(zipPath);
             }
 
             ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
-            outputFiles = [zipPath];
-            return (outputDirectory, outputFiles);
+            outputFiles.Add(zipPath);
+        }
+
+        var validationSummary = BuildValidationSummary(
+            detectedBody,
+            morphs,
+            payloadReuse,
+            clipping,
+            correction,
+            voxelResult,
+            skeletonMapping,
+            textureSummary,
+            poseSimulation,
+            topologyMismatchRisk,
+            nifSupport,
+            partitionSignals,
+            pluginRewriteVerification,
+            qualityWarnings,
+            steps,
+            request,
+            outputDirectory,
+            outputFiles,
+            bodySlideProject,
+            pluginAnalysis);
+
+        await File.WriteAllTextAsync(
+            previewPath,
+            BuildPreviewHtml(request, armor, analysis, mesh, bodySlideProject, physics, poseSimulation, worldPhysics, correction, textureSummary, validationSummary),
+            cancellationToken);
+        await File.WriteAllTextAsync(
+            previewWorkbenchPath,
+            BuildPreviewWorkbenchHtml(request, armor, analysis, mesh, writtenNifs, validationSummary),
+            cancellationToken);
+
+        await File.WriteAllTextAsync(
+            readmePath,
+            ConversionReadmeGenerator.Generate(
+                request,
+                armor,
+                mesh,
+                bodySlideProject,
+                pluginAnalysis,
+                outputFiles,
+                pluginRewriteMap,
+                patchEspGenerated,
+                pluginInstallHints,
+                validationSummary),
+            cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(zipPath))
+        {
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+
+            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+        }
+
+        var qualityReport = new ConversionQualityReport(
+            DetectedSourceBody:        detectedBody.Body,
+            BodyDetectionConfidence:   detectedBody.Confidence,
+            BodyDetectionEvidence:     detectedBody.Evidence,
+            TargetBody:                request.TargetBody,
+            MeshType:                  analysis.MeshType,
+            Strategy:                  mesh.Strategy,
+            RegionalMorphing:          mesh.RegionalMorphing,
+            ClippingDetected:          clipping.HasClipping,
+            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
+            CorrectionApplied:         correction.Applied,
+            CorrectionMethod:          correction.Method,
+            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
+            VoxelAffectedRegions:      voxelResult.AffectedRegions,
+            SourceSkeleton:            skeletonMapping.SourceSkeleton,
+            TargetSkeleton:            skeletonMapping.TargetSkeleton,
+            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
+            UnsupportedBones:          skeletonMapping.UnsupportedBones,
+            GeneratedAt:               DateTimeOffset.UtcNow,
+            TopologyMismatchRisk:      topologyMismatchRisk,
+            VertexCountDeltaRatio:     vertexCountDeltaRatio,
+            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
+            UvAspectRatioDelta:        uvAspectRatioDelta,
+            QualityWarnings:           qualityWarnings,
+            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
+            BodySlideCompatible:       morphs.BodySlideCompatible,
+            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
+            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
+            MissingNormalCount:        textureSummary.MissingNormals.Count,
+            ValidationSummary:         validationSummary,
+            SourceMorphQuality:        morphs.SourceMorphQuality,
+            SourceAssetSupport:        morphs.SourceAssetSupport,
+            PayloadReuse:              payloadReuse,
+            NifSupport:                nifSupport,
+            PluginRewriteVerification: pluginRewriteVerification,
+            PartitionSignals:          partitionSignals);
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        await File.WriteAllTextAsync(
+            qualityPath,
+            JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        if (!outputFiles.Contains(qualityPath, StringComparer.OrdinalIgnoreCase))
+        {
+            outputFiles.Add(qualityPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(zipPath))
+        {
+            File.Delete(zipPath);
+            ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
         }
 
         return (outputDirectory, outputFiles);
@@ -9965,7 +12995,7 @@ internal sealed class LocalExportService(
     /// <returns>
     /// A tuple of the written file paths and the count of synthesised weight variants.
     /// </returns>
-    private static async Task<(IReadOnlyList<string> Written, int SynthesizedCount)> WriteConvertedNifsAsync(
+    private static async Task<ConvertedNifWriteResult> WriteConvertedNifsAsync(
         ImportedArmor armor,
         ConvertedMesh mesh,
         string outputDirectory,
@@ -9973,6 +13003,7 @@ internal sealed class LocalExportService(
         CancellationToken cancellationToken)
     {
         var written = new List<string>();
+        var writtenBySourceMesh = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var synthesizedCount = 0;
 
         // NIFs are placed under meshes/slidesmith/<body>/ so that Skyrim's loose-file
@@ -10000,6 +13031,8 @@ internal sealed class LocalExportService(
                     await CopyNifAsync(pair.HighWeightMesh, highDest, mesh, cancellationToken);
                     written.Add(lowDest);
                     written.Add(highDest);
+                    writtenBySourceMesh[pair.LowWeightMesh] = lowDest;
+                    writtenBySourceMesh[pair.HighWeightMesh] = highDest;
                 }
                 else
                 {
@@ -10027,6 +13060,7 @@ internal sealed class LocalExportService(
                     pairedFiles.Add(sourceMesh);
                     written.Add(destSource);
                     written.Add(destSynth);
+                    writtenBySourceMesh[sourceMesh] = destSource;
                     synthesizedCount++;
                 }
             }
@@ -10040,9 +13074,10 @@ internal sealed class LocalExportService(
             var dest = Path.Combine(nifDirectory, Path.GetFileName(meshFile)!);
             await CopyNifAsync(meshFile, dest, mesh, cancellationToken);
             written.Add(dest);
+            writtenBySourceMesh[meshFile] = dest;
         }
 
-        return (written, synthesizedCount);
+        return new ConvertedNifWriteResult(written, writtenBySourceMesh, synthesizedCount);
     }
 
     /// <summary>
@@ -10443,6 +13478,7 @@ internal sealed class LocalExportService(
         supportFiles.AddRange(armor.BodyReferenceFiles.Where(path =>
             Path.GetExtension(path).Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(path).Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase)));
         supportFiles.AddRange(EnumerateMaterialFiles(armor.SourcePath, outputDirectory));
         supportFiles.AddRange(EnumeratePluginFiles(armor.SourcePath, outputDirectory));
@@ -10678,6 +13714,12 @@ internal sealed class LocalExportService(
     {
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(sourceBytes, out var vertexDataOffset, out var vertexCount))
         {
+            var floatStrideTransformed = TryApplyNifInterleavedFloatVertexTransform(sourceBytes, regionalMorphing, deformationCage);
+            if (!ReferenceEquals(floatStrideTransformed, sourceBytes))
+            {
+                return floatStrideTransformed;
+            }
+
             // SSE NIFs use BSTriShape with half-precision (16-bit) float vertices — try that path.
             return TryApplyNifHalfFloatVertexTransform(sourceBytes, regionalMorphing, deformationCage);
         }
@@ -10796,6 +13838,122 @@ internal sealed class LocalExportService(
         return transformed;
     }
 
+    private static byte[] TryApplyNifInterleavedFloatVertexTransform(
+        byte[] sourceBytes,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage? deformationCage)
+    {
+        if (!NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(
+                sourceBytes,
+                out var vertexDataOffset,
+                out var vertexCount,
+                out var vertexStride))
+        {
+            return sourceBytes;
+        }
+
+        if (vertexCount <= 0 || vertexStride < 12)
+        {
+            return sourceBytes;
+        }
+
+        var transformed = sourceBytes.ToArray();
+        var requiredBytes = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
+        {
+            return sourceBytes;
+        }
+
+        var minX = float.MaxValue;
+        var maxX = float.MinValue;
+        var minY = float.MaxValue;
+        var maxY = float.MinValue;
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+
+        var rawVertices = new (float X, float Y, float Z)[vertexCount];
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            rawVertices[index] = (x, y, z);
+            minX = Math.Min(minX, x);
+            maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y);
+            maxY = Math.Max(maxY, y);
+            minZ = Math.Min(minZ, z);
+            maxZ = Math.Max(maxZ, z);
+        }
+
+        var zRange = Math.Max(0.0001f, maxZ - minZ);
+        var centerX = (minX + maxX) / 2f;
+        var centerY = (minY + maxY) / 2f;
+        var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
+        var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
+        var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
+        var pushOut = solverResult.MaxPushOutPerRegion;
+        var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var offset = vertexDataOffset + (index * vertexStride);
+            var x = BitConverter.ToSingle(transformed, offset);
+            var y = BitConverter.ToSingle(transformed, offset + 4);
+            var z = BitConverter.ToSingle(transformed, offset + 8);
+            var normalizedHeight = (z - minZ) / zRange;
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
+                normalizedHeight,
+                lateralPosition,
+                depthPosition,
+                regionalMorphing,
+                effectiveCage);
+
+            var transformedX = centerX + ((x - centerX) * (float)widthScale);
+            var transformedY = centerY + ((y - centerY) * (float)depthScale);
+            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
+
+            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            if (pushOut.TryGetValue(region, out var depth) && depth > 0)
+            {
+                var dx = transformedX - centerX;
+                var dy = transformedY - centerY;
+                var xyDist = MathF.Sqrt(dx * dx + dy * dy);
+                if (xyDist > 0.0001f)
+                {
+                    var pushOutModelSpace = (float)(depth * normScale);
+                    transformedX += (dx / xyDist) * pushOutModelSpace;
+                    transformedY += (dy / xyDist) * pushOutModelSpace;
+                }
+            }
+
+            if (regionalMorphing.Count > 0)
+            {
+                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
+                ApplyShrinkwrapProjection(
+                    centerX,
+                    centerY,
+                    normScale,
+                    shrinkRegion,
+                    regionalMorphing,
+                    clearanceNorm,
+                    ref transformedX,
+                    ref transformedY);
+            }
+
+            Array.Copy(BitConverter.GetBytes(transformedX), 0, transformed, offset, 4);
+            Array.Copy(BitConverter.GetBytes(transformedY), 0, transformed, offset + 4, 4);
+            Array.Copy(BitConverter.GetBytes(transformedZ), 0, transformed, offset + 8, 4);
+        }
+
+        return transformed;
+    }
+
     /// <summary>
     /// SSE NIF variant of <see cref="TryApplyNifVertexTransform"/>: reads and writes vertex
     /// positions as three consecutive <see cref="System.Half"/> values (half-precision 16-bit
@@ -10808,22 +13966,47 @@ internal sealed class LocalExportService(
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage? deformationCage)
     {
-        if (!NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(
-                sourceBytes,
-                out var vertexDataOffset,
-                out var vertexCount,
-                out var vertexStride))
+        var blocks = NifGeometrySignatureReader.LocateHalfFloatVertexBlocks(sourceBytes);
+        if (blocks.Count == 0)
         {
             return sourceBytes;
         }
 
-        if (vertexCount <= 0 || vertexStride < 6)
-            return sourceBytes;
-
         var transformed = sourceBytes.ToArray();
+        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
+        var transformedAny = false;
+        foreach (var block in blocks)
+        {
+            transformedAny |= TryApplyHalfFloatVertexBlockTransform(
+                transformed,
+                block.VertexDataOffset,
+                block.VertexCount,
+                block.VertexStride,
+                regionalMorphing,
+                effectiveCage);
+        }
+
+        return transformedAny ? transformed : sourceBytes;
+    }
+
+    private static bool TryApplyHalfFloatVertexBlockTransform(
+        byte[] transformed,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage effectiveCage)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return false;
+        }
+
         var requiredBytes = (long)vertexCount * vertexStride;
         if (vertexDataOffset < 0 || vertexDataOffset + requiredBytes > transformed.Length)
-            return sourceBytes;
+        {
+            return false;
+        }
 
         var minX = float.MaxValue;
         var maxX = float.MinValue;
@@ -10832,7 +14015,6 @@ internal sealed class LocalExportService(
         var minZ = float.MaxValue;
         var maxZ = float.MinValue;
 
-        // First pass: bounding box + collect positions for the animation-driven solver.
         var rawVertices = new (float X, float Y, float Z)[vertexCount];
         for (var i = 0; i < vertexCount; i++)
         {
@@ -10841,9 +14023,12 @@ internal sealed class LocalExportService(
             var y = (float)BitConverter.ToHalf(transformed.AsSpan(off + 2));
             var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
             rawVertices[i] = (x, y, z);
-            minX = MathF.Min(minX, x); maxX = MathF.Max(maxX, x);
-            minY = MathF.Min(minY, y); maxY = MathF.Max(maxY, y);
-            minZ = MathF.Min(minZ, z); maxZ = MathF.Max(maxZ, z);
+            minX = MathF.Min(minX, x);
+            maxX = MathF.Max(maxX, x);
+            minY = MathF.Min(minY, y);
+            maxY = MathF.Max(maxY, y);
+            minZ = MathF.Min(minZ, z);
+            maxZ = MathF.Max(maxZ, z);
         }
 
         var zRange = Math.Max(0.0001f, maxZ - minZ);
@@ -10851,14 +14036,11 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
-
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
+        var transformedAny = false;
 
-        // Second pass: apply the same regional morph + push-out + shrinkwrap as the LE path,
-        // but encode results back as Half to preserve the BSVertexData layout.
         for (var i = 0; i < vertexCount; i++)
         {
             var off = vertexDataOffset + i * vertexStride;
@@ -10909,18 +14091,22 @@ internal sealed class LocalExportService(
                     ref transformedY);
             }
 
-            // Clamp to Half range (±65504) and write back the 6 position bytes only;
-            // the remaining bytes within the vertex element (UV, normals, tangents, etc.)
-            // are left unchanged.
             transformedX = Math.Clamp(transformedX, -65504f, 65504f);
             transformedY = Math.Clamp(transformedY, -65504f, 65504f);
             transformedZ = Math.Clamp(transformedZ, -65504f, 65504f);
-            BitConverter.TryWriteBytes(transformed.AsSpan(off),     (Half)transformedX);
+            if (MathF.Abs(transformedX - x) > 0.0001f ||
+                MathF.Abs(transformedY - y) > 0.0001f ||
+                MathF.Abs(transformedZ - z) > 0.0001f)
+            {
+                transformedAny = true;
+            }
+
+            BitConverter.TryWriteBytes(transformed.AsSpan(off), (Half)transformedX);
             BitConverter.TryWriteBytes(transformed.AsSpan(off + 2), (Half)transformedY);
             BitConverter.TryWriteBytes(transformed.AsSpan(off + 4), (Half)transformedZ);
         }
 
-        return transformed;
+        return transformedAny;
     }
 
     private static (double WidthScale, double DepthScale, double HeightScale) ComputeCageProjectionScales(
@@ -11153,6 +14339,7 @@ internal sealed class LocalExportService(
     private static ConversionValidationSummary BuildValidationSummary(
         BodyDetectionReport detectedBody,
         MorphSet morphs,
+        MorphPayloadReuseSummary payloadReuse,
         ClippingReport clipping,
         CorrectionResult correction,
         VoxelCollisionResult voxelResult,
@@ -11160,8 +14347,16 @@ internal sealed class LocalExportService(
         TextureSummary textureSummary,
         PoseSimulationResult poseSimulation,
         bool topologyMismatchRisk,
+        IReadOnlyList<NifSupportReport>? nifSupport,
+        PartitionSignalReport? partitionSignals,
+        PluginRewriteVerificationReport? pluginRewriteVerification,
         IReadOnlyList<string> qualityWarnings,
-        IReadOnlyList<string> steps)
+        IReadOnlyList<string> steps,
+        ConversionRequest request,
+        string outputDirectory,
+        IReadOnlyList<string> outputFiles,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis)
     {
         var issues = new List<ConversionValidationIssue>();
 
@@ -11196,6 +14391,46 @@ internal sealed class LocalExportService(
                 "Generated morphs are not marked BodySlide-compatible."));
         }
 
+        if (morphs.SourceAssetSupport is { UsedFallbackSliders: true } sourceAssetSupport)
+        {
+            var detail = sourceAssetSupport.MissingAssets is { Count: > 0 }
+                ? $": {string.Join(", ", sourceAssetSupport.MissingAssets)}"
+                : string.Empty;
+            var inferredBodyDetail = !string.IsNullOrWhiteSpace(sourceAssetSupport.InferredSourceBody)
+                ? $" Inferred source body: {sourceAssetSupport.InferredSourceBody}."
+                : string.Empty;
+            var inferredProfileDetail = !string.IsNullOrWhiteSpace(sourceAssetSupport.InferredDeformationProfile)
+                ? $" Inferred fallback profile: {sourceAssetSupport.InferredDeformationProfile}."
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "incomplete-source-fallback",
+                "medium",
+                $"Source BodySlide assets were incomplete, so fallback slider reconstruction was used{detail}.{inferredBodyDetail}{inferredProfileDetail}"));
+        }
+
+        if (payloadReuse.RequestedVariantCount > 0 && payloadReuse.FallbackVariantCount > 0)
+        {
+            var severity = (payloadReuse.ReusedVariantCount + payloadReuse.RetargetedVariantCount) == 0 ? "medium" : "low";
+            var detail = payloadReuse.FallbackVariants is { Count: > 0 }
+                ? $": {string.Join(", ", payloadReuse.FallbackVariants.Take(6))}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "synthetic-morph-fallback",
+                severity,
+                $"{payloadReuse.FallbackVariantCount} morph variant(s) used synthesized deltas instead of source TRI/BSD payload reuse{detail}."));
+        }
+
+        if (payloadReuse.RetargetedVariantCount > 0)
+        {
+            var detail = payloadReuse.RetargetedVariants is { Count: > 0 }
+                ? $": {string.Join(", ", payloadReuse.RetargetedVariants.Take(6))}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "retargeted-morph-reuse",
+                "low",
+                $"{payloadReuse.RetargetedVariantCount} morph variant(s) reused source TRI/BSD deltas through conservative topology retargeting{detail}."));
+        }
+
         if (topologyMismatchRisk)
         {
             var detail = qualityWarnings.Count > 0
@@ -11205,6 +14440,80 @@ internal sealed class LocalExportService(
                 "topology-mismatch-risk",
                 "high",
                 $"Converted mesh topology or UV layout drifted significantly from the source{detail}."));
+        }
+
+        if (nifSupport is { Count: > 0 })
+        {
+            var unsupported = nifSupport
+                .Where(report => report.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                .Select(DescribeUnsupportedNifReport)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (unsupported.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "unsupported-nif-layout",
+                    "high",
+                    $"Some NIF meshes could not be parsed with supported geometry readers and require manual review: {string.Join(", ", unsupported.Take(6))}."));
+            }
+
+            var degraded = nifSupport
+                .Where(report => report.Status.Equals("degraded", StringComparison.OrdinalIgnoreCase))
+                .Select(report => Path.GetFileName(report.MeshPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (degraded.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "heuristic-nif-read",
+                    "medium",
+                    $"Some NIF meshes were handled through heuristic geometry scanning instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
+            }
+
+            var raisedHeels = nifSupport
+                .Where(report => report.HeelAnalysis is not null &&
+                                 report.HeelAnalysis.Profile is "high-heel" or "raised-heel")
+                .Select(report =>
+                {
+                    var profile = report.HeelAnalysis!.Profile;
+                    return $"{Path.GetFileName(report.MeshPath)} ({profile})";
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (raisedHeels.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "heel-offset-review",
+                    "medium",
+                    $"Raised-heel footwear was detected and should be checked for ankle height and foot placement after conversion: {string.Join(", ", raisedHeels.Take(6))}."));
+            }
+        }
+
+        if (partitionSignals is not null)
+        {
+            if (partitionSignals.MissingSourceSlots is { Count: > 0 } missingSourceSlots)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-source-partitions",
+                    missingSourceSlots.Count >= 2 ? "high" : "medium",
+                    $"Final exported partitions dropped source NIF slot signal(s): {string.Join(", ", missingSourceSlots)}."));
+            }
+
+            if (partitionSignals.MissingPluginSlots is { Count: > 0 } missingPluginSlots)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-plugin-partitions",
+                    missingPluginSlots.Count >= 2 ? "high" : "medium",
+                    $"Final exported partitions dropped source plugin BOD2/BODT slot signal(s): {string.Join(", ", missingPluginSlots)}."));
+            }
+
+            if (partitionSignals.UnknownFinalPartitions is { Count: > 0 } unknownFinalPartitions)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "unknown-export-partitions",
+                    "low",
+                    $"Final exported partitions included nonstandard labels that need manual review: {string.Join(", ", unknownFinalPartitions.Take(6))}."));
+            }
         }
 
         if (clipping.HasClipping)
@@ -11264,6 +14573,121 @@ internal sealed class LocalExportService(
                 $"Plugin race compatibility needs review for: {string.Join(", ", raceWarnings)}."));
         }
 
+        if (pluginRewriteVerification is not null)
+        {
+            if (pluginRewriteVerification.AmbiguousConvertedMatches is { Count: > 0 })
+            {
+                var tieGroupSummary = pluginRewriteVerification.UnresolvedTieGroups is { Count: > 0 }
+                    ? $" Review tie groups in plugin-patches.json for families such as {string.Join(", ", pluginRewriteVerification.UnresolvedTieGroups.SelectMany(static group => group.CandidateSourceFamilies).Distinct(StringComparer.OrdinalIgnoreCase).Take(3))}."
+                    : string.Empty;
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-ambiguous-filename",
+                    "high",
+                    $"Some plugin mesh paths matched multiple converted NIF candidates and were left for manual review: {string.Join(", ", pluginRewriteVerification.AmbiguousConvertedMatches.Take(4))}.{tieGroupSummary}"));
+            }
+
+            if (pluginRewriteVerification.MissingConvertedMatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-missing-converted-match",
+                    "medium",
+                    $"Some plugin mesh paths had no converted NIF filename match: {string.Join(", ", pluginRewriteVerification.MissingConvertedMatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingStagedMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-missing-staged-mesh",
+                    "high",
+                    $"Some rewritten plugin mesh paths were not staged into the output package: {string.Join(", ", pluginRewriteVerification.MissingStagedMeshes.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.UnverifiedPatchedPlugins is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-rewrite-verification-warning",
+                    "medium",
+                    $"Some generated plugin patches could not be re-verified for rewritten mesh paths: {string.Join(", ", pluginRewriteVerification.UnverifiedPatchedPlugins.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingPatchPluginMasters is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-patch-missing-master-chain",
+                    "high",
+                    $"Some generated override patches are missing required TES4 masters from the source plugin chain: {string.Join(", ", pluginRewriteVerification.MissingPatchPluginMasters.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.PatchPluginMasterOrderMismatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-patch-master-order-mismatch",
+                    "high",
+                    $"Some generated override patches did not preserve the source plugin master order needed for stable FormID resolution: {string.Join(", ", pluginRewriteVerification.PatchPluginMasterOrderMismatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingLinkedArmorAddonRecords is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-arma-record",
+                    "high",
+                    $"Some ARMO records referenced ARMA FormIDs that could not be correlated during verification: {string.Join(", ", pluginRewriteVerification.MissingLinkedArmorAddonRecords.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.UnscannedLinkedArmorAddonReferences is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-unscanned-master-reference",
+                    "medium",
+                    $"Some ARMO records referenced ARMA FormIDs in master or external plugins that were not part of the scanned input set: {string.Join(", ", pluginRewriteVerification.UnscannedLinkedArmorAddonReferences.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.UnsupportedLinkedArmorAddonMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-unsupported-nif-layout",
+                    "high",
+                    $"Some linked ARMO→ARMA source meshes were detected but could not be parsed with supported NIF readers: {string.Join(", ", pluginRewriteVerification.UnsupportedLinkedArmorAddonMeshes.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingLinkedConvertedMatches is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-converted-match",
+                    "medium",
+                    $"Some ARMO→ARMA links did not resolve to fully rewritten mesh outputs: {string.Join(", ", pluginRewriteVerification.MissingLinkedConvertedMatches.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.MissingLinkedStagedMeshes is { Count: > 0 })
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-missing-staged-mesh",
+                    "high",
+                    $"Some ARMO→ARMA linked mesh outputs were not staged into the package: {string.Join(", ", pluginRewriteVerification.MissingLinkedStagedMeshes.Take(4))}."));
+            }
+
+            if (pluginRewriteVerification.PartialLinkedArmorFamilyFailures is { Count: > 0 } partialFamilyFailures)
+            {
+                var familyDetails = partialFamilyFailures
+                    .Select(static failure =>
+                        $"{failure.ArmorRecord} [{failure.VerifiedLinkedArmorAddonReferences}/{failure.TotalLinkedArmorAddonReferences} linked ARMA members verified]")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(4)
+                    .ToList();
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-link-partial-family-failure",
+                    "high",
+                    $"Some linked armor families mixed verified and unresolved ARMA members across the same master chain: {string.Join(", ", familyDetails)}."));
+            }
+        }
+
+        issues.AddRange(BuildPackageArtifactIssues(
+            request,
+            outputDirectory,
+            outputFiles,
+            bodySlideProject,
+            pluginAnalysis));
+
         var highSeverityCount = issues.Count(issue => issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase));
         var mediumSeverityCount = issues.Count(issue => issue.Severity.Equals("medium", StringComparison.OrdinalIgnoreCase));
         var lowSeverityCount = issues.Count(issue => issue.Severity.Equals("low", StringComparison.OrdinalIgnoreCase));
@@ -11282,6 +14706,431 @@ internal sealed class LocalExportService(
             LowSeverityCount: lowSeverityCount,
             Issues: issues);
     }
+
+    internal static IReadOnlyList<ConversionValidationIssue> BuildPackageArtifactIssues(
+        ConversionRequest request,
+        string outputDirectory,
+        IReadOnlyList<string> outputFiles,
+        BodySlideProject bodySlideProject,
+        PluginAnalysisResult pluginAnalysis)
+    {
+        var issues = new List<ConversionValidationIssue>();
+        var safeBodyToken = BuildSafeBodyToken(request.TargetBody);
+        var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", safeBodyToken);
+        var expectedFomodDataFolders = new[] { "meshes", "CalienteTools", "textures", "SKSE", "scripts" }
+            .Where(folder => Directory.Exists(Path.Combine(outputDirectory, folder)))
+            .ToList();
+        var expectedFomodRootPlugins = outputFiles
+            .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase)
+                && IsBethesdaPluginFile(path))
+            .Select(path => Path.GetFileName(path)!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expectedFomodRootSupportFiles = outputFiles
+            .Where(path => string.Equals(Path.GetDirectoryName(path), outputDirectory, StringComparison.OrdinalIgnoreCase)
+                && IsFomodRootSupportFile(Path.GetFileName(path)))
+            .Select(path => Path.GetFileName(path)!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        bool HasFile(string path) =>
+            outputFiles.Any(existing => PathsEqual(existing, path)) || File.Exists(path);
+
+        bool HasAnyFile(string directoryPath, string searchPattern) =>
+            Directory.Exists(directoryPath) && Directory.EnumerateFiles(directoryPath, searchPattern).Any();
+
+        bool ContainsXmlAttributeValue(string xmlContent, string attributeName, string value) =>
+            xmlContent.Contains($"{attributeName}=\"{SecurityElement.Escape(value)}\"", StringComparison.OrdinalIgnoreCase);
+
+        bool HasBodySlidePayloadFiles(string directoryPath) =>
+            HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri");
+
+        void AddMissingFileIssue(string relativePath, string code, string severity, string message)
+        {
+            var fullPath = Path.Combine(outputDirectory, relativePath);
+            if (!HasFile(fullPath))
+            {
+                issues.Add(new ConversionValidationIssue(code, severity, message));
+            }
+        }
+
+        AddMissingFileIssue("README.txt", "missing-readme", "medium",
+            "README.txt was not generated, so install guidance and manual follow-up notes are missing.");
+        AddMissingFileIssue("dependency-map.json", "missing-dependency-map", "medium",
+            "dependency-map.json was not generated, so required source assets and plugin dependencies are not summarized.");
+        AddMissingFileIssue("conversion-quality.json", "missing-conversion-quality-report", "medium",
+            "conversion-quality.json was not generated, so the validation score, issue list, and machine-readable review data are missing.");
+        AddMissingFileIssue("skeleton-compatibility.json", "missing-skeleton-compatibility-report", "medium",
+            "skeleton-compatibility.json was not generated, so skeleton requirements and unsupported-bone diagnostics are missing.");
+        AddMissingFileIssue("pose-simulation-report.json", "missing-pose-report", "low",
+            "pose-simulation-report.json was not generated, so post-conversion pose-risk review data is missing.");
+        AddMissingFileIssue("world-physics.json", "missing-world-physics-report", "low",
+            "world-physics.json was not generated, so dropped-item/world-model guidance is missing.");
+        AddMissingFileIssue("preview.svg", "missing-preview-svg", "low",
+            "preview.svg was not generated, so a static preview render is missing.");
+        AddMissingFileIssue("preview.html", "missing-preview-html", "low",
+            "preview.html was not generated, so the interactive conversion preview is missing.");
+        AddMissingFileIssue("preview-workbench.html", "missing-preview-workbench", "low",
+            "preview-workbench.html was not generated, so the side-by-side review workbench is missing.");
+        AddMissingFileIssue(Path.Combine("fomod", "ModuleConfig.xml"), "missing-fomod-module-config", "medium",
+            "fomod/ModuleConfig.xml was not generated, so mod managers cannot install the package as a FOMOD.");
+        AddMissingFileIssue(Path.Combine("fomod", "info.xml"), "missing-fomod-info", "medium",
+            "fomod/info.xml was not generated, so the FOMOD package metadata is incomplete.");
+
+        var rootCbpcConfigPath = Path.Combine(outputDirectory, "cbpc-config.xml");
+        var stagedCbpcConfigPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml");
+        if (HasFile(rootCbpcConfigPath) && !HasFile(stagedCbpcConfigPath))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-cbpc-config",
+                "medium",
+                "cbpc-config.xml was generated but was not staged into SKSE/Plugins/CBPCSystem/, so the package is not mod-manager ready for CBPC installs."));
+        }
+
+        var rootSmpConfigPath = Path.Combine(outputDirectory, "smp-config.xml");
+        var stagedSmpConfigPath = Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml");
+        if (HasFile(rootSmpConfigPath) && !HasFile(stagedSmpConfigPath))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-smp-config",
+                "medium",
+                "smp-config.xml was generated but was not staged into SKSE/Plugins/hdtSMP64/, so the package is not mod-manager ready for SMP installs."));
+        }
+
+        if (!HasAnyFile(stagedMeshDirectory, "*.nif"))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "missing-staged-mesh-output",
+                "high",
+                $"Converted meshes were not staged under 'meshes/slidesmith/{safeBodyToken}', so the package is not installable."));
+        }
+
+        var moduleConfigPath = Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml");
+        if (HasFile(moduleConfigPath))
+        {
+            var moduleConfigContent = File.ReadAllText(moduleConfigPath);
+            foreach (var folder in expectedFomodDataFolders)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", folder))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-folder-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include an installer entry for the '{folder}' output folder."));
+                }
+            }
+
+            foreach (var pluginFileName in expectedFomodRootPlugins)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", pluginFileName))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-root-plugin-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include a root installer entry for plugin '{pluginFileName}'."));
+                }
+            }
+
+            foreach (var supportFileName in expectedFomodRootSupportFiles)
+            {
+                if (!ContainsXmlAttributeValue(moduleConfigContent, "source", supportFileName))
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "fomod-missing-root-support-entry",
+                        "medium",
+                        $"fomod/ModuleConfig.xml does not include a root installer entry for support file '{supportFileName}'."));
+                }
+            }
+        }
+
+        if (request.GenerateBodySlideFiles)
+        {
+            var ospPath = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets", $"{bodySlideProject.ProjectName}.osp");
+            if (!HasFile(ospPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-osp",
+                    "medium",
+                    $"Expected BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp' was not generated."));
+            }
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
+            var hasShapeData = Directory.Exists(shapeDataDirectory)
+                && (HasAnyFile(shapeDataDirectory, "*.nif")
+                    || HasAnyFile(shapeDataDirectory, "*.bsd")
+                    || HasAnyFile(shapeDataDirectory, "*.tri"));
+            if (!hasShapeData)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-shape-data",
+                    "medium",
+                    $"Expected BodySlide ShapeData assets for '{bodySlideProject.ProjectName}' were not generated."));
+            }
+            else if (!HasAnyFile(shapeDataDirectory, "*.nif"))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-reference-nif",
+                    "medium",
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing a reference NIF, so Outfit Studio cannot load the generated project correctly."));
+            }
+
+            if (Directory.Exists(shapeDataDirectory) &&
+                bodySlideProject.Sliders.Count > 0 &&
+                !HasBodySlidePayloadFiles(shapeDataDirectory))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-slider-payload",
+                    "medium",
+                    $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+            }
+        }
+
+        if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+        {
+            AddMissingFileIssue("patch-armor.pas", "missing-xedit-script", "medium",
+                "patch-armor.pas was not generated, so xEdit automation for plugin rewrites is missing.");
+            AddMissingFileIssue("plugin-patches.json", "missing-plugin-patch-report", "medium",
+                "plugin-patches.json was not generated, so plugin rewrite guidance and verification output are missing.");
+        }
+
+        if (request.OutputZip)
+        {
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            if (!HasFile(zipPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-output-zip",
+                    "medium",
+                    "The requested distributable ZIP package was not generated."));
+            }
+            else
+            {
+                try
+                {
+                    using var archive = ZipFile.OpenRead(zipPath);
+                    var zipEntries = archive.Entries
+                        .Select(entry => entry.FullName.Replace('\\', '/').Trim('/'))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    bool ZipContains(string relativePath) =>
+                        zipEntries.Contains(relativePath.Replace('\\', '/').Trim('/'));
+
+                    bool ZipContainsPrefix(string relativeDirectory) =>
+                        zipEntries.Any(entry => entry.StartsWith(relativeDirectory.Replace('\\', '/').Trim('/') + "/", StringComparison.OrdinalIgnoreCase));
+
+                    if (!ZipContains("README.txt"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-readme",
+                            "medium",
+                            "The distributable ZIP is missing README.txt, so install guidance is absent from the packaged archive."));
+                    }
+
+                    if (!ZipContains("dependency-map.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-dependency-map",
+                            "medium",
+                            "The distributable ZIP is missing dependency-map.json, so required source assets and plugin dependencies are not summarized in the packaged archive."));
+                    }
+
+                    if (!ZipContains("conversion-quality.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-conversion-quality-report",
+                            "medium",
+                            "The distributable ZIP is missing conversion-quality.json, so packaged validation scores and issue details are unavailable."));
+                    }
+
+                    if (!ZipContains("skeleton-compatibility.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-skeleton-compatibility-report",
+                            "medium",
+                            "The distributable ZIP is missing skeleton-compatibility.json, so packaged skeleton requirements and unsupported-bone diagnostics are unavailable."));
+                    }
+
+                    if (!ZipContains("pose-simulation-report.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-pose-report",
+                            "low",
+                            "The distributable ZIP is missing pose-simulation-report.json, so packaged pose-risk review data is unavailable."));
+                    }
+
+                    if (!ZipContains("world-physics.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-world-physics-report",
+                            "low",
+                            "The distributable ZIP is missing world-physics.json, so packaged world/drop guidance is unavailable."));
+                    }
+
+                    if (!ZipContains("preview.svg"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-svg",
+                            "low",
+                            "The distributable ZIP is missing preview.svg, so the packaged static preview render is unavailable."));
+                    }
+
+                    if (!ZipContains("preview.html"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-html",
+                            "low",
+                            "The distributable ZIP is missing preview.html, so the packaged interactive preview is unavailable."));
+                    }
+
+                    if (!ZipContains("preview-workbench.html"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-preview-workbench",
+                            "low",
+                            "The distributable ZIP is missing preview-workbench.html, so the packaged side-by-side review workbench is unavailable."));
+                    }
+
+                    if (!ZipContains("fomod/ModuleConfig.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-fomod-module-config",
+                            "medium",
+                            "The distributable ZIP is missing fomod/ModuleConfig.xml, so mod managers cannot install the archive as a FOMOD."));
+                    }
+
+                    if (!ZipContains("fomod/info.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-fomod-info",
+                            "medium",
+                            "The distributable ZIP is missing fomod/info.xml, so the packaged FOMOD metadata is incomplete."));
+                    }
+
+                    if (!ZipContainsPrefix($"meshes/slidesmith/{safeBodyToken}"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-mesh-output",
+                            "high",
+                            $"The distributable ZIP is missing converted meshes under 'meshes/slidesmith/{safeBodyToken}'."));
+                    }
+
+                    if (HasFile(rootCbpcConfigPath) && !ZipContains("SKSE/Plugins/CBPCSystem/cbpc-config.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-cbpc-config",
+                            "medium",
+                            "The distributable ZIP is missing SKSE/Plugins/CBPCSystem/cbpc-config.xml, so the packaged CBPC config will not install automatically."));
+                    }
+
+                    if (HasFile(rootSmpConfigPath) && !ZipContains("SKSE/Plugins/hdtSMP64/smp-config.xml"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-staged-smp-config",
+                            "medium",
+                            "The distributable ZIP is missing SKSE/Plugins/hdtSMP64/smp-config.xml, so the packaged SMP config will not install automatically."));
+                    }
+
+                    foreach (var pluginFileName in expectedFomodRootPlugins)
+                    {
+                        if (!ZipContains(pluginFileName))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-root-plugin",
+                                "medium",
+                                $"The distributable ZIP is missing root plugin '{pluginFileName}'."));
+                        }
+                    }
+
+                    foreach (var supportFileName in expectedFomodRootSupportFiles)
+                    {
+                        if (!ZipContains(supportFileName))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-root-support-file",
+                                "medium",
+                                $"The distributable ZIP is missing root support file '{supportFileName}'."));
+                        }
+                    }
+
+                    if (request.GenerateBodySlideFiles)
+                    {
+                        var zipOspPath = $"CalienteTools/BodySlide/SliderSets/{bodySlideProject.ProjectName}.osp";
+                        var zipShapeDataPrefix = $"CalienteTools/BodySlide/ShapeData/{bodySlideProject.ProjectName}";
+                        if (!ZipContains(zipOspPath))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-bodyslide-osp",
+                                "medium",
+                                $"The distributable ZIP is missing BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp'."));
+                        }
+
+                        if (!ZipContainsPrefix(zipShapeDataPrefix))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-bodyslide-shape-data",
+                                "medium",
+                                $"The distributable ZIP is missing BodySlide ShapeData assets for '{bodySlideProject.ProjectName}'."));
+                        }
+                        else
+                        {
+                            if (!zipEntries.Any(entry =>
+                                    entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
+                                    entry.EndsWith(".nif", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                issues.Add(new ConversionValidationIssue(
+                                    "zip-missing-bodyslide-reference-nif",
+                                    "medium",
+                                    $"The distributable ZIP is missing a BodySlide reference NIF for '{bodySlideProject.ProjectName}'."));
+                            }
+
+                            if (bodySlideProject.Sliders.Count > 0 &&
+                                !zipEntries.Any(entry =>
+                                    entry.StartsWith($"{zipShapeDataPrefix}/", StringComparison.OrdinalIgnoreCase) &&
+                                    (entry.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                                     entry.EndsWith(".tri", StringComparison.OrdinalIgnoreCase))))
+                            {
+                                issues.Add(new ConversionValidationIssue(
+                                    "zip-missing-bodyslide-slider-payload",
+                                    "medium",
+                                    $"The distributable ZIP is missing BSD/TRI slider payload files for '{bodySlideProject.ProjectName}'."));
+                            }
+                        }
+                    }
+
+                    if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+                    {
+                        if (!ZipContains("patch-armor.pas"))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-xedit-script",
+                                "medium",
+                                "The distributable ZIP is missing patch-armor.pas, so xEdit-based plugin rewrite fallback is not packaged."));
+                        }
+
+                        if (!ZipContains("plugin-patches.json"))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-plugin-patch-report",
+                                "medium",
+                                "The distributable ZIP is missing plugin-patches.json, so plugin rewrite guidance and verification output are not packaged."));
+                        }
+                    }
+                }
+                catch (InvalidDataException)
+                {
+                    issues.Add(new ConversionValidationIssue(
+                        "invalid-output-zip",
+                        "high",
+                        "The requested distributable ZIP could not be read, so the generated package is corrupt."));
+                }
+            }
+        }
+
+        return issues;
+    }
+
+    private static bool IsBethesdaPluginFile(string path) =>
+        Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
     {
@@ -11349,6 +15198,30 @@ internal sealed class LocalExportService(
         }
 
         return (topologyRisk, vertexDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, warnings);
+    }
+
+    private static IReadOnlyList<string> BuildNifSupportWarnings(
+        IReadOnlyList<NifSupportReport> reports,
+        string role)
+    {
+        return reports
+            .Where(report => !report.Status.Equals("supported", StringComparison.OrdinalIgnoreCase))
+            .Select(report => $"{role}-nif-{report.Status}:{Path.GetFileName(report.MeshPath)}:{report.ParseMode}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string DescribeUnsupportedNifReport(NifSupportReport report)
+    {
+        var fileName = Path.GetFileName(report.MeshPath);
+        var family = report.Messages
+            .FirstOrDefault(static message => message.StartsWith("geometry-family:", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            return fileName;
+        }
+
+        return $"{fileName} [{family["geometry-family:".Length..]}]";
     }
 
     // ── Preview helpers ──────────────────────────────────────────────────────
@@ -11424,41 +15297,1103 @@ internal sealed class LocalExportService(
 
     // ── Plugin guidance helpers ───────────────────────────────────────────────
 
-    private static IReadOnlyDictionary<string, string> BuildPluginRewriteMap(
+    private static PluginRewritePlan BuildPluginRewritePlan(
         PluginAnalysisResult pluginAnalysis,
-        string targetBody,
-        IReadOnlyList<string> writtenNifPaths)
+        IReadOnlyList<string> sourceMeshPaths,
+        string targetBody)
     {
-        var convertedByFileName = writtenNifPaths
-            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
-
         var rewrites = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sourceMeshMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingAmbiguous = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var relatedPluginMeshPaths = BuildRelatedPluginMeshPathMap(pluginAnalysis);
+        var sourceMeshVariantCounts = BuildSourceMeshVariantCountMap(sourceMeshPaths);
 
         // Collect paths from both ARMA (ArmorAddon) and ARMO (Armor) records.
         var allPaths = pluginAnalysis.ArmorAddons
             .SelectMany(a => a.DetectedMeshPaths)
-            .Concat((pluginAnalysis.ArmorRecords ?? []).SelectMany(r => r.DetectedMeshPaths));
+            .Concat((pluginAnalysis.ArmorRecords ?? []).SelectMany(r => r.DetectedMeshPaths))
+            .Select(NormalizePluginMeshPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         foreach (var originalPath in allPaths)
         {
-            var normalisedOriginal = originalPath.Replace('\\', '/');
-            var fileName = Path.GetFileName(normalisedOriginal);
-            if (string.IsNullOrWhiteSpace(fileName) || !convertedByFileName.ContainsKey(fileName))
+            var fileName = Path.GetFileName(originalPath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                missing.Add(originalPath);
+                continue;
+            }
+
+            if (!TryResolveSourceMeshForPluginPath(originalPath, sourceMeshPaths, sourceMeshVariantCounts, out var sourceMeshPath, out var ambiguousMatches))
+            {
+                if (ambiguousMatches.Count > 0)
+                {
+                    pendingAmbiguous[originalPath] = ambiguousMatches;
+                }
+                else
+                {
+                    missing.Add(originalPath);
+                }
+
+                continue;
+            }
+
+            rewrites[originalPath] = BuildPluginConvertedMeshPath(targetBody, originalPath, sourceMeshPath);
+            sourceMeshMap[originalPath] = sourceMeshPath;
+        }
+
+        var madeProgress = true;
+        while (pendingAmbiguous.Count > 0 && madeProgress)
+        {
+            madeProgress = false;
+            foreach (var (pluginMeshPath, candidatePaths) in pendingAmbiguous.ToArray())
+            {
+                if (!TryResolveAmbiguousSourceMeshFromContext(
+                        pluginMeshPath,
+                        candidatePaths,
+                        sourceMeshMap,
+                        relatedPluginMeshPaths,
+                        pendingAmbiguous,
+                        out var resolvedSourceMeshPath))
+                {
+                    continue;
+                }
+
+                rewrites[pluginMeshPath] = BuildPluginConvertedMeshPath(targetBody, pluginMeshPath, resolvedSourceMeshPath);
+                sourceMeshMap[pluginMeshPath] = resolvedSourceMeshPath;
+                pendingAmbiguous.Remove(pluginMeshPath);
+                madeProgress = true;
+            }
+        }
+
+        foreach (var (originalPath, ambiguousMatches) in pendingAmbiguous)
+        {
+            ambiguous.Add($"{originalPath} => {string.Join(" | ", ambiguousMatches.Select(Path.GetFileName))}");
+        }
+
+        var unresolvedTieGroups = pendingAmbiguous
+            .Select(pair => BuildUnresolvedPluginTieGroup(
+                pair.Key,
+                pair.Value,
+                sourceMeshMap,
+                relatedPluginMeshPaths,
+                pendingAmbiguous))
+            .OrderBy(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new PluginRewritePlan(
+            rewrites,
+            sourceMeshMap,
+            missing.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            ambiguous.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList(),
+            allPaths.Count,
+            unresolvedTieGroups);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> BuildRelatedPluginMeshPathMap(PluginAnalysisResult pluginAnalysis)
+    {
+        var relatedPathsByMeshPath = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        static IReadOnlyList<PluginLinkedFormReference> GetLinkedReferences(PluginArmorRecord armorRecord) =>
+            armorRecord.LinkedArmorAddonReferences?.Count > 0
+                ? armorRecord.LinkedArmorAddonReferences
+                : armorRecord.LinkedArmorAddonFormIds?.Select(rawFormId => new PluginLinkedFormReference(
+                    rawFormId,
+                    armorRecord.OwningPluginFileName,
+                    rawFormId & 0x00FFFFFFu)).ToList()
+                    ?? [];
+
+        static void AddRelatedGroup(
+            Dictionary<string, HashSet<string>> map,
+            IEnumerable<string> paths)
+        {
+            var normalizedPaths = paths
+                .Select(NormalizePluginMeshPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (normalizedPaths.Count < 2)
+            {
+                return;
+            }
+
+            foreach (var path in normalizedPaths)
+            {
+                if (!map.TryGetValue(path, out var related))
+                {
+                    related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    map[path] = related;
+                }
+
+                foreach (var candidate in normalizedPaths)
+                {
+                    if (!path.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        related.Add(candidate);
+                    }
+                }
+            }
+        }
+
+        var addonByResolvedKey = pluginAnalysis.ArmorAddons
+            .Where(static addon => addon.FormId != 0)
+            .Select(addon => new
+            {
+                Addon = addon,
+                Key = BuildResolvedPluginFormKey(
+                    addon.OwningPluginFileName,
+                    addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
+            })
+            .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            AddRelatedGroup(relatedPathsByMeshPath, addon.DetectedMeshPaths);
+        }
+
+        foreach (var standaloneAddonFamily in pluginAnalysis.ArmorAddons
+                     .Select(addon => new
+                     {
+                         Addon = addon,
+                         FamilyKey = BuildStandaloneArmorAddonFamilyKey(addon)
+                     })
+                     .Where(static entry => !string.IsNullOrWhiteSpace(entry.FamilyKey))
+                     .GroupBy(static entry => entry.FamilyKey!, StringComparer.OrdinalIgnoreCase)
+                     .Where(static group => group.Count() > 1))
+        {
+            foreach (var relatedStandaloneFamily in BuildStandaloneArmorAddonFamilyComponents(
+                         standaloneAddonFamily.Select(static entry => entry.Addon)))
+            {
+                AddRelatedGroup(
+                    relatedPathsByMeshPath,
+                    relatedStandaloneFamily.SelectMany(static addon => addon.DetectedMeshPaths));
+            }
+        }
+
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            var relatedPaths = new List<string>();
+            relatedPaths.AddRange(armorRecord.DetectedMeshPaths);
+            foreach (var linkedReference in GetLinkedReferences(armorRecord))
+            {
+                var linkedKey = BuildResolvedPluginFormKey(
+                    linkedReference.OwningPluginFileName,
+                    linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
+                if (addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
+                {
+                    relatedPaths.AddRange(linkedAddon.DetectedMeshPaths);
+                }
+            }
+
+            AddRelatedGroup(relatedPathsByMeshPath, relatedPaths);
+        }
+
+        return relatedPathsByMeshPath.ToDictionary(
+            static pair => pair.Key,
+            static pair => (IReadOnlyList<string>)pair.Value.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToList(),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePluginMeshPath(string pluginPath) =>
+        string.IsNullOrWhiteSpace(pluginPath)
+            ? string.Empty
+            : pluginPath.Replace('\\', '/').Trim().TrimStart('/');
+
+    private static string? BuildStandaloneArmorAddonFamilyKey(PluginArmorAddon addon)
+    {
+        var editorFamily = ExtractStandaloneArmorAddonEditorFamily(addon.EditorId);
+        return string.IsNullOrWhiteSpace(editorFamily) ? null : editorFamily;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<PluginArmorAddon>> BuildStandaloneArmorAddonFamilyComponents(
+        IEnumerable<PluginArmorAddon> addons)
+    {
+        var remaining = addons
+            .Distinct()
+            .ToList();
+        var components = new List<IReadOnlyList<PluginArmorAddon>>();
+        while (remaining.Count > 0)
+        {
+            var seed = remaining[0];
+            remaining.RemoveAt(0);
+            var component = new List<PluginArmorAddon> { seed };
+            var queue = new Queue<PluginArmorAddon>();
+            queue.Enqueue(seed);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                for (var index = remaining.Count - 1; index >= 0; index--)
+                {
+                    if (!AreStandaloneArmorAddonFamiliesRelated(current, remaining[index]))
+                    {
+                        continue;
+                    }
+
+                    var match = remaining[index];
+                    remaining.RemoveAt(index);
+                    component.Add(match);
+                    queue.Enqueue(match);
+                }
+            }
+
+            if (component.Count > 1)
+            {
+                components.Add(component);
+            }
+        }
+
+        return components;
+    }
+
+    private static bool AreStandaloneArmorAddonFamiliesRelated(PluginArmorAddon left, PluginArmorAddon right)
+    {
+        var leftOwner = NormalizeResolvedPluginFileNameOrNull(left.OwningPluginFileName);
+        var rightOwner = NormalizeResolvedPluginFileNameOrNull(right.OwningPluginFileName);
+        if (string.IsNullOrWhiteSpace(leftOwner) || string.IsNullOrWhiteSpace(rightOwner))
+        {
+            return false;
+        }
+
+        if (leftOwner.Equals(rightOwner, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var leftMasters = NormalizeDeclaredMasterFileNames(left.DeclaredMasterFileNames);
+        var rightMasters = NormalizeDeclaredMasterFileNames(right.DeclaredMasterFileNames);
+        return leftMasters.Contains(rightOwner)
+            || rightMasters.Contains(leftOwner);
+    }
+
+    private static IReadOnlySet<string> NormalizeDeclaredMasterFileNames(IReadOnlyList<string>? masterFileNames)
+    {
+        var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var masterFileName in masterFileNames ?? [])
+        {
+            var normalizedFileName = NormalizeResolvedPluginFileNameOrNull(masterFileName);
+            if (!string.IsNullOrWhiteSpace(normalizedFileName))
+            {
+                normalized.Add(normalizedFileName);
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string? ExtractStandaloneArmorAddonEditorFamily(string? editorId)
+    {
+        if (string.IsNullOrWhiteSpace(editorId))
+        {
+            return null;
+        }
+
+        var separatedTokens = editorId
+            .Split(['_', '-', ':', '/', '\\', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeStandaloneArmorAddonEditorToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        var separatedFamily = BuildStandaloneArmorAddonEditorFamilyFromTokens(separatedTokens);
+        if (!string.IsNullOrWhiteSpace(separatedFamily))
+        {
+            return separatedFamily;
+        }
+
+        var camelTokens = System.Text.RegularExpressions.Regex.Matches(editorId.Trim(), "[A-Z]+(?=$|[A-Z][a-z0-9])|[A-Z]?[a-z0-9]+")
+            .Select(static match => NormalizeStandaloneArmorAddonEditorToken(match.Value))
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        return BuildStandaloneArmorAddonEditorFamilyFromTokens(camelTokens);
+    }
+
+    private static string? BuildStandaloneArmorAddonEditorFamilyFromTokens(IReadOnlyList<string> tokens)
+    {
+        if (tokens.Count < 2)
+        {
+            return null;
+        }
+
+        var trimmedTokens = tokens.ToList();
+        while (trimmedTokens.Count > 1 && IsStandaloneArmorAddonSpecificToken(trimmedTokens[^1]))
+        {
+            trimmedTokens.RemoveAt(trimmedTokens.Count - 1);
+        }
+
+        while (trimmedTokens.Count > 1 && IsStandaloneArmorAddonGenericToken(trimmedTokens[^1]))
+        {
+            trimmedTokens.RemoveAt(trimmedTokens.Count - 1);
+        }
+
+        if (trimmedTokens.Count < 2)
+        {
+            return null;
+        }
+
+        var familyTokens = trimmedTokens.Take(trimmedTokens.Count - 1).ToList();
+        while (familyTokens.Count > 1 && IsStandaloneArmorAddonGenericToken(familyTokens[^1]))
+        {
+            familyTokens.RemoveAt(familyTokens.Count - 1);
+        }
+
+        if (familyTokens.Count == 0)
+        {
+            return null;
+        }
+
+        var normalizedFamily = string.Join("-", familyTokens);
+        return normalizedFamily.Length >= 6 ? normalizedFamily : null;
+    }
+
+    private static string NormalizeStandaloneArmorAddonEditorToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return new string(token
+                .Where(char.IsLetterOrDigit)
+                .ToArray())
+            .ToLowerInvariant();
+    }
+
+    private static bool IsStandaloneArmorAddonSpecificToken(string token) =>
+        token is "0" or "1" or "male" or "female" or "firstperson" or "first" or "fp" or
+            "world" or "ground" or "gnd" or "addon" or "aa" or "arma" or "armo";
+
+    private static bool IsStandaloneArmorAddonGenericToken(string token) =>
+        token is "addon" or "aa" or "arma" or "armo" or "armor" or "piece" or "part" or "device";
+
+    private static bool TryResolveSourceMeshForPluginPath(
+        string pluginMeshPath,
+        IReadOnlyList<string> sourceMeshPaths,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts,
+        out string sourceMeshPath,
+        out IReadOnlyList<string> ambiguousMatches)
+    {
+        sourceMeshPath = string.Empty;
+        ambiguousMatches = [];
+
+        var fileName = Path.GetFileName(pluginMeshPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        var candidates = sourceMeshPaths
+            .Where(path =>
+                Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase) &&
+                IsPluginMeshFileNameMatch(fileName, Path.GetFileName(path)))
+            .Select(path => new
+            {
+                Path = path,
+                Score = ScoreSourceMeshCandidate(pluginMeshPath, path, sourceMeshVariantCounts)
+            })
+            .Where(candidate => candidate.Score > 0)
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestScore = candidates.Max(static candidate => candidate.Score);
+        var bestMatches = candidates
+            .Where(candidate => candidate.Score == bestScore)
+            .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (bestMatches.Count != 1)
+        {
+            ambiguousMatches = bestMatches.Select(static candidate => candidate.Path).ToList();
+            return false;
+        }
+
+        sourceMeshPath = bestMatches[0].Path;
+        return true;
+    }
+
+    private static bool TryResolveAmbiguousSourceMeshFromContext(
+        string pluginMeshPath,
+        IReadOnlyList<string> candidatePaths,
+        IReadOnlyDictionary<string, string> resolvedSourceMeshByPluginPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths,
+        out string sourceMeshPath)
+    {
+        sourceMeshPath = string.Empty;
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        var relatedGroup = CollectRelatedPluginMeshPathGroup(normalizedPluginMeshPath, relatedPluginMeshPaths);
+
+        var resolvedNeighborPaths = relatedGroup
+            .Select(path => resolvedSourceMeshByPluginPath.TryGetValue(path, out var resolvedPath) ? resolvedPath : null)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var pendingGroupPaths = relatedGroup
+            .Where(pendingAmbiguousCandidatePaths.ContainsKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var groupContextSupport = BuildGroupContextSupportMap(pendingGroupPaths, pendingAmbiguousCandidatePaths);
+
+        var scoredCandidates = candidatePaths
+            .Select(path => new
+            {
+                Path = path,
+                Score = ScoreSourceMeshCandidateFromContext(path, resolvedNeighborPaths, groupContextSupport)
+            })
+            .Where(static candidate => candidate.Score > 0)
+            .ToList();
+        if (scoredCandidates.Count == 0)
+        {
+            return false;
+        }
+
+        var bestScore = scoredCandidates.Max(static candidate => candidate.Score);
+        var bestMatches = scoredCandidates
+            .Where(candidate => candidate.Score == bestScore)
+            .OrderBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (bestMatches.Count != 1)
+        {
+            return false;
+        }
+
+        sourceMeshPath = bestMatches[0].Path;
+        return true;
+    }
+
+    private static IReadOnlyList<string> CollectRelatedPluginMeshPathGroup(
+        string pluginMeshPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths)
+    {
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        if (string.IsNullOrWhiteSpace(normalizedPluginMeshPath))
+        {
+            return [];
+        }
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>();
+        visited.Add(normalizedPluginMeshPath);
+        queue.Enqueue(normalizedPluginMeshPath);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (!relatedPluginMeshPaths.TryGetValue(current, out var neighbors))
             {
                 continue;
             }
 
-            rewrites[normalisedOriginal] = BuildPluginConvertedMeshPath(targetBody, fileName, normalisedOriginal);
+            foreach (var neighbor in neighbors)
+            {
+                if (string.IsNullOrWhiteSpace(neighbor) || !visited.Add(neighbor))
+                {
+                    continue;
+                }
+
+                queue.Enqueue(neighbor);
+            }
         }
 
-        return rewrites;
+        return visited.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static string BuildPluginConvertedMeshPath(string targetBody, string fileName, string originalPath)
+    private static IReadOnlyDictionary<string, int> BuildGroupContextSupportMap(
+        IReadOnlyList<string> groupPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths)
+    {
+        var support = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var groupPluginMeshPath in groupPluginMeshPaths)
+        {
+            if (!pendingAmbiguousCandidatePaths.TryGetValue(groupPluginMeshPath, out var candidatePaths) ||
+                candidatePaths.Count == 0)
+            {
+                continue;
+            }
+
+            var candidateFamilies = candidatePaths
+                .SelectMany(static path => EnumerateComparablePathAncestors(Path.GetDirectoryName(path) ?? string.Empty))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            foreach (var family in candidateFamilies)
+            {
+                support[family] = support.GetValueOrDefault(family) + 1;
+            }
+        }
+
+        return support;
+    }
+
+    private static UnresolvedPluginTieGroup BuildUnresolvedPluginTieGroup(
+        string pluginMeshPath,
+        IReadOnlyList<string> candidatePaths,
+        IReadOnlyDictionary<string, string> resolvedSourceMeshByPluginPath,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> relatedPluginMeshPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> pendingAmbiguousCandidatePaths)
+    {
+        var normalizedPluginMeshPath = NormalizePluginMeshPath(pluginMeshPath);
+        var relatedGroup = CollectRelatedPluginMeshPathGroup(normalizedPluginMeshPath, relatedPluginMeshPaths);
+        var resolvedNeighborPaths = relatedGroup
+            .Select(path => resolvedSourceMeshByPluginPath.TryGetValue(path, out var resolvedPath) ? resolvedPath : null)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var pendingGroupPaths = relatedGroup
+            .Where(pendingAmbiguousCandidatePaths.ContainsKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var sharedCandidateFamilies = BuildGroupContextSupportMap(pendingGroupPaths, pendingAmbiguousCandidatePaths)
+            .Where(static pair => pair.Value >= 2)
+            .OrderByDescending(static pair => pair.Value)
+            .ThenByDescending(static pair => CountPathSegments(pair.Key))
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(static pair => new PluginTieFamilyHint(DescribeSourceContextPath(pair.Key), pair.Value))
+            .ToList();
+        var candidateFamilies = candidatePaths
+            .Select(path => DescribeSourceContextPath(Path.GetDirectoryName(path) ?? string.Empty))
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var manualReviewReason = resolvedNeighborPaths.Count == 0
+            ? "No linked ARMO/ARMA neighbor produced a unique source-family match."
+            : "Linked ARMO/ARMA context still left multiple equally plausible source families.";
+
+        return new UnresolvedPluginTieGroup(
+            normalizedPluginMeshPath,
+            candidatePaths.Select(DescribeSourceContextPath)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            candidateFamilies,
+            relatedGroup.Where(path => !path.Equals(normalizedPluginMeshPath, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            resolvedNeighborPaths.Select(DescribeSourceContextPath)
+                .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            sharedCandidateFamilies,
+            manualReviewReason);
+    }
+
+    private static int ScoreSourceMeshCandidate(
+        string pluginMeshPath,
+        string sourceMeshPath,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts)
+    {
+        var normalizedPluginPath = NormalizePluginMeshPath(pluginMeshPath);
+        var comparableSourcePath = NormalizeComparablePath(sourceMeshPath);
+        var pluginFileName = Path.GetFileName(normalizedPluginPath);
+        var sourceFileName = Path.GetFileName(comparableSourcePath);
+        var pluginStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(normalizedPluginPath));
+        var sourceStem = NormalizeMeshStemForPluginMatch(Path.GetFileName(comparableSourcePath));
+        var pluginVariants = new[]
+        {
+            normalizedPluginPath,
+            TrimMeshesPrefix(normalizedPluginPath)
+        }.Where(static value => !string.IsNullOrWhiteSpace(value))
+         .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        var bestScore = 0;
+        foreach (var variant in pluginVariants)
+        {
+            var trailingSegmentMatches = CountMatchingTrailingSegments(comparableSourcePath, variant);
+            var score = trailingSegmentMatches * 100;
+            if (HasPathSuffix(comparableSourcePath, variant))
+            {
+                score += 10_000;
+            }
+
+            score += CountSharedPathTokens(comparableSourcePath, variant) * 15;
+            if (!string.IsNullOrWhiteSpace(pluginStem) &&
+                pluginStem.Equals(sourceStem, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 75;
+            }
+
+            if (!string.IsNullOrWhiteSpace(pluginFileName) &&
+                pluginFileName.Equals(sourceFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250;
+            }
+
+            if (PreferLowWeightVariantForUnsuffixedPlugin(pluginFileName, sourceFileName))
+            {
+                score += 40;
+            }
+
+            score += GetMeshVariantAlignmentScore(normalizedPluginPath, comparableSourcePath);
+            score += GetSourceMeshVariantCountBonus(comparableSourcePath, sourceMeshVariantCounts);
+            score -= GetDiscouragedSourcePathPenalty(comparableSourcePath);
+
+            bestScore = Math.Max(bestScore, score);
+        }
+
+        return bestScore;
+    }
+
+    private static int ScoreSourceMeshCandidateFromNeighbors(
+        string candidatePath,
+        IReadOnlyList<string> resolvedNeighborPaths)
+    {
+        var candidateDirectory = NormalizeComparablePath(Path.GetDirectoryName(candidatePath) ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidateDirectory))
+        {
+            return 0;
+        }
+
+        var bestScore = 0;
+        foreach (var neighborPath in resolvedNeighborPaths)
+        {
+            var neighborDirectory = NormalizeComparablePath(Path.GetDirectoryName(neighborPath) ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(neighborDirectory))
+            {
+                continue;
+            }
+
+            var score = CountMatchingTrailingSegments(candidateDirectory, neighborDirectory) * 250;
+            score += CountMatchingLeadingSegments(candidateDirectory, neighborDirectory) * 400;
+            if (candidateDirectory.Equals(neighborDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 10_000;
+            }
+
+            score += CountSharedPathTokens(candidateDirectory, neighborDirectory) * 20;
+            bestScore = Math.Max(bestScore, score);
+        }
+
+        return bestScore;
+    }
+
+    private static int ScoreSourceMeshCandidateFromContext(
+        string candidatePath,
+        IReadOnlyList<string> resolvedNeighborPaths,
+        IReadOnlyDictionary<string, int> groupContextSupport)
+    {
+        var neighborScore = ScoreSourceMeshCandidateFromNeighbors(candidatePath, resolvedNeighborPaths);
+        var candidateDirectory = NormalizeComparablePath(Path.GetDirectoryName(candidatePath) ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(candidateDirectory))
+        {
+            return neighborScore;
+        }
+
+        var bestGroupContextScore = 0;
+        foreach (var ancestor in EnumerateComparablePathAncestors(candidateDirectory))
+        {
+            if (!groupContextSupport.TryGetValue(ancestor, out var supportCount) || supportCount < 2)
+            {
+                continue;
+            }
+
+            var score = supportCount * 10_000 + CountPathSegments(ancestor) * 100;
+            bestGroupContextScore = Math.Max(bestGroupContextScore, score);
+        }
+
+        return neighborScore + bestGroupContextScore;
+    }
+
+    private static int CountMatchingTrailingSegments(string leftPath, string rightPath)
+    {
+        var leftSegments = NormalizeComparablePath(leftPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rightSegments = NormalizeComparablePath(rightPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var matches = 0;
+        for (int leftIndex = leftSegments.Length - 1, rightIndex = rightSegments.Length - 1;
+             leftIndex >= 0 && rightIndex >= 0;
+             leftIndex--, rightIndex--)
+        {
+            if (!leftSegments[leftIndex].Equals(rightSegments[rightIndex], StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            matches++;
+        }
+
+        return matches;
+    }
+
+    private static int CountMatchingLeadingSegments(string leftPath, string rightPath)
+    {
+        var leftSegments = NormalizeComparablePath(leftPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rightSegments = NormalizeComparablePath(rightPath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var matches = 0;
+        var length = Math.Min(leftSegments.Length, rightSegments.Length);
+        for (var index = 0; index < length; index++)
+        {
+            if (!leftSegments[index].Equals(rightSegments[index], StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            matches++;
+        }
+
+        return matches;
+    }
+
+    private static bool HasPathSuffix(string path, string suffix)
+    {
+        var normalizedPath = NormalizeComparablePath(path);
+        var normalizedSuffix = NormalizeComparablePath(suffix);
+        return normalizedPath.Equals(normalizedSuffix, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.EndsWith($"/{normalizedSuffix}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> EnumerateComparablePathAncestors(string path)
+    {
+        var normalized = NormalizeComparablePath(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            yield break;
+        }
+
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var length = segments.Length; length >= 1; length--)
+        {
+            yield return string.Join('/', segments.Take(length));
+        }
+    }
+
+    private static int CountPathSegments(string path) =>
+        NormalizeComparablePath(path)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Length;
+
+    private static string NormalizeComparablePath(string path) =>
+        string.IsNullOrWhiteSpace(path)
+            ? string.Empty
+            : path.Replace('\\', '/').Trim().Trim('/');
+
+    private static string DescribeSourceContextPath(string path)
+    {
+        var normalized = NormalizeComparablePath(path);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        foreach (var marker in new[] { "meshes/", "textures/", "skse/", "calientetools/" })
+        {
+            var index = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return normalized[index..];
+            }
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildSourceMeshVariantCountMap(IReadOnlyList<string> sourceMeshPaths)
+    {
+        return sourceMeshPaths
+            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(
+                path => $"{NormalizeComparablePath(Path.GetDirectoryName(path) ?? string.Empty)}|{NormalizeMeshStemForPluginMatch(Path.GetFileName(path))}",
+                StringComparer.OrdinalIgnoreCase)
+            .SelectMany(group =>
+            {
+                var count = group.Count();
+                return group.Select(path => new KeyValuePair<string, int>(NormalizeComparablePath(path), count));
+            })
+            .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static int GetSourceMeshVariantCountBonus(
+        string sourceMeshPath,
+        IReadOnlyDictionary<string, int> sourceMeshVariantCounts)
+    {
+        if (!sourceMeshVariantCounts.TryGetValue(NormalizeComparablePath(sourceMeshPath), out var variantCount) ||
+            variantCount <= 1)
+        {
+            return 0;
+        }
+
+        return (variantCount - 1) * 120;
+    }
+
+    private static int GetMeshVariantAlignmentScore(string pluginMeshPath, string sourceMeshPath)
+    {
+        var pluginSignals = ExtractMeshPathVariantSignals(pluginMeshPath);
+        var sourceSignals = ExtractMeshPathVariantSignals(sourceMeshPath);
+
+        var score = 0;
+        score += ScoreVariantSignalAlignment(pluginSignals.IsFirstPerson, sourceSignals.IsFirstPerson, matchBonus: 600, mismatchPenalty: 450, unexpectedSourcePenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsWorld, sourceSignals.IsWorld, matchBonus: 180, mismatchPenalty: 120);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsFemale, sourceSignals.IsFemale, matchBonus: 260, mismatchPenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsMale, sourceSignals.IsMale, matchBonus: 260, mismatchPenalty: 220);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsLowWeight, sourceSignals.IsLowWeight, matchBonus: 320, mismatchPenalty: 260);
+        score += ScoreVariantSignalAlignment(pluginSignals.IsHighWeight, sourceSignals.IsHighWeight, matchBonus: 320, mismatchPenalty: 260);
+        return score;
+    }
+
+    private static int ScoreVariantSignalAlignment(
+        bool pluginHasSignal,
+        bool sourceHasSignal,
+        int matchBonus,
+        int mismatchPenalty,
+        int unexpectedSourcePenalty = 0)
+    {
+        if (pluginHasSignal)
+        {
+            return sourceHasSignal ? matchBonus : -mismatchPenalty;
+        }
+
+        return sourceHasSignal ? -unexpectedSourcePenalty : 0;
+    }
+
+    private static MeshPathVariantSignals ExtractMeshPathVariantSignals(string path)
+    {
+        var tokens = ExtractRawPathTokens(path);
+        var fileStemTokens = ExtractFileStemTokens(path);
+        return new MeshPathVariantSignals(
+            IsFirstPerson: tokens.Any(IsFirstPersonVariantToken),
+            IsWorld: tokens.Any(IsWorldVariantToken),
+            IsFemale: tokens.Any(static token => token.Equals("female", StringComparison.OrdinalIgnoreCase))
+                || fileStemTokens.Any(IsFemaleVariantToken),
+            IsMale: tokens.Any(static token => token.Equals("male", StringComparison.OrdinalIgnoreCase))
+                || fileStemTokens.Any(IsMaleVariantToken),
+            IsLowWeight: HasLowWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path),
+            IsHighWeight: HasHighWeightVariantSuffix(Path.GetFileNameWithoutExtension(path) ?? path));
+    }
+
+    private static int GetDiscouragedSourcePathPenalty(string sourceMeshPath)
+    {
+        var normalizedPath = NormalizeComparablePath(sourceMeshPath);
+        var relativeMeshPath = TryTrimPathToMeshesSubpath(normalizedPath, out var trimmedPath)
+            ? trimmedPath
+            : normalizedPath;
+        var discouragedSegments = relativeMeshPath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Count(IsDiscouragedSourcePathSegment);
+        return discouragedSegments * 350;
+    }
+
+    private static bool TryTrimPathToMeshesSubpath(string path, out string trimmedPath)
+    {
+        trimmedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        const string meshesToken = "/meshes/";
+        var normalizedPath = NormalizeComparablePath(path);
+        var meshesIndex = normalizedPath.LastIndexOf(meshesToken, StringComparison.OrdinalIgnoreCase);
+        if (meshesIndex < 0)
+        {
+            if (normalizedPath.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmedPath = normalizedPath;
+                return true;
+            }
+
+            return false;
+        }
+
+        trimmedPath = normalizedPath[(meshesIndex + 1)..];
+        return true;
+    }
+
+    private static bool IsDiscouragedSourcePathSegment(string segment) =>
+        segment.Equals("duplicate", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("duplicates", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("backup", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("backups", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("copy", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("copies", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("tmp", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("temp", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("old", StringComparison.OrdinalIgnoreCase) ||
+        segment.Equals("deprecated", StringComparison.OrdinalIgnoreCase);
+
+    private static bool PreferLowWeightVariantForUnsuffixedPlugin(string? pluginFileName, string? sourceFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(sourceFileName))
+        {
+            return false;
+        }
+
+        var pluginStem = Path.GetFileNameWithoutExtension(pluginFileName) ?? pluginFileName;
+        var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName) ?? sourceFileName;
+        return !HasExplicitBodyWeightSuffix(pluginStem) &&
+               HasLowWeightVariantSuffix(sourceStem);
+    }
+
+    private static bool HasExplicitBodyWeightSuffix(string fileStem) =>
+        HasLowWeightVariantSuffix(fileStem) ||
+        HasHighWeightVariantSuffix(fileStem);
+
+    private static bool HasLowWeightVariantSuffix(string fileStem) =>
+        fileStem.EndsWith("_0", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasHighWeightVariantSuffix(string fileStem) =>
+        fileStem.EndsWith("_1", StringComparison.OrdinalIgnoreCase);
+
+    private static string TrimMeshesPrefix(string pluginPath)
+    {
+        var normalized = NormalizePluginMeshPath(pluginPath);
+        return normalized.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)
+            ? normalized["meshes/".Length..]
+            : normalized;
+    }
+
+    private static bool IsPluginMeshFileNameMatch(string pluginFileName, string? sourceFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName) || string.IsNullOrWhiteSpace(sourceFileName))
+        {
+            return false;
+        }
+
+        if (pluginFileName.Equals(sourceFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return NormalizeMeshStemForPluginMatch(pluginFileName)
+            .Equals(NormalizeMeshStemForPluginMatch(sourceFileName), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int CountSharedPathTokens(string leftPath, string rightPath)
+    {
+        var leftTokens = ExtractComparablePathTokens(leftPath);
+        var rightTokens = ExtractComparablePathTokens(rightPath);
+        return leftTokens.Intersect(rightTokens, StringComparer.OrdinalIgnoreCase).Count();
+    }
+
+    private static IReadOnlyList<string> ExtractComparablePathTokens(string path)
+    {
+        return ExtractRawPathTokens(path)
+            .Where(static token => token.Length > 1 && !IsGenericPluginPathToken(token))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ExtractRawPathTokens(string path)
+    {
+        return NormalizeComparablePath(path)
+            .Split(['/', '\\', '_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static bool IsGenericPluginPathToken(string token) =>
+        token.Equals("meshes", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("mesh", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("armor", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("clothes", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("clothing", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("female", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("male", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("item", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeMeshStemForPluginMatch(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return string.Empty;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName) ?? fileName;
+        stem = stem.Replace("1stperson", "_firstperson_", StringComparison.OrdinalIgnoreCase)
+            .Replace("firstperson", "_firstperson_", StringComparison.OrdinalIgnoreCase);
+        var normalizedTokens = stem
+            .Split(['_', '-', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(CanonicalizeMeshStemMatchToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .ToList();
+        if (normalizedTokens.Count > 0 && normalizedTokens[^1] is "0" or "1")
+        {
+            normalizedTokens.RemoveAt(normalizedTokens.Count - 1);
+        }
+
+        return new string(normalizedTokens
+            .SelectMany(static token => token)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+    }
+
+    private static string CanonicalizeMeshStemMatchToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        return token.Trim().ToLowerInvariant() switch
+        {
+            "1stperson" or "firstperson" or "first" or "fp" => string.Empty,
+            "gnd" => "ground",
+            "f" or "fem" => "female",
+            "m" or "masc" => "male",
+            _ => token
+        };
+    }
+
+    private static IReadOnlyList<string> ExtractFileStemTokens(string path)
+    {
+        var stem = Path.GetFileNameWithoutExtension(path) ?? path;
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            return [];
+        }
+
+        stem = stem.Replace("1stperson", "_1stperson_", StringComparison.OrdinalIgnoreCase)
+            .Replace("firstperson", "_firstperson_", StringComparison.OrdinalIgnoreCase);
+        return stem.Split(['_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static bool IsFirstPersonVariantToken(string token) =>
+        token.Equals("1stperson", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("firstperson", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("first", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("1st", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("fp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWorldVariantToken(string token) =>
+        token.Equals("world", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("ground", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("gnd", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFemaleVariantToken(string token) =>
+        token.Equals("female", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("fem", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("f", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsMaleVariantToken(string token) =>
+        token.Equals("male", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("masc", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("m", StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildPluginConvertedMeshPath(string targetBody, string originalPath, string? sourceMeshPath = null)
     {
         var safeBodyToken = BuildSafeBodyToken(targetBody);
-        var rewrittenRelative = $"slidesmith/{safeBodyToken}/{fileName}";
+        var relativePluginPath = TrimMeshesPrefix(originalPath);
+        var fileName = Path.GetFileName(relativePluginPath);
+        var matchedFileName = Path.GetFileName(sourceMeshPath);
+        if (!string.IsNullOrWhiteSpace(matchedFileName))
+        {
+            fileName = matchedFileName;
+        }
+
+        var directory = Path.GetDirectoryName(relativePluginPath)?
+            .Replace('\\', '/')
+            .Trim('/')
+            .Trim();
+        var rewrittenRelative = string.IsNullOrWhiteSpace(directory)
+            ? $"slidesmith/{safeBodyToken}/{fileName}"
+            : $"slidesmith/{safeBodyToken}/{directory}/{fileName}";
         return HasPluginMeshesPrefix(originalPath)
             ? $"meshes/{rewrittenRelative}"
             : rewrittenRelative;
@@ -11483,7 +16418,7 @@ internal sealed class LocalExportService(
             return false;
         }
 
-        var normalised = pluginPath.Replace('\\', '/').TrimStart('/');
+        var normalised = NormalizePluginMeshPath(pluginPath);
         return normalised.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -11494,33 +16429,611 @@ internal sealed class LocalExportService(
             return string.Empty;
         }
 
-        var normalised = pluginMeshPath.Replace('\\', '/').TrimStart('/');
+        var normalised = NormalizePluginMeshPath(pluginMeshPath);
         return HasPluginMeshesPrefix(normalised)
             ? normalised
             : $"meshes/{normalised}";
     }
 
-    private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
+    private static IReadOnlyList<string> BuildMissingStagedPluginMeshes(
         string outputDirectory,
-        IReadOnlyList<string> writtenNifPaths,
         IReadOnlyDictionary<string, string> pluginRewriteMap,
-        CancellationToken cancellationToken)
+        IReadOnlySet<string> stagedPluginMeshes)
     {
-        if (pluginRewriteMap.Count == 0 || writtenNifPaths.Count == 0)
+        var missing = new List<string>();
+        foreach (var rewrittenPath in pluginRewriteMap.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var outputMeshPath = ResolveOutputMeshPath(rewrittenPath);
+            if (string.IsNullOrWhiteSpace(outputMeshPath))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.Combine(
+                outputDirectory,
+                outputMeshPath.Replace('/', Path.DirectorySeparatorChar));
+            if (!stagedPluginMeshes.Contains(destinationPath) && !File.Exists(destinationPath))
+            {
+                missing.Add(outputMeshPath);
+            }
+        }
+
+        return missing;
+    }
+
+    private sealed record LinkedArmorAddonVerificationSummary(
+        int LinkedArmorReferenceCount,
+        int VerifiedLinkedArmorReferenceCount,
+        IReadOnlyList<string> MissingLinkedArmorAddonRecords,
+        IReadOnlyList<string> UnscannedLinkedArmorAddonReferences,
+        IReadOnlyList<string> UnsupportedLinkedArmorAddonMeshes,
+        IReadOnlyList<string> MissingLinkedConvertedMatches,
+        IReadOnlyList<string> MissingLinkedStagedMeshes,
+        IReadOnlyList<PartialLinkedArmorFamilyFailure> PartialLinkedArmorFamilyFailures);
+
+    private sealed record LinkedArmorReferenceOutcome(
+        bool Verified,
+        string Detail,
+        string Category,
+        IReadOnlyList<string> CandidateSourceFamilies);
+
+    private static PluginRewriteVerificationReport BuildPluginRewriteVerificationReport(
+        PluginRewritePlan pluginRewritePlan,
+        PluginAnalysisResult pluginAnalysis,
+        string outputDirectory,
+        IReadOnlySet<string> stagedPluginMeshes,
+        IReadOnlyList<string> patchedPluginPaths,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> patchMasterValidationExpectations,
+        IReadOnlyList<string> warnings,
+        IReadOnlyList<NifSupportReport>? sourceNifSupport = null)
+    {
+        var rewrittenPaths = pluginRewritePlan.RewriteMap.Values
+            .Select(NormalizePluginMeshPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingStagedMeshes = BuildMissingStagedPluginMeshes(outputDirectory, pluginRewritePlan.RewriteMap, stagedPluginMeshes);
+        var verifiedPluginPathCount = 0;
+        var missingPatchPluginMasters = new List<string>();
+        var patchPluginMasterOrderMismatches = new List<string>();
+        var unverifiedPatchedPlugins = new List<string>();
+
+        foreach (var pluginPath in patchedPluginPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var pluginBytes = File.ReadAllBytes(pluginPath);
+                var detectedPaths = BinaryArmaParser.ExtractArmaRecords(pluginBytes, Path.GetFileName(pluginPath) ?? string.Empty)
+                    .SelectMany(record => record.MeshPaths)
+                    .Concat(BinaryArmaParser.ExtractArmoRecords(pluginBytes, Path.GetFileName(pluginPath) ?? string.Empty)
+                        .SelectMany(record => record.MeshPaths))
+                    .Select(NormalizePluginMeshPath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (patchMasterValidationExpectations.TryGetValue(pluginPath, out var masterExpectation))
+                {
+                    var actualMasters = BinaryArmaParser.ExtractMasterFileNames(pluginBytes)
+                        .Select(static name => Path.GetFileName(name) ?? name)
+                        .Where(static name => !string.IsNullOrWhiteSpace(name))
+                        .ToList();
+                    var expectedMasters = masterExpectation
+                        .Select(static name => Path.GetFileName(name) ?? name)
+                        .Where(static name => !string.IsNullOrWhiteSpace(name))
+                        .ToList();
+                    var missingMasters = expectedMasters
+                        .Except(actualMasters, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (missingMasters.Count > 0)
+                    {
+                        missingPatchPluginMasters.Add(
+                            $"{Path.GetFileName(pluginPath) ?? pluginPath} missing expected masters: {string.Join(", ", missingMasters)}");
+                    }
+                    else if (!actualMasters.SequenceEqual(expectedMasters, StringComparer.OrdinalIgnoreCase))
+                    {
+                        patchPluginMasterOrderMismatches.Add(
+                            $"{Path.GetFileName(pluginPath) ?? pluginPath} expected master order {string.Join(" -> ", expectedMasters)} but found {string.Join(" -> ", actualMasters)}");
+                    }
+                }
+
+                var verifiedCount = detectedPaths.Count(rewrittenPaths.Contains);
+                if (verifiedCount > 0)
+                {
+                    verifiedPluginPathCount += verifiedCount;
+                }
+                else
+                {
+                    unverifiedPatchedPlugins.Add(Path.GetFileName(pluginPath) ?? pluginPath);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException)
+            {
+                unverifiedPatchedPlugins.Add($"{Path.GetFileName(pluginPath) ?? pluginPath}: {ex.Message}");
+            }
+        }
+
+        var linkedArmorVerification = BuildLinkedArmorAddonVerificationSummary(
+            pluginAnalysis,
+            pluginRewritePlan,
+            missingStagedMeshes,
+            sourceNifSupport);
+
+        return new PluginRewriteVerificationReport(
+            DetectedMeshPathCount: pluginRewritePlan.DetectedMeshPathCount,
+            RewriteReadyCount: pluginRewritePlan.RewriteMap.Count,
+            VerifiedPluginPathCount: verifiedPluginPathCount,
+            StagedMeshCount: stagedPluginMeshes.Count,
+            LinkedArmorReferenceCount: linkedArmorVerification.LinkedArmorReferenceCount,
+            VerifiedLinkedArmorReferenceCount: linkedArmorVerification.VerifiedLinkedArmorReferenceCount,
+            MissingConvertedMatches: pluginRewritePlan.MissingConvertedMatches,
+            AmbiguousConvertedMatches: pluginRewritePlan.AmbiguousConvertedMatches,
+            MissingStagedMeshes: missingStagedMeshes,
+            MissingLinkedArmorAddonRecords: linkedArmorVerification.MissingLinkedArmorAddonRecords,
+            UnscannedLinkedArmorAddonReferences: linkedArmorVerification.UnscannedLinkedArmorAddonReferences,
+            UnsupportedLinkedArmorAddonMeshes: linkedArmorVerification.UnsupportedLinkedArmorAddonMeshes,
+            MissingLinkedConvertedMatches: linkedArmorVerification.MissingLinkedConvertedMatches,
+            MissingLinkedStagedMeshes: linkedArmorVerification.MissingLinkedStagedMeshes,
+            PartialLinkedArmorFamilyFailures: linkedArmorVerification.PartialLinkedArmorFamilyFailures,
+            MissingPatchPluginMasters: missingPatchPluginMasters,
+            PatchPluginMasterOrderMismatches: patchPluginMasterOrderMismatches,
+            UnverifiedPatchedPlugins: unverifiedPatchedPlugins,
+            Warnings: warnings,
+            UnresolvedTieGroups: pluginRewritePlan.UnresolvedTieGroups);
+    }
+
+    private static LinkedArmorAddonVerificationSummary BuildLinkedArmorAddonVerificationSummary(
+        PluginAnalysisResult pluginAnalysis,
+        PluginRewritePlan pluginRewritePlan,
+        IReadOnlyList<string> missingStagedMeshes,
+        IReadOnlyList<NifSupportReport>? sourceNifSupport)
+    {
+        var linkedReferenceCount = 0;
+        var verifiedLinkedReferenceCount = 0;
+        var missingLinkedArmorAddons = new List<string>();
+        var unscannedLinkedArmorAddons = new List<string>();
+        var unsupportedLinkedArmorMeshes = new List<string>();
+        var missingLinkedConvertedMatches = new List<string>();
+        var missingLinkedStagedMeshes = new List<string>();
+        var partialLinkedArmorFamilyFailures = new List<PartialLinkedArmorFamilyFailure>();
+        var unresolvedTieLookup = (pluginRewritePlan.UnresolvedTieGroups ?? [])
+            .ToDictionary(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase);
+        var sourceSupportByMeshPath = (sourceNifSupport ?? [])
+            .Where(static report => !string.IsNullOrWhiteSpace(report.MeshPath))
+            .ToDictionary(
+                static report => NormalizeComparablePath(report.MeshPath),
+                static report => report,
+                StringComparer.OrdinalIgnoreCase);
+        var addonByResolvedKey = pluginAnalysis.ArmorAddons
+            .Where(static addon => addon.FormId != 0)
+            .Select(addon => new
+            {
+                Addon = addon,
+                Key = BuildResolvedPluginFormKey(
+                    addon.OwningPluginFileName,
+                    addon.LocalFormId ?? (addon.FormId & 0x00FFFFFFu))
+            })
+            .GroupBy(static entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Addon, StringComparer.OrdinalIgnoreCase);
+        var missingStagedSet = missingStagedMeshes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var scannedPluginFileNames = pluginAnalysis.ArmorAddons
+            .Select(static addon => NormalizeResolvedPluginFileName(addon.OwningPluginFileName))
+            .Concat((pluginAnalysis.ArmorRecords ?? []).Select(static record => NormalizeResolvedPluginFileName(record.OwningPluginFileName)))
+            .Where(static fileName => !string.IsNullOrWhiteSpace(fileName))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var armorRecord in pluginAnalysis.ArmorRecords ?? [])
+        {
+            var linkedReferences = armorRecord.LinkedArmorAddonReferences?.Count > 0
+                ? armorRecord.LinkedArmorAddonReferences
+                : armorRecord.LinkedArmorAddonFormIds?.Select(rawFormId => new PluginLinkedFormReference(
+                    rawFormId,
+                    armorRecord.OwningPluginFileName,
+                    rawFormId & 0x00FFFFFFu)).ToList();
+            if (linkedReferences is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            var armorLabel = DescribePluginRecord(armorRecord.EditorId, armorRecord.FormId);
+            var linkedReferenceOutcomes = new List<LinkedArmorReferenceOutcome>();
+            foreach (var linkedReference in linkedReferences
+                .GroupBy(reference => BuildResolvedPluginFormKey(
+                    reference.OwningPluginFileName,
+                    reference.LocalFormId ?? (reference.RawFormId & 0x00FFFFFFu)),
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First()))
+            {
+                linkedReferenceCount++;
+                var linkedKey = BuildResolvedPluginFormKey(
+                    linkedReference.OwningPluginFileName,
+                    linkedReference.LocalFormId ?? (linkedReference.RawFormId & 0x00FFFFFFu));
+                if (!addonByResolvedKey.TryGetValue(linkedKey, out var linkedAddon))
+                {
+                    var linkedOwner = NormalizeResolvedPluginFileNameOrNull(linkedReference.OwningPluginFileName);
+                    if (!string.IsNullOrWhiteSpace(linkedOwner) &&
+                        !scannedPluginFileNames.Contains(linkedOwner))
+                    {
+                        var unresolvedReference = FormatResolvedPluginFormReference(linkedReference);
+                        unscannedLinkedArmorAddons.Add($"{armorLabel} -> {unresolvedReference}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: unresolvedReference,
+                            Category: "unscanned-master-reference",
+                            CandidateSourceFamilies: []));
+                    }
+                    else
+                    {
+                        var unresolvedReference = FormatResolvedPluginFormReference(linkedReference);
+                        missingLinkedArmorAddons.Add($"{armorLabel} -> {unresolvedReference}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: unresolvedReference,
+                            Category: "missing-arma-record",
+                            CandidateSourceFamilies: []));
+                    }
+                    continue;
+                }
+
+                var linkedAddonLabel = DescribePluginRecord(linkedAddon.EditorId, linkedAddon.FormId);
+                var normalizedPaths = linkedAddon.DetectedMeshPaths
+                    .Select(NormalizePluginMeshPath)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (normalizedPaths.Count == 0)
+                {
+                    missingLinkedConvertedMatches.Add($"{armorLabel} -> {linkedAddonLabel} (no ARMA mesh paths)");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} (no ARMA mesh paths)",
+                        Category: "missing-converted-match",
+                        CandidateSourceFamilies: []));
+                    continue;
+                }
+
+                var missingLinkedRewrites = normalizedPaths
+                    .Where(path => !pluginRewritePlan.RewriteMap.ContainsKey(path))
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (missingLinkedRewrites.Count > 0)
+                {
+                    var unsupportedLinkedSources = missingLinkedRewrites
+                        .Select(path => new
+                        {
+                            PluginPath = path,
+                            SourceMeshPath = pluginRewritePlan.SourceMeshMap.TryGetValue(path, out var sourceMeshPath)
+                                ? sourceMeshPath
+                                : null
+                        })
+                        .Where(entry => !string.IsNullOrWhiteSpace(entry.SourceMeshPath))
+                        .Select(entry => new
+                        {
+                            entry.PluginPath,
+                            Support = sourceSupportByMeshPath.TryGetValue(
+                                NormalizeComparablePath(entry.SourceMeshPath!),
+                                out var report)
+                                ? report
+                                : null
+                        })
+                        .Where(static entry => entry.Support is not null &&
+                            entry.Support.Status.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                        .Select(entry => $"{entry.PluginPath} [{entry.Support!.ParseMode}]")
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var unresolvedCandidateFamilies = missingLinkedRewrites
+                        .Select(path => unresolvedTieLookup.TryGetValue(path, out var unresolvedTieGroup)
+                            ? unresolvedTieGroup.CandidateSourceFamilies
+                            : [])
+                        .SelectMany(static families => families)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (unsupportedLinkedSources.Count > 0)
+                    {
+                        unsupportedLinkedArmorMeshes.Add(
+                            $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", unsupportedLinkedSources)}");
+                        linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                            Verified: false,
+                            Detail: $"{linkedAddonLabel} => {string.Join(", ", unsupportedLinkedSources)}",
+                            Category: "unsupported-nif-layout",
+                            CandidateSourceFamilies: unresolvedCandidateFamilies));
+                        continue;
+                    }
+
+                    missingLinkedConvertedMatches.Add(
+                        $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} => {string.Join(", ", missingLinkedRewrites)}",
+                        Category: unresolvedCandidateFamilies.Count > 0 ? "ambiguous-family" : "missing-converted-match",
+                        CandidateSourceFamilies: unresolvedCandidateFamilies));
+                    continue;
+                }
+
+                var missingLinkedStagePaths = normalizedPaths
+                    .Select(path => NormalizePluginMeshPath(pluginRewritePlan.RewriteMap[path]))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Where(missingStagedSet.Contains)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (missingLinkedStagePaths.Count > 0)
+                {
+                    missingLinkedStagedMeshes.Add(
+                        $"{armorLabel} -> {linkedAddonLabel} => {string.Join(", ", missingLinkedStagePaths)}");
+                    linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                        Verified: false,
+                        Detail: $"{linkedAddonLabel} => {string.Join(", ", missingLinkedStagePaths)}",
+                        Category: "missing-staged-mesh",
+                        CandidateSourceFamilies: []));
+                    continue;
+                }
+
+                verifiedLinkedReferenceCount++;
+                var rewrittenLinkedPaths = normalizedPaths
+                    .Select(path => NormalizePluginMeshPath(pluginRewritePlan.RewriteMap[path]))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                linkedReferenceOutcomes.Add(new LinkedArmorReferenceOutcome(
+                    Verified: true,
+                    Detail: $"{linkedAddonLabel} => {string.Join(", ", rewrittenLinkedPaths)}",
+                    Category: "verified",
+                    CandidateSourceFamilies: []));
+            }
+
+            if (linkedReferenceOutcomes.Count > 0 &&
+                linkedReferenceOutcomes.Any(static outcome => outcome.Verified) &&
+                linkedReferenceOutcomes.Any(static outcome => !outcome.Verified))
+            {
+                var unresolvedOutcomes = linkedReferenceOutcomes
+                    .Where(static outcome => !outcome.Verified)
+                    .ToList();
+                var candidateFamilies = unresolvedOutcomes
+                    .SelectMany(static outcome => outcome.CandidateSourceFamilies)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var failureCategories = unresolvedOutcomes
+                    .Select(static outcome => outcome.Category)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static category => category, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var manualReviewReason = candidateFamilies.Count > 0
+                    ? $"This linked armor family mixed verified and unresolved ARMA members across its master chain. Unresolved members still map to multiple source families ({string.Join(", ", candidateFamilies.Take(3))})."
+                    : "This linked armor family mixed verified and unresolved ARMA members across its master chain. Review every linked ARMA member before trusting the generated patch.";
+                partialLinkedArmorFamilyFailures.Add(new PartialLinkedArmorFamilyFailure(
+                    ArmorRecord: armorLabel,
+                    OwningPluginFileName: NormalizeResolvedPluginFileName(armorRecord.OwningPluginFileName),
+                    TotalLinkedArmorAddonReferences: linkedReferenceOutcomes.Count,
+                    VerifiedLinkedArmorAddonReferences: linkedReferenceOutcomes.Count(static outcome => outcome.Verified),
+                    VerifiedLinkedArmorAddonRecords: linkedReferenceOutcomes
+                        .Where(static outcome => outcome.Verified)
+                        .Select(static outcome => outcome.Detail)
+                        .OrderBy(static detail => detail, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    UnresolvedLinkedArmorAddonReferences: unresolvedOutcomes
+                        .Select(static outcome => outcome.Detail)
+                        .OrderBy(static detail => detail, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    CandidateSourceFamilies: candidateFamilies,
+                    FailureCategories: failureCategories,
+                    ManualReviewReason: manualReviewReason));
+            }
+        }
+
+        return new LinkedArmorAddonVerificationSummary(
+            LinkedArmorReferenceCount: linkedReferenceCount,
+            VerifiedLinkedArmorReferenceCount: verifiedLinkedReferenceCount,
+            MissingLinkedArmorAddonRecords: missingLinkedArmorAddons
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            UnscannedLinkedArmorAddonReferences: unscannedLinkedArmorAddons
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            UnsupportedLinkedArmorAddonMeshes: unsupportedLinkedArmorMeshes
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            MissingLinkedConvertedMatches: missingLinkedConvertedMatches
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            MissingLinkedStagedMeshes: missingLinkedStagedMeshes
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            PartialLinkedArmorFamilyFailures: partialLinkedArmorFamilyFailures
+                .OrderBy(static entry => entry.ArmorRecord, StringComparer.OrdinalIgnoreCase)
+                .ToList());
+    }
+
+    private static string DescribePluginRecord(string? editorId, uint formId)
+    {
+        if (!string.IsNullOrWhiteSpace(editorId))
+        {
+            return formId != 0
+                ? $"{editorId} ({FormatPluginFormId(formId)})"
+                : editorId;
+        }
+
+        return formId != 0 ? FormatPluginFormId(formId) : "unnamed-record";
+    }
+
+    private static string BuildResolvedPluginFormKey(string? pluginFileName, uint localFormId) =>
+        $"{NormalizeResolvedPluginFileName(pluginFileName)}|{localFormId:X8}";
+
+    private static string FormatResolvedPluginFormReference(PluginLinkedFormReference reference)
+    {
+        var formattedFormId = FormatPluginFormId(reference.LocalFormId ?? reference.RawFormId);
+        var pluginFileName = NormalizeResolvedPluginFileNameOrNull(reference.OwningPluginFileName);
+        return string.IsNullOrWhiteSpace(pluginFileName)
+            ? formattedFormId
+            : $"{pluginFileName}::{formattedFormId}";
+    }
+
+    private static string NormalizeResolvedPluginFileName(string? pluginFileName) =>
+        NormalizeResolvedPluginFileNameOrNull(pluginFileName) ?? "(unknown-plugin)";
+
+    private static string? NormalizeResolvedPluginFileNameOrNull(string? pluginFileName)
+    {
+        if (string.IsNullOrWhiteSpace(pluginFileName))
+        {
+            return null;
+        }
+
+        var trimmed = pluginFileName.Trim();
+        var fileName = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+    }
+
+    private static string FormatPluginFormId(uint formId) => $"0x{formId:X8}";
+
+    private static PartitionSignalReport? BuildPartitionSignalReport(IReadOnlyList<string> steps)
+    {
+        if (steps.Count == 0)
+        {
+            return null;
+        }
+
+        var sourceNifSlots = ExtractNumericStepPayload(steps, "nif-skin-partitions:");
+        var pluginSlots = ExtractNumericStepPayload(steps, "biped-slots-passthrough:");
+        var finalPartitions = ExtractStepValue(steps, "partitions:");
+        var finalSlotLabels = finalPartitions is null || finalPartitions.Equals("unchanged", StringComparison.OrdinalIgnoreCase)
+            ? []
+            : finalPartitions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var finalSlots = finalSlotLabels
+            .Select(static label => ParsePartitionSlot(label))
+            .Where(static slot => slot.HasValue)
+            .Select(static slot => slot!.Value)
+            .Distinct()
+            .OrderBy(static slot => slot)
+            .ToList();
+        var unknownFinalPartitions = finalSlotLabels
+            .Where(label => ParsePartitionSlot(label) is null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var regions = ExtractRegions(steps);
+        var regionBindingMethod = ExtractStepValue(steps, "region-binding:") ?? "unknown";
+
+        if (sourceNifSlots.Count == 0 &&
+            pluginSlots.Count == 0 &&
+            finalSlots.Count == 0 &&
+            unknownFinalPartitions.Count == 0 &&
+            regions.Count == 0)
+        {
+            return null;
+        }
+
+        var missingSourceSlots = sourceNifSlots.Except(finalSlots).OrderBy(static slot => slot).ToList();
+        var missingPluginSlots = pluginSlots.Except(finalSlots).OrderBy(static slot => slot).ToList();
+        var warnings = new List<string>();
+        if (missingSourceSlots.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions dropped source NIF slots {string.Join(", ", missingSourceSlots)}");
+        }
+
+        if (missingPluginSlots.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions dropped plugin slots {string.Join(", ", missingPluginSlots)}");
+        }
+
+        if (unknownFinalPartitions.Count > 0)
+        {
+            warnings.Add($"manual review: exported partitions contain nonstandard labels {string.Join(", ", unknownFinalPartitions)}");
+        }
+
+        return new PartitionSignalReport(
+            SourceNifSlots: sourceNifSlots,
+            PluginSlots: pluginSlots,
+            FinalSlots: finalSlots,
+            Regions: regions,
+            RegionBindingMethod: regionBindingMethod,
+            MissingSourceSlots: missingSourceSlots,
+            MissingPluginSlots: missingPluginSlots,
+            UnknownFinalPartitions: unknownFinalPartitions,
+            Warnings: warnings);
+    }
+
+    private static IReadOnlyList<int> ExtractNumericStepPayload(IReadOnlyList<string> steps, string prefix)
+    {
+        var value = ExtractStepValue(steps, prefix);
+        if (string.IsNullOrWhiteSpace(value))
         {
             return [];
         }
 
-        var sourceByFileName = writtenNifPaths
-            .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static token => int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : (int?)null)
+            .Where(static slot => slot.HasValue)
+            .Select(static slot => slot!.Value)
+            .Distinct()
+            .OrderBy(static slot => slot)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractRegions(IReadOnlyList<string> steps)
+    {
+        var value = ExtractStepValue(steps, "regions:");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ExtractStepValue(IReadOnlyList<string> steps, string prefix)
+    {
+        for (var i = steps.Count - 1; i >= 0; i--)
+        {
+            var step = steps[i];
+            if (step.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return step[prefix.Length..].Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static int? ParsePartitionSlot(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return null;
+        }
+
+        var separator = label.IndexOf(':');
+        var token = separator >= 0 ? label[..separator] : label;
+        return int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static async Task<IReadOnlyList<string>> StageConvertedMeshesForPluginRewriteAsync(
+        string outputDirectory,
+        IReadOnlyDictionary<string, string> writtenPathBySourceMesh,
+        PluginRewritePlan pluginRewritePlan,
+        CancellationToken cancellationToken)
+    {
+        if (pluginRewritePlan.RewriteMap.Count == 0 || writtenPathBySourceMesh.Count == 0)
+        {
+            return [];
+        }
 
         var staged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var rewrittenPath in pluginRewriteMap.Values)
+        foreach (var (originalPath, rewrittenPath) in pluginRewritePlan.RewriteMap)
         {
-            var fileName = Path.GetFileName(rewrittenPath);
-            if (string.IsNullOrWhiteSpace(fileName) || !sourceByFileName.TryGetValue(fileName, out var sourcePath))
+            if (!pluginRewritePlan.SourceMeshMap.TryGetValue(originalPath, out var sourceMeshPath) ||
+                !writtenPathBySourceMesh.TryGetValue(sourceMeshPath, out var sourcePath))
             {
                 continue;
             }
@@ -11668,16 +17181,19 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<object> BuildProposedPatchSteps(
         PluginAnalysisResult pluginAnalysis,
         string targetBody,
-        IReadOnlyDictionary<string, string> pluginRewriteMap)
+        PluginRewritePlan pluginRewritePlan)
     {
         var steps = new List<object>();
+        var unresolvedTieLookup = (pluginRewritePlan.UnresolvedTieGroups ?? [])
+            .ToDictionary(static group => group.PluginMeshPath, StringComparer.OrdinalIgnoreCase);
 
         foreach (var addon in pluginAnalysis.ArmorAddons)
         {
             foreach (var meshPath in addon.DetectedMeshPaths)
             {
-                var normalised = meshPath.Replace('\\', '/');
-                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                var normalised = NormalizePluginMeshPath(meshPath);
+                var hasRewrite = pluginRewritePlan.RewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                unresolvedTieLookup.TryGetValue(normalised, out var unresolvedTieGroup);
                 steps.Add(new
                 {
                     Plugin = addon.RecordType,
@@ -11687,11 +17203,21 @@ internal sealed class LocalExportService(
                     RewriteReady = hasRewrite,
                     PlacementNote = hasRewrite
                         ? $"Use patch-armor.pas to rewrite ARMA path to {rewrittenPath} and keep the converted NIF at that path."
+                        : unresolvedTieGroup is not null
+                            ? $"Multiple source mesh families remain plausible for this ARMA path ({string.Join(", ", unresolvedTieGroup.CandidateSourceFamilies.Take(3))}). Review the unresolved tie group before patching for {targetBody}."
                         : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
                     XEditAction = hasRewrite
                         ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMA mesh paths."
+                        : unresolvedTieGroup is not null
+                            ? "Open plugin-patches.json unresolved tie details, choose the correct source family in xEdit, and patch this ARMA mesh path manually."
                         : "Open in xEdit and patch this ARMA mesh path manually.",
-                    Tool = "xEdit"
+                    Tool = "xEdit",
+                    ManualReviewReason = unresolvedTieGroup?.ManualReviewReason,
+                    CandidateSourceMeshPaths = unresolvedTieGroup?.CandidateSourceMeshPaths ?? [],
+                    CandidateSourceFamilies = unresolvedTieGroup?.CandidateSourceFamilies ?? [],
+                    RelatedPluginMeshPaths = unresolvedTieGroup?.RelatedPluginMeshPaths ?? [],
+                    ResolvedNeighborSourceMeshPaths = unresolvedTieGroup?.ResolvedNeighborSourceMeshPaths ?? [],
+                    SharedCandidateFamilies = unresolvedTieGroup?.SharedCandidateFamilies ?? []
                 });
             }
         }
@@ -11700,8 +17226,9 @@ internal sealed class LocalExportService(
         {
             foreach (var meshPath in record.DetectedMeshPaths)
             {
-                var normalised = meshPath.Replace('\\', '/');
-                var hasRewrite = pluginRewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                var normalised = NormalizePluginMeshPath(meshPath);
+                var hasRewrite = pluginRewritePlan.RewriteMap.TryGetValue(normalised, out var rewrittenPath);
+                unresolvedTieLookup.TryGetValue(normalised, out var unresolvedTieGroup);
                 steps.Add(new
                 {
                     Plugin = record.RecordType,
@@ -11711,16 +17238,103 @@ internal sealed class LocalExportService(
                     RewriteReady = hasRewrite,
                     PlacementNote = hasRewrite
                         ? $"Use patch-armor.pas to rewrite ARMO path to {rewrittenPath} and keep the converted NIF at that path."
+                        : unresolvedTieGroup is not null
+                            ? $"Multiple source mesh families remain plausible for this ARMO path ({string.Join(", ", unresolvedTieGroup.CandidateSourceFamilies.Take(3))}). Review the unresolved tie group before patching for {targetBody}."
                         : $"No converted filename match found for this path. Keep original mesh path or patch manually for {targetBody}.",
                     XEditAction = hasRewrite
                         ? "Run generated patch-armor.pas in xEdit to auto-rewrite matching ARMO mesh paths."
+                        : unresolvedTieGroup is not null
+                            ? "Open plugin-patches.json unresolved tie details, choose the correct source family in xEdit, and patch this ARMO mesh path manually."
                         : "Open in xEdit and patch this ARMO mesh path manually.",
-                    Tool = "xEdit"
+                    Tool = "xEdit",
+                    ManualReviewReason = unresolvedTieGroup?.ManualReviewReason,
+                    CandidateSourceMeshPaths = unresolvedTieGroup?.CandidateSourceMeshPaths ?? [],
+                    CandidateSourceFamilies = unresolvedTieGroup?.CandidateSourceFamilies ?? [],
+                    RelatedPluginMeshPaths = unresolvedTieGroup?.RelatedPluginMeshPaths ?? [],
+                    ResolvedNeighborSourceMeshPaths = unresolvedTieGroup?.ResolvedNeighborSourceMeshPaths ?? [],
+                    SharedCandidateFamilies = unresolvedTieGroup?.SharedCandidateFamilies ?? []
                 });
             }
         }
 
         return steps;
+    }
+
+    private static IReadOnlyList<object> BuildLinkedArmorFamilyReviewSteps(
+        PluginRewriteVerificationReport? pluginRewriteVerification,
+        string targetBody)
+    {
+        if (pluginRewriteVerification?.PartialLinkedArmorFamilyFailures is not { Count: > 0 } failures)
+        {
+            return [];
+        }
+
+        return failures
+            .OrderBy(static failure => failure.OwningPluginFileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static failure => failure.ArmorRecord, StringComparer.OrdinalIgnoreCase)
+            .Select(failure => (object)new
+            {
+                failure.ArmorRecord,
+                failure.OwningPluginFileName,
+                VerificationStatus = "partial-linked-family-failure",
+                failure.TotalLinkedArmorAddonReferences,
+                failure.VerifiedLinkedArmorAddonReferences,
+                failure.VerifiedLinkedArmorAddonRecords,
+                failure.UnresolvedLinkedArmorAddonReferences,
+                failure.CandidateSourceFamilies,
+                failure.FailureCategories,
+                failure.ManualReviewReason,
+                SuggestedXEditAction =
+                    $"Review every linked ARMA member for {failure.ArmorRecord} in xEdit before release and only keep {targetBody} overrides for the verified family members.",
+                ReviewPriority = failure.FailureCategories.Contains("unsupported-nif-layout", StringComparer.OrdinalIgnoreCase)
+                    ? "high"
+                    : failure.CandidateSourceFamilies.Count > 0
+                        ? "high"
+                        : "medium"
+            })
+            .ToList();
+    }
+
+    private static PluginInstallHint BuildPluginInstallHint(
+        string sourcePlugin,
+        IReadOnlyList<string> inheritedMasterFileNames,
+        string? generatedPatchPlugin,
+        bool manualReviewRequired,
+        string? manualReviewReason = null)
+    {
+        var sourcePluginFileName = Path.GetFileName(sourcePlugin) ?? sourcePlugin;
+        var normalizedMasters = PatchPluginWriter.BuildOrderedMasterList(string.Empty, inheritedMasterFileNames)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .ToList();
+        var recommendedLoadAfter = PatchPluginWriter.BuildOrderedMasterList(sourcePluginFileName, normalizedMasters);
+
+        var notes = new List<string>
+        {
+            "Install the SlideSmith output as a separate mod and place it below the original armor/body mod in Mod Organizer 2 or Vortex so converted meshes and physics files win conflicts."
+        };
+
+        if (!string.IsNullOrWhiteSpace(generatedPatchPlugin))
+        {
+            notes.Add($"{generatedPatchPlugin} should load after {sourcePluginFileName} and keep the inherited master chain in this same order: {string.Join(" -> ", recommendedLoadAfter)}.");
+        }
+        else
+        {
+            notes.Add($"No generated override patch was written for {sourcePluginFileName}; use plugin-patches.json and patch-armor.pas/xEdit guidance for manual plugin updates.");
+        }
+
+        if (manualReviewRequired && !string.IsNullOrWhiteSpace(manualReviewReason))
+        {
+            notes.Add(manualReviewReason);
+        }
+
+        return new PluginInstallHint(
+            sourcePluginFileName,
+            normalizedMasters,
+            generatedPatchPlugin,
+            recommendedLoadAfter,
+            "Keep the SlideSmith output mod below the source armor mod so converted assets and generated plugins win conflicts cleanly.",
+            manualReviewRequired,
+            notes);
     }
 
     private static string BuildFomodModuleConfigXml(
@@ -11733,8 +17347,14 @@ internal sealed class LocalExportService(
         var safePackage = XmlEscape(packageName);
         var safeTargetBody = XmlEscape(targetBody);
         var safeProjectName = XmlEscape(bodySlideProjectName);
+        var patchPluginName = rootFileNames
+            .Select(static name => Path.GetFileName(name) ?? name)
+            .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
+        var installDescription = patchPluginName is null
+            ? $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod so converted files win conflicts cleanly, and keep README.txt for follow-up guidance."
+            : $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod, load {XmlEscape(patchPluginName)} after its source plugin, and keep README.txt for follow-up guidance.";
 
-        // Build <files> content: one <folder> per Data subfolder + one <file> per root ESP/plugin.
+        // Build <files> content: one <folder> per Data subfolder + one <file> per root install file.
         var filesContent = new System.Text.StringBuilder();
         foreach (var folder in dataFolderNames)
         {
@@ -11761,7 +17381,7 @@ internal sealed class LocalExportService(
                     <group name="Body">
                       <plugins order="Explicit">
                         <plugin name="{{safeTargetBody}}">
-                          <description>Generated conversion output for {{safeTargetBody}} with BodySlide project {{safeProjectName}}.</description>
+                          <description>{{installDescription}}</description>
             {{filesBlock}}
                           <conditionFlags />
                           <typeDescriptor>
@@ -11777,9 +17397,15 @@ internal sealed class LocalExportService(
             """;
     }
 
-    private static string BuildFomodInfoXml(string packageName)
+    private static string BuildFomodInfoXml(string packageName, IReadOnlyList<string> rootFileNames)
     {
         var safePackage = XmlEscape(packageName);
+        var patchPluginName = rootFileNames
+            .Select(static name => Path.GetFileName(name) ?? name)
+            .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
+        var description = patchPluginName is null
+            ? "Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex as a separate mod, keep the SlideSmith mod below the original armor/body mod for clean conflict handling, and keep README.txt for manual follow-up guidance."
+            : $"Auto-generated FOMOD metadata for SlideSmith conversion output. Install it with Mod Organizer 2 or Vortex as a separate mod, keep the SlideSmith mod below the original armor/body mod, load {XmlEscape(patchPluginName)} after its source plugin, and keep README.txt for manual follow-up guidance.";
 
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -11788,7 +17414,7 @@ internal sealed class LocalExportService(
               <Author>SlideSmith</Author>
               <Version MachineVersion="0.1">0.1</Version>
               <Website></Website>
-              <Description>Auto-generated FOMOD metadata for SlideSmith conversion output.</Description>
+              <Description>{{description}}</Description>
             </fomod>
             """;
     }
@@ -11797,6 +17423,15 @@ internal sealed class LocalExportService(
     {
         return SecurityElement.Escape(value) ?? string.Empty;
     }
+
+    private static bool IsFomodRootInstallFile(string? fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        (IsBethesdaPluginFile(fileName) || IsFomodRootSupportFile(fileName));
+
+    private static bool IsFomodRootSupportFile(string? fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        (fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Builds a BSD (BodySlide Data) binary payload for a single slider.
@@ -11817,10 +17452,13 @@ internal sealed class LocalExportService(
         string sliderName,
         bool isHighWeight,
         int vertexCount,
-        IReadOnlyDictionary<string, double> regionalMorphing)
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
+        MorphTransferContext? morphTransferContext = null)
     {
         vertexCount = Math.Clamp(vertexCount, 1, 250_000);
         var nameBytes = System.Text.Encoding.UTF8.GetBytes(sliderName);
+        var deltas = ResolveMorphDeltas(sliderName, isHighWeight, vertexCount, regionalMorphing, reusableSourceMorphPayloads, morphTransferContext);
         using var ms = new System.IO.MemoryStream();
         using var w  = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
 
@@ -11834,9 +17472,8 @@ internal sealed class LocalExportService(
         w.Write(nameBytes);
         w.Write((uint)vertexCount);
 
-        for (var index = 0; index < vertexCount; index++)
+        foreach (var (x, y, z) in deltas)
         {
-            var (x, y, z) = ComputeMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing);
             w.Write(x);
             w.Write(y);
             w.Write(z);
@@ -11869,7 +17506,9 @@ internal sealed class LocalExportService(
             IReadOnlyList<string> sliders,
             bool isHighWeight,
             int vertexCount,
-            IReadOnlyDictionary<string, double> regionalMorphing)
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads = null,
+            MorphTransferContext? morphTransferContext = null)
         {
             vertexCount = Math.Clamp(vertexCount, 1, 250_000);
             using var ms = new System.IO.MemoryStream();
@@ -11892,9 +17531,14 @@ internal sealed class LocalExportService(
 
             foreach (var slider in sliders)
             {
-                for (var index = 0; index < vertexCount; index++)
+                foreach (var (x, y, z) in ResolveMorphDeltas(
+                    slider,
+                    isHighWeight,
+                    vertexCount,
+                    regionalMorphing,
+                    reusableSourceMorphPayloads,
+                    morphTransferContext))
                 {
-                    var (x, y, z) = ComputeMorphDelta(slider, index, vertexCount, isHighWeight, regionalMorphing);
                     w.Write(QuantizeTriDelta(x));
                     w.Write(QuantizeTriDelta(y));
                     w.Write(QuantizeTriDelta(z));
@@ -11902,6 +17546,419 @@ internal sealed class LocalExportService(
             }
 
             return ms.ToArray();
+        }
+
+        private static MorphPayloadReuseSummary BuildPayloadReuseSummary(
+            IReadOnlyList<string> sliders,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            int vertexCount,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (sliders.Count == 0 || reusableSourceMorphPayloads is null || reusableSourceMorphPayloads.Count == 0)
+            {
+                return new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
+            }
+
+            var reusedVariants = new List<string>();
+            var fallbackVariants = new List<string>();
+            var retargetedVariants = new List<string>();
+            foreach (var slider in sliders)
+            {
+                if (!reusableSourceMorphPayloads.TryGetValue(slider, out var variants))
+                {
+                    continue;
+                }
+
+                TrackPayloadReuseVariant(slider, slider, isHighWeight: false);
+                TrackPayloadReuseVariant(slider, $"{slider}_1", isHighWeight: true);
+            }
+
+            return new MorphPayloadReuseSummary(
+                reusedVariants.Count + fallbackVariants.Count + retargetedVariants.Count,
+                reusedVariants.Count,
+                fallbackVariants.Count,
+                retargetedVariants.Count,
+                reusedVariants,
+                fallbackVariants,
+                retargetedVariants);
+
+            void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
+            {
+                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, morphTransferContext, out _, out var wasRetargeted))
+                {
+                    if (wasRetargeted)
+                    {
+                        retargetedVariants.Add(variantName);
+                    }
+                    else
+                    {
+                        reusedVariants.Add(variantName);
+                    }
+                }
+                else
+                {
+                    fallbackVariants.Add(variantName);
+                }
+            }
+        }
+
+        private sealed record MorphTransferInfluence(
+            int SourceIndex,
+            float Weight);
+
+        private sealed record MorphTransferContext(
+            IReadOnlyList<MeshVertex> SourceVertices,
+            IReadOnlyList<MeshVertex> TargetVertices,
+            int[] TargetToSourceIndexMap,
+            IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences);
+
+        private static MorphTransferContext? CreateMorphTransferContext(
+            IReadOnlyList<string> sourceMeshFiles,
+            IReadOnlyList<string> writtenNifs)
+        {
+            var sourceVertices = sourceMeshFiles
+                .Select(NifGeometrySignatureReader.TryReadFullVertices)
+                .FirstOrDefault(vertices => vertices is { Count: > 0 });
+            var targetVertices = writtenNifs
+                .Select(NifGeometrySignatureReader.TryReadFullVertices)
+                .FirstOrDefault(vertices => vertices is { Count: > 0 });
+
+            if (sourceVertices is null || targetVertices is null || sourceVertices.Count == 0 || targetVertices.Count == 0)
+            {
+                return null;
+            }
+
+            var influenceMap = BuildMorphTransferInfluenceMap(sourceVertices, targetVertices);
+            var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
+                ? influenceMap
+                    .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
+                    .ToArray()
+                : BuildNearestSurfaceMap(sourceVertices, targetVertices);
+
+            return new MorphTransferContext(
+                sourceVertices,
+                targetVertices,
+                nearestSurfaceMap,
+                influenceMap);
+        }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
+            string sliderName,
+            bool isHighWeight,
+            int vertexCount,
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out _))
+            {
+                return sourcePayload.Deltas;
+            }
+
+            var deltas = new (float X, float Y, float Z)[vertexCount];
+            for (var index = 0; index < vertexCount; index++)
+            {
+                deltas[index] = ComputeMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing);
+            }
+
+            return deltas;
+        }
+
+        private static bool TryGetReusableMorphPayload(
+            IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
+            string sliderName,
+            bool isHighWeight,
+            int vertexCount,
+            MorphTransferContext? morphTransferContext,
+            out SourceMorphPayload payload,
+            out bool wasRetargeted)
+        {
+            payload = default!;
+            wasRetargeted = false;
+            if (reusableSourceMorphPayloads is null ||
+                !reusableSourceMorphPayloads.TryGetValue(sliderName, out var variants))
+            {
+                return false;
+            }
+
+            var candidate = isHighWeight ? variants.HighWeight : variants.LowWeight;
+            if (candidate is null)
+            {
+                return false;
+            }
+
+            if (candidate.VertexCount == vertexCount)
+            {
+                payload = candidate;
+                return true;
+            }
+
+            if (candidate.Deltas.Count == 0 || vertexCount <= 0)
+            {
+                return false;
+            }
+
+            payload = candidate with
+            {
+                VertexCount = vertexCount,
+                PayloadKind = $"{candidate.PayloadKind}-retargeted",
+                Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount, morphTransferContext)
+            };
+            wasRetargeted = true;
+            return true;
+        }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            int targetVertexCount,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (targetVertexCount == sourceDeltas.Count)
+            {
+                return sourceDeltas;
+            }
+
+            if (morphTransferContext is not null &&
+                morphTransferContext.SourceVertices.Count == sourceDeltas.Count &&
+                morphTransferContext.TargetVertices.Count == targetVertexCount &&
+                morphTransferContext.TargetToSourceIndexMap.Length == targetVertexCount)
+            {
+                var nearestSurface = new (float X, float Y, float Z)[targetVertexCount];
+                for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
+                {
+                    var blended = TryBlendRetargetedDelta(sourceDeltas, morphTransferContext, targetIndex);
+                    nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
+                }
+
+                return nearestSurface;
+            }
+
+            var retargeted = new (float X, float Y, float Z)[targetVertexCount];
+            if (sourceDeltas.Count == 1)
+            {
+                Array.Fill(retargeted, sourceDeltas[0]);
+                return retargeted;
+            }
+
+            for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
+            {
+                var normalizedPosition = targetVertexCount == 1
+                    ? 0d
+                    : (double)targetIndex / (targetVertexCount - 1);
+                var sourcePosition = normalizedPosition * (sourceDeltas.Count - 1);
+                var lowerIndex = (int)Math.Floor(sourcePosition);
+                var upperIndex = Math.Min(sourceDeltas.Count - 1, lowerIndex + 1);
+                var blend = (float)(sourcePosition - lowerIndex);
+                var lower = sourceDeltas[lowerIndex];
+                var upper = sourceDeltas[upperIndex];
+                retargeted[targetIndex] = (
+                    lower.X + ((upper.X - lower.X) * blend),
+                    lower.Y + ((upper.Y - lower.Y) * blend),
+                    lower.Z + ((upper.Z - lower.Z) * blend));
+            }
+
+            return retargeted;
+        }
+
+        private static int[] BuildNearestSurfaceMap(
+            IReadOnlyList<MeshVertex> sourceVertices,
+            IReadOnlyList<MeshVertex> targetVertices)
+        {
+            var mapping = new int[targetVertices.Count];
+            var searchRadius = Math.Clamp(sourceVertices.Count / 24, 32, 768);
+
+            for (var targetIndex = 0; targetIndex < targetVertices.Count; targetIndex++)
+            {
+                var approximateIndex = targetVertices.Count == 1
+                    ? 0
+                    : (int)Math.Round(((double)targetIndex / Math.Max(1, targetVertices.Count - 1)) * (sourceVertices.Count - 1));
+                var start = Math.Max(0, approximateIndex - searchRadius);
+                var end = Math.Min(sourceVertices.Count - 1, approximateIndex + searchRadius);
+
+                var targetVertex = targetVertices[targetIndex];
+                var bestIndex = approximateIndex;
+                var bestDistance = float.MaxValue;
+
+                for (var sourceIndex = start; sourceIndex <= end; sourceIndex++)
+                {
+                    var sourceVertex = sourceVertices[sourceIndex];
+                    var dx = targetVertex.X - sourceVertex.X;
+                    var dy = targetVertex.Y - sourceVertex.Y;
+                    var dz = targetVertex.Z - sourceVertex.Z;
+                    var distance = (dx * dx) + (dy * dy) + (dz * dz);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestIndex = sourceIndex;
+                    }
+                }
+
+                mapping[targetIndex] = bestIndex;
+            }
+
+            return mapping;
+        }
+
+        private static IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> BuildMorphTransferInfluenceMap(
+            IReadOnlyList<MeshVertex> sourceVertices,
+            IReadOnlyList<MeshVertex> targetVertices)
+        {
+            if (sourceVertices.Count == 0 || targetVertices.Count == 0)
+            {
+                return [];
+            }
+
+            var normalizedSource = NormalizeVerticesForTransfer(sourceVertices);
+            var normalizedTarget = NormalizeVerticesForTransfer(targetVertices);
+            var sourceByHeight = normalizedSource
+                .Select(static (vertex, index) => (Vertex: vertex, Index: index))
+                .OrderBy(static entry => entry.Vertex.Z)
+                .ToArray();
+            var sortedSourceHeights = sourceByHeight.Select(static entry => entry.Vertex.Z).ToArray();
+            var influences = new IReadOnlyList<MorphTransferInfluence>[targetVertices.Count];
+            var candidateWindowRadius = Math.Clamp(sourceVertices.Count / 40, 48, 256);
+
+            for (var targetIndex = 0; targetIndex < normalizedTarget.Count; targetIndex++)
+            {
+                var targetVertex = normalizedTarget[targetIndex];
+                var insertionIndex = Array.BinarySearch(sortedSourceHeights, targetVertex.Z);
+                if (insertionIndex < 0)
+                {
+                    insertionIndex = ~insertionIndex;
+                }
+
+                var start = Math.Max(0, insertionIndex - candidateWindowRadius);
+                var end = Math.Min(sourceByHeight.Length - 1, insertionIndex + candidateWindowRadius);
+                var bestCandidates = new List<(int SourceIndex, float DistanceSquared)>(capacity: 4);
+
+                for (var candidateIndex = start; candidateIndex <= end; candidateIndex++)
+                {
+                    var candidate = sourceByHeight[candidateIndex];
+                    var dx = targetVertex.X - candidate.Vertex.X;
+                    var dy = targetVertex.Y - candidate.Vertex.Y;
+                    var dz = targetVertex.Z - candidate.Vertex.Z;
+                    var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                    InsertMorphTransferCandidate(bestCandidates, candidate.Index, distanceSquared);
+                }
+
+                if (bestCandidates.Count == 0)
+                {
+                    var fallbackIndex = Math.Clamp(
+                        (int)Math.Round(((double)targetIndex / Math.Max(1, targetVertices.Count - 1)) * Math.Max(0, sourceVertices.Count - 1)),
+                        0,
+                        Math.Max(0, sourceVertices.Count - 1));
+                    influences[targetIndex] = [new MorphTransferInfluence(fallbackIndex, 1f)];
+                    continue;
+                }
+
+                if (bestCandidates[0].DistanceSquared <= 0.000001f)
+                {
+                    influences[targetIndex] = [new MorphTransferInfluence(bestCandidates[0].SourceIndex, 1f)];
+                    continue;
+                }
+
+                var rawWeights = bestCandidates
+                    .Select(static candidate => 1f / MathF.Max(0.0001f, candidate.DistanceSquared))
+                    .ToArray();
+                var weightSum = rawWeights.Sum();
+                if (weightSum <= 0.000001f)
+                {
+                    influences[targetIndex] = [new MorphTransferInfluence(bestCandidates[0].SourceIndex, 1f)];
+                    continue;
+                }
+
+                influences[targetIndex] = bestCandidates
+                    .Select((candidate, index) => new MorphTransferInfluence(candidate.SourceIndex, rawWeights[index] / weightSum))
+                    .ToArray();
+            }
+
+            return influences;
+        }
+
+        private static void InsertMorphTransferCandidate(
+            List<(int SourceIndex, float DistanceSquared)> bestCandidates,
+            int sourceIndex,
+            float distanceSquared)
+        {
+            var insertAt = bestCandidates.FindIndex(existing => distanceSquared < existing.DistanceSquared);
+            if (insertAt < 0)
+            {
+                bestCandidates.Add((sourceIndex, distanceSquared));
+            }
+            else
+            {
+                bestCandidates.Insert(insertAt, (sourceIndex, distanceSquared));
+            }
+
+            if (bestCandidates.Count > 4)
+            {
+                bestCandidates.RemoveAt(bestCandidates.Count - 1);
+            }
+        }
+
+        private static (float X, float Y, float Z)? TryBlendRetargetedDelta(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            if (targetIndex < 0 || targetIndex >= morphTransferContext.TargetToSourceInfluences.Count)
+            {
+                return null;
+            }
+
+            var influences = morphTransferContext.TargetToSourceInfluences[targetIndex];
+            if (influences.Count == 0)
+            {
+                return null;
+            }
+
+            var x = 0f;
+            var y = 0f;
+            var z = 0f;
+            var totalWeight = 0f;
+            foreach (var influence in influences)
+            {
+                if (influence.SourceIndex < 0 || influence.SourceIndex >= sourceDeltas.Count || influence.Weight <= 0f)
+                {
+                    continue;
+                }
+
+                var delta = sourceDeltas[influence.SourceIndex];
+                x += delta.X * influence.Weight;
+                y += delta.Y * influence.Weight;
+                z += delta.Z * influence.Weight;
+                totalWeight += influence.Weight;
+            }
+
+            return totalWeight <= 0.000001f
+                ? null
+                : (x / totalWeight, y / totalWeight, z / totalWeight);
+        }
+
+        private static IReadOnlyList<MeshVertex> NormalizeVerticesForTransfer(IReadOnlyList<MeshVertex> vertices)
+        {
+            if (vertices.Count == 0)
+            {
+                return [];
+            }
+
+            var minX = vertices.Min(static vertex => vertex.X);
+            var maxX = vertices.Max(static vertex => vertex.X);
+            var minY = vertices.Min(static vertex => vertex.Y);
+            var maxY = vertices.Max(static vertex => vertex.Y);
+            var minZ = vertices.Min(static vertex => vertex.Z);
+            var maxZ = vertices.Max(static vertex => vertex.Z);
+
+            var width = MathF.Max(0.0001f, maxX - minX);
+            var depth = MathF.Max(0.0001f, maxY - minY);
+            var height = MathF.Max(0.0001f, maxZ - minZ);
+
+            return vertices
+                .Select(vertex => new MeshVertex(
+                    (vertex.X - minX) / width,
+                    (vertex.Y - minY) / depth,
+                    (vertex.Z - minZ) / height))
+                .ToList();
         }
 
         private static int EstimateMorphVertexCount(IReadOnlyList<string> writtenNifs, string targetBody)
@@ -12071,7 +18128,8 @@ internal sealed class LocalExportService(
         PhysicsConfig physics,
         ImportedArmor armor,
         string? groundMeshRelativePath,
-        string? worldModeOverride)
+        string? worldModeOverride,
+        IReadOnlyList<NifSupportReport>? nifSupport = null)
     {
         var sourcePhysicsDetected = analysis.PhysicsEnabled || armor.PhysicsFiles.Count > 0;
         var runtimePhysicsProfileGenerated = !string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase);
@@ -12084,6 +18142,11 @@ internal sealed class LocalExportService(
         var overrideHint = hasModeOverride
             ? $"World drop mode override active: {modeOverride}."
             : null;
+        var heelAnalysis = nifSupport?
+            .Where(static report => report.HeelAnalysis is not null)
+            .Select(static report => report.HeelAnalysis!)
+            .OrderByDescending(static report => report.Confidence)
+            .FirstOrDefault();
 
         if (useRigidProxyMode)
         {
@@ -12098,6 +18161,11 @@ internal sealed class LocalExportService(
             recommendations.Add(groundMeshAvailable
                 ? "Use the generated *_ground.nif as the dropped-item world model."
                 : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
+            if (heelAnalysis is not null &&
+                heelAnalysis.Profile is "high-heel" or "raised-heel")
+            {
+                recommendations.Add("Detected raised-heel footwear; manually verify ankle height, toe angle, and ground contact after conversion.");
+            }
 
             return new WorldObjectPhysicsReport(
                 Mode: "rigid-proxy",
@@ -12105,7 +18173,8 @@ internal sealed class LocalExportService(
                 SourcePhysicsDetected: sourcePhysicsDetected,
                 RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
                 GroundMeshAvailable: groundMeshAvailable,
-                Recommendations: recommendations);
+                Recommendations: recommendations,
+                HeelAnalysis: heelAnalysis);
         }
 
         var staticRecommendations = new List<string>();
@@ -12118,6 +18187,11 @@ internal sealed class LocalExportService(
         staticRecommendations.Add(groundMeshAvailable
             ? "Use the generated *_ground.nif for world/inventory model paths."
             : "No dedicated ground mesh was available; use the primary converted mesh as MODL fallback.");
+        if (heelAnalysis is not null &&
+            heelAnalysis.Profile is "high-heel" or "raised-heel")
+        {
+            staticRecommendations.Add("Detected raised-heel footwear; manually verify ankle height, toe angle, and foot placement after conversion.");
+        }
 
         return new WorldObjectPhysicsReport(
             Mode: "static",
@@ -12125,7 +18199,8 @@ internal sealed class LocalExportService(
             SourcePhysicsDetected: sourcePhysicsDetected,
             RuntimePhysicsProfileGenerated: runtimePhysicsProfileGenerated,
             GroundMeshAvailable: groundMeshAvailable,
-            Recommendations: staticRecommendations);
+            Recommendations: staticRecommendations,
+            HeelAnalysis: heelAnalysis);
     }
 
     /// <summary>
@@ -12170,16 +18245,82 @@ internal sealed class LocalExportService(
             """;
     }
 
+    private static string BuildValidationPreviewPanelHtml(
+        ConversionValidationSummary? validationSummary,
+        string targetBody)
+    {
+        if (validationSummary is null)
+        {
+            return string.Empty;
+        }
+
+        var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 8);
+        var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(validationSummary, targetBody);
+        var gateLabel = ConversionValidationPresentation.GetGateLabel(validationSummary.Status);
+        var dispositionMessage = ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status);
+        var statusColor = validationSummary.Status switch
+        {
+            "ready" => "#6bcb77",
+            "needs-review" => "#ffd93d",
+            "high-risk" => "#ff6b6b",
+            _ => "#9ab"
+        };
+
+        var panel = new System.Text.StringBuilder();
+        panel.AppendLine("""      <div class="panel">""");
+        panel.AppendLine("""        <h3 style="margin-top:0">Conversion Readiness &amp; Next Actions</h3>""");
+        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Status:</strong> <span style="color:{statusColor};font-weight:700">{HtmlEncode(gateLabel)}</span> <span style="color:#9ab">({HtmlEncode(validationSummary.Status)})</span> · <strong>Score:</strong> {validationSummary.Score}</p>""");
+        panel.AppendLine($"""        <p style="font-size:.8rem;color:#9ab;margin:0 0 10px">Issues: {validationSummary.HighSeverityCount} high · {validationSummary.MediumSeverityCount} medium · {validationSummary.LowSeverityCount} low</p>""");
+        panel.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 10px">{HtmlEncode(dispositionMessage)}</p>""");
+
+        if (prioritizedIssues.Count == 0)
+        {
+            panel.AppendLine("""        <p style="color:#6bcb77;font-size:.85rem;margin:0">✓ No follow-up issues were reported by the conversion checks.</p>""");
+        }
+        else
+        {
+            panel.AppendLine("""        <table><tr><th>Severity</th><th>Issue</th><th>What happened</th></tr>""");
+            foreach (var issue in prioritizedIssues)
+            {
+                panel.AppendLine($"""          <tr><td>{HtmlEncode(issue.Severity.ToUpperInvariant())}</td><td>{HtmlEncode(issue.Code)}</td><td>{HtmlEncode(issue.Message)}</td></tr>""");
+            }
+
+            panel.AppendLine("        </table>");
+            if (validationSummary.Issues.Count > prioritizedIssues.Count)
+            {
+                panel.AppendLine($"""        <p style="font-size:.8rem;color:#9ab;margin:8px 0 0">Showing {prioritizedIssues.Count} of {validationSummary.Issues.Count} issues. Open conversion-quality.json for the full machine-readable list.</p>""");
+            }
+        }
+
+        if (followUpActions.Count > 0)
+        {
+            panel.AppendLine("""        <h4 style="margin:12px 0 8px;color:#9bb7f2">Recommended next actions</h4>""");
+            panel.AppendLine("""        <ul style="font-size:.85rem;padding-left:18px;margin:0">""");
+            foreach (var action in followUpActions)
+            {
+                panel.AppendLine($"""          <li>{HtmlEncode(action)}</li>""");
+            }
+
+            panel.AppendLine("        </ul>");
+        }
+
+        panel.AppendLine("""        <p style="font-size:.8rem;color:#9ab;margin:10px 0 0">Use README.txt and conversion-quality.json for full follow-up details before release.</p>""");
+        panel.AppendLine("      </div>");
+        return panel.ToString();
+    }
+
     private static string BuildPreviewWorkbenchHtml(
         ConversionRequest request,
         ImportedArmor armor,
         MeshAnalysis analysis,
         ConvertedMesh mesh,
-        IReadOnlyList<string> convertedMeshPaths)
+        IReadOnlyList<string> convertedMeshPaths,
+        ConversionValidationSummary? validationSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths);
         var payloadJson = JsonSerializer.Serialize(payload);
+        var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
 
         return $$"""
             <!DOCTYPE html>
@@ -12215,18 +18356,21 @@ internal sealed class LocalExportService(
                   </div>
                   <p id="workbench-status" class="subtitle" style="margin-top:10px"></p>
                 </div>
-                <div class="panel">
-                  <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
-                  <ul class="kvs">
-                    <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
-                    <li><strong>Points loaded:</strong> {{payload.VertexCount}}</li>
-                    <li><strong>NIF file:</strong> {{HtmlEncode(payload.MeshFile)}}</li>
-                  </ul>
-                  <p class="subtitle" style="margin-top:10px">{{HtmlEncode(payload.Note)}}</p>
-                  <p style="font-size:.85rem;margin:12px 0 0">
-                    Drag to rotate · mouse wheel (or zoom slider) to zoom · use
-                    <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
-                  </p>
+                <div style="display:flex;flex-direction:column;gap:18px">
+                  <div class="panel">
+                    <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
+                    <ul class="kvs">
+                      <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
+                      <li><strong>Points loaded:</strong> {{payload.VertexCount}}</li>
+                      <li><strong>NIF file:</strong> {{HtmlEncode(payload.MeshFile)}}</li>
+                    </ul>
+                    <p class="subtitle" style="margin-top:10px">{{HtmlEncode(payload.Note)}}</p>
+                    <p style="font-size:.85rem;margin:12px 0 0">
+                      Drag to rotate · mouse wheel (or zoom slider) to zoom · use
+                      <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
+                    </p>
+                  </div>
+            {{validationPanelHtml}}
                 </div>
               </div>
               <script>
@@ -12419,37 +18563,124 @@ internal sealed class LocalExportService(
 
     private static IReadOnlyList<(float X, float Y, float Z)> ExtractPreviewWorkbenchVertices(byte[] bytes, int maxVertices)
     {
+        if (NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(bytes, out var halfOffset, out var halfCount, out var halfStride))
+        {
+            var halfVertices = ReadPreviewWorkbenchHalfFloatVertices(bytes, halfOffset, halfCount, halfStride, maxVertices);
+            if (halfVertices.Count > 0)
+            {
+                return halfVertices;
+            }
+        }
+
+        if (NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedOffset, out var interleavedCount, out var interleavedStride))
+        {
+            var interleavedVertices = ReadPreviewWorkbenchFloatStrideVertices(bytes, interleavedOffset, interleavedCount, interleavedStride, maxVertices);
+            if (interleavedVertices.Count > 0)
+            {
+                return interleavedVertices;
+            }
+        }
+
         if (!NifGeometrySignatureReader.TryLocateVertexBlock(bytes, out var offset, out var count) || count <= 0)
         {
             return [];
         }
 
-        const int vertexSize = 12;
-        var required = (long)count * vertexSize;
-        if (offset < 0 || offset + required > bytes.Length)
+        return ReadPreviewWorkbenchFloatStrideVertices(bytes, offset, count, vertexStride: 12, maxVertices);
+    }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadPreviewWorkbenchFloatStrideVertices(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        int maxVertices)
+    {
+        if (vertexCount <= 0 || vertexStride < 12)
         {
             return [];
         }
 
-        var sampleStride = Math.Max(1, count / Math.Max(1, maxVertices));
-        var sampledCount = Math.Min(count, maxVertices);
+        var required = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var sampleStride = Math.Max(1, vertexCount / Math.Max(1, maxVertices));
+        var sampledCount = Math.Min(vertexCount, maxVertices);
         var vertices = new List<(float, float, float)>(sampledCount);
-        for (var i = 0; i < count; i += sampleStride)
+        for (var i = 0; i < vertexCount; i += sampleStride)
         {
             if (vertices.Count >= maxVertices)
             {
                 break;
             }
 
-            var o = offset + i * vertexSize;
-            vertices.Add((
-                BitConverter.ToSingle(bytes, o),
-                BitConverter.ToSingle(bytes, o + 4),
-                BitConverter.ToSingle(bytes, o + 8)));
+            var offset = vertexDataOffset + (i * vertexStride);
+            var x = BitConverter.ToSingle(bytes, offset);
+            var y = BitConverter.ToSingle(bytes, offset + 4);
+            var z = BitConverter.ToSingle(bytes, offset + 8);
+            if (!IsPreviewWorkbenchCoordinate(x, maxMagnitude: 8192f) ||
+                !IsPreviewWorkbenchCoordinate(y, maxMagnitude: 8192f) ||
+                !IsPreviewWorkbenchCoordinate(z, maxMagnitude: 8192f))
+            {
+                return [];
+            }
+
+            vertices.Add((x, y, z));
         }
 
         return vertices;
     }
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ReadPreviewWorkbenchHalfFloatVertices(
+        byte[] bytes,
+        int vertexDataOffset,
+        int vertexCount,
+        int vertexStride,
+        int maxVertices)
+    {
+        if (vertexCount <= 0 || vertexStride < 6)
+        {
+            return [];
+        }
+
+        var required = (long)vertexCount * vertexStride;
+        if (vertexDataOffset < 0 || vertexDataOffset + required > bytes.Length)
+        {
+            return [];
+        }
+
+        var sampleStride = Math.Max(1, vertexCount / Math.Max(1, maxVertices));
+        var sampledCount = Math.Min(vertexCount, maxVertices);
+        var vertices = new List<(float, float, float)>(sampledCount);
+        for (var i = 0; i < vertexCount; i += sampleStride)
+        {
+            if (vertices.Count >= maxVertices)
+            {
+                break;
+            }
+
+            var offset = vertexDataOffset + (i * vertexStride);
+            var x = (float)BitConverter.ToHalf(bytes.AsSpan(offset));
+            var y = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 2));
+            var z = (float)BitConverter.ToHalf(bytes.AsSpan(offset + 4));
+            if (!IsPreviewWorkbenchCoordinate(x, maxMagnitude: 512f) ||
+                !IsPreviewWorkbenchCoordinate(y, maxMagnitude: 512f) ||
+                !IsPreviewWorkbenchCoordinate(z, maxMagnitude: 512f))
+            {
+                return [];
+            }
+
+            vertices.Add((x, y, z));
+        }
+
+        return vertices;
+    }
+
+    private static bool IsPreviewWorkbenchCoordinate(float value, float maxMagnitude) =>
+        float.IsFinite(value) && MathF.Abs(value) <= maxMagnitude;
 
     private static string BuildPreviewHtml(
         ConversionRequest request,
@@ -12461,7 +18692,8 @@ internal sealed class LocalExportService(
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics,
         CorrectionResult correction,
-        TextureSummary textureSummary)
+        TextureSummary textureSummary,
+        ConversionValidationSummary? validationSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
         var orderedRegions = mesh.RegionalMorphing
@@ -12603,6 +18835,7 @@ internal sealed class LocalExportService(
         var highRiskBadge = poseSimulation.HighRiskRegions.Count > 0
             ? $" &nbsp;·&nbsp; <span style=\"color:#ff6b6b\">High-risk: {HtmlEncode(string.Join(", ", poseSimulation.HighRiskRegions.OrderBy(r => r, StringComparer.OrdinalIgnoreCase)))}</span>"
             : string.Empty;
+        var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
 
         // Auto-correction panel.
         var correctionPanelHtml = new System.Text.StringBuilder();
@@ -12758,7 +18991,7 @@ internal sealed class LocalExportService(
                     <h3 style="margin-top:0">Physics Nodes</h3>
                     {{physicsPanel}}
                   </div>
-            {{posePanelHtml}}{{correctionPanelHtml}}{{texturePanelHtml}}{{worldPhysicsPanelHtml}}      </div>
+            {{validationPanelHtml}}{{posePanelHtml}}{{correctionPanelHtml}}{{texturePanelHtml}}{{worldPhysicsPanelHtml}}      </div>
               </div>
               <script>
                 const baseFactors = {{baseFactorsJson}};
@@ -13307,13 +19540,13 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
         new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
             ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
-            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
-            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
-            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
-            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.06, ["legs"]=1.04, ["feet"]=1.08 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08, ["calves"]=1.10, ["feet"]=1.12 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02, ["feet"]=1.01 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14, ["feet"]=1.06 },
             ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
-            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
-            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 }
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10, ["feet"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16, ["feet"]=1.08 }
         };
 
     // A region is flagged at-risk when its effective stress (morph × pose amplifier) meets or exceeds this.
@@ -13556,7 +19789,8 @@ internal static class AnimationDrivenGeometrySolver
     /// </summary>
     public static AnimationDrivenResult Solve(
         IReadOnlyList<(float X, float Y, float Z)> vertices,
-        IReadOnlyDictionary<string, double> regionalMorphing)
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        bool heelAware = false)
     {
         if (vertices.Count == 0)
         {
@@ -13585,7 +19819,7 @@ internal static class AnimationDrivenGeometrySolver
         // Track maximum push-out depth per region across all poses
         var maxPushOut = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (poseName, poseBones) in Poses)
+        foreach (var (_, poseBones) in EnumeratePoses(heelAware))
         {
             for (var i = 0; i < vertices.Count; i++)
             {
@@ -13644,6 +19878,37 @@ internal static class AnimationDrivenGeometrySolver
 
         return new AnimationDrivenResult(vertices.Count, maxPushOut, "animation-driven");
     }
+
+    private static IEnumerable<KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>> EnumeratePoses(bool heelAware)
+    {
+        foreach (var pose in Poses)
+        {
+            yield return pose;
+        }
+
+        if (!heelAware)
+        {
+            yield break;
+        }
+
+        yield return new KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>(
+            "Heel-Idle",
+            new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = new(0.140f),
+                ["calves"] = new(0.105f),
+                ["pelvis"] = new(TransZ: -0.015f),
+            });
+        yield return new KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>(
+            "Heel-Walk",
+            new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = new(0.310f),
+                ["calves"] = new(0.192f),
+                ["thighs"] = new(-0.262f),
+                ["pelvis"] = new(TransZ: -0.030f),
+            });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13663,21 +19928,42 @@ internal static class AnimationDrivenGeometrySolver
 /// </summary>
 internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationService
 {
-    private static readonly IReadOnlyList<string> AnimationPoses =
+    private static readonly IReadOnlyList<string> BaseAnimationPoses =
         ["T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak"];
+    private static readonly IReadOnlyList<string> HeelAnimationPoses =
+        ["Heel-Idle", "Heel-Walk"];
+    private static readonly string[] HeelKeywordTokens =
+        ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
 
     // Per-pose regional stress amplifiers — retained as the heuristic fallback path.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> PoseAmplifiers =
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> BasePoseAmplifiers =
         new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
             ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
-            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
-            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
-            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
-            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.06, ["legs"]=1.04, ["feet"]=1.08 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08, ["calves"]=1.10, ["feet"]=1.12 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02, ["feet"]=1.01 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14, ["feet"]=1.06 },
             ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
-            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
-            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 },
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10, ["feet"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16, ["feet"]=1.08 },
+        };
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> HeelPoseAmplifiers =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Heel-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.14,
+                ["calves"] = 1.08,
+                ["legs"] = 1.06,
+            },
+            ["Heel-Walk"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.24,
+                ["calves"] = 1.16,
+                ["legs"] = 1.12,
+                ["pelvis"] = 1.06,
+            },
         };
 
     private const double RiskThreshold = 1.10;
@@ -13694,6 +19980,8 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         IReadOnlyList<string>? sourceMeshPaths,
         CancellationToken cancellationToken)
     {
+        var heelAware = IsHeelAwareSource(sourceMeshPaths);
+
         // Try animation-driven mode when source NIF paths are available
         if (sourceMeshPaths is { Count: > 0 })
         {
@@ -13707,8 +19995,8 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
                     var vertices = ExtractVertices(bytes);
                     if (vertices.Count > 0)
                     {
-                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing);
-                        return BuildResultFromSolverOutput(solverResult);
+                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing, heelAware);
+                        return BuildResultFromSolverOutput(solverResult, heelAware);
                     }
                 }
 #pragma warning disable CA1031
@@ -13721,7 +20009,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         // Heuristic fallback
-        return RunHeuristicSimulation(mesh);
+        return RunHeuristicSimulation(mesh, heelAware);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -13753,7 +20041,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         return result;
     }
 
-    private static PoseSimulationResult BuildResultFromSolverOutput(AnimationDrivenResult solver)
+    private static PoseSimulationResult BuildResultFromSolverOutput(AnimationDrivenResult solver, bool heelAware)
     {
         // Map solver push-out depths → PoseSimulationResult.
         // Each region with non-zero push-out is assigned to its highest-stress pose.
@@ -13765,7 +20053,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             if (pushOut <= 0.0) continue;
 
             highRiskSet.Add(region);
-            var worstPose = GetWorstPoseForRegion(region);
+            var worstPose = GetWorstPoseForRegion(region, heelAware);
 
             if (!poseClippingRisk.TryGetValue(worstPose, out var existing))
             {
@@ -13799,16 +20087,18 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         return new PoseSimulationResult(
-            AnimationPoses,
+            GetAnimationPoses(heelAware),
             poseClippingRisk,
             highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
             poseClippingRisk.Count);
     }
 
-    private static string GetWorstPoseForRegion(string region) =>
+    private static string GetWorstPoseForRegion(string region, bool heelAware) =>
         region.ToLowerInvariant() switch
         {
-            "thighs" or "calves" or "butt" or "pelvis" => "Crouch",
+            "feet"                                      => heelAware ? "Heel-Walk" : "Walk",
+            "calves"                                    => heelAware ? "Heel-Walk" : "Crouch",
+            "thighs" or "butt" or "pelvis"              => "Crouch",
             "chest" or "breasts"                        => "Combat-Idle",
             "shoulders" or "armpits"                    => "Combat-Idle",
             "arms"                                      => "Run",
@@ -13816,15 +20106,17 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             _                                           => "Run",
         };
 
-    private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh)
+    private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh, bool heelAware = false)
     {
         var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var highRiskSet      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var atRiskPoseCount  = 0;
 
-        foreach (var pose in AnimationPoses)
+        foreach (var pose in GetAnimationPoses(heelAware))
         {
-            PoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            var amplifierMap = heelAware ? MergeAmplifiersForPose(pose) : null;
+            BasePoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            amplifiers = amplifierMap ?? amplifiers;
             amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
             var atRiskRegions = new List<string>();
@@ -13859,9 +20151,65 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         return new PoseSimulationResult(
-            AnimationPoses,
+            GetAnimationPoses(heelAware),
             poseClippingRisk,
             highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
             atRiskPoseCount);
+    }
+
+    private static IReadOnlyList<string> GetAnimationPoses(bool heelAware) =>
+        heelAware
+            ? [.. BaseAnimationPoses, .. HeelAnimationPoses]
+            : BaseAnimationPoses;
+
+    private static IReadOnlyDictionary<string, double>? MergeAmplifiersForPose(string pose)
+    {
+        BasePoseAmplifiers.TryGetValue(pose, out var baseAmplifiers);
+        HeelPoseAmplifiers.TryGetValue(pose, out var heelAmplifiers);
+        if (baseAmplifiers is null)
+        {
+            return heelAmplifiers;
+        }
+
+        if (heelAmplifiers is null)
+        {
+            return baseAmplifiers;
+        }
+
+        var merged = new Dictionary<string, double>(baseAmplifiers, StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, factor) in heelAmplifiers)
+        {
+            merged[region] = factor;
+        }
+
+        return merged;
+    }
+
+    private static bool IsHeelAwareSource(IReadOnlyList<string>? sourceMeshPaths)
+    {
+        if (sourceMeshPaths is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var path in sourceMeshPaths.Where(static path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty;
+            if (HeelKeywordTokens.Any(fileName.Contains))
+            {
+                return true;
+            }
+
+            if (File.Exists(path))
+            {
+                var report = NifGeometrySignatureReader.Inspect(path);
+                if (report.HeelAnalysis?.Profile is "high-heel" or "raised-heel")
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

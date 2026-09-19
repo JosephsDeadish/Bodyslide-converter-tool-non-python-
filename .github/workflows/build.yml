@@ -51,10 +51,18 @@ jobs:
           -p:DebugSymbols=false
           --output artifacts/linux-x64
 
+      - name: Smoke-test packaged Linux CLI
+        run: |
+          chmod +x artifacts/linux-x64/SlideSmith
+          artifacts/linux-x64/SlideSmith --self-check
+
       - name: Zip Linux CLI (single binary)
         run: |
           cd artifacts/linux-x64
           zip ../slidesmith-linux-x64.zip SlideSmith
+
+      - name: Verify Linux CLI zip contents
+        run: unzip -l artifacts/slidesmith-linux-x64.zip SlideSmith
 
       - name: Upload Linux CLI zip artifact
         uses: actions/upload-artifact@v4
@@ -121,8 +129,29 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          & artifacts/win-x64/SlideSmith.exe --smoke-test
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+
       - name: Create Windows bundle zip (desktop + CLI)
         run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith.exe"))) {
+            throw "Missing SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith-CLI.exe"))) {
+            throw "Missing SlideSmith-CLI.exe in bundle zip."
+          }
 
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
@@ -212,8 +241,29 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          & artifacts/win-x64/SlideSmith.exe --smoke-test
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+
       - name: Zip Windows bundle (desktop + CLI)
         run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith.exe"))) {
+            throw "Missing SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "SlideSmith-CLI.exe"))) {
+            throw "Missing SlideSmith-CLI.exe in bundle zip."
+          }
 
       - name: Set Windows artifact name
         shell: pwsh

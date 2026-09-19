@@ -1,0 +1,8 @@
+{
+  "name": "Devious Master Chain Reference",
+  "detectionTokens": ["devious", "harness", "restraint"],
+  "referenceTokens": ["deviouspanel", "restraint"],
+  "physicsProfile": "smp+cbpc",
+  "sliderNames": ["Belly", "Butt", "Waist"],
+  "gender": "female"
+}
