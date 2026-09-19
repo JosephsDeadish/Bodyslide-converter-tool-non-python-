@@ -591,6 +591,7 @@ static void WriteConversionGuide()
 static void WritePostConversionGuidance(ConversionResult result)
 {
     var qualityReport = TryReadConversionQualityReport(result);
+    var targetBody = qualityReport?.TargetBody ?? "target body";
     var validationSummary = qualityReport?.ValidationSummary;
     if (validationSummary is null)
     {
@@ -620,7 +621,7 @@ static void WritePostConversionGuidance(ConversionResult result)
 
     var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
         validationSummary,
-        qualityReport.TargetBody,
+        targetBody,
         maxActions: 4);
     if (followUpActions.Count > 0)
     {
