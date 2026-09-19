@@ -132,7 +132,7 @@ if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
             : $"{display} [{profile}]";
         Console.WriteLine($" - {label,-34}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
-    Console.WriteLine("Alias accepted: soft-body => smp+cbpc");
+    Console.WriteLine("Aliases accepted: soft-body / full-soft-body / hdt-smp / fsmp / cbp => canonical physics profiles");
     Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;

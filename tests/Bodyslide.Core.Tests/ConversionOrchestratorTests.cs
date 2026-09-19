@@ -8252,6 +8252,23 @@ public sealed class BodyTypeCatalogTests
         Assert.Equal("smp+cbpc", normalized, StringComparer.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("off", "none")]
+    [InlineData("disabled", "none")]
+    [InlineData("cbp", "cbpc")]
+    [InlineData("cbpc only", "cbpc")]
+    [InlineData("hdt-smp", "smp")]
+    [InlineData("FSMP", "smp")]
+    [InlineData("faster hdt-smp", "smp")]
+    [InlineData("hdt-smp + cbpc", "smp+cbpc")]
+    [InlineData("cbpc + fsmp", "smp+cbpc")]
+    [InlineData("full soft body", "smp+cbpc")]
+    public void PhysicsProfileCatalog_TryNormalize_CommonRealWorldAliasesNormalizes(string value, string expected)
+    {
+        Assert.True(PhysicsProfileCatalog.TryNormalize(value, out var normalized));
+        Assert.Equal(expected, normalized, StringComparer.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void PhysicsProfileCatalog_ToDisplayName_ShowsSoftBodyLabelForSmpCbpc()
     {

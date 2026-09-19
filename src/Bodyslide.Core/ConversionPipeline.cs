@@ -1007,15 +1007,13 @@ public static class PhysicsProfileCatalog
             return false;
         }
 
-        var candidate = value.Trim().ToLowerInvariant();
+        var candidate = CanonicalizePhysicsProfileAlias(value);
         normalized = candidate switch
         {
-            "none"                                                  => "none",
-            "cbpc"                                                  => "cbpc",
-            "smp"                                                   => "smp",
-            "smp+cbpc" or "cbpc+smp" or "smp,cbpc" or "cbpc,smp"  => "smp+cbpc",
-            // "soft-body" is a behavior-facing alias; it normalises to canonical smp+cbpc.
-            "soft-body" or "soft body" or "softbody" or "soft_body" or "soft body (cbpc + smp)" => "smp+cbpc",
+            "none" or "off" or "disabled" or "static" => "none",
+            "cbpc" or "cbp" or "cbpconly" or "clothphysics" => "cbpc",
+            "smp" or "smponly" or "hdtsmp" or "fsmp" or "fasterhdtsmp" => "smp",
+            "smpcbpc" or "cbpcsmp" or "softbody" or "softbodycbpcsmp" or "fullsoftbody" or "fullsoftbodycbpcsmp" or "hdtsmpcbpc" or "cbpchdtsmp" or "fsmpcbpc" or "cbpcfsmp" => "smp+cbpc",
             _ => string.Empty
         };
 
@@ -1039,6 +1037,21 @@ public static class PhysicsProfileCatalog
         BuiltInBodyMetadataCatalog.TryGet(targetBody.Trim(), out var metadata)
             ? metadata.DefaultPhysics
             : "none";
+
+    private static string CanonicalizePhysicsProfileAlias(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        var length = 0;
+        foreach (var ch in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                buffer[length++] = ch;
+            }
+        }
+
+        return new string(buffer[..length]);
+    }
 }
 
 public static class WorldDropModeCatalog
