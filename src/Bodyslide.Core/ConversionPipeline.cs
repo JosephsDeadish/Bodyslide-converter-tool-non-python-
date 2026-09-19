@@ -7114,15 +7114,16 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RegionalAdjacency =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
+            ["feet"] = ["calves", "legs"],
             ["chest"] = ["breasts", "shoulders", "arms", "waist"],
             ["breasts"] = ["chest", "shoulders", "waist"],
             ["waist"] = ["chest", "belly", "pelvis", "arms"],
             ["belly"] = ["waist", "pelvis", "butt"],
             ["pelvis"] = ["waist", "belly", "butt", "legs", "thighs"],
             ["butt"] = ["pelvis", "thighs", "legs"],
-            ["legs"] = ["pelvis", "thighs", "calves"],
+            ["legs"] = ["pelvis", "thighs", "calves", "feet"],
             ["thighs"] = ["pelvis", "butt", "legs", "calves"],
-            ["calves"] = ["legs", "thighs"],
+            ["calves"] = ["legs", "thighs", "feet"],
             ["shoulders"] = ["chest", "arms", "breasts"],
             ["arms"] = ["shoulders", "chest", "waist"]
         };
@@ -8342,9 +8343,11 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
         ("Spine",     "chest"),
         ("Pelvis",    "pelvis"),
         ("Thigh",     "legs"),
-        ("Calf",      "legs"),
-        ("Foot",      "legs"),
-        ("Toe",       "legs"),
+        ("Calf",      "calves"),
+        ("Foot",      "feet"),
+        ("Toe",       "feet"),
+        ("Heel",      "feet"),
+        ("Ankle",     "feet"),
         ("UpperArm",  "arms"),
         ("ForeArm",   "arms"),
         ("Hand",      "arms"),
@@ -8365,9 +8368,14 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
         ("glove",       "arms"),
         ("forearm",     "arms"),
         ("bracer",      "arms"),
-        ("sabatons",    "legs"),
+        ("sabatons",    "feet"),
         ("greave",      "legs"),
-        ("boot",        "legs"),
+        ("boot",        "feet"),
+        ("shoe",        "feet"),
+        ("sandal",      "feet"),
+        ("slipper",     "feet"),
+        ("heel",        "feet"),
+        ("pump",        "feet"),
         ("legging",     "legs"),
         ("trouser",     "legs"),
         ("pauldron",    "shoulders"),
@@ -8391,8 +8399,8 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             [32] = ["chest", "waist", "pelvis"],
             [33] = ["arms"],
             [34] = ["arms"],
-            [37] = ["legs"],
-            [38] = ["legs"],
+            [37] = ["feet"],
+            [38] = ["calves"],
             [40] = ["pelvis", "legs"],
             [42] = ["shoulders"],
             [43] = ["shoulders"],
@@ -8529,6 +8537,7 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
 
             // These normalized height bands approximate common humanoid proportions after the
             // mesh bounds are projected into 0..1 space (feet near 0, shoulders/head near 1).
+            AddIfInRange(scores, "feet", normalizedHeight, 0.00, 0.08);
             AddIfInRange(scores, "shoulders", normalizedHeight, 0.82, 1.01);
             AddIfInRange(scores, "chest", normalizedHeight, 0.56, 0.82);
             AddIfInRange(scores, "waist", normalizedHeight, 0.40, 0.60);
@@ -18858,13 +18867,13 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
         new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
             ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
-            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
-            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
-            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
-            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.06, ["legs"]=1.04, ["feet"]=1.08 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08, ["calves"]=1.10, ["feet"]=1.12 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02, ["feet"]=1.01 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14, ["feet"]=1.06 },
             ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
-            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
-            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 }
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10, ["feet"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16, ["feet"]=1.08 }
         };
 
     // A region is flagged at-risk when its effective stress (morph × pose amplifier) meets or exceeds this.
@@ -19107,7 +19116,8 @@ internal static class AnimationDrivenGeometrySolver
     /// </summary>
     public static AnimationDrivenResult Solve(
         IReadOnlyList<(float X, float Y, float Z)> vertices,
-        IReadOnlyDictionary<string, double> regionalMorphing)
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        bool heelAware = false)
     {
         if (vertices.Count == 0)
         {
@@ -19136,7 +19146,7 @@ internal static class AnimationDrivenGeometrySolver
         // Track maximum push-out depth per region across all poses
         var maxPushOut = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (poseName, poseBones) in Poses)
+        foreach (var (_, poseBones) in EnumeratePoses(heelAware))
         {
             for (var i = 0; i < vertices.Count; i++)
             {
@@ -19195,6 +19205,37 @@ internal static class AnimationDrivenGeometrySolver
 
         return new AnimationDrivenResult(vertices.Count, maxPushOut, "animation-driven");
     }
+
+    private static IEnumerable<KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>> EnumeratePoses(bool heelAware)
+    {
+        foreach (var pose in Poses)
+        {
+            yield return pose;
+        }
+
+        if (!heelAware)
+        {
+            yield break;
+        }
+
+        yield return new KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>(
+            "Heel-Idle",
+            new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = new(0.140f),
+                ["calves"] = new(0.105f),
+                ["pelvis"] = new(TransZ: -0.015f),
+            });
+        yield return new KeyValuePair<string, IReadOnlyDictionary<string, PoseBoneRotation>>(
+            "Heel-Walk",
+            new Dictionary<string, PoseBoneRotation>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = new(0.310f),
+                ["calves"] = new(0.192f),
+                ["thighs"] = new(-0.262f),
+                ["pelvis"] = new(TransZ: -0.030f),
+            });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19214,21 +19255,42 @@ internal static class AnimationDrivenGeometrySolver
 /// </summary>
 internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationService
 {
-    private static readonly IReadOnlyList<string> AnimationPoses =
+    private static readonly IReadOnlyList<string> BaseAnimationPoses =
         ["T-pose", "Walk", "Run", "Idle", "Crouch", "Combat-Idle", "Jump", "Sneak"];
+    private static readonly IReadOnlyList<string> HeelAnimationPoses =
+        ["Heel-Idle", "Heel-Walk"];
+    private static readonly string[] HeelKeywordTokens =
+        ["highheel", "high-heel", "heel", "heels", "stiletto", "platform", "wedge", "pump", "pumps"];
 
     // Per-pose regional stress amplifiers — retained as the heuristic fallback path.
-    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> PoseAmplifiers =
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> BasePoseAmplifiers =
         new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
         {
             ["T-pose"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
-            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.04, ["legs"]=1.04 },
-            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08 },
-            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02 },
-            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14 },
+            ["Walk"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.08, ["thighs"]=1.05, ["belly"]=1.03, ["calves"]=1.06, ["legs"]=1.04, ["feet"]=1.08 },
+            ["Run"]         = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["butt"]=1.12, ["thighs"]=1.10, ["belly"]=1.05, ["arms"]=1.04, ["legs"]=1.08, ["calves"]=1.10, ["feet"]=1.12 },
+            ["Idle"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["shoulders"]=1.02, ["arms"]=1.02, ["feet"]=1.01 },
+            ["Crouch"]      = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.20, ["pelvis"]=1.15, ["butt"]=1.10, ["belly"]=1.12, ["calves"]=1.08, ["legs"]=1.14, ["feet"]=1.06 },
             ["Combat-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["chest"]=1.05, ["arms"]=1.08, ["shoulders"]=1.10, ["waist"]=1.04 },
-            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10 },
-            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16 },
+            ["Jump"]        = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["butt"]=1.15, ["thighs"]=1.12, ["belly"]=1.08, ["calves"]=1.10, ["legs"]=1.10, ["feet"]=1.10 },
+            ["Sneak"]       = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase) { ["thighs"]=1.18, ["pelvis"]=1.12, ["butt"]=1.08, ["calves"]=1.15, ["legs"]=1.16, ["feet"]=1.08 },
+        };
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> HeelPoseAmplifiers =
+        new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Heel-Idle"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.14,
+                ["calves"] = 1.08,
+                ["legs"] = 1.06,
+            },
+            ["Heel-Walk"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.24,
+                ["calves"] = 1.16,
+                ["legs"] = 1.12,
+                ["pelvis"] = 1.06,
+            },
         };
 
     private const double RiskThreshold = 1.10;
@@ -19245,6 +19307,8 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         IReadOnlyList<string>? sourceMeshPaths,
         CancellationToken cancellationToken)
     {
+        var heelAware = IsHeelAwareSource(sourceMeshPaths);
+
         // Try animation-driven mode when source NIF paths are available
         if (sourceMeshPaths is { Count: > 0 })
         {
@@ -19258,8 +19322,8 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
                     var vertices = ExtractVertices(bytes);
                     if (vertices.Count > 0)
                     {
-                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing);
-                        return BuildResultFromSolverOutput(solverResult);
+                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing, heelAware);
+                        return BuildResultFromSolverOutput(solverResult, heelAware);
                     }
                 }
 #pragma warning disable CA1031
@@ -19272,7 +19336,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         // Heuristic fallback
-        return RunHeuristicSimulation(mesh);
+        return RunHeuristicSimulation(mesh, heelAware);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -19304,7 +19368,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         return result;
     }
 
-    private static PoseSimulationResult BuildResultFromSolverOutput(AnimationDrivenResult solver)
+    private static PoseSimulationResult BuildResultFromSolverOutput(AnimationDrivenResult solver, bool heelAware)
     {
         // Map solver push-out depths → PoseSimulationResult.
         // Each region with non-zero push-out is assigned to its highest-stress pose.
@@ -19316,7 +19380,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             if (pushOut <= 0.0) continue;
 
             highRiskSet.Add(region);
-            var worstPose = GetWorstPoseForRegion(region);
+            var worstPose = GetWorstPoseForRegion(region, heelAware);
 
             if (!poseClippingRisk.TryGetValue(worstPose, out var existing))
             {
@@ -19350,16 +19414,18 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         return new PoseSimulationResult(
-            AnimationPoses,
+            GetAnimationPoses(heelAware),
             poseClippingRisk,
             highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
             poseClippingRisk.Count);
     }
 
-    private static string GetWorstPoseForRegion(string region) =>
+    private static string GetWorstPoseForRegion(string region, bool heelAware) =>
         region.ToLowerInvariant() switch
         {
-            "thighs" or "calves" or "butt" or "pelvis" => "Crouch",
+            "feet"                                      => heelAware ? "Heel-Walk" : "Walk",
+            "calves"                                    => heelAware ? "Heel-Walk" : "Crouch",
+            "thighs" or "butt" or "pelvis"              => "Crouch",
             "chest" or "breasts"                        => "Combat-Idle",
             "shoulders" or "armpits"                    => "Combat-Idle",
             "arms"                                      => "Run",
@@ -19367,15 +19433,17 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             _                                           => "Run",
         };
 
-    private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh)
+    private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh, bool heelAware = false)
     {
         var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var highRiskSet      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var atRiskPoseCount  = 0;
 
-        foreach (var pose in AnimationPoses)
+        foreach (var pose in GetAnimationPoses(heelAware))
         {
-            PoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            var amplifierMap = heelAware ? MergeAmplifiersForPose(pose) : null;
+            BasePoseAmplifiers.TryGetValue(pose, out var amplifiers);
+            amplifiers = amplifierMap ?? amplifiers;
             amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
             var atRiskRegions = new List<string>();
@@ -19410,9 +19478,65 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         }
 
         return new PoseSimulationResult(
-            AnimationPoses,
+            GetAnimationPoses(heelAware),
             poseClippingRisk,
             highRiskSet.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList(),
             atRiskPoseCount);
+    }
+
+    private static IReadOnlyList<string> GetAnimationPoses(bool heelAware) =>
+        heelAware
+            ? [.. BaseAnimationPoses, .. HeelAnimationPoses]
+            : BaseAnimationPoses;
+
+    private static IReadOnlyDictionary<string, double>? MergeAmplifiersForPose(string pose)
+    {
+        BasePoseAmplifiers.TryGetValue(pose, out var baseAmplifiers);
+        HeelPoseAmplifiers.TryGetValue(pose, out var heelAmplifiers);
+        if (baseAmplifiers is null)
+        {
+            return heelAmplifiers;
+        }
+
+        if (heelAmplifiers is null)
+        {
+            return baseAmplifiers;
+        }
+
+        var merged = new Dictionary<string, double>(baseAmplifiers, StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, factor) in heelAmplifiers)
+        {
+            merged[region] = factor;
+        }
+
+        return merged;
+    }
+
+    private static bool IsHeelAwareSource(IReadOnlyList<string>? sourceMeshPaths)
+    {
+        if (sourceMeshPaths is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var path in sourceMeshPaths.Where(static path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty;
+            if (HeelKeywordTokens.Any(fileName.Contains))
+            {
+                return true;
+            }
+
+            if (File.Exists(path))
+            {
+                var report = NifGeometrySignatureReader.Inspect(path);
+                if (report.HeelAnalysis?.Profile is "high-heel" or "raised-heel")
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

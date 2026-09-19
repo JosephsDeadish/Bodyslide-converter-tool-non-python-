@@ -8283,7 +8283,7 @@ public sealed class ArmorRegionBindingTests
 
     [Theory]
     [InlineData("cuirass.nif",   "chest")]
-    [InlineData("boots.nif",     "legs")]
+    [InlineData("boots.nif",     "feet")]
     [InlineData("gauntlets.nif", "arms")]
     [InlineData("helmet.nif",    "shoulders")]
     public async Task BasicArmorRegionBindingService_FilenameHints_DetectsCorrectRegion(string fileName, string expectedRegion)
@@ -8306,6 +8306,36 @@ public sealed class ArmorRegionBindingTests
         finally
         {
             Directory.Delete(workingDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicArmorRegionBindingService_FootPartitions_DetectFeetAndCalves()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "heel_boots.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteBlockGraphStyleAsync(
+                meshPath,
+                SyntheticNifTestData.CreateBodyVertices(240),
+                partitionSlots: [37, 38]);
+
+            var service = new BasicArmorRegionBindingService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var analysis = new MeshAnalysis("leather", false, 1);
+
+            var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+            Assert.Equal("nif-partitions", binding.DetectionMethod);
+            Assert.Contains("feet", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("calves", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
@@ -10174,6 +10204,36 @@ public sealed class AnimationDrivenGeometrySolverTests
 
         Assert.Equal(8, result.TestedPoses.Count);
         Assert.True(result.TotalPosesAtRisk > 0, "Heuristic fallback should flag high thigh morph.");
+    }
+
+    [Fact]
+    public async Task AnimationDrivenService_SimulateWithMeshDataAsync_HighHeelFallback_AddsHeelAwarePoses()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "ebony_highheel_boots_1.nif");
+        await File.WriteAllTextAsync(meshPath, "not-a-real-nif");
+
+        try
+        {
+            var service = new AnimationDrivenPoseSimulationService();
+            var mesh = new ConvertedMesh("leather", "test", 1, new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["feet"] = 1.12,
+                ["calves"] = 1.04
+            });
+
+            var result = await service.SimulateWithMeshDataAsync(mesh, "3BA", [meshPath], CancellationToken.None);
+
+            Assert.Contains(result.TestedPoses, pose => string.Equals(pose, "Heel-Idle", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.TestedPoses, pose => string.Equals(pose, "Heel-Walk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.PoseClippingRisk.Keys, pose => string.Equals(pose, "Heel-Walk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.HighRiskRegions, region => string.Equals(region, "feet", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     // ── Integration: animation-driven path in full pipeline ───────────────────
