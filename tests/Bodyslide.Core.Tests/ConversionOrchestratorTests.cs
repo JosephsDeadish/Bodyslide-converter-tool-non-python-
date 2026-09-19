@@ -4823,7 +4823,7 @@ public sealed class NifOutputAndSourceOverrideTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bodySlideProject, pluginAnalysis,
                 textureSummary, poseSimulation, ["step1"],
-                detectedBody, skeletonMapping, voxelResult,
+                detectedBody, skeletonMapping, null, voxelResult,
                 CancellationToken.None);
 
             var transformedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "arm_bias.nif")));
@@ -15154,7 +15154,7 @@ public sealed class LocalExportServiceGroundMeshTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bodySlideProject, pluginAnalysis,
                 textureSummary, poseSimulation, ["step1"],
-                detectedBody, skeletonMapping, voxelResult,
+                detectedBody, skeletonMapping, null, voxelResult,
                 CancellationToken.None);
 
             var espPath = files.First(f => f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase));
@@ -15338,7 +15338,7 @@ public sealed class LocalExportServiceGroundMeshTests
             request, armor, analysis, mesh, morphs, physics,
             clipping, correction, bodySlideProject, pluginAnalysis,
             textureSummary, poseSimulation, ["step1"],
-            detectedBody, skeletonMapping, voxelResult,
+            detectedBody, skeletonMapping, null, voxelResult,
             CancellationToken.None);
     }
 }
@@ -15385,7 +15385,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var skelPath = files.FirstOrDefault(f => f.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
@@ -15437,7 +15437,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var qualityPath = files.FirstOrDefault(f => f.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
@@ -15804,7 +15804,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
@@ -15888,7 +15888,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
@@ -15953,7 +15953,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var lowBsdPath = files.Single(path => path.EndsWith($"{Path.DirectorySeparatorChar}Belly.bsd", StringComparison.OrdinalIgnoreCase));
@@ -16145,7 +16145,7 @@ public sealed class OutputCompletenessTests
                 request, armor, analysis, mesh, morphs, physics,
                 clipping, correction, bsProject, pluginResult,
                 textures, pose, ["step1"],
-                detected, skel, voxel,
+                detected, skel, null, voxel,
                 CancellationToken.None);
 
             var depMapPath = files.FirstOrDefault(f => f.EndsWith("dependency-map.json", StringComparison.OrdinalIgnoreCase));
