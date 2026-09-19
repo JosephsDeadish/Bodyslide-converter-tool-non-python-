@@ -16303,6 +16303,71 @@ public sealed class OutputCompletenessTests
         }
     }
 
+    [Fact]
+    public async Task RetargetMorphPayload_SmoothsAmbiguousTopologyTransfers()
+    {
+        var retargetMethod = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var createContextMethod = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(retargetMethod);
+        Assert.NotNull(createContextMethod);
+        Assert.NotNull(blendMethod);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-ambiguous.nif");
+            var targetPath = Path.Combine(tmpDir, "target-ambiguous.nif");
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (0f, 0f, 0f),
+                (1f, 0f, 0f),
+                (2f, 0f, 0f),
+                (3f, 0f, 0f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (0f, 0f, 0f),
+                (0.25f, 0.8f, 0f),
+                (2.75f, 0.8f, 0f),
+                (3f, 0f, 0f)
+            ]);
+
+            var context = createContextMethod!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = new (float X, float Y, float Z)[]
+            {
+                (0f, 0f, 0f),
+                (8f, 0f, 0f),
+                (0f, 0f, 0f),
+                (0f, 0f, 0f)
+            };
+
+            var rawBlend = Assert.IsType<(float X, float Y, float Z)>(
+                blendMethod!.Invoke(null, [sourceDeltas, context!, 1]));
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                retargetMethod!.Invoke(null, [sourceDeltas, 4, context!]));
+
+            Assert.Equal(4, result.Count);
+            Assert.True(rawBlend.X > 0f);
+            Assert.True(result[1].X > 0f);
+            Assert.True(result[1].X < rawBlend.X, "Expected ambiguous retargeted morph delta to be stabilized below the raw blended spike.");
+            Assert.Equal(0f, result[0].X, 3);
+            Assert.Equal(0f, result[3].X, 3);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     private static void AssertDeltasEqual(
         IReadOnlyList<(float X, float Y, float Z)> expected,
         IReadOnlyList<(float X, float Y, float Z)> actual)
@@ -16561,8 +16626,64 @@ public sealed class BasicWeightTransferServicePhysicsTests
     }
 }
 
-// ── ConversionOrchestrator — rigid-islands and physics-injection step tests ─────
+public sealed class StrategyMeshConversionServiceStabilizationTests
+{
+    [Fact]
+    public async Task ConvertAsync_PhysicsEnabledCase_UsesStrongerStabilization()
+    {
+        var service = new StrategyMeshConversionService();
+        var cage = BasicCageGenerationService.CreatePresetCage("mixed");
+        var armor = new ImportedArmor("input", ["/tmp/testarmor.nif"], [], [], []);
+        var plainAnalysis = new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasStrapLikePieces: true);
+        var physicsAnalysis = plainAnalysis with { PhysicsEnabled = true };
 
+        var plain = await service.ConvertAsync(armor, plainAnalysis, cage, "UBE", "curvy", "SAM Light", CancellationToken.None);
+        var stabilized = await service.ConvertAsync(armor, physicsAnalysis, cage, "UBE", "curvy", "SAM Light", CancellationToken.None);
+
+        Assert.True(GetSpread(stabilized.RegionalMorphing) < GetSpread(plain.RegionalMorphing));
+        Assert.True(stabilized.RegionalMorphing["breasts"] < plain.RegionalMorphing["breasts"]);
+        Assert.True(stabilized.RegionalMorphing["pelvis"] < plain.RegionalMorphing["pelvis"]);
+    }
+
+    [Fact]
+    public async Task ConvertAsync_CustomRigPhysicsHints_UsesStrongerStabilization()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var meshPath = Path.Combine(tmpDir, "custom-rig-armor.nif");
+            var physicsPath = Path.Combine(tmpDir, "custom-rig.xml");
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(
+                physicsPath,
+                "<system><bone name=\"BreastUpper\" /><bone name=\"BreastOuter\" /></system>");
+
+            var service = new StrategyMeshConversionService();
+            var cage = BasicCageGenerationService.CreatePresetCage("mixed");
+            var analysis = new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasStrapLikePieces: true);
+            var plainArmor = new ImportedArmor(tmpDir, [meshPath], [], [], []);
+            var customRigArmor = new ImportedArmor(tmpDir, [meshPath], [], [physicsPath], []);
+
+            var plain = await service.ConvertAsync(plainArmor, analysis, cage, "UBE", "curvy", "SAM Light", CancellationToken.None);
+            var stabilized = await service.ConvertAsync(customRigArmor, analysis, cage, "UBE", "curvy", "SAM Light", CancellationToken.None);
+
+            Assert.True(GetSpread(stabilized.RegionalMorphing) < GetSpread(plain.RegionalMorphing));
+            Assert.True(stabilized.RegionalMorphing["breasts"] < plain.RegionalMorphing["breasts"]);
+            Assert.True(stabilized.RegionalMorphing["butt"] < plain.RegionalMorphing["butt"]);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    private static double GetSpread(IReadOnlyDictionary<string, double> morphing) =>
+        morphing.Count == 0 ? 0d : morphing.Values.Max() - morphing.Values.Min();
+}
+
+// ── ConversionOrchestrator — rigid-islands and physics-injection step tests ─────
 public sealed class ConversionOrchestratorRigidIslandTests
 {
     [Fact]

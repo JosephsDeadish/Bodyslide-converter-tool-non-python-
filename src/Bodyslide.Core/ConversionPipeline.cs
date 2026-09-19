@@ -7715,6 +7715,22 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["arms"] = 0.76d,
         };
 
+    private static readonly IReadOnlyDictionary<string, double> PhysicsRigRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 0.74d,
+            ["breasts"] = 0.66d,
+            ["waist"] = 0.72d,
+            ["belly"] = 0.68d,
+            ["pelvis"] = 0.66d,
+            ["butt"] = 0.66d,
+            ["thighs"] = 0.70d,
+            ["legs"] = 0.76d,
+            ["calves"] = 0.82d,
+            ["shoulders"] = 0.74d,
+            ["arms"] = 0.72d,
+        };
+
     private sealed record ExtremeDifferenceAssessment(
         bool IsExtreme,
         double Severity,
@@ -7723,6 +7739,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         double Spread,
         int ExtremeRegionCount,
         int HarshTransitionCount);
+
+    private sealed record PhysicsRigStabilizationHints(
+        bool StrengthenStabilization,
+        bool HasCustomRigFramework,
+        double SeverityFloor);
 
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
@@ -7787,8 +7808,10 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
         var featureAdjustedMorphing = ApplyMeshFeatureTuning(solverRefinedMorphing, analysis);
-        var stabilizedMorphing = extremeDifference.IsExtreme
-            ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, extremeDifference)
+        var physicsRigHints = InspectPhysicsRigStabilizationHints(armor, analysis);
+        var stabilizationAssessment = CreateStabilizationAssessment(extremeDifference, analysis, physicsRigHints);
+        var stabilizedMorphing = stabilizationAssessment.IsExtreme || physicsRigHints.StrengthenStabilization
+            ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, stabilizationAssessment, physicsRigHints.StrengthenStabilization)
             : featureAdjustedMorphing;
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, stabilizedMorphing, cage));
     }
@@ -8163,10 +8186,135 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         return (value - low) / Math.Max(0.0001d, high - low);
     }
 
+    private static PhysicsRigStabilizationHints InspectPhysicsRigStabilizationHints(ImportedArmor armor, MeshAnalysis analysis)
+    {
+        string? frameworkLabel = null;
+        if (armor.PhysicsFiles.Count > 0)
+        {
+            frameworkLabel = DetectCustomRigFrameworkFromPhysicsFiles(armor.PhysicsFiles);
+        }
+
+        if (string.IsNullOrWhiteSpace(frameworkLabel) && armor.BodyReferenceFiles.Count > 0)
+        {
+            frameworkLabel = DetectCustomRigFrameworkFromBodyReferences(armor.BodyReferenceFiles);
+        }
+
+        var hasCustomRigFramework = !string.IsNullOrWhiteSpace(frameworkLabel);
+        if (!analysis.PhysicsEnabled && !hasCustomRigFramework)
+        {
+            return new PhysicsRigStabilizationHints(false, false, 0d);
+        }
+
+        var severityFloor = analysis.PhysicsEnabled ? 0.28d : 0.24d;
+        if (hasCustomRigFramework)
+        {
+            severityFloor = Math.Max(severityFloor, 0.38d);
+        }
+
+        if (analysis.HasStrapLikePieces || analysis.HasSplitMeshes)
+        {
+            severityFloor += 0.04d;
+        }
+
+        if (analysis.HasRigidSubMeshes)
+        {
+            severityFloor += 0.03d;
+        }
+
+        return new PhysicsRigStabilizationHints(
+            true,
+            hasCustomRigFramework,
+            Math.Round(Math.Clamp(severityFloor, 0.18d, 0.72d), 6));
+    }
+
+    private static string? DetectCustomRigFrameworkFromPhysicsFiles(IReadOnlyList<string> physicsFiles)
+    {
+        var boneNames = new List<string>();
+        foreach (var physicsPath in physicsFiles)
+        {
+            if (!physicsPath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) || !File.Exists(physicsPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var document = System.Xml.Linq.XDocument.Load(physicsPath, System.Xml.Linq.LoadOptions.None);
+                boneNames.AddRange(document
+                    .Descendants()
+                    .Where(static element => element.Name.LocalName.Equals("bone", StringComparison.OrdinalIgnoreCase))
+                    .Select(static element => element.Attribute("name")?.Value?.Trim())
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Select(static value => value!));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+            {
+            }
+        }
+
+        return boneNames.Count == 0 ? null : SkeletonFrameworkCatalog.DetectFramework(boneNames);
+    }
+
+    private static string? DetectCustomRigFrameworkFromBodyReferences(IReadOnlyList<string> bodyReferenceFiles)
+    {
+        foreach (var bodyReferencePath in bodyReferenceFiles)
+        {
+            if (!bodyReferencePath.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) || !File.Exists(bodyReferencePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var frameworkLabel = SkeletonFrameworkCatalog.DetectFramework(
+                    SkeletonNifBoneParser.ExtractBoneNames(File.ReadAllBytes(bodyReferencePath)));
+                if (!string.IsNullOrWhiteSpace(frameworkLabel))
+                {
+                    return frameworkLabel;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static ExtremeDifferenceAssessment CreateStabilizationAssessment(
+        ExtremeDifferenceAssessment assessment,
+        MeshAnalysis analysis,
+        PhysicsRigStabilizationHints physicsRigHints)
+    {
+        if (!physicsRigHints.StrengthenStabilization)
+        {
+            return assessment;
+        }
+
+        var severity = Math.Max(assessment.Severity, physicsRigHints.SeverityFloor);
+        var spreadFloor = analysis.PhysicsEnabled
+            ? Lerp(0.32d, 0.48d, severity)
+            : Lerp(0.28d, 0.42d, severity);
+        var peakExpansionFloor = analysis.PhysicsEnabled ? 0.22d : 0.18d;
+        var peakCompressionFloor = physicsRigHints.HasCustomRigFramework ? 0.18d : 0.14d;
+
+        return assessment with
+        {
+            IsExtreme = true,
+            Severity = Math.Round(Math.Clamp(severity, 0d, 1d), 6),
+            PeakExpansion = Math.Max(assessment.PeakExpansion, peakExpansionFloor),
+            PeakCompression = Math.Max(assessment.PeakCompression, peakCompressionFloor),
+            Spread = Math.Max(assessment.Spread, spreadFloor),
+            ExtremeRegionCount = Math.Max(assessment.ExtremeRegionCount, analysis.PhysicsEnabled ? 3 : 2),
+            HarshTransitionCount = Math.Max(assessment.HarshTransitionCount, physicsRigHints.HasCustomRigFramework ? 2 : 1)
+        };
+    }
+
     private static IReadOnlyDictionary<string, double> ApplyExtremeDifferenceStabilization(
         IReadOnlyDictionary<string, double> field,
         MeshAnalysis analysis,
-        ExtremeDifferenceAssessment assessment)
+        ExtremeDifferenceAssessment assessment,
+        bool strengthenForPhysicsRig = false)
     {
         var stabilized = new Dictionary<string, double>(
             ApplyRegionAwareSolver(field, analysis.MeshType),
@@ -8197,6 +8345,25 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         ApplyDampingProfile(
             stabilized,
             ScaleDampingProfile(PoseStressRegionDamping, Math.Min(1d, assessment.Severity * 0.90d)));
+
+        if (strengthenForPhysicsRig)
+        {
+            var stabilizationSeverity = Math.Max(0.35d, assessment.Severity);
+            ApplyDampingProfile(
+                stabilized,
+                ScaleDampingProfile(PhysicsRigRegionDamping, stabilizationSeverity));
+            ApplySeamContinuity(
+                stabilized,
+                maxGap: Lerp(0.10d, 0.05d, stabilizationSeverity),
+                blendStrength: Lerp(0.70d, 0.92d, stabilizationSeverity),
+                constrainedRegions: ExtremeDifferenceCoreRegions);
+            ApplyClampProfile(
+                stabilized,
+                BuildExtremeDifferenceClampProfile(
+                    stabilized.Keys,
+                    analysis.MeshType,
+                    Math.Min(1d, stabilizationSeverity + 0.08d)));
+        }
 
         ApplyClampProfile(stabilized, clampProfile);
         return stabilized;
@@ -18164,7 +18331,9 @@ internal sealed class LocalExportService(
             IReadOnlyList<MeshVertex> SourceVertices,
             IReadOnlyList<MeshVertex> TargetVertices,
             int[] TargetToSourceIndexMap,
-            IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences);
+            IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences,
+            IReadOnlyList<IReadOnlyList<int>> TargetNeighborIndexes,
+            float[] TargetTransferAmbiguity);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
@@ -18183,17 +18352,24 @@ internal sealed class LocalExportService(
             }
 
             var influenceMap = BuildMorphTransferInfluenceMap(sourceVertices, targetVertices);
+            var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
             var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
                 ? influenceMap
                     .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
                     .ToArray()
                 : BuildNearestSurfaceMap(sourceVertices, targetVertices);
+            var neighborIndexes = BuildMorphTransferNeighborIndexes(normalizedTargetVertices);
+            var transferAmbiguity = influenceMap
+                .Select(ComputeMorphTransferAmbiguity)
+                .ToArray();
 
             return new MorphTransferContext(
                 sourceVertices,
                 targetVertices,
                 nearestSurfaceMap,
-                influenceMap);
+                influenceMap,
+                neighborIndexes,
+                transferAmbiguity);
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
@@ -18284,7 +18460,7 @@ internal sealed class LocalExportService(
                     nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
                 }
 
-                return nearestSurface;
+                return StabilizeRetargetedMorphPayload(nearestSurface, morphTransferContext);
             }
 
             var retargeted = new (float X, float Y, float Z)[targetVertexCount];
@@ -18450,6 +18626,99 @@ internal sealed class LocalExportService(
             }
         }
 
+        private static IReadOnlyList<IReadOnlyList<int>> BuildMorphTransferNeighborIndexes(
+            IReadOnlyList<MeshVertex> normalizedTargetVertices)
+        {
+            if (normalizedTargetVertices.Count == 0)
+            {
+                return [];
+            }
+
+            var targetByHeight = normalizedTargetVertices
+                .Select(static (vertex, index) => (Vertex: vertex, Index: index))
+                .OrderBy(static entry => entry.Vertex.Z)
+                .ToArray();
+            var sortedTargetHeights = targetByHeight.Select(static entry => entry.Vertex.Z).ToArray();
+            var neighbors = new IReadOnlyList<int>[normalizedTargetVertices.Count];
+            var candidateWindowRadius = Math.Clamp(normalizedTargetVertices.Count / 36, 24, 128);
+
+            for (var targetIndex = 0; targetIndex < normalizedTargetVertices.Count; targetIndex++)
+            {
+                var targetVertex = normalizedTargetVertices[targetIndex];
+                var insertionIndex = Array.BinarySearch(sortedTargetHeights, targetVertex.Z);
+                if (insertionIndex < 0)
+                {
+                    insertionIndex = ~insertionIndex;
+                }
+
+                var start = Math.Max(0, insertionIndex - candidateWindowRadius);
+                var end = Math.Min(targetByHeight.Length - 1, insertionIndex + candidateWindowRadius);
+                var bestNeighbors = new List<(int TargetIndex, float DistanceSquared)>(capacity: 4);
+                for (var candidateIndex = start; candidateIndex <= end; candidateIndex++)
+                {
+                    var candidate = targetByHeight[candidateIndex];
+                    if (candidate.Index == targetIndex)
+                    {
+                        continue;
+                    }
+
+                    var dx = targetVertex.X - candidate.Vertex.X;
+                    var dy = targetVertex.Y - candidate.Vertex.Y;
+                    var dz = targetVertex.Z - candidate.Vertex.Z;
+                    var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                    InsertMorphTransferNeighbor(bestNeighbors, candidate.Index, distanceSquared);
+                }
+
+                neighbors[targetIndex] = bestNeighbors.Select(static candidate => candidate.TargetIndex).ToArray();
+            }
+
+            return neighbors;
+        }
+
+        private static void InsertMorphTransferNeighbor(
+            List<(int TargetIndex, float DistanceSquared)> bestNeighbors,
+            int targetIndex,
+            float distanceSquared)
+        {
+            var insertAt = bestNeighbors.FindIndex(existing => distanceSquared < existing.DistanceSquared);
+            if (insertAt < 0)
+            {
+                bestNeighbors.Add((targetIndex, distanceSquared));
+            }
+            else
+            {
+                bestNeighbors.Insert(insertAt, (targetIndex, distanceSquared));
+            }
+
+            if (bestNeighbors.Count > 4)
+            {
+                bestNeighbors.RemoveAt(bestNeighbors.Count - 1);
+            }
+        }
+
+        private static float ComputeMorphTransferAmbiguity(IReadOnlyList<MorphTransferInfluence> influences)
+        {
+            if (influences.Count == 0)
+            {
+                return 1f;
+            }
+
+            var dominantWeight = influences.Max(static influence => influence.Weight);
+            if (influences.Count == 1 && dominantWeight >= 0.999f)
+            {
+                return 0f;
+            }
+
+            var totalWeight = influences.Sum(static influence => influence.Weight);
+            if (totalWeight <= 0.000001f)
+            {
+                return 1f;
+            }
+
+            var competingWeight = Math.Max(0f, totalWeight - dominantWeight);
+            return Math.Clamp(((1f - dominantWeight) * 0.65f) + (MathF.Min(competingWeight, 1f) * 0.35f), 0f, 1f);
+        }
+
         private static (float X, float Y, float Z)? TryBlendRetargetedDelta(
             IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
             MorphTransferContext morphTransferContext,
@@ -18488,6 +18757,73 @@ internal sealed class LocalExportService(
                 ? null
                 : (x / totalWeight, y / totalWeight, z / totalWeight);
         }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> StabilizeRetargetedMorphPayload(
+            IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas,
+            MorphTransferContext morphTransferContext)
+        {
+            if (retargetedDeltas.Count < 3 ||
+                morphTransferContext.TargetNeighborIndexes.Count != retargetedDeltas.Count ||
+                morphTransferContext.TargetTransferAmbiguity.Length != retargetedDeltas.Count)
+            {
+                return retargetedDeltas;
+            }
+
+            var stabilized = retargetedDeltas.ToArray();
+            for (var targetIndex = 0; targetIndex < stabilized.Length; targetIndex++)
+            {
+                var ambiguity = morphTransferContext.TargetTransferAmbiguity[targetIndex];
+                if (ambiguity <= 0.18f)
+                {
+                    continue;
+                }
+
+                var neighbors = morphTransferContext.TargetNeighborIndexes[targetIndex];
+                if (neighbors.Count == 0)
+                {
+                    continue;
+                }
+
+                var sampleCount = 0;
+                var averageX = 0f;
+                var averageY = 0f;
+                var averageZ = 0f;
+                foreach (var neighborIndex in neighbors)
+                {
+                    if (neighborIndex < 0 || neighborIndex >= retargetedDeltas.Count)
+                    {
+                        continue;
+                    }
+
+                    var delta = retargetedDeltas[neighborIndex];
+                    averageX += delta.X;
+                    averageY += delta.Y;
+                    averageZ += delta.Z;
+                    sampleCount++;
+                }
+
+                if (sampleCount == 0)
+                {
+                    continue;
+                }
+
+                averageX /= sampleCount;
+                averageY /= sampleCount;
+                averageZ /= sampleCount;
+
+                var current = retargetedDeltas[targetIndex];
+                var blendStrength = Math.Clamp(0.12f + (ambiguity * 0.48f), 0.12f, 0.60f);
+                stabilized[targetIndex] = (
+                    Lerp(current.X, averageX, blendStrength),
+                    Lerp(current.Y, averageY, blendStrength),
+                    Lerp(current.Z, averageZ, blendStrength));
+            }
+
+            return stabilized;
+        }
+
+        private static float Lerp(float start, float end, float amount) =>
+            start + ((end - start) * amount);
 
         private static IReadOnlyList<MeshVertex> NormalizeVerticesForTransfer(IReadOnlyList<MeshVertex> vertices)
         {
