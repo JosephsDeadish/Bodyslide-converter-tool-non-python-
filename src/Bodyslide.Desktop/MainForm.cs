@@ -3787,7 +3787,7 @@ public sealed class MainForm : Form
 
             if (hasPhysicsCompatibility && !string.IsNullOrWhiteSpace(physicsRequestedProfile))
             {
-                if (physicsCompatible == false || physicsMissingBones.Count > 0)
+                if (string.Equals(physicsCompatible, "False", StringComparison.OrdinalIgnoreCase) || physicsMissingBones.Count > 0)
                 {
                     requiresReview = true;
                     add(
