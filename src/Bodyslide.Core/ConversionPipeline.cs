@@ -7677,6 +7677,37 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["feet"] = 0.74d,
         };
 
+    private static readonly IReadOnlyDictionary<string, double> ExtremeDifferenceRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breasts"] = 0.72d,
+            ["chest"] = 0.78d,
+            ["waist"] = 0.74d,
+            ["belly"] = 0.80d,
+            ["pelvis"] = 0.78d,
+            ["butt"] = 0.78d,
+            ["thighs"] = 0.80d,
+            ["legs"] = 0.82d,
+            ["calves"] = 0.84d,
+            ["feet"] = 0.86d,
+            ["shoulders"] = 0.82d,
+            ["arms"] = 0.84d,
+        };
+
+    private static readonly string[] ExtremeDifferenceCoreRegions =
+    [
+        "chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "legs", "calves", "feet", "shoulders", "arms"
+    ];
+
+    private sealed record ExtremeDifferenceAssessment(
+        bool IsExtreme,
+        double Severity,
+        double PeakExpansion,
+        double PeakCompression,
+        double Spread,
+        int ExtremeRegionCount,
+        int HarshTransitionCount);
+
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
         var strategy = analysis.MeshType switch
@@ -7725,6 +7756,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         var tunedField = ApplyBodySpecificTuning(baseField, targetBody, sourceBody);
         var profileField = DeformationProfileModifier.Apply(tunedField, deformationProfile);
+        var extremeDifference = !string.IsNullOrWhiteSpace(sourceBody)
+            ? AssessExtremeDifference(profileField, analysis.MeshType)
+            : new ExtremeDifferenceAssessment(false, 0d, 0d, 0d, 0d, 0, 0);
         var regionalMorphing = analysis.MeshType switch
         {
             "plate" => ApplyRigidityConstraints(profileField),
@@ -7737,7 +7771,10 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
         var featureAdjustedMorphing = ApplyMeshFeatureTuning(solverRefinedMorphing, analysis);
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, featureAdjustedMorphing, cage));
+        var stabilizedMorphing = extremeDifference.IsExtreme
+            ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, extremeDifference)
+            : featureAdjustedMorphing;
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, stabilizedMorphing, cage));
     }
 
     /// <summary>
@@ -8003,6 +8040,178 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         }
 
         return tuned;
+    }
+
+    private static ExtremeDifferenceAssessment AssessExtremeDifference(
+        IReadOnlyDictionary<string, double> field,
+        string meshType)
+    {
+        if (field.Count == 0)
+        {
+            return new ExtremeDifferenceAssessment(false, 0d, 0d, 0d, 0d, 0, 0);
+        }
+
+        var values = field.Values.ToList();
+        var maxValue = values.Max();
+        var minValue = values.Min();
+        var peakExpansion = Math.Max(0d, maxValue - 1d);
+        var peakCompression = Math.Max(0d, 1d - minValue);
+        var spread = maxValue - minValue;
+        var extremeRegionCount = values.Count(static value => value >= 1.18d || value <= 0.82d);
+        var harshTransitionLimit = meshType switch
+        {
+            "plate" => 0.26d,
+            "leather" => 0.24d,
+            "skin-tight" => 0.24d,
+            "cloth" => 0.22d,
+            "physics-enabled" => 0.20d,
+            _ => 0.23d
+        };
+        var harshTransitionCount = CountHarshTransitions(field, harshTransitionLimit);
+        var severity =
+            (NormalizeTransferMetric(peakExpansion, 0.18d, 0.55d) * 0.35d) +
+            (NormalizeTransferMetric(peakCompression, 0.12d, 0.34d) * 0.25d) +
+            (NormalizeTransferMetric(spread, 0.28d, 0.90d) * 0.25d) +
+            (NormalizeTransferMetric(extremeRegionCount, 2d, 7d) * 0.10d) +
+            (NormalizeTransferMetric(harshTransitionCount, 1d, 5d) * 0.05d);
+        severity = Math.Round(Math.Clamp(severity, 0d, 1d), 6);
+
+        var isExtreme =
+            peakExpansion >= 0.24d ||
+            peakCompression >= 0.18d ||
+            spread >= 0.50d ||
+            extremeRegionCount >= 3 ||
+            harshTransitionCount >= 2;
+
+        return new ExtremeDifferenceAssessment(
+            isExtreme,
+            severity,
+            peakExpansion,
+            peakCompression,
+            spread,
+            extremeRegionCount,
+            harshTransitionCount);
+    }
+
+    private static int CountHarshTransitions(
+        IReadOnlyDictionary<string, double> field,
+        double harshTransitionLimit)
+    {
+        var transitions = 0;
+        var visitedPairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (region, neighbors) in RegionalAdjacency)
+        {
+            if (!field.TryGetValue(region, out var left))
+            {
+                continue;
+            }
+
+            foreach (var neighbor in neighbors)
+            {
+                if (!field.TryGetValue(neighbor, out var right))
+                {
+                    continue;
+                }
+
+                var pairKey = string.Compare(region, neighbor, StringComparison.OrdinalIgnoreCase) <= 0
+                    ? $"{region}|{neighbor}"
+                    : $"{neighbor}|{region}";
+                if (!visitedPairs.Add(pairKey))
+                {
+                    continue;
+                }
+
+                if (Math.Abs(left - right) >= harshTransitionLimit)
+                {
+                    transitions++;
+                }
+            }
+        }
+
+        return transitions;
+    }
+
+    private static double NormalizeTransferMetric(double value, double low, double high)
+    {
+        if (value <= low)
+        {
+            return 0d;
+        }
+
+        if (value >= high)
+        {
+            return 1d;
+        }
+
+        return (value - low) / Math.Max(0.0001d, high - low);
+    }
+
+    private static IReadOnlyDictionary<string, double> ApplyExtremeDifferenceStabilization(
+        IReadOnlyDictionary<string, double> field,
+        MeshAnalysis analysis,
+        ExtremeDifferenceAssessment assessment)
+    {
+        var stabilized = new Dictionary<string, double>(
+            ApplyRegionAwareSolver(field, analysis.MeshType),
+            StringComparer.OrdinalIgnoreCase);
+
+        ApplyDampingProfile(
+            stabilized,
+            ScaleDampingProfile(ExtremeDifferenceRegionDamping, assessment.Severity));
+
+        var clampProfile = BuildExtremeDifferenceClampProfile(stabilized.Keys, analysis.MeshType, assessment.Severity);
+        ApplyClampProfile(stabilized, clampProfile);
+
+        ApplySeamContinuity(
+            stabilized,
+            maxGap: Lerp(0.16d, 0.08d, assessment.Severity),
+            blendStrength: Lerp(0.58d, 0.84d, assessment.Severity),
+            constrainedRegions: ExtremeDifferenceCoreRegions);
+
+        if (analysis.HasSplitMeshes || analysis.HasStrapLikePieces || analysis.HasRigidSubMeshes || analysis.IsFootwear)
+        {
+            ApplySeamContinuity(
+                stabilized,
+                maxGap: Lerp(0.12d, 0.06d, assessment.Severity),
+                blendStrength: Lerp(0.72d, 0.90d, assessment.Severity),
+                constrainedRegions: ExtremeDifferenceCoreRegions);
+        }
+
+        ApplyClampProfile(stabilized, clampProfile);
+        return stabilized;
+    }
+
+    private static IReadOnlyDictionary<string, double> ScaleDampingProfile(
+        IReadOnlyDictionary<string, double> baseProfile,
+        double severity)
+    {
+        return baseProfile.ToDictionary(
+            static pair => pair.Key,
+            pair => Math.Round(Lerp(1d, pair.Value, severity), 6),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, (double Minimum, double Maximum)> BuildExtremeDifferenceClampProfile(
+        IEnumerable<string> regions,
+        string meshType,
+        double severity)
+    {
+        var limits = meshType switch
+        {
+            "plate" => (Minimum: Lerp(0.86d, 0.90d, severity), Maximum: Lerp(1.20d, 1.16d, severity)),
+            "leather" => (Minimum: Lerp(0.82d, 0.88d, severity), Maximum: Lerp(1.28d, 1.20d, severity)),
+            "skin-tight" => (Minimum: Lerp(0.82d, 0.87d, severity), Maximum: Lerp(1.26d, 1.18d, severity)),
+            "cloth" => (Minimum: Lerp(0.78d, 0.86d, severity), Maximum: Lerp(1.34d, 1.22d, severity)),
+            "physics-enabled" => (Minimum: Lerp(0.76d, 0.85d, severity), Maximum: Lerp(1.36d, 1.24d, severity)),
+            _ => (Minimum: Lerp(0.80d, 0.87d, severity), Maximum: Lerp(1.30d, 1.20d, severity))
+        };
+
+        return regions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static region => region,
+                _ => (Math.Round(limits.Minimum, 6), Math.Round(limits.Maximum, 6)),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private static void ApplyDampingProfile(

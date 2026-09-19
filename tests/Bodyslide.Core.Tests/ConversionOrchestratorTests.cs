@@ -2256,6 +2256,155 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task StrategyMeshConversionService_ExtremeSourceTargetDifferences_StabilizeRiskyRegions()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var targetField = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.78,
+                ["breasts"] = 1.92,
+                ["waist"] = 0.68,
+                ["belly"] = 1.34,
+                ["pelvis"] = 1.44,
+                ["butt"] = 1.48,
+                ["thighs"] = 1.42,
+                ["legs"] = 1.28,
+                ["calves"] = 1.18,
+                ["feet"] = 1.14,
+                ["shoulders"] = 1.32,
+                ["arms"] = 1.26,
+            };
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceExtreme",
+                    ["sourceextreme"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    targetField.Keys.ToDictionary(static key => key, static _ => 1.0, StringComparer.OrdinalIgnoreCase)),
+                new CustomBodyProfile(
+                    "TargetExtreme",
+                    ["targetextreme"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    targetField),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var service = new StrategyMeshConversionService();
+            var result = await service.ConvertAsync(
+                armor,
+                new MeshAnalysis("cloth", false, 1),
+                new DeformationCage("smooth-adaptive-cage"),
+                "TargetExtreme",
+                null,
+                "SourceExtreme",
+                CancellationToken.None);
+
+            Assert.True(result.RegionalMorphing["breasts"] < targetField["breasts"]);
+            Assert.True(result.RegionalMorphing["chest"] < targetField["chest"]);
+            Assert.True(result.RegionalMorphing["waist"] > targetField["waist"]);
+            Assert.True(result.RegionalMorphing["thighs"] < targetField["thighs"]);
+            Assert.True(
+                Math.Abs(result.RegionalMorphing["chest"] - result.RegionalMorphing["waist"]) <
+                Math.Abs(targetField["chest"] - targetField["waist"]));
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_ExtremeSourceTargetDifferences_ReduceClippingPoseAndVoxelPressure()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var targetField = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = 1.82,
+                ["breasts"] = 1.96,
+                ["waist"] = 0.66,
+                ["belly"] = 1.38,
+                ["pelvis"] = 1.46,
+                ["butt"] = 1.52,
+                ["thighs"] = 1.48,
+                ["legs"] = 1.30,
+                ["calves"] = 1.22,
+                ["feet"] = 1.16,
+                ["shoulders"] = 1.34,
+                ["arms"] = 1.30,
+            };
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceExtreme",
+                    ["sourceextreme"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    targetField.Keys.ToDictionary(static key => key, static _ => 1.0, StringComparer.OrdinalIgnoreCase)),
+                new CustomBodyProfile(
+                    "TargetExtreme",
+                    ["targetextreme"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    targetField),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var service = new StrategyMeshConversionService();
+            var stabilized = await service.ConvertAsync(
+                armor,
+                new MeshAnalysis("cloth", false, 1),
+                new DeformationCage("smooth-adaptive-cage"),
+                "TargetExtreme",
+                null,
+                "SourceExtreme",
+                CancellationToken.None);
+
+            var rawMesh = new ConvertedMesh("cloth", "raw-delta", 1, targetField);
+            var clippingService = new BasicClippingDetectionService();
+            var poseService = new BasicPoseSimulationService();
+            var voxelService = new SimplifiedVoxelCollisionService();
+
+            var rawClipping = await clippingService.DetectAsync(rawMesh, "TargetExtreme", CancellationToken.None);
+            var stabilizedClipping = await clippingService.DetectAsync(stabilized, "TargetExtreme", CancellationToken.None);
+            var rawPose = await poseService.SimulateAsync(rawMesh, "TargetExtreme", CancellationToken.None);
+            var stabilizedPose = await poseService.SimulateAsync(stabilized, "TargetExtreme", CancellationToken.None);
+            var rawVoxel = await voxelService.ComputeAsync(armor, rawMesh, "TargetExtreme", CancellationToken.None);
+            var stabilizedVoxel = await voxelService.ComputeAsync(armor, stabilized, "TargetExtreme", CancellationToken.None);
+
+            var rawThreshold = MeshBehaviorCatalog.Get("cloth").ClippingThreshold;
+            var rawExposure = targetField.Values.Where(value => value > rawThreshold).Sum(value => value - rawThreshold);
+            var stabilizedExposure = stabilized.RegionalMorphing.Values.Where(value => value > rawThreshold).Sum(value => value - rawThreshold);
+
+            Assert.True(stabilizedClipping.Regions.Count <= rawClipping.Regions.Count);
+            Assert.True(stabilizedExposure < rawExposure, $"Expected stabilized exposure to drop below raw exposure. Raw={rawExposure}, Stabilized={stabilizedExposure}");
+            Assert.True(stabilizedPose.TotalPosesAtRisk < rawPose.TotalPosesAtRisk, $"Expected fewer at-risk poses after stabilization. Raw={rawPose.TotalPosesAtRisk}, Stabilized={stabilizedPose.TotalPosesAtRisk}");
+            Assert.True(
+                stabilizedVoxel.PushOutMagnitudes.Values.Sum() < rawVoxel.PushOutMagnitudes.Values.Sum(),
+                $"Expected lower voxel push-out pressure after stabilization. Raw={rawVoxel.PushOutMagnitudes.Values.Sum()}, Stabilized={stabilizedVoxel.PushOutMagnitudes.Values.Sum()}");
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
     // ── Gap 2: Race compatibility check ──────────────────────────────────────
 
     [Fact]
