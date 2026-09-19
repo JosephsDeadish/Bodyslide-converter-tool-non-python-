@@ -95,6 +95,7 @@ public sealed class MainForm : Form
         "conversion-quality.json",
         "dependency-map.json",
         "skeleton-compatibility.json",
+        "race-compatibility.json",
         "texture-summary.json",
         "pose-simulation-report.json",
         "world-physics.json",
@@ -3364,6 +3365,14 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    break;
+                case "race-compatibility.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Plugins", CountNestedArray(root, "ScannedPlugins"), filePath);
+                    AddReportMetric(reportName, "Armor add-ons", TryReadInt(root, "ArmorAddonCount"), filePath);
+                    AddReportMetric(reportName, "Compatible", TryReadBool(root, "IsCompatible"), filePath);
+                    AddReportMetric(reportName, "Incompatible races", TryReadArray(root, "IncompatibleRaces"), filePath);
+                    AddReportMetric(reportName, "Warnings", TryReadArray(root, "Warnings"), filePath);
                     break;
                 case "texture-summary.json":
                     AddReportMetric(reportName, "Textures", TryReadInt(root, "TotalCount"), filePath);

@@ -110,6 +110,7 @@ public sealed class ConversionValidationGuidanceTests
             [
                 new ConversionValidationIssue("missing-readme", "medium", "README.txt was not generated."),
                 new ConversionValidationIssue("missing-dependency-map", "medium", "dependency-map.json was not generated."),
+                new ConversionValidationIssue("missing-race-compatibility-report", "medium", "race-compatibility.json was not generated."),
                 new ConversionValidationIssue("missing-pose-report", "low", "pose-simulation-report.json was not generated."),
                 new ConversionValidationIssue("missing-world-physics-report", "low", "world-physics.json was not generated."),
                 new ConversionValidationIssue("missing-plugin-patch-report", "medium", "plugin-patches.json was not generated."),
@@ -121,6 +122,7 @@ public sealed class ConversionValidationGuidanceTests
 
         Assert.Contains(actions, action => action.Contains("README.txt", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("dependency-map.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("race-compatibility.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("world-physics.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("plugin-patches.json", StringComparison.OrdinalIgnoreCase));

@@ -1907,6 +1907,7 @@ public sealed class ConversionOrchestratorTests
     private sealed class TestExporter : IExportService
     {
         public string? ExportPath { get; private set; }
+        public RaceCompatibilityReport? RaceCompatibility { get; private set; }
 
         public Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
             ConversionRequest request,
@@ -1924,10 +1925,12 @@ public sealed class ConversionOrchestratorTests
             IReadOnlyList<string> steps,
             BodyDetectionReport detectedBody,
             SkeletonMappingResult skeletonMapping,
+            RaceCompatibilityReport? raceCompatibility,
             VoxelCollisionResult voxelResult,
             CancellationToken cancellationToken)
         {
             ExportPath = request.OutputDirectory ?? throw new InvalidOperationException("Output should be provided for this test.");
+            RaceCompatibility = raceCompatibility;
             Directory.CreateDirectory(ExportPath);
             return Task.FromResult<(string, IReadOnlyList<string>)>((ExportPath, []));
         }
@@ -2594,14 +2597,17 @@ public sealed class ConversionOrchestratorTests
         try
         {
             // Use a plugin analyzer that returns a Khajiit-race ARMA record.
+            var exporter = new TestExporter();
             var orchestrator = BuildTestOrchestrator(
-                exporter: new TestExporter(),
+                exporter: exporter,
                 pluginAnalyzer: new KhajiitPluginAnalysisService());
 
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
             Assert.Contains(result.Steps, s => s.StartsWith("race-compat:warnings=", StringComparison.Ordinal));
+            Assert.NotNull(exporter.RaceCompatibility);
+            Assert.Contains("KhajiitRace", exporter.RaceCompatibility!.IncompatibleRaces);
         }
         finally
         {
@@ -2619,14 +2625,17 @@ public sealed class ConversionOrchestratorTests
 
         try
         {
+            var exporter = new TestExporter();
             var orchestrator = BuildTestOrchestrator(
-                exporter: new TestExporter(),
+                exporter: exporter,
                 pluginAnalyzer: new NordRacePluginAnalysisService());
 
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
             Assert.Contains(result.Steps, s => s.Equals("race-compat:ok", StringComparison.Ordinal));
+            Assert.NotNull(exporter.RaceCompatibility);
+            Assert.True(exporter.RaceCompatibility!.IsCompatible);
         }
         finally
         {
@@ -15491,6 +15500,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("missing-dependency-map", codes);
             Assert.Contains("missing-conversion-quality-report", codes);
             Assert.Contains("missing-skeleton-compatibility-report", codes);
+            Assert.Contains("missing-race-compatibility-report", codes);
             Assert.Contains("missing-preview-html", codes);
             Assert.Contains("missing-preview-workbench", codes);
             Assert.Contains("missing-fomod-module-config", codes);
@@ -15517,6 +15527,7 @@ public sealed class OutputCompletenessTests
         {
             File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
             File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "race-compatibility.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
@@ -15623,6 +15634,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("zip-missing-dependency-map", codes);
             Assert.Contains("zip-missing-conversion-quality-report", codes);
             Assert.Contains("zip-missing-skeleton-compatibility-report", codes);
+            Assert.Contains("zip-missing-race-compatibility-report", codes);
             Assert.Contains("zip-missing-pose-report", codes);
             Assert.Contains("zip-missing-world-physics-report", codes);
             Assert.Contains("zip-missing-preview-svg", codes);
@@ -16540,6 +16552,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
             IReadOnlyList<string> steps,
             BodyDetectionReport detectedBody,
             SkeletonMappingResult skeletonMapping,
+            RaceCompatibilityReport? raceCompatibility,
             VoxelCollisionResult voxelResult,
             CancellationToken ct) =>
             Task.FromResult<(string, IReadOnlyList<string>)>((request.OutputDirectory ?? Path.GetTempPath(), []));

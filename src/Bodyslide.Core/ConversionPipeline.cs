@@ -370,7 +370,7 @@ internal static class ConversionValidationGuidance
             "missing-normal-maps" =>
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
-                "Review plugin-patches.json and the race-specific ARMO/ARMA entries, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
+                "Review race-compatibility.json and plugin-patches.json, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
@@ -392,6 +392,8 @@ internal static class ConversionValidationGuidance
                 "Re-run the conversion and confirm conversion-quality.json is present before release so the validation score, issue list, and next-action guidance remain available outside the app.",
             "missing-skeleton-compatibility-report" =>
                 "Re-run the conversion and confirm skeleton-compatibility.json is present before release so skeleton requirements and unsupported-bone warnings remain reviewable.",
+            "missing-race-compatibility-report" =>
+                "Re-run the conversion and confirm race-compatibility.json is present before release so race-specific follower/custom/beast review notes remain packaged with the output.",
             "missing-pose-report" =>
                 "Re-run the conversion and confirm pose-simulation-report.json is present before release so stressed-pose clipping checks remain reviewable outside the desktop preview.",
             "missing-world-physics-report" =>
@@ -437,6 +439,7 @@ internal static class ConversionValidationGuidance
             "zip-missing-dependency-map" or
             "zip-missing-conversion-quality-report" or
             "zip-missing-skeleton-compatibility-report" or
+            "zip-missing-race-compatibility-report" or
             "zip-missing-pose-report" or
             "zip-missing-world-physics-report" or
             "zip-missing-preview-svg" or
@@ -489,13 +492,15 @@ internal static class ConversionValidationGuidance
             "heel-offset-review" =>
                 ["world-physics.json", "preview-workbench.html"],
             "unsupported-bones" or "race-compatibility-warning" =>
-                ["skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
+                ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
             "missing-normal-maps" =>
                 ["texture-summary.json", "conversion-quality.json"],
             "missing-conversion-quality-report" =>
                 ["conversion.log"],
             "missing-skeleton-compatibility-report" =>
                 ["conversion-quality.json"],
+            "missing-race-compatibility-report" =>
+                ["plugin-patches.json", "conversion-quality.json"],
             "missing-pose-report" =>
                 ["conversion-quality.json", "preview-workbench.html"],
             "missing-world-physics-report" =>
@@ -518,7 +523,7 @@ internal static class ConversionValidationGuidance
             "missing-output-zip" or "zip-missing-readme" or "zip-missing-fomod-module-config" or
             "zip-missing-fomod-info" or "zip-missing-dependency-map" or
             "zip-missing-conversion-quality-report" or "zip-missing-skeleton-compatibility-report" or
-            "zip-missing-pose-report" or "zip-missing-world-physics-report" or
+            "zip-missing-race-compatibility-report" or "zip-missing-pose-report" or "zip-missing-world-physics-report" or
             "zip-missing-preview-svg" or "zip-missing-preview-html" or "zip-missing-preview-workbench" or
             "zip-missing-staged-cbpc-config" or "zip-missing-staged-smp-config" or
             "zip-missing-root-plugin" or "zip-missing-root-support-file" or "zip-missing-bodyslide-osp" or
@@ -4343,6 +4348,7 @@ public interface IExportService
         IReadOnlyList<string> steps,
         BodyDetectionReport detectedBody,
         SkeletonMappingResult skeletonMapping,
+        RaceCompatibilityReport? raceCompatibility,
         VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken);
 }
@@ -4690,13 +4696,14 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"plugin-ambiguous-warning:{pluginAnalysis.AmbiguousPlugins.Count}");
             }
 
-            if (pluginAnalysis.ScannedPlugins.Count > 0 && raceCompatService is not null)
+            RaceCompatibilityReport? raceCompatibility = null;
+            if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) && raceCompatService is not null)
             {
                 ReportStage("Checking plugin race compatibility", 4);
-                var raceReport = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
-                if (raceReport.IncompatibleRaces.Count > 0)
+                raceCompatibility = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
+                if (raceCompatibility.IncompatibleRaces.Count > 0)
                 {
-                    steps.Add($"race-compat:warnings={string.Join(',', raceReport.IncompatibleRaces)}");
+                    steps.Add($"race-compat:warnings={string.Join(',', raceCompatibility.IncompatibleRaces)}");
                 }
                 else
                 {
@@ -4978,7 +4985,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Exporting outputs", 18);
-            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, voxelResult, cancellationToken);
+            var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
             return new ConversionResult(true, export.OutputDirectory, steps, export.OutputFiles);
@@ -12451,6 +12458,7 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> steps,
         BodyDetectionReport detectedBody,
         SkeletonMappingResult skeletonMapping,
+        RaceCompatibilityReport? raceCompatibility,
         VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken)
     {
@@ -12480,6 +12488,7 @@ internal sealed class LocalExportService(
             Correction = correction,
             BodySlide = new { bodySlideProject.ProjectName, bodySlideProject.TargetBody, SliderCount = bodySlideProject.Sliders.Count },
             Plugins = new { ScannedCount = pluginAnalysis.ScannedPlugins.Count, AddonCount = pluginAnalysis.ArmorAddons.Count },
+            RaceCompatibility = raceCompatibility,
             Textures = new
             {
                 textureSummary.TotalCount,
@@ -12605,6 +12614,25 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(skeletonMapping, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
+
+        if (raceCompatibility is not null)
+        {
+            var raceCompatibilityPath = Path.Combine(outputDirectory, "race-compatibility.json");
+            var raceCompatibilityOutput = new
+            {
+                request.TargetBody,
+                pluginAnalysis.ScannedPlugins,
+                ArmorAddonCount = pluginAnalysis.ArmorAddons.Count,
+                raceCompatibility.IsCompatible,
+                raceCompatibility.IncompatibleRaces,
+                raceCompatibility.Warnings
+            };
+            await File.WriteAllTextAsync(
+                raceCompatibilityPath,
+                JsonSerializer.Serialize(raceCompatibilityOutput, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(raceCompatibilityPath);
+        }
 
         var payloadReuse = request.GenerateBodySlideFiles
             ? BuildPayloadReuseSummary(
@@ -14988,6 +15016,11 @@ internal sealed class LocalExportService(
             "conversion-quality.json was not generated, so the validation score, issue list, and machine-readable review data are missing.");
         AddMissingFileIssue("skeleton-compatibility.json", "missing-skeleton-compatibility-report", "medium",
             "skeleton-compatibility.json was not generated, so skeleton requirements and unsupported-bone diagnostics are missing.");
+        if (pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0)
+        {
+            AddMissingFileIssue("race-compatibility.json", "missing-race-compatibility-report", "medium",
+                "race-compatibility.json was not generated, so follower/custom/beast race review guidance is missing.");
+        }
         AddMissingFileIssue("pose-simulation-report.json", "missing-pose-report", "low",
             "pose-simulation-report.json was not generated, so post-conversion pose-risk review data is missing.");
         AddMissingFileIssue("world-physics.json", "missing-world-physics-report", "low",
@@ -15174,6 +15207,15 @@ internal sealed class LocalExportService(
                             "zip-missing-skeleton-compatibility-report",
                             "medium",
                             "The distributable ZIP is missing skeleton-compatibility.json, so packaged skeleton requirements and unsupported-bone diagnostics are unavailable."));
+                    }
+
+                    if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) &&
+                        !ZipContains("race-compatibility.json"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-race-compatibility-report",
+                            "medium",
+                            "The distributable ZIP is missing race-compatibility.json, so packaged follower/custom/beast race review guidance is unavailable."));
                     }
 
                     if (!ZipContains("pose-simulation-report.json"))
