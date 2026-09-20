@@ -2823,6 +2823,138 @@ internal static class NifGeometrySignatureReader
         return true;
     }
 
+    private static bool TryLocatePartialInterleavedFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var bestOffset = -1;
+        var bestRequestedVertexCount = 0;
+        var bestStride = 0;
+        var bestRecoveredVertexCount = 0;
+        var bestNodeScore = int.MinValue;
+        var bestPaddingIndex = int.MaxValue;
+
+        if (NifBlockGraphParser.TryParse(bytes, out var graph) && graph is not null)
+        {
+            var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
+
+            foreach (var node in preferredNodes)
+            {
+                var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+                if (nodeScore <= 0)
+                {
+                    continue;
+                }
+
+                var scanStart = Math.Max(node.StartOffset, 0);
+                var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
+
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                    {
+                        var candidateDataOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                        foreach (var stride in EnumerateCandidateFloatVertexStrides())
+                        {
+                            var candidate = TryBuildPartialFloatStrideSignature(
+                                bytes,
+                                candidateDataOffset,
+                                candidateVertexCount,
+                                stride,
+                                out var recoveredVertexCount);
+                            if (candidate is null)
+                            {
+                                continue;
+                            }
+
+                            if (nodeScore > bestNodeScore ||
+                                (nodeScore == bestNodeScore && recoveredVertexCount > bestRecoveredVertexCount) ||
+                                (nodeScore == bestNodeScore && recoveredVertexCount == bestRecoveredVertexCount && paddingIndex < bestPaddingIndex) ||
+                                (nodeScore == bestNodeScore && recoveredVertexCount == bestRecoveredVertexCount && paddingIndex == bestPaddingIndex && (bestStride == 0 || stride < bestStride)))
+                            {
+                                bestOffset = candidateDataOffset;
+                                bestRequestedVertexCount = candidateVertexCount;
+                                bestStride = stride;
+                                bestRecoveredVertexCount = recoveredVertexCount;
+                                bestNodeScore = nodeScore;
+                                bestPaddingIndex = paddingIndex;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            var scanEnd = Math.Min(bytes.Length - sizeof(int), HeuristicScanByteLimit);
+            for (var offset = NifHeaderToken.Length; offset <= scanEnd; offset++)
+            {
+                var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                {
+                    continue;
+                }
+
+                for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                {
+                    var candidateDataOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                    foreach (var stride in EnumerateCandidateFloatVertexStrides())
+                    {
+                        var candidate = TryBuildPartialFloatStrideSignature(
+                            bytes,
+                            candidateDataOffset,
+                            candidateVertexCount,
+                            stride,
+                            out var recoveredVertexCount);
+                        if (candidate is null)
+                        {
+                            continue;
+                        }
+
+                        if (recoveredVertexCount > bestRecoveredVertexCount ||
+                            (recoveredVertexCount == bestRecoveredVertexCount && paddingIndex < bestPaddingIndex) ||
+                            (recoveredVertexCount == bestRecoveredVertexCount && paddingIndex == bestPaddingIndex && (bestStride == 0 || stride < bestStride)))
+                        {
+                            bestOffset = candidateDataOffset;
+                            bestRequestedVertexCount = candidateVertexCount;
+                            bestStride = stride;
+                            bestRecoveredVertexCount = recoveredVertexCount;
+                            bestPaddingIndex = paddingIndex;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestRequestedVertexCount;
+        vertexStride = bestStride;
+        return true;
+    }
+
     private static IEnumerable<int> EnumerateCandidateFloatVertexStrides()
     {
         foreach (var stride in CommonFloatVertexStrides)
@@ -2880,6 +3012,102 @@ internal static class NifGeometrySignatureReader
         vertexDataOffset = bestCandidate.VertexDataOffset;
         vertexCount = bestCandidate.VertexCount;
         vertexStride = bestCandidate.VertexStride;
+        return true;
+    }
+
+    private static bool TryLocatePartialHalfFloatVertexBlock(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        out int vertexStride)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+        vertexStride = 0;
+
+        if (bytes.Length < 64 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0 || !ContainsSupportedSseHalfFloatShape(bytes))
+        {
+            return false;
+        }
+
+        var bestOffset = -1;
+        var bestRequestedVertexCount = 0;
+        var bestStride = 0;
+        var bestRecoveredVertexCount = 0;
+        var bestScore = 0;
+
+        var scanEnd = bytes.Length - 16;
+        for (var offset = 32; offset <= scanEnd; offset++)
+        {
+            if (LooksLikeAsciiTokenWindow(bytes, offset, sizeof(ulong)))
+            {
+                continue;
+            }
+
+            var desc = BitConverter.ToUInt64(bytes, offset);
+            var strideDiv4 = (int)((desc >> 44) & 0xF);
+            if (strideDiv4 < 3 || strideDiv4 > 15)
+            {
+                continue;
+            }
+
+            var candidateStride = strideDiv4 * 4;
+            var numTriangles = BitConverter.ToInt32(bytes, offset + 8);
+            if (numTriangles < 0 || numTriangles > 200_000)
+            {
+                continue;
+            }
+
+            var numVertices = (int)BitConverter.ToUInt16(bytes, offset + 12);
+            if (numVertices < MinPlausibleExplicitVertexCount)
+            {
+                continue;
+            }
+
+            var vertStart = offset + 14 + numTriangles * 6;
+            if (vertStart < 0 || vertStart >= bytes.Length)
+            {
+                continue;
+            }
+
+            var availableVertexCount = (bytes.Length - vertStart) / candidateStride;
+            if (availableVertexCount <= 0 || availableVertexCount >= numVertices)
+            {
+                continue;
+            }
+
+            var minimumRetainedCount = Math.Max(MinPlausibleExplicitVertexCount, (int)Math.Ceiling(numVertices * 0.5d));
+            if (availableVertexCount < minimumRetainedCount)
+            {
+                continue;
+            }
+
+            var score = ScoreHalfFloatVertexBlock(bytes, vertStart, availableVertexCount, candidateStride);
+            if (score < Math.Max(1, availableVertexCount / 2))
+            {
+                continue;
+            }
+
+            if (score > bestScore ||
+                (score == bestScore && availableVertexCount > bestRecoveredVertexCount) ||
+                (score == bestScore && availableVertexCount == bestRecoveredVertexCount && numVertices > bestRequestedVertexCount))
+            {
+                bestOffset = vertStart;
+                bestRequestedVertexCount = numVertices;
+                bestStride = candidateStride;
+                bestRecoveredVertexCount = availableVertexCount;
+                bestScore = score;
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestRequestedVertexCount;
+        vertexStride = bestStride;
         return true;
     }
 
@@ -3855,7 +4083,10 @@ internal static class NifGeometrySignatureReader
             {
                 return (halfSignature, "bstri-half-float");
             }
+        }
 
+        if (TryLocatePartialHalfFloatVertexBlock(bytes, out halfDataOffset, out halfVertexCount, out vertexStride))
+        {
             var partialHalfSignature = TryBuildPartialHalfFloatSignature(bytes, halfDataOffset, halfVertexCount, vertexStride, out _);
             if (partialHalfSignature is not null)
             {
@@ -3888,7 +4119,14 @@ internal static class NifGeometrySignatureReader
             {
                 return (interleavedSignature, "interleaved-float");
             }
+        }
 
+        if (TryLocatePartialInterleavedFloatVertexBlock(
+                bytes,
+                out interleavedDataOffset,
+                out interleavedVertexCount,
+                out interleavedVertexStride))
+        {
             var partialInterleavedSignature = TryBuildPartialFloatStrideSignature(
                 bytes,
                 interleavedDataOffset,

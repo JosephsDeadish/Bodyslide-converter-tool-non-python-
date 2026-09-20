@@ -565,6 +565,91 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task NifGeometrySignatureReader_TruncatedBsTriShapeHalfFloatStub_IsRecoveredAsDegraded()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "bstri_half_truncated_stub.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, sourceVertices);
+        var bytes = await File.ReadAllBytesAsync(inputFile);
+        Assert.True(NifGeometrySignatureReader.TryLocateHalfFloatVertexBlock(bytes, out _, out var declaredVertexCount, out var vertexStride));
+        await File.WriteAllBytesAsync(inputFile, bytes[..^((declaredVertexCount - 72) * vertexStride)]);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("degraded", report.Status);
+            Assert.Equal("bstri-half-partial-float", report.ParseMode);
+            Assert.Equal(72, report.VertexCount);
+            Assert.Contains("partial-geometry-recovered", report.Messages ?? []);
+            Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NifGeometrySignatureReader_TruncatedInterleavedFloatStub_IsRecoveredAsDegraded()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "interleaved_truncated_stub.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WritePaddedInterleavedFloatStyleAsync(inputFile, sourceVertices, prefixPadding: 36, stride: 68);
+        var bytes = await File.ReadAllBytesAsync(inputFile);
+        Assert.True(NifGeometrySignatureReader.TryLocateInterleavedFloatVertexBlock(bytes, out _, out var declaredVertexCount, out var vertexStride));
+        await File.WriteAllBytesAsync(inputFile, bytes[..^((declaredVertexCount - 72) * vertexStride)]);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("degraded", report.Status);
+            Assert.Equal("interleaved-partial-float", report.ParseMode);
+            Assert.Equal(72, report.VertexCount);
+            Assert.Contains("partial-geometry-recovered", report.Messages ?? []);
+            Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NifGeometrySignatureReader_UnsupportedGeometryStub_ReportsExpandedShaderAndPropertyVariants()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "expanded_shader_property_stub.nif");
+        await SyntheticNifTestData.WriteUnsupportedGeometryTokenStubAsync(
+            inputFile,
+            "NiLinesData",
+            prefixPadding: 24,
+            additionalTokens: ["BSShaderPPLightingProperty", "BSWaterShaderProperty", "NiStencilProperty", "NiZBufferProperty"]);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("unsupported", report.Status);
+            Assert.Contains("geometry-family:NiLinesData", report.Messages ?? []);
+            Assert.Contains("shader-property:BSShaderPPLightingProperty", report.Messages ?? []);
+            Assert.Contains("shader-property:BSWaterShaderProperty", report.Messages ?? []);
+            Assert.Contains("property-node:NiStencilProperty", report.Messages ?? []);
+            Assert.Contains("property-node:NiZBufferProperty", report.Messages ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInTarGzArchive()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
