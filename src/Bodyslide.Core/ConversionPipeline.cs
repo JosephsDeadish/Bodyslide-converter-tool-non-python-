@@ -373,6 +373,10 @@ internal static class ConversionValidationGuidance
                 "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
+            "physics-profile-unsupported" =>
+                "Open skeleton-compatibility.json, compare the requested physics profile against the target body's advertised capability and generated runtime configs, then switch to a physics-capable body/skeleton or set Physics to None before release.",
+            "physics-config-mismatch" =>
+                "Open skeleton-compatibility.json and world-physics.json, restore the missing runtime config outputs or switch to a compatible physics profile before packaging the result.",
             "physics-bone-missing" =>
                 "Open skeleton-compatibility.json, compare the requested physics profile against the expected and missing target bones, then switch to a compatible body/skeleton or disable the unsupported physics chains before release.",
             "physics-bone-remap" =>
@@ -505,7 +509,7 @@ internal static class ConversionValidationGuidance
                 ["world-physics.json", "preview-workbench.html"],
             "unsupported-bones" or "race-compatibility-warning" =>
                 ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
-            "physics-bone-missing" or "physics-bone-remap" =>
+            "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-remap" =>
                 ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json"],
             "missing-normal-maps" =>
                 ["texture-summary.json", "conversion-quality.json"],
@@ -1123,6 +1127,10 @@ public sealed record PhysicsCompatibilityReport(
     IReadOnlyList<string> InjectedBones,
     IReadOnlyList<string> MissingBones,
     IReadOnlyList<string> RemappedBones,
+    IReadOnlyList<string> ExpectedRuntimeConfigs,
+    IReadOnlyList<string> GeneratedRuntimeConfigs,
+    IReadOnlyList<string> MissingRuntimeConfigs,
+    bool HasRequiredRuntimeConfigs,
     string Summary);
 
 public sealed record PreviewWorkbenchPayload(
@@ -13852,6 +13860,7 @@ internal sealed class LocalExportService(
             correction,
             voxelResult,
             skeletonMapping,
+            physics,
             textureSummary,
             poseSimulation,
             topologyMismatchRisk,
@@ -15322,6 +15331,7 @@ internal sealed class LocalExportService(
         CorrectionResult correction,
         VoxelCollisionResult voxelResult,
         SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
         TextureSummary textureSummary,
         PoseSimulationResult poseSimulation,
         bool topologyMismatchRisk,
@@ -15337,6 +15347,11 @@ internal sealed class LocalExportService(
         PluginAnalysisResult pluginAnalysis)
     {
         var issues = new List<ConversionValidationIssue>();
+        var physicsCompatibility = BuildPhysicsCompatibilityReport(
+            request.TargetBody,
+            skeletonMapping,
+            physics,
+            steps);
 
         if (detectedBody.Confidence < 0.70d)
         {
@@ -15542,6 +15557,24 @@ internal sealed class LocalExportService(
                 "physics-bone-missing",
                 missingPhysicsBones.Count >= 3 ? "high" : "medium",
                 $"Some generated physics bones were not supported by the selected target skeleton/body framework: {string.Join(", ", missingPhysicsBones.Take(6))}."));
+        }
+
+        if (!string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase) &&
+            !physicsCompatibility.TargetBodySupportsPhysics)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-profile-unsupported",
+                "high",
+                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' is not supported by target body '{physicsCompatibility.TargetBody}' ({physicsCompatibility.TargetSkeleton}); generated runtime configs: {FormatPhysicsConfigList(physicsCompatibility.GeneratedRuntimeConfigs)}."));
+        }
+
+        if (physicsCompatibility.TargetBodySupportsPhysics &&
+            physicsCompatibility.MissingRuntimeConfigs.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-config-mismatch",
+                "medium",
+                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' did not generate required runtime config(s): {string.Join(", ", physicsCompatibility.MissingRuntimeConfigs)}."));
         }
 
         if (poseSimulation.TotalPosesAtRisk > 0)
@@ -16158,14 +16191,22 @@ internal sealed class LocalExportService(
         var requestedProfile = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedProfile)
             ? normalizedProfile
             : physics.Profile;
+        var expectedRuntimeConfigs = GetExpectedRuntimeConfigs(requestedProfile);
+        var generatedRuntimeConfigs = GetGeneratedRuntimeConfigs(physics);
+        var missingRuntimeConfigs = expectedRuntimeConfigs
+            .Where(config => !generatedRuntimeConfigs.Contains(config, StringComparer.OrdinalIgnoreCase))
+            .ToList();
         var targetBodySupportsPhysics = hasProfile && profile.SupportsPhysics;
         var physicsRequested = !string.Equals(requestedProfile, "none", StringComparison.OrdinalIgnoreCase);
+        var hasRequiredRuntimeConfigs = missingRuntimeConfigs.Count == 0;
         var isCompatible = !physicsRequested ||
-            (targetBodySupportsPhysics && missingBones.Count == 0);
+            (targetBodySupportsPhysics && missingBones.Count == 0 && hasRequiredRuntimeConfigs);
         var summary = !physicsRequested
             ? "No runtime physics profile was requested for this output."
             : !targetBodySupportsPhysics
-                ? $"Physics profile '{requestedProfile}' was requested, but {targetBody} does not advertise built-in physics-capable bones."
+                ? $"Physics profile '{requestedProfile}' was requested, but {targetBody} does not advertise built-in physics-capable bones. Generated runtime configs: {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
+                : missingRuntimeConfigs.Count > 0
+                    ? $"Physics profile '{requestedProfile}' expected runtime config(s) {FormatPhysicsConfigList(expectedRuntimeConfigs)} but only generated {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
                 : missingBones.Count > 0
                     ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
                     : remappedBones.Count > 0
@@ -16185,8 +16226,55 @@ internal sealed class LocalExportService(
             injectedBones,
             missingBones,
             remappedBones,
+            expectedRuntimeConfigs,
+            generatedRuntimeConfigs,
+            missingRuntimeConfigs,
+            hasRequiredRuntimeConfigs,
             summary);
     }
+
+    private static IReadOnlyList<string> GetExpectedRuntimeConfigs(string requestedProfile)
+    {
+        if (string.IsNullOrWhiteSpace(requestedProfile) ||
+            string.Equals(requestedProfile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        var configs = new List<string>();
+        if (requestedProfile.Contains("cbpc", StringComparison.OrdinalIgnoreCase))
+        {
+            configs.Add("cbpc-config.xml");
+        }
+
+        if (requestedProfile.Contains("smp", StringComparison.OrdinalIgnoreCase))
+        {
+            configs.Add("smp-config.xml");
+        }
+
+        return configs;
+    }
+
+    private static IReadOnlyList<string> GetGeneratedRuntimeConfigs(PhysicsConfig physics)
+    {
+        var configs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(physics.CbpcConfigXml))
+        {
+            configs.Add("cbpc-config.xml");
+        }
+
+        if (!string.IsNullOrWhiteSpace(physics.SmpConfigXml))
+        {
+            configs.Add("smp-config.xml");
+        }
+
+        return configs;
+    }
+
+    private static string FormatPhysicsConfigList(IReadOnlyList<string> configs) =>
+        configs.Count == 0
+            ? "none"
+            : string.Join(", ", configs);
 
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
     {

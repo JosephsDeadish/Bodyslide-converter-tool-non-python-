@@ -3420,6 +3420,9 @@ public sealed class MainForm : Form
                     {
                         AddReportMetric(reportName, "Physics profile", TryReadString(physicsCompatibility, "RequestedProfile"), filePath);
                         AddReportMetric(reportName, "Physics ready", TryReadBool(physicsCompatibility, "IsCompatible"), filePath);
+                        AddReportMetric(reportName, "Expected physics configs", TryReadArray(physicsCompatibility, "ExpectedRuntimeConfigs"), filePath);
+                        AddReportMetric(reportName, "Generated physics configs", TryReadArray(physicsCompatibility, "GeneratedRuntimeConfigs"), filePath);
+                        AddReportMetric(reportName, "Missing physics configs", TryReadArray(physicsCompatibility, "MissingRuntimeConfigs"), filePath);
                         AddReportMetric(reportName, "Missing physics bones", TryReadArray(physicsCompatibility, "MissingBones"), filePath);
                         AddReportMetric(reportName, "Remapped physics bones", TryReadArray(physicsCompatibility, "RemappedBones"), filePath);
                     }
@@ -3783,6 +3786,8 @@ public sealed class MainForm : Form
             var hasPhysicsCompatibility = TryGetProperty(root, "PhysicsCompatibility", out physicsCompatibility);
             var physicsMissingBones = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "MissingBones") : [];
             var physicsRemappedBones = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "RemappedBones") : [];
+            var physicsMissingConfigs = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "MissingRuntimeConfigs") : [];
+            var physicsGeneratedConfigs = hasPhysicsCompatibility ? ReadArrayValues(physicsCompatibility, "GeneratedRuntimeConfigs") : [];
             var physicsRequestedProfile = hasPhysicsCompatibility
                 ? TryReadString(physicsCompatibility, "RequestedProfile")
                 : null;
@@ -3791,6 +3796,9 @@ public sealed class MainForm : Form
                 : null;
             var physicsCompatible = hasPhysicsCompatibility
                 ? TryReadBoolValue(physicsCompatibility, "IsCompatible")
+                : null;
+            var targetBodySupportsPhysics = hasPhysicsCompatibility
+                ? TryReadBoolValue(physicsCompatibility, "TargetBodySupportsPhysics")
                 : null;
             if (unsupportedBones.Count == 0)
             {
@@ -3817,7 +3825,39 @@ public sealed class MainForm : Form
 
             if (hasPhysicsCompatibility && !string.IsNullOrWhiteSpace(physicsRequestedProfile))
             {
-                if (physicsCompatible == false || physicsMissingBones.Count > 0)
+                if (targetBodySupportsPhysics == false)
+                {
+                    requiresReview = true;
+                    add(
+                        "Physics compatibility",
+                        "Warning",
+                        string.IsNullOrWhiteSpace(physicsSummary)
+                            ? $"Physics profile {physicsRequestedProfile} is not supported by target skeleton/body {targetSkeleton}. Generated configs: {BuildListPreview(physicsGeneratedConfigs)}."
+                            : physicsSummary,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-profile-unsupported", reportPath));
+                    add(
+                        "Physics next step",
+                        "Action",
+                        "Switch to a physics-capable target body or skeleton, or set Physics to None before packaging this output.",
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-profile-unsupported", reportPath));
+                }
+                else if (physicsMissingConfigs.Count > 0)
+                {
+                    requiresReview = true;
+                    add(
+                        "Physics compatibility",
+                        "Warning",
+                        string.IsNullOrWhiteSpace(physicsSummary)
+                            ? $"Physics profile {physicsRequestedProfile} did not generate all required runtime configs: {BuildListPreview(physicsMissingConfigs)}."
+                            : physicsSummary,
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-config-mismatch", reportPath));
+                    add(
+                        "Physics next step",
+                        "Action",
+                        "Open skeleton-compatibility.json and world-physics.json, then restore the missing runtime config outputs or choose a compatible physics profile before sharing the package.",
+                        ResolveGuidanceTargetPath(outputDirectory, previewPath, "physics-config-mismatch", reportPath));
+                }
+                else if (physicsCompatible == false || physicsMissingBones.Count > 0)
                 {
                     requiresReview = true;
                     add(
@@ -4266,6 +4306,13 @@ public sealed class MainForm : Form
         if (normalized is "unsupported-bones")
         {
             return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json") ?? fallbackPath;
+        }
+
+        if (normalized is "physics-profile-unsupported" or "physics-config-mismatch")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "world-physics.json")
+                ?? fallbackPath;
         }
 
         if (normalized is "missing-normal-maps")

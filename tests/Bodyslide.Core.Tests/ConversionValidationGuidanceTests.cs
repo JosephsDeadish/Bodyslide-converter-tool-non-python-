@@ -162,6 +162,8 @@ public sealed class ConversionValidationGuidanceTests
             1,
             0,
             [
+                new ConversionValidationIssue("physics-profile-unsupported", "high", "Requested physics profile is not supported by the target body."),
+                new ConversionValidationIssue("physics-config-mismatch", "medium", "Required runtime physics configs were not generated."),
                 new ConversionValidationIssue("physics-bone-missing", "high", "Required target physics bones were missing."),
                 new ConversionValidationIssue("physics-bone-remap", "medium", "Physics chains were remapped."),
             ]);
@@ -169,6 +171,8 @@ public sealed class ConversionValidationGuidanceTests
         var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Vanilla Beast", maxActions: 6);
         var artifacts = ConversionValidationGuidance.BuildReviewArtifacts(summary, maxArtifacts: 6);
 
+        Assert.Contains(actions, action => action.Contains("set Physics to None", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("missing runtime config outputs", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("requested physics profile", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("remapped physics chains", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));

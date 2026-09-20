@@ -2644,11 +2644,80 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal("smp+cbpc", compatibility.GetProperty("RequestedProfile").GetString());
             Assert.False(compatibility.GetProperty("IsCompatible").GetBoolean());
             Assert.Contains(
+                compatibility.GetProperty("ExpectedRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "cbpc-config.xml", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                compatibility.GetProperty("GeneratedRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "smp-config.xml", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 compatibility.GetProperty("MissingBones").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "NPC Belly", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 compatibility.GetProperty("RemappedBones").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "NPC L Breast01=>NPC L Breast", StringComparison.OrdinalIgnoreCase));
+            Assert.Empty(compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_SkeletonCompatibilityReport_FlagsMissingRuntimePhysicsConfigsForUnsupportedTarget()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(32));
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "Vanilla", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp+cbpc");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "Vanilla", ["Body"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "xpmsse-physics",
+                "xpmsse",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+            var steps = new[] { "physics:smp+cbpc" };
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, steps,
+                detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
+            var compatibility = document.RootElement.GetProperty("PhysicsCompatibility");
+            Assert.False(compatibility.GetProperty("TargetBodySupportsPhysics").GetBoolean());
+            Assert.False(compatibility.GetProperty("HasRequiredRuntimeConfigs").GetBoolean());
+            Assert.Contains(
+                compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "cbpc-config.xml", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "smp-config.xml", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                compatibility.GetProperty("Summary").GetString(),
+                "does not advertise built-in physics-capable bones",
+                StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
