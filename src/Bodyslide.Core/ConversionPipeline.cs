@@ -2331,11 +2331,17 @@ internal static class NifGeometrySignatureReader
     [
         (System.Text.Encoding.ASCII.GetBytes("BSLightingShaderProperty"), "BSLightingShaderProperty", "shader-property"),
         (System.Text.Encoding.ASCII.GetBytes("BSEffectShaderProperty"), "BSEffectShaderProperty", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("BSShaderPPLightingProperty"), "BSShaderPPLightingProperty", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("BSWaterShaderProperty"), "BSWaterShaderProperty", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("BSSkyShaderProperty"), "BSSkyShaderProperty", "shader-property"),
         (System.Text.Encoding.ASCII.GetBytes("BSShaderTextureSet"), "BSShaderTextureSet", "shader-property"),
         (System.Text.Encoding.ASCII.GetBytes("NiAlphaProperty"), "NiAlphaProperty", "property-node"),
         (System.Text.Encoding.ASCII.GetBytes("NiMaterialProperty"), "NiMaterialProperty", "property-node"),
         (System.Text.Encoding.ASCII.GetBytes("NiTexturingProperty"), "NiTexturingProperty", "property-node"),
-        (System.Text.Encoding.ASCII.GetBytes("NiSpecularProperty"), "NiSpecularProperty", "property-node")
+        (System.Text.Encoding.ASCII.GetBytes("NiSpecularProperty"), "NiSpecularProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiStencilProperty"), "NiStencilProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiVertexColorProperty"), "NiVertexColorProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiZBufferProperty"), "NiZBufferProperty", "property-node")
     ];
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
     private const int MaxFloatVertexStride = 160;
@@ -3849,6 +3855,12 @@ internal static class NifGeometrySignatureReader
             {
                 return (halfSignature, "bstri-half-float");
             }
+
+            var partialHalfSignature = TryBuildPartialHalfFloatSignature(bytes, halfDataOffset, halfVertexCount, vertexStride, out _);
+            if (partialHalfSignature is not null)
+            {
+                return (partialHalfSignature, "bstri-half-partial-float");
+            }
         }
 
         var triStripsSignature = TryReadTriStripsVertexBlock(bytes);
@@ -3875,6 +3887,17 @@ internal static class NifGeometrySignatureReader
             if (interleavedSignature is not null)
             {
                 return (interleavedSignature, "interleaved-float");
+            }
+
+            var partialInterleavedSignature = TryBuildPartialFloatStrideSignature(
+                bytes,
+                interleavedDataOffset,
+                interleavedVertexCount,
+                interleavedVertexStride,
+                out _);
+            if (partialInterleavedSignature is not null)
+            {
+                return (partialInterleavedSignature, "interleaved-partial-float");
             }
         }
 
@@ -3912,6 +3935,41 @@ internal static class NifGeometrySignatureReader
         }
 
         var signature = BuildSignature(bytes, vertexDataOffset, availableVertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        recoveredVertexCount = availableVertexCount;
+        return signature;
+    }
+
+    private static MeshGeometrySignature? TryBuildPartialHalfFloatSignature(
+        byte[] bytes,
+        int vertexDataOffset,
+        int requestedVertexCount,
+        int vertexStride,
+        out int recoveredVertexCount)
+    {
+        recoveredVertexCount = 0;
+        if (vertexDataOffset < 0 || vertexDataOffset >= bytes.Length || vertexStride < 6)
+        {
+            return null;
+        }
+
+        var availableVertexCount = (bytes.Length - vertexDataOffset) / vertexStride;
+        if (availableVertexCount <= 0 || availableVertexCount >= requestedVertexCount)
+        {
+            return null;
+        }
+
+        var minimumRetainedCount = Math.Max(MinPlausibleExplicitVertexCount, (int)Math.Ceiling(requestedVertexCount * 0.5d));
+        if (availableVertexCount < minimumRetainedCount)
+        {
+            return null;
+        }
+
+        var signature = BuildHalfFloatSignature(bytes, vertexDataOffset, availableVertexCount, vertexStride);
         if (signature is null)
         {
             return null;
@@ -4246,6 +4304,41 @@ internal static class NifGeometrySignatureReader
 
         var geometry = new MeshGeometrySignature(vertexCount, sampleVertices, minX, maxX, minY, maxY, minZ, maxZ, null);
         return AttachUvSignatureForFloatStride(bytes, vertexDataOffset, vertexCount, vertexStride, geometry);
+    }
+
+    private static MeshGeometrySignature? TryBuildPartialFloatStrideSignature(
+        byte[] bytes,
+        int vertexDataOffset,
+        int requestedVertexCount,
+        int vertexStride,
+        out int recoveredVertexCount)
+    {
+        recoveredVertexCount = 0;
+        if (vertexDataOffset < 0 || vertexDataOffset >= bytes.Length || vertexStride < 12)
+        {
+            return null;
+        }
+
+        var availableVertexCount = (bytes.Length - vertexDataOffset) / vertexStride;
+        if (availableVertexCount <= 0 || availableVertexCount >= requestedVertexCount)
+        {
+            return null;
+        }
+
+        var minimumRetainedCount = Math.Max(MinPlausibleExplicitVertexCount, (int)Math.Ceiling(requestedVertexCount * 0.5d));
+        if (availableVertexCount < minimumRetainedCount)
+        {
+            return null;
+        }
+
+        var signature = BuildFloatStrideSignature(bytes, vertexDataOffset, availableVertexCount, vertexStride);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        recoveredVertexCount = availableVertexCount;
+        return signature;
     }
 
     private static MeshGeometrySignature AttachUvSignatureForFloatStride(
