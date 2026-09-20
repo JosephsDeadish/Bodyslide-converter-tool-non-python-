@@ -2715,8 +2715,8 @@ public sealed class ConversionOrchestratorTests
                 compatibility.GetProperty("MissingRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "smp-config.xml", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
-                compatibility.GetProperty("Summary").GetString(),
                 "does not advertise built-in physics-capable bones",
+                compatibility.GetProperty("Summary").GetString(),
                 StringComparison.OrdinalIgnoreCase);
         }
         finally
