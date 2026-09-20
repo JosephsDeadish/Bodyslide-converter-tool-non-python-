@@ -75,5 +75,26 @@
     "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "WingMembrane", "Feather01", "Feather02", "Feather03", "Pinion", "Talon"],
     "distinctiveSignatures": ["WingMid.L", "WingMid.R", "WingMembrane.L", "WingMembrane.R", "Feather01.L", "Feather01.R", "Feather03.L", "Feather03.R"],
     "minimumSignatureMatches": 2
+  },
+  {
+    "label": "draconic-humanoid",
+    "bonePrefixes": ["WingFinger", "SpineFin", "TailBarb", "Frill", "Drake", "Wyvern"],
+    "boneTokens": ["WingFinger01", "WingFinger02", "WingFinger03", "SpineFinRoot", "SpineFinMid", "SpineFinTip", "TailBarb", "TailBarbTip", "Frill.L", "Frill.R", "Wyvern", "Drake"],
+    "distinctiveSignatures": ["WingFinger01.L", "WingFinger01.R", "SpineFinRoot", "TailBarbTip"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "insectoid-humanoid",
+    "bonePrefixes": ["Antenna", "Mandible", "Abdomen", "CarapaceWing", "Chitin"],
+    "boneTokens": ["Antenna.L", "Antenna.R", "AntennaTip", "Mandible.L", "Mandible.R", "MandibleTip", "AbdomenRoot", "AbdomenMid", "AbdomenTip", "CarapaceWing.L", "CarapaceWing.R", "Chitin"],
+    "distinctiveSignatures": ["Antenna.L", "Antenna.R", "Mandible.L", "Mandible.R", "AbdomenTip"],
+    "minimumSignatureMatches": 2
+  },
+  {
+    "label": "aquatic-humanoid",
+    "bonePrefixes": ["Fin", "Whisker", "Frill", "Dorsal", "Pectoral", "Ventral"],
+    "boneTokens": ["Fin.Dorsal", "Fin.DorsalTip", "PectoralFin.L", "PectoralFin.R", "VentralFin.L", "VentralFin.R", "Frill.L", "Frill.R", "Whisker.L", "Whisker.R", "GillFrill", "Siren", "Koi"],
+    "distinctiveSignatures": ["Fin.Dorsal", "PectoralFin.L", "PectoralFin.R", "Whisker.L", "Whisker.R"],
+    "minimumSignatureMatches": 2
   }
 ]

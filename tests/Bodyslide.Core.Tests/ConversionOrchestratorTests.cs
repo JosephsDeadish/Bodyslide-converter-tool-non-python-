@@ -8610,6 +8610,23 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Branch.L", branchFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("BriarTendrilChain", out var branchGroup));
         Assert.Equal("branch", branchGroup);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingFinger03.L", "draconic-humanoid", out var draconicWingFallbacks));
+        Assert.Contains("WingFinger02.L", draconicWingFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("AntennaTip.L", "insectoid-humanoid", out var insectAntennaFallbacks));
+        Assert.Contains("Antenna.L", insectAntennaFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Fin.DorsalTip", "aquatic-humanoid", out var aquaticFinFallbacks));
+        Assert.Contains("Fin.Dorsal", aquaticFinFallbacks);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailBarbSwing02", out var draconicTailGroup));
+        Assert.Equal("tail", draconicTailGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("AntennaChainL", out var insectHornGroup));
+        Assert.Equal("horn", insectHornGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("PectoralFinPhysics01", out var aquaticWingGroup));
+        Assert.Equal("wing", aquaticWingGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("GillFrillSwing", out var aquaticManeGroup));
+        Assert.Equal("mane", aquaticManeGroup);
+        Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingFinger01.L", "TailBarbTip"]));
+        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Antenna.L", "Mandible.R"]));
+        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFin.L", "Whisker.R"]));
     }
 }
 
@@ -19002,6 +19019,27 @@ public sealed class CustomBodyProfileSupportTests
     {
         var label = SkeletonNifBoneParser.DetectSkeletonLabel(["WingMid.L", "WingMid.R", "NPC Spine"]);
         Assert.Equal("avian-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_DraconicBonesYieldDraconicFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["WingFinger01.L", "SpineFinRoot", "NPC Spine"]);
+        Assert.Equal("draconic-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_InsectoidBonesYieldInsectoidFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Antenna.L", "Mandible.R", "NPC Spine"]);
+        Assert.Equal("insectoid-humanoid", label);
+    }
+
+    [Fact]
+    public void SkeletonNifBoneParser_DetectSkeletonLabel_AquaticBonesYieldAquaticFrameworkLabel()
+    {
+        var label = SkeletonNifBoneParser.DetectSkeletonLabel(["Fin.Dorsal", "Whisker.L", "NPC Spine"]);
+        Assert.Equal("aquatic-humanoid", label);
     }
 
     [Fact]

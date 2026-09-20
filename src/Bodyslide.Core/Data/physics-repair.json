@@ -6,13 +6,13 @@
     { "name": "pec", "tokens": ["pec", "chest"] },
     { "name": "lat", "tokens": ["lat"] },
     { "name": "genitals", "tokens": ["genital", "schlong", "balls", "scrot", "penis", "sos", "tng"] },
-    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfin", "tailfur", "tailfluff", "coil", "serpenttail", "serpentine", "snake", "cobra", "viper"] },
+    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfin", "tailfur", "tailfluff", "tailbarb", "tailspike", "tailblade", "coil", "serpenttail", "serpentine", "snake", "cobra", "viper", "tentacle", "abdomen"] },
     { "name": "thigh", "tokens": ["thigh"] },
-    { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "wingmembrane", "feather", "pinion", "plume", "talon"] },
+    { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "wingmembrane", "wingfinger", "feather", "pinion", "plume", "talon", "fin", "dorsalfin", "pectoralfin", "ventralfin", "carapacewing", "webwing"] },
     { "name": "branch", "tokens": ["branch", "branchtip", "vine", "vinetip", "tendril", "briar", "twig", "rootclaw", "rootbranch", "leaf"] },
-    { "name": "horn", "tokens": ["horn", "goathorn", "ramhorn"] },
+    { "name": "horn", "tokens": ["horn", "goathorn", "ramhorn", "antenna", "mandible", "feeler"] },
     { "name": "hoof", "tokens": ["hoof", "hock", "digitigrade", "paw", "claw", "dewclaw", "fetlock", "talon"] },
-    { "name": "mane", "tokens": ["mane", "forelock", "manetip", "crest"] },
+    { "name": "mane", "tokens": ["mane", "forelock", "manetip", "crest", "frill", "gillfrill", "whisker", "spinefin"] },
     { "name": "vagina", "tokens": ["vagina", "labia"] },
     { "name": "anus", "tokens": ["anus"] }
   ]
