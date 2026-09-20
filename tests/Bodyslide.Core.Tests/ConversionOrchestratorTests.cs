@@ -8166,10 +8166,10 @@ public sealed class PluginPatchGuidanceTests
         var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("AmbiguousArmor\0"))
             .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
             .ToArray();
-        var pluginBytes = new List<byte>(BuildTes4HeaderWithFlags(0x00000200u))
-        {
-        };
-        pluginBytes.AddRange(BuildFlatRecordForTests("ARMA", armaData, 0x00012345u));
+        var tes4 = BuildSseRecord("TES4", BuildTes4DataWithMasters([]));
+        WriteUInt32Le(tes4, 8, 0x00000200u);
+        var pluginBytes = new List<byte>(tes4);
+        pluginBytes.AddRange(BuildSseRecord("ARMA", armaData, formId: 0x00012345u));
 
         await File.WriteAllBytesAsync(Path.Combine(workingDirectory, "AmbiguousArmor.esp"), [.. pluginBytes]);
         await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
