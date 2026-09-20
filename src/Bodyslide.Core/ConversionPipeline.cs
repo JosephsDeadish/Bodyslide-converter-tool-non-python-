@@ -1948,8 +1948,8 @@ internal sealed record NifBlockGraph(IReadOnlyList<NifBlockGraphNode> Nodes)
 {
     public IReadOnlyList<NifBlockGraphNode> GeometryCandidates =>
         Nodes.Where(static node =>
-                node.TypeName.Contains("TriShapeData", StringComparison.Ordinal) ||
-                node.TypeName.Contains("TriStripsData", StringComparison.Ordinal) ||
+                node.TypeName.Contains("TriShape", StringComparison.Ordinal) ||
+                node.TypeName.Contains("TriStrips", StringComparison.Ordinal) ||
                 node.TypeName.Contains("GeometryData", StringComparison.Ordinal) ||
                 node.TypeName.Contains("Mesh", StringComparison.Ordinal))
             .ToList();
@@ -2280,6 +2280,8 @@ internal static class NifGeometrySignatureReader
     ];
     private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
     [
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShape"), "NiTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStrips"), "NiTriStrips"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
@@ -2288,6 +2290,8 @@ internal static class NifGeometrySignatureReader
     ];
     private static readonly (byte[] TokenBytes, string TypeName)[] GeometryFamilyHintTokens =
     [
+        (System.Text.Encoding.ASCII.GetBytes("NiTriShape"), "NiTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTriStrips"), "NiTriStrips"),
         (System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"), "BSSubIndexTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSTriShape"), "BSTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"), "BSDynamicTriShape"),
@@ -2301,6 +2305,16 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("NiMesh"), "NiMesh"),
         (System.Text.Encoding.ASCII.GetBytes("NiLinesData"), "NiLinesData"),
         (System.Text.Encoding.ASCII.GetBytes("NiLines"), "NiLines"),
+    ];
+    private static readonly (byte[] TokenBytes, string TypeName, string MessagePrefix)[] GraphVariantHintTokens =
+    [
+        (System.Text.Encoding.ASCII.GetBytes("BSLightingShaderProperty"), "BSLightingShaderProperty", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("BSEffectShaderProperty"), "BSEffectShaderProperty", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("BSShaderTextureSet"), "BSShaderTextureSet", "shader-property"),
+        (System.Text.Encoding.ASCII.GetBytes("NiAlphaProperty"), "NiAlphaProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiMaterialProperty"), "NiMaterialProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiTexturingProperty"), "NiTexturingProperty", "property-node"),
+        (System.Text.Encoding.ASCII.GetBytes("NiSpecularProperty"), "NiSpecularProperty", "property-node")
     ];
     private static readonly int[] CommonFloatVertexStrides = [12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
     private const int MaxFloatVertexStride = 160;
@@ -3300,6 +3314,9 @@ internal static class NifGeometrySignatureReader
         }
 
         var metadata = ExtractMetadata(bytes);
+        NifBlockGraph? graph = null;
+        NifBlockGraphParser.TryParse(bytes, out graph);
+        var graphVariantMessages = ExtractGraphVariantMessages(bytes, graph);
         var result = TryReadWithMode(bytes);
         var heelAnalysis = AnalyzeHeelProfile(path, metadata, result.Signature);
         if (result.Signature is not null)
@@ -3310,7 +3327,8 @@ internal static class NifGeometrySignatureReader
                     ? ["heuristic-geometry-read", "manual-review-recommended"]
                     : [],
                 metadata,
-                heelAnalysis);
+                heelAnalysis,
+                graphVariantMessages);
             return new NifSupportReport(
                 path,
                 status,
@@ -3322,15 +3340,14 @@ internal static class NifGeometrySignatureReader
                 metadata.BoneNames.Count,
                 heelAnalysis);
         }
-
         var unsupportedMessages = new List<string>();
-        NifBlockGraph? graph = null;
+        var unsupportedMessages = new List<string>();
         if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
         {
             unsupportedMessages.Add("bstri-layout-unreadable");
         }
 
-        if (NifBlockGraphParser.TryParse(bytes, out graph) && graph is not null)
+        if (graph is not null)
         {
             unsupportedMessages.Add($"graph-blocks:{graph.Nodes.Count}");
             if (graph.GeometryCandidates.Count == 0)
@@ -3340,6 +3357,7 @@ internal static class NifGeometrySignatureReader
         }
 
         unsupportedMessages.AddRange(ExtractUnsupportedGeometryFamilyMessages(bytes, graph));
+        unsupportedMessages.AddRange(graphVariantMessages);
 
         if (unsupportedMessages.Count == 0)
         {
@@ -3362,9 +3380,15 @@ internal static class NifGeometrySignatureReader
     private static IReadOnlyList<string> BuildMetadataMessages(
         IReadOnlyList<string> baseMessages,
         NifMeshMetadata metadata,
-        HeelAnalysisReport? heelAnalysis = null)
+        HeelAnalysisReport? heelAnalysis = null,
+        IReadOnlyList<string>? extraMessages = null)
     {
         var messages = new List<string>(baseMessages);
+        if (extraMessages is { Count: > 0 })
+        {
+            messages.AddRange(extraMessages);
+        }
+
         if (!string.IsNullOrWhiteSpace(metadata.SkinInstanceType))
         {
             messages.Add($"skin-instance:{metadata.SkinInstanceType}");
@@ -3385,7 +3409,9 @@ internal static class NifGeometrySignatureReader
             messages.Add($"heel-profile:{heelAnalysis.Profile}");
         }
 
-        return messages;
+        return messages
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static IReadOnlyList<string> ExtractUnsupportedGeometryFamilyMessages(byte[] bytes, NifBlockGraph? graph)
@@ -3413,6 +3439,37 @@ internal static class NifGeometrySignatureReader
         return families
             .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
             .Select(static family => $"geometry-family:{family}")
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ExtractGraphVariantMessages(byte[] bytes, NifBlockGraph? graph)
+    {
+        var messages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (graph is not null)
+        {
+            foreach (var node in graph.Nodes)
+            {
+                foreach (var (_, typeName, messagePrefix) in GraphVariantHintTokens)
+                {
+                    if (node.TypeName.Contains(typeName, StringComparison.Ordinal))
+                    {
+                        messages.Add($"{messagePrefix}:{typeName}");
+                    }
+                }
+            }
+        }
+
+        foreach (var (tokenBytes, typeName, messagePrefix) in GraphVariantHintTokens)
+        {
+            if (bytes.AsSpan().IndexOf(tokenBytes) >= 0)
+            {
+                messages.Add($"{messagePrefix}:{typeName}");
+            }
+        }
+
+        return messages
+            .OrderBy(static message => message, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 

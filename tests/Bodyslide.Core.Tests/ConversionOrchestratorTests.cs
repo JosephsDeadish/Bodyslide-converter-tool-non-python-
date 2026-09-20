@@ -445,6 +445,62 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task NifGeometrySignatureReader_NiTriShapeTokenGuidedStub_IsRecoveredAsSupported()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "nitrishape_stub.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            geometryToken: "NiTriShape",
+            prefixPadding: 12);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("supported", report.Status);
+            Assert.Equal("geometry-token-float", report.ParseMode);
+            Assert.Equal(96, report.VertexCount);
+            Assert.Contains("geometry-family:NiTriShape", report.Messages ?? []);
+            Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NifGeometrySignatureReader_UnsupportedGeometryStub_ReportsShaderAndPropertyVariants()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "shader_property_stub.nif");
+        await SyntheticNifTestData.WriteUnsupportedGeometryTokenStubAsync(
+            inputFile,
+            "NiLinesData",
+            prefixPadding: 32,
+            additionalTokens: ["BSLightingShaderProperty", "NiAlphaProperty"]);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("unsupported", report.Status);
+            Assert.Contains("geometry-family:NiLinesData", report.Messages ?? []);
+            Assert.Contains("shader-property:BSLightingShaderProperty", report.Messages ?? []);
+            Assert.Contains("property-node:NiAlphaProperty", report.Messages ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsAllNifsInTarGzArchive()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4143,7 +4199,8 @@ internal static class SyntheticNifTestData
     public static async Task WriteUnsupportedGeometryTokenStubAsync(
         string path,
         string geometryToken,
-        int prefixPadding = 24)
+        int prefixPadding = 24,
+        IReadOnlyList<string>? additionalTokens = null)
     {
         await using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream);
@@ -4151,6 +4208,14 @@ internal static class SyntheticNifTestData
         writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format"));
         writer.Write(new byte[Math.Max(24, prefixPadding)]);
         writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        if (additionalTokens is { Count: > 0 })
+        {
+            foreach (var token in additionalTokens.Where(static token => !string.IsNullOrWhiteSpace(token)))
+            {
+                writer.Write((byte)0);
+                writer.Write(System.Text.Encoding.ASCII.GetBytes(token));
+            }
+        }
         writer.Write(new byte[32]);
     }
 
