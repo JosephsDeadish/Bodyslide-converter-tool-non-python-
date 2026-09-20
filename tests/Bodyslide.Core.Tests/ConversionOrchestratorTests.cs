@@ -2399,6 +2399,11 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(summary.ComponentBoundaryVertexCounts);
             Assert.Single(summary.ComponentBoundaryVertexCounts!);
             Assert.Equal(vertices.Length, summary.ComponentBoundaryVertexCounts[0]);
+            Assert.NotNull(summary.BoundaryLoops);
+            Assert.Equal(2, summary.BoundaryLoops!.Count);
+            Assert.All(summary.BoundaryLoops, loop => Assert.Equal(6, loop.VertexIndexes.Count));
+            Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([0, 1, 2, 3, 4, 5]));
+            Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([6, 7, 8, 9, 10, 11]));
             Assert.True(summary.BoundaryVertexFlags.All(static flag => flag), "Expected the synthetic openwork ring to mark every vertex as part of an explicit boundary loop.");
         }
         finally
@@ -2474,6 +2479,56 @@ public sealed class ConversionOrchestratorTests
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BuildTopologyTransformContext_GivesInnerBoundaryLoopsStrongerPreservationWeight()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "openwork_boundary_weights_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            ( 1.20f,  0.00f, 0.40f), ( 0.60f,  1.04f, 0.40f), (-0.60f,  1.04f, 0.40f),
+            (-1.20f,  0.00f, 0.40f), (-0.60f, -1.04f, 0.40f), ( 0.60f, -1.04f, 0.40f),
+            ( 0.45f,  0.00f, 0.40f), ( 0.225f,  0.39f, 0.40f), (-0.225f,  0.39f, 0.40f),
+            (-0.45f,  0.00f, 0.40f), (-0.225f, -0.39f, 0.40f), ( 0.225f, -0.39f, 0.40f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 7), (0, 7, 6),
+            (1, 2, 8), (1, 8, 7),
+            (2, 3, 9), (2, 9, 8),
+            (3, 4,10), (3,10, 9),
+            (4, 5,11), (4,11,10),
+            (5, 0, 6), (5, 6,11)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath);
+            Assert.NotNull(topologySummary);
+
+            var buildContextMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildContextMethod);
+
+            var context = buildContextMethod!.Invoke(null,
+            [
+                vertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                topologySummary
+            ]);
+            Assert.NotNull(context);
+
+            var weights = Assert.IsType<float[]>(context!.GetType().GetProperty("BoundaryVertexWeights", BindingFlags.Public | BindingFlags.Instance)!.GetValue(context));
+            Assert.Equal(vertices.Length, weights.Length);
+            Assert.True(weights[6] > weights[0], $"Expected inner authored loop vertices to receive stronger preservation weighting than the outer perimeter, got outer={weights[0]} inner={weights[6]}.");
+            Assert.True(weights[6] >= 0.12f, $"Expected authored inner loop weighting to be material, got {weights[6]}.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
         }
     }
 

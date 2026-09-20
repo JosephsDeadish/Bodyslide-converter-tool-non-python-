@@ -2411,7 +2411,12 @@ internal static class NifGeometrySignatureReader
         int BoundaryVertexCount,
         bool[] BoundaryVertexFlags,
         int[]? ComponentBoundaryLoopCounts = null,
-        int[]? ComponentBoundaryVertexCounts = null);
+        int[]? ComponentBoundaryVertexCounts = null,
+        IReadOnlyList<BoundaryLoopSequence>? BoundaryLoops = null);
+
+    internal sealed record BoundaryLoopSequence(
+        int ComponentId,
+        IReadOnlyList<int> VertexIndexes);
 
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
@@ -3379,7 +3384,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
-        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
+        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
         return new MeshTopologySummary(
             bestVertexCount,
             componentIds,
@@ -3387,7 +3392,8 @@ internal static class NifGeometrySignatureReader
             boundaryVertexCount,
             boundaryVertexFlags,
             componentBoundaryLoopCounts,
-            componentBoundaryVertexCounts);
+            componentBoundaryVertexCounts,
+            boundaryLoops);
     }
 
     private static int[] BuildTopologyComponentIds(int vertexCount, IReadOnlyList<ushort> triangles)
@@ -3459,7 +3465,7 @@ internal static class NifGeometrySignatureReader
         return normalized;
     }
 
-    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts) AnalyzeBoundaryEdges(
+    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts, IReadOnlyList<BoundaryLoopSequence> BoundaryLoops) AnalyzeBoundaryEdges(
         int vertexCount,
         IReadOnlyList<ushort> triangles,
         IReadOnlyList<int> componentIds)
@@ -3537,6 +3543,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var visited = new HashSet<int>();
+        var boundaryLoops = new List<BoundaryLoopSequence>();
         var loopCount = 0;
         foreach (var vertex in boundaryAdjacency.Keys)
         {
@@ -3549,9 +3556,11 @@ internal static class NifGeometrySignatureReader
             var queue = new Queue<int>();
             queue.Enqueue(vertex);
             var componentMembership = new Dictionary<int, int>();
+            var loopVertices = new List<int>();
             while (queue.Count > 0)
             {
                 var current = queue.Dequeue();
+                loopVertices.Add(current);
                 if (componentIds.Count == vertexCount)
                 {
                     var componentId = componentIds[current];
@@ -3585,10 +3594,16 @@ internal static class NifGeometrySignatureReader
                 {
                     componentBoundaryLoopCounts[dominantComponentId]++;
                 }
+
+                var orderedLoop = OrderBoundaryLoopVertices(boundaryAdjacency, loopVertices);
+                if (orderedLoop.Count > 0)
+                {
+                    boundaryLoops.Add(new BoundaryLoopSequence(dominantComponentId, orderedLoop));
+                }
             }
         }
 
-        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts);
+        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops);
 
         void AddEdge(int left, int right)
         {
@@ -3596,6 +3611,76 @@ internal static class NifGeometrySignatureReader
             edgeCounts[normalized] = edgeCounts.TryGetValue(normalized, out var count) ? count + 1 : 1;
         }
     }
+
+    private static IReadOnlyList<int> OrderBoundaryLoopVertices(
+        IReadOnlyDictionary<int, HashSet<int>> boundaryAdjacency,
+        IReadOnlyList<int> loopVertices)
+    {
+        if (loopVertices.Count == 0)
+        {
+            return [];
+        }
+
+        var loopSet = loopVertices.ToHashSet();
+        var start = loopVertices.Min();
+        var ordered = new List<int>(loopSet.Count);
+        var usedEdges = new HashSet<(int Left, int Right)>();
+        var visitedVertices = new HashSet<int>();
+        var current = start;
+        var previous = -1;
+
+        while (loopSet.Contains(current) && visitedVertices.Add(current))
+        {
+            ordered.Add(current);
+            if (!boundaryAdjacency.TryGetValue(current, out var rawNeighbors))
+            {
+                break;
+            }
+
+            var orderedNeighbors = rawNeighbors
+                .Where(loopSet.Contains)
+                .OrderBy(neighbor => neighbor == previous ? 1 : 0)
+                .ThenBy(neighbor => IsBoundaryEdgeUsed(usedEdges, current, neighbor) ? 1 : 0)
+                .ThenBy(neighbor => neighbor)
+                .ToArray();
+            var next = orderedNeighbors
+                .FirstOrDefault(neighbor => neighbor != previous && !IsBoundaryEdgeUsed(usedEdges, current, neighbor), -1);
+
+            if (next < 0)
+            {
+                next = orderedNeighbors.FirstOrDefault(-1);
+            }
+
+            if (next < 0 || next == previous)
+            {
+                break;
+            }
+
+            usedEdges.Add(NormalizeBoundaryEdge(current, next));
+            previous = current;
+            current = next;
+            if (current == start)
+            {
+                break;
+            }
+        }
+
+        if (ordered.Count == loopSet.Count)
+        {
+            return ordered;
+        }
+
+        return loopVertices
+            .Distinct()
+            .OrderBy(static index => index)
+            .ToArray();
+    }
+
+    private static (int Left, int Right) NormalizeBoundaryEdge(int left, int right) =>
+        left <= right ? (left, right) : (right, left);
+
+    private static bool IsBoundaryEdgeUsed(ISet<(int Left, int Right)> usedEdges, int left, int right) =>
+        usedEdges.Contains(NormalizeBoundaryEdge(left, right));
 
     /// <summary>
     /// Samples up to 256 vertices from the candidate block and validates their half-float
@@ -9211,6 +9296,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
         int[] ComponentIds,
         bool[] BoundaryVertexFlags,
+        float[] BoundaryVertexWeights,
         float BoundaryPreservationWeight);
 }
 
@@ -16386,6 +16472,7 @@ internal sealed class LocalExportService(
         IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
         int[] ComponentIds,
         bool[] BoundaryVertexFlags,
+        float[] BoundaryVertexWeights,
         float BoundaryPreservationWeight);
 
     private static readonly IReadOnlyDictionary<string, float> ShrinkwrapBaseRadius =
@@ -17221,6 +17308,7 @@ internal sealed class LocalExportService(
     {
         int[] componentIds;
         bool[] boundaryVertexFlags;
+        float[] boundaryVertexWeights;
         var boundaryLoopCount = 0;
         var hasExplicitTopology = topologySummary is not null &&
                                   topologySummary.VertexCount == rawVertices.Count &&
@@ -17233,6 +17321,7 @@ internal sealed class LocalExportService(
                 : EstimateBoundaryVertexFlags(
                     rawVertices.Select(static vertex => new MeshVertex(vertex.X, vertex.Y, vertex.Z)).ToArray(),
                     topologySummary.ComponentIds);
+            boundaryVertexWeights = BuildBoundaryVertexWeights(rawVertices, topologySummary);
             boundaryLoopCount = topologySummary.BoundaryLoopCount;
         }
         else
@@ -17252,6 +17341,7 @@ internal sealed class LocalExportService(
             }
 
             boundaryVertexFlags = EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+            boundaryVertexWeights = new float[rawVertices.Count];
         }
 
         var hasMultipleComponents = componentIds.Distinct().Skip(1).Any();
@@ -17309,7 +17399,82 @@ internal sealed class LocalExportService(
             regions,
             componentIds,
             boundaryVertexFlags,
+            boundaryVertexWeights,
             boundaryPreservationWeight);
+    }
+
+    private static float[] BuildBoundaryVertexWeights(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        NifGeometrySignatureReader.MeshTopologySummary topologySummary)
+    {
+        var weights = new float[rawVertices.Count];
+        if (topologySummary.BoundaryLoops is not { Count: > 0 })
+        {
+            return weights;
+        }
+
+        foreach (var componentGroup in topologySummary.BoundaryLoops
+                     .Where(static loop => loop.VertexIndexes.Count > 0)
+                     .GroupBy(static loop => loop.ComponentId))
+        {
+            var componentLoops = componentGroup
+                .Select(loop => new
+                {
+                    Loop = loop,
+                    Area = ComputeBoundaryLoopProjectedArea(rawVertices, loop.VertexIndexes)
+                })
+                .OrderByDescending(static entry => entry.Area)
+                .ToArray();
+            if (componentLoops.Length == 0)
+            {
+                continue;
+            }
+
+            var outerLoop = componentLoops[0].Loop;
+            foreach (var entry in componentLoops)
+            {
+                var extraWeight = ReferenceEquals(entry.Loop, outerLoop)
+                    ? 0f
+                    : entry.Loop.VertexIndexes.Count >= 6 ? 0.12f : 0.08f;
+                foreach (var vertexIndex in entry.Loop.VertexIndexes)
+                {
+                    if (vertexIndex >= 0 && vertexIndex < weights.Length)
+                    {
+                        weights[vertexIndex] = Math.Max(weights[vertexIndex], extraWeight);
+                    }
+                }
+            }
+        }
+
+        return weights;
+    }
+
+    private static float ComputeBoundaryLoopProjectedArea(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> orderedVertexIndexes)
+    {
+        if (orderedVertexIndexes.Count < 3)
+        {
+            return 0f;
+        }
+
+        double signedArea = 0d;
+        for (var index = 0; index < orderedVertexIndexes.Count; index++)
+        {
+            var currentIndex = orderedVertexIndexes[index];
+            var nextIndex = orderedVertexIndexes[(index + 1) % orderedVertexIndexes.Count];
+            if (currentIndex < 0 || currentIndex >= rawVertices.Count ||
+                nextIndex < 0 || nextIndex >= rawVertices.Count)
+            {
+                continue;
+            }
+
+            var current = rawVertices[currentIndex];
+            var next = rawVertices[nextIndex];
+            signedArea += (current.X * next.Y) - (next.X * current.Y);
+        }
+
+        return (float)Math.Abs(signedArea * 0.5d);
     }
 
     private static void ResolveTopologyProjectionFrame(
@@ -17358,7 +17523,13 @@ internal sealed class LocalExportService(
         if (vertexIndex < topologyContext.BoundaryVertexFlags.Length &&
             topologyContext.BoundaryVertexFlags[vertexIndex])
         {
-            boundaryPreservationWeight = topologyContext.BoundaryPreservationWeight;
+            var perVertexWeight = vertexIndex < topologyContext.BoundaryVertexWeights.Length
+                ? topologyContext.BoundaryVertexWeights[vertexIndex]
+                : 0f;
+            boundaryPreservationWeight = Math.Clamp(
+                topologyContext.BoundaryPreservationWeight + perVertexWeight,
+                0f,
+                0.72f);
         }
     }
 
