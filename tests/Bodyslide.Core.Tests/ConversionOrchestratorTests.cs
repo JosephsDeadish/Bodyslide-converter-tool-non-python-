@@ -3939,7 +3939,7 @@ public sealed class ConversionOrchestratorTests
                 break;
             }
 
-            if (tag is "MOD2" or "MOD3" or "MOD4" or "MOD5")
+            if (tag is "MOD2" or "MOD3" or "MOD4" or "MOD5" or "MODL")
             {
                 int nullOffset = Array.IndexOf(data, (byte)0, position, size);
                 int length = nullOffset >= 0 ? nullOffset - position : size;
@@ -12544,11 +12544,11 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(2, pathsRewritten);
+        Assert.Equal(3, pathsRewritten);
 
         var descriptors = BinaryArmaParser.ExtractArmoRecords(patched);
         Assert.Single(descriptors);
-        Assert.Equal(2, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(3, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
 
         var armoOffset = FindTopLevelRecordOffset(patched, "ARMO", headerSize: 24);
         Assert.True(armoOffset >= 0, "Patched plugin should still contain ARMO record.");
@@ -12576,11 +12576,11 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Empty(warnings);
         Assert.Equal(1, armaPatched);
-        Assert.Equal(2, pathsRewritten);
+        Assert.Equal(3, pathsRewritten);
 
         var descriptors = BinaryArmaParser.ExtractArmoRecords(patched);
         Assert.Single(descriptors);
-        Assert.Equal(2, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(3, descriptors[0].MeshPaths.Count(p => p.Equals(newPath, StringComparison.OrdinalIgnoreCase)));
     }
 
     // ── RewriteAsync integration ──────────────────────────────────────────────
@@ -12771,7 +12771,7 @@ public sealed class BinaryPluginRewriteServiceTests
                 CancellationToken.None);
 
             Assert.Equal(1, result.PluginsProcessed);
-            Assert.Equal(2, result.PathsRewritten);
+            Assert.Equal(3, result.PathsRewritten);
             Assert.Single(result.PatchedPluginPaths);
 
             var patchedContent = System.Text.Encoding.Latin1.GetString(
@@ -13626,9 +13626,9 @@ public sealed class PatchPluginWriterTests
 
         var (newData, rewritten) = PatchPluginWriter.RewriteArmaData(mod2, rewriteMap, "ARMO");
 
-        Assert.Equal(2, rewritten);
+        Assert.Equal(3, rewritten);
         Assert.Contains("MODL", System.Text.Encoding.Latin1.GetString(newData), StringComparison.Ordinal);
-        Assert.Equal(2, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_w.nif"));
+        Assert.Equal(3, CountSubrecordPathOccurrences(newData, "meshes/slidesmith/cbbe/iron_w.nif"));
     }
 
     [Fact]
