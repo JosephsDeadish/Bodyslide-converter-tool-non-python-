@@ -3396,9 +3396,9 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
                     AddReportMetric(reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
-                    AddReportMetric(reportName, "Clipping detected", TryReadBool(root, "ClippingDetected"), filePath);
-                    AddReportMetric(reportName, "Correction applied", TryReadBool(root, "CorrectionApplied"), filePath);
-                    AddReportMetric(reportName, "Topology risk", TryReadBool(root, "TopologyMismatchRisk"), filePath);
+                    AddReportMetric(reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
+                    AddReportMetric(reportName, "Correction applied", FormatBool(TryReadBoolValue(root, "CorrectionApplied")), filePath);
+                    AddReportMetric(reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
                     AddReportMetric(reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
                     AddReportMetric(reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
                     AddReportMetric(reportName, "High-risk poses", TryReadInt(root, "HighRiskPoseCount"), filePath);
@@ -3419,7 +3419,7 @@ public sealed class MainForm : Form
                     if (TryGetProperty(root, "PhysicsCompatibility", out var physicsCompatibility))
                     {
                         AddReportMetric(reportName, "Physics profile", TryReadString(physicsCompatibility, "RequestedProfile"), filePath);
-                        AddReportMetric(reportName, "Physics ready", TryReadBool(physicsCompatibility, "IsCompatible"), filePath);
+                        AddReportMetric(reportName, "Physics ready", FormatBool(TryReadBoolValue(physicsCompatibility, "IsCompatible")), filePath);
                         AddReportMetric(reportName, "Expected physics configs", TryReadArray(physicsCompatibility, "ExpectedRuntimeConfigs"), filePath);
                         AddReportMetric(reportName, "Generated physics configs", TryReadArray(physicsCompatibility, "GeneratedRuntimeConfigs"), filePath);
                         AddReportMetric(reportName, "Missing physics configs", TryReadArray(physicsCompatibility, "MissingRuntimeConfigs"), filePath);
@@ -3431,7 +3431,7 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Plugins", CountNestedArray(root, "ScannedPlugins"), filePath);
                     AddReportMetric(reportName, "Armor add-ons", TryReadInt(root, "ArmorAddonCount"), filePath);
-                    AddReportMetric(reportName, "Compatible", TryReadBool(root, "IsCompatible"), filePath);
+                    AddReportMetric(reportName, "Compatible", FormatBool(TryReadBoolValue(root, "IsCompatible")), filePath);
                     AddReportMetric(reportName, "Incompatible races", TryReadArray(root, "IncompatibleRaces"), filePath);
                     AddReportMetric(reportName, "Warnings", TryReadArray(root, "Warnings"), filePath);
                     break;
@@ -3450,8 +3450,8 @@ public sealed class MainForm : Form
                 case "world-physics.json":
                     AddReportMetric(reportName, "Mode", TryReadString(root, "Mode"), filePath);
                     AddReportMetric(reportName, "Collision shape", TryReadString(root, "CollisionShape"), filePath);
-                    AddReportMetric(reportName, "Source physics", TryReadBool(root, "SourcePhysicsDetected"), filePath);
-                    AddReportMetric(reportName, "Ground mesh", TryReadBool(root, "GroundMeshAvailable"), filePath);
+                    AddReportMetric(reportName, "Source physics", FormatBool(TryReadBoolValue(root, "SourcePhysicsDetected")), filePath);
+                    AddReportMetric(reportName, "Ground mesh", FormatBool(TryReadBoolValue(root, "GroundMeshAvailable")), filePath);
                     AddReportMetric(reportName, "Recommendations", TryReadArray(root, "Recommendations"), filePath);
                     break;
                 case "plugin-patches.json":
@@ -3508,10 +3508,8 @@ public sealed class MainForm : Form
             ? value.ToString()
             : null;
 
-    private static string? TryReadBool(JsonElement element, string propertyName) =>
-        TryReadBoolValue(element, propertyName) is { } value
-            ? (value ? "Yes" : "No")
-            : null;
+    private static string? FormatBool(bool? value) =>
+        value is null ? null : value.Value ? "Yes" : "No";
 
     private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
@@ -4174,7 +4172,7 @@ public sealed class MainForm : Form
             using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
             var root = document.RootElement;
             var mode = TryReadString(root, "Mode");
-            var groundMeshAvailable = TryReadBool(root, "GroundMeshAvailable");
+            var groundMeshAvailable = FormatBool(TryReadBoolValue(root, "GroundMeshAvailable"));
             if (!string.IsNullOrWhiteSpace(mode))
             {
                 add(
@@ -4283,13 +4281,6 @@ public sealed class MainForm : Form
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return fallbackPath;
-        }
-
-        if (IsPreviewDrivenGuidanceCode(normalized) &&
-            !string.IsNullOrWhiteSpace(previewPath) &&
-            File.Exists(previewPath))
-        {
-            return previewPath;
         }
 
         if (normalized is "unsupported-bones")
@@ -4423,6 +4414,13 @@ public sealed class MainForm : Form
         if (normalized is "missing-root-plugin")
         {
             return ResolveFirstExistingPath(outputDirectory, "*.esp", "*.esm", "*.esl") ?? outputDirectory;
+        }
+
+        if (IsPreviewDrivenGuidanceCode(normalized) &&
+            !string.IsNullOrWhiteSpace(previewPath) &&
+            File.Exists(previewPath))
+        {
+            return previewPath;
         }
 
         return fallbackPath;
