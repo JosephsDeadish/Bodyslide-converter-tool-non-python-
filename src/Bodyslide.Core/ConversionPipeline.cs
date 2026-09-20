@@ -9162,41 +9162,51 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         var summaries = new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase);
         foreach (var meshFile in meshFiles)
         {
+            var snapshot = LocalExportService.GetMeshTransferTopologySnapshot(meshFile);
+            if (snapshot is null)
+            {
+                continue;
+            }
+
             List<int> islandSizes;
-            var vertexCount = 0;
+            var vertexCount = snapshot.Vertices.Count;
             var boundaryLoopCount = 0;
             IReadOnlyList<bool> boundaryFlags = [];
             IReadOnlyList<TopologyIslandEdgeNetworkSummary>? edgeNetworks = null;
             var hasExplicitEdgeNetwork = false;
-            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
-            if (topologySummary is { VertexCount: > 0 } &&
-                topologySummary.ComponentIds.Length == topologySummary.VertexCount)
+            var topologySummary = snapshot.TopologySummary;
+            if (snapshot.HasExplicitTopology &&
+                topologySummary is { VertexCount: > 0 } &&
+                snapshot.ComponentIds.Length == topologySummary.VertexCount)
             {
                 vertexCount = topologySummary.VertexCount;
-                islandSizes = topologySummary.ComponentIds
+                islandSizes = snapshot.ComponentIds
                     .GroupBy(static componentId => componentId)
                     .Select(static group => group.Count())
                     .OrderByDescending(static count => count)
                     .ToList();
-                boundaryLoopCount = topologySummary.BoundaryLoopCount;
-                boundaryFlags = topologySummary.BoundaryVertexFlags;
-                if (topologySummary.ComponentEdgeNetworks is { Count: > 0 })
-                {
-                    edgeNetworks = topologySummary.ComponentEdgeNetworks
-                        .OrderBy(static network => network.ComponentId)
-                        .ToArray();
-                    hasExplicitEdgeNetwork = true;
-                }
-            }
-            else
-            {
-                var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
-                if (vertices is null || vertices.Count < 12)
+                if (islandSizes.Count == 0)
                 {
                     continue;
                 }
 
-                vertexCount = vertices.Count;
+                boundaryLoopCount = topologySummary.BoundaryLoopCount;
+                boundaryFlags = snapshot.BoundaryVertexFlags;
+                edgeNetworks = topologySummary.ComponentEdgeNetworks is { Count: > 0 } explicitEdgeNetworks
+                    ? explicitEdgeNetworks.OrderBy(static network => network.ComponentId).ToArray()
+                    : snapshot.EdgeNetworks.Count > 0
+                        ? SummarizeTransferIslandEdgeNetworks(snapshot.EdgeNetworks)
+                        : null;
+                hasExplicitEdgeNetwork = topologySummary.ComponentEdgeNetworks is { Count: > 0 };
+            }
+            else
+            {
+                var vertices = snapshot.Vertices;
+                if (vertices.Count < 12)
+                {
+                    continue;
+                }
+
                 var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
                 if (sampledVertices.Count < 12)
                 {
@@ -15543,7 +15553,7 @@ internal sealed class LocalExportService(
     IGroundMeshGeneratorService? groundMeshGen = null,
     IScratchPluginGeneratorService? scratchPluginGen = null) : IExportService
 {
-    private sealed record MeshTransferTopologySnapshot(
+    internal sealed record MeshTransferTopologySnapshot(
         string CacheKey,
         IReadOnlyList<MeshVertex> Vertices,
         IReadOnlyList<MeshVertex> NormalizedVertices,
@@ -17118,7 +17128,7 @@ internal sealed class LocalExportService(
             ["arms"] = 0.055f,
         };
 
-    private static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshot(string meshFile)
+    internal static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshot(string meshFile)
     {
         if (string.IsNullOrWhiteSpace(meshFile) ||
             !File.Exists(meshFile) ||
@@ -17139,7 +17149,7 @@ internal sealed class LocalExportService(
             meshFile);
     }
 
-    private static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshotFromBytes(byte[] bytes, string? sourceIdentity)
+    internal static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshotFromBytes(byte[] bytes, string? sourceIdentity)
     {
         if (bytes.Length < 32)
         {
@@ -17221,22 +17231,27 @@ internal sealed class LocalExportService(
 
     private static MeshTransferTopologySnapshot CreateMeshTransferTopologySnapshot(byte[] bytes, string cacheKey)
     {
+        var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(bytes);
         var vertices = NifGeometrySignatureReader.TryReadFullVertices(bytes);
         if (vertices is not { Count: > 0 })
         {
+            var hasExplicitTopologyWithoutVertices = topologySummary is { VertexCount: > 0 } &&
+                                                     topologySummary.ComponentIds.Length == topologySummary.VertexCount;
             return new MeshTransferTopologySnapshot(
                 cacheKey,
                 [],
                 [],
-                null,
-                [],
-                [],
+                topologySummary,
+                hasExplicitTopologyWithoutVertices ? topologySummary!.ComponentIds : [],
+                hasExplicitTopologyWithoutVertices &&
+                topologySummary!.BoundaryVertexFlags.Length == topologySummary.VertexCount
+                    ? topologySummary.BoundaryVertexFlags
+                    : [],
                 new Dictionary<int, TransferIslandEdgeNetwork>(),
-                false);
+                hasExplicitTopologyWithoutVertices);
         }
 
         var normalizedVertices = NormalizeVerticesForTransfer(vertices);
-        var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(bytes);
         var hasExplicitTopology = topologySummary is { VertexCount: > 0 } &&
                                   topologySummary.VertexCount == vertices.Count &&
                                   topologySummary.ComponentIds.Length == vertices.Count;

@@ -2558,6 +2558,54 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_UsesSharedTopologySnapshotsForExplicitTopologyLabels()
+    {
+        var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshot", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "shared_snapshot_analysis_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            ( 1.20f,  0.00f, 0.40f), ( 0.60f,  1.04f, 0.40f), (-0.60f,  1.04f, 0.40f),
+            (-1.20f,  0.00f, 0.40f), (-0.60f, -1.04f, 0.40f), ( 0.60f, -1.04f, 0.40f),
+            ( 0.45f,  0.00f, 0.40f), ( 0.225f,  0.39f, 0.40f), (-0.225f,  0.39f, 0.40f),
+            (-0.45f,  0.00f, 0.40f), (-0.225f, -0.39f, 0.40f), ( 0.225f, -0.39f, 0.40f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 7), (0, 7, 6),
+            (1, 2, 8), (1, 8, 7),
+            (2, 3, 9), (2, 9, 8),
+            (3, 4,10), (3,10, 9),
+            (4, 5,11), (4,11,10),
+            (5, 0, 6), (5, 6,11)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var snapshot = method!.Invoke(null, [meshPath]);
+            Assert.NotNull(snapshot);
+            Assert.True((bool)(snapshot!.GetType().GetProperty("HasExplicitTopology")?.GetValue(snapshot) ?? false));
+
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            var summary = Assert.Single(result.TopologyIslandSummaries!.Values);
+            Assert.Contains(summary.Labels, label => label.Equals("window-boundary-risk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("explicit-boundary-tracking", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("interior-edge-network", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicMeshAnalysisService_DerivesEdgeNetworkLabelsFromExplicitNonManifoldTopology()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
