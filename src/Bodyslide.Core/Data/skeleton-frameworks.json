@@ -31,7 +31,7 @@
     "label": "serpentine-humanoid",
     "bonePrefixes": ["Tail", "Coil", "Serpent"],
     "boneTokens": ["NPC Tail", "Tail4", "Tail5", "TailTip", "CoilRoot", "CoilMid", "CoilTip", "Lamia", "Naga", "Serpent"],
-    "distinctiveSignatures": ["Tail4", "Tail5", "CoilRoot", "CoilMid", "CoilTip"],
+    "distinctiveSignatures": ["CoilRoot", "CoilMid", "CoilTip", "SerpentTail"],
     "minimumSignatureMatches": 2
   },
   {
