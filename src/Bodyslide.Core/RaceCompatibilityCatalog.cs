@@ -117,12 +117,28 @@ internal static class RaceCompatibilityCatalog
         var inferenceRules = (dto.InferenceRules ?? [])
             .Select(NormalizeInferenceRule)
             .ToArray();
+        EnsureNoDuplicateRaceFormIds(races);
 
         return new RaceCompatibilityCatalogData(
             races.ToDictionary(static race => race.FormId),
             races.ToDictionary(static race => race.Name, StringComparer.OrdinalIgnoreCase),
             bodyRules,
             inferenceRules);
+    }
+
+    private static void EnsureNoDuplicateRaceFormIds(IReadOnlyList<RaceCompatibilityRace> races)
+    {
+        var seen = new Dictionary<uint, string>();
+        foreach (var race in races)
+        {
+            if (seen.TryGetValue(race.FormId, out var existingName))
+            {
+                throw new InvalidOperationException(
+                    $"Race compatibility metadata contained duplicate FormID 0x{race.FormId:X8} for races '{existingName}' and '{race.Name}'.");
+            }
+
+            seen[race.FormId] = race.Name;
+        }
     }
 
     private static RaceCompatibilityRace NormalizeRace(RaceCompatibilityRaceDto dto)
