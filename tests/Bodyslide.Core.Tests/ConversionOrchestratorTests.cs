@@ -2363,6 +2363,45 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task NifGeometrySignatureReader_ReadsBoundaryVertexMembershipFromBsTriShapeConnectivity()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "openwork_boundary_membership_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            ( 1.20f,  0.00f, 0.40f), ( 0.60f,  1.04f, 0.40f), (-0.60f,  1.04f, 0.40f),
+            (-1.20f,  0.00f, 0.40f), (-0.60f, -1.04f, 0.40f), ( 0.60f, -1.04f, 0.40f),
+            ( 0.45f,  0.00f, 0.40f), ( 0.225f,  0.39f, 0.40f), (-0.225f,  0.39f, 0.40f),
+            (-0.45f,  0.00f, 0.40f), (-0.225f, -0.39f, 0.40f), ( 0.225f, -0.39f, 0.40f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 7), (0, 7, 6),
+            (1, 2, 8), (1, 8, 7),
+            (2, 3, 9), (2, 9, 8),
+            (3, 4,10), (3,10, 9),
+            (4, 5,11), (4,11,10),
+            (5, 0, 6), (5, 6,11)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var summary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath);
+
+            Assert.NotNull(summary);
+            Assert.Equal(vertices.Length, summary!.BoundaryVertexFlags.Length);
+            Assert.True(summary.BoundaryLoopCount >= 2);
+            Assert.True(summary.BoundaryVertexFlags.All(static flag => flag), "Expected the synthetic openwork ring to mark every vertex as part of an explicit boundary loop.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

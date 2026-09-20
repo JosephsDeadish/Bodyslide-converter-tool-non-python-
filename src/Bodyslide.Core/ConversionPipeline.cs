@@ -2376,7 +2376,8 @@ internal static class NifGeometrySignatureReader
         int VertexCount,
         int[] ComponentIds,
         int BoundaryLoopCount,
-        int BoundaryVertexCount);
+        int BoundaryVertexCount,
+        bool[] BoundaryVertexFlags);
 
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
@@ -3344,8 +3345,8 @@ internal static class NifGeometrySignatureReader
         }
 
         var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
-        var (boundaryLoopCount, boundaryVertexCount) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles);
-        return new MeshTopologySummary(bestVertexCount, componentIds, boundaryLoopCount, boundaryVertexCount);
+        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles);
+        return new MeshTopologySummary(bestVertexCount, componentIds, boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags);
     }
 
     private static int[] BuildTopologyComponentIds(int vertexCount, IReadOnlyList<ushort> triangles)
@@ -3417,7 +3418,7 @@ internal static class NifGeometrySignatureReader
         return normalized;
     }
 
-    private static (int BoundaryLoopCount, int BoundaryVertexCount) AnalyzeBoundaryEdges(int vertexCount, IReadOnlyList<ushort> triangles)
+    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags) AnalyzeBoundaryEdges(int vertexCount, IReadOnlyList<ushort> triangles)
     {
         var edgeCounts = new Dictionary<(int Left, int Right), int>();
         for (var index = 0; index + 2 < triangles.Count; index += 3)
@@ -3436,6 +3437,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var boundaryAdjacency = new Dictionary<int, HashSet<int>>();
+        var boundaryVertexFlags = new bool[vertexCount];
         foreach (var (edge, count) in edgeCounts)
         {
             if (count != 1 || edge.Left == edge.Right)
@@ -3457,6 +3459,15 @@ internal static class NifGeometrySignatureReader
 
             leftNeighbors.Add(edge.Right);
             rightNeighbors.Add(edge.Left);
+            if (edge.Left >= 0 && edge.Left < boundaryVertexFlags.Length)
+            {
+                boundaryVertexFlags[edge.Left] = true;
+            }
+
+            if (edge.Right >= 0 && edge.Right < boundaryVertexFlags.Length)
+            {
+                boundaryVertexFlags[edge.Right] = true;
+            }
         }
 
         var visited = new HashSet<int>();
@@ -3489,7 +3500,7 @@ internal static class NifGeometrySignatureReader
             }
         }
 
-        return (loopCount, boundaryAdjacency.Count);
+        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags);
 
         void AddEdge(int left, int right)
         {
@@ -9101,6 +9112,18 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         double Density);
 
     private sealed record TransferIslandSummary(int IslandId, int VertexCount, MeshVertex Centroid);
+    private sealed record TopologyTransformRegion(
+        float CenterX,
+        float CenterY,
+        float MinZ,
+        float ZRange,
+        float HalfRangeX,
+        float HalfRangeY);
+    private sealed record TopologyTransformContext(
+        IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
+        int[] ComponentIds,
+        bool[] BoundaryVertexFlags,
+        float BoundaryPreservationWeight);
 }
 
 internal sealed class BasicCageGenerationService : ICageGenerationService
@@ -16257,6 +16280,19 @@ internal sealed class LocalExportService(
         await File.WriteAllBytesAsync(destPath, outputBytes, cancellationToken);
     }
 
+    private sealed record TopologyTransformRegion(
+        float CenterX,
+        float CenterY,
+        float MinZ,
+        float ZRange,
+        float HalfRangeX,
+        float HalfRangeY);
+    private sealed record TopologyTransformContext(
+        IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
+        int[] ComponentIds,
+        bool[] BoundaryVertexFlags,
+        float BoundaryPreservationWeight);
+
     private static readonly IReadOnlyDictionary<string, float> ShrinkwrapBaseRadius =
         new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
@@ -16332,6 +16368,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         // Run animation-driven solver to get per-region push-out corrections
@@ -16346,19 +16383,41 @@ internal sealed class LocalExportService(
             var x = BitConverter.ToSingle(transformed, offset);
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
-            var normalizedHeight = (z - minZ) / zRange;
-            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
-            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            ResolveTopologyProjectionFrame(
+                topologyContext,
+                index,
+                centerX,
+                centerY,
+                minZ,
+                zRange,
+                halfRangeX,
+                halfRangeY,
+                out var frameCenterX,
+                out var frameCenterY,
+                out var frameMinZ,
+                out var frameZRange,
+                out var frameHalfRangeX,
+                out var frameHalfRangeY,
+                out var boundaryPreservationWeight);
+            var normalizedHeight = (z - frameMinZ) / frameZRange;
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
             var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
                 normalizedHeight,
                 lateralPosition,
                 depthPosition,
                 regionalMorphing,
                 effectiveCage);
+            if (boundaryPreservationWeight > 0f)
+            {
+                widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
+                depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
+                heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
+            }
 
-            var transformedX = centerX + ((x - centerX) * (float)widthScale);
-            var transformedY = centerY + ((y - centerY) * (float)depthScale);
-            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
+            var transformedX = frameCenterX + ((x - frameCenterX) * (float)widthScale);
+            var transformedY = frameCenterY + ((y - frameCenterY) * (float)depthScale);
+            var transformedZ = frameMinZ + ((z - frameMinZ) * (float)heightScale);
 
             // Animation-driven push-out: move vertex outward along its XY direction from the
             // body centre by the push-out depth so that it sits outside the body envelope at
@@ -16366,8 +16425,8 @@ internal sealed class LocalExportService(
             var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
-                var dx = transformedX - centerX;
-                var dy = transformedY - centerY;
+                var dx = transformedX - frameCenterX;
+                var dy = transformedY - frameCenterY;
                 var xyDist = MathF.Sqrt(dx * dx + dy * dy);
                 if (xyDist > 0.0001f)
                 {
@@ -16386,8 +16445,8 @@ internal sealed class LocalExportService(
                 var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
-                    centerX,
-                    centerY,
+                    frameCenterX,
+                    frameCenterY,
                     normScale,
                     shrinkRegion,
                     regionalMorphing,
@@ -16458,6 +16517,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -16469,25 +16529,47 @@ internal sealed class LocalExportService(
             var x = BitConverter.ToSingle(transformed, offset);
             var y = BitConverter.ToSingle(transformed, offset + 4);
             var z = BitConverter.ToSingle(transformed, offset + 8);
-            var normalizedHeight = (z - minZ) / zRange;
-            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
-            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            ResolveTopologyProjectionFrame(
+                topologyContext,
+                index,
+                centerX,
+                centerY,
+                minZ,
+                zRange,
+                halfRangeX,
+                halfRangeY,
+                out var frameCenterX,
+                out var frameCenterY,
+                out var frameMinZ,
+                out var frameZRange,
+                out var frameHalfRangeX,
+                out var frameHalfRangeY,
+                out var boundaryPreservationWeight);
+            var normalizedHeight = (z - frameMinZ) / frameZRange;
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
             var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
                 normalizedHeight,
                 lateralPosition,
                 depthPosition,
                 regionalMorphing,
                 effectiveCage);
+            if (boundaryPreservationWeight > 0f)
+            {
+                widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
+                depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
+                heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
+            }
 
-            var transformedX = centerX + ((x - centerX) * (float)widthScale);
-            var transformedY = centerY + ((y - centerY) * (float)depthScale);
-            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
+            var transformedX = frameCenterX + ((x - frameCenterX) * (float)widthScale);
+            var transformedY = frameCenterY + ((y - frameCenterY) * (float)depthScale);
+            var transformedZ = frameMinZ + ((z - frameMinZ) * (float)heightScale);
 
             var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
-                var dx = transformedX - centerX;
-                var dy = transformedY - centerY;
+                var dx = transformedX - frameCenterX;
+                var dy = transformedY - frameCenterY;
                 var xyDist = MathF.Sqrt(dx * dx + dy * dy);
                 if (xyDist > 0.0001f)
                 {
@@ -16502,8 +16584,8 @@ internal sealed class LocalExportService(
                 var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
-                    centerX,
-                    centerY,
+                    frameCenterX,
+                    frameCenterY,
                     normScale,
                     shrinkRegion,
                     regionalMorphing,
@@ -16602,6 +16684,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
+        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(transformed));
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
@@ -16614,25 +16697,47 @@ internal sealed class LocalExportService(
             var y = (float)BitConverter.ToHalf(transformed.AsSpan(off + 2));
             var z = (float)BitConverter.ToHalf(transformed.AsSpan(off + 4));
 
-            var normalizedHeight = (z - minZ) / zRange;
-            var lateralPosition = MathF.Min(1f, MathF.Abs(x - centerX) / halfRangeX);
-            var depthPosition = MathF.Min(1f, MathF.Abs(y - centerY) / halfRangeY);
+            ResolveTopologyProjectionFrame(
+                topologyContext,
+                i,
+                centerX,
+                centerY,
+                minZ,
+                zRange,
+                halfRangeX,
+                halfRangeY,
+                out var frameCenterX,
+                out var frameCenterY,
+                out var frameMinZ,
+                out var frameZRange,
+                out var frameHalfRangeX,
+                out var frameHalfRangeY,
+                out var boundaryPreservationWeight);
+            var normalizedHeight = (z - frameMinZ) / frameZRange;
+            var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
+            var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
             var (widthScale, depthScale, heightScale) = ComputeCageProjectionScales(
                 normalizedHeight,
                 lateralPosition,
                 depthPosition,
                 regionalMorphing,
                 effectiveCage);
+            if (boundaryPreservationWeight > 0f)
+            {
+                widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
+                depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
+                heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
+            }
 
-            var transformedX = centerX + ((x - centerX) * (float)widthScale);
-            var transformedY = centerY + ((y - centerY) * (float)depthScale);
-            var transformedZ = minZ + ((z - minZ) * (float)heightScale);
+            var transformedX = frameCenterX + ((x - frameCenterX) * (float)widthScale);
+            var transformedY = frameCenterY + ((y - frameCenterY) * (float)depthScale);
+            var transformedZ = frameMinZ + ((z - frameMinZ) * (float)heightScale);
 
             var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
-                var dx = transformedX - centerX;
-                var dy = transformedY - centerY;
+                var dx = transformedX - frameCenterX;
+                var dy = transformedY - frameCenterY;
                 var xyDist = MathF.Sqrt(dx * dx + dy * dy);
                 if (xyDist > 0.0001f)
                 {
@@ -16647,8 +16752,8 @@ internal sealed class LocalExportService(
                 var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
-                    centerX,
-                    centerY,
+                    frameCenterX,
+                    frameCenterY,
                     normScale,
                     shrinkRegion,
                     regionalMorphing,
@@ -16673,6 +16778,126 @@ internal sealed class LocalExportService(
         }
 
         return transformedAny;
+    }
+
+    private static TopologyTransformContext? BuildTopologyTransformContext(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        NifGeometrySignatureReader.MeshTopologySummary? topologySummary)
+    {
+        if (topologySummary is null ||
+            topologySummary.VertexCount != rawVertices.Count ||
+            topologySummary.ComponentIds.Length != rawVertices.Count ||
+            topologySummary.BoundaryVertexFlags.Length != rawVertices.Count)
+        {
+            return null;
+        }
+
+        var hasMultipleComponents = topologySummary.ComponentIds.Distinct().Skip(1).Any();
+        var boundaryCoverage = topologySummary.VertexCount <= 0
+            ? 0f
+            : topologySummary.BoundaryVertexCount / (float)topologySummary.VertexCount;
+        if (!hasMultipleComponents &&
+            topologySummary.BoundaryLoopCount <= 0 &&
+            boundaryCoverage <= 0.001f)
+        {
+            return null;
+        }
+
+        var regions = topologySummary.ComponentIds
+            .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
+            .GroupBy(static entry => entry.ComponentId)
+            .ToDictionary(
+                static group => group.Key,
+                group =>
+                {
+                    var minX = float.MaxValue;
+                    var maxX = float.MinValue;
+                    var minY = float.MaxValue;
+                    var maxY = float.MinValue;
+                    var minZ = float.MaxValue;
+                    var maxZ = float.MinValue;
+
+                    foreach (var (_, index) in group)
+                    {
+                        var vertex = rawVertices[index];
+                        minX = MathF.Min(minX, vertex.X);
+                        maxX = MathF.Max(maxX, vertex.X);
+                        minY = MathF.Min(minY, vertex.Y);
+                        maxY = MathF.Max(maxY, vertex.Y);
+                        minZ = MathF.Min(minZ, vertex.Z);
+                        maxZ = MathF.Max(maxZ, vertex.Z);
+                    }
+
+                    return new TopologyTransformRegion(
+                        (minX + maxX) * 0.5f,
+                        (minY + maxY) * 0.5f,
+                        minZ,
+                        MathF.Max(0.0001f, maxZ - minZ),
+                        MathF.Max((maxX - minX) * 0.5f, 0.0001f),
+                        MathF.Max((maxY - minY) * 0.5f, 0.0001f));
+                });
+
+        var boundaryPreservationWeight = Math.Clamp(
+            0.14f +
+            (Math.Min(3, topologySummary.BoundaryLoopCount) * 0.08f) +
+            Math.Min(0.20f, boundaryCoverage * 0.45f),
+            0f,
+            0.48f);
+        return new TopologyTransformContext(
+            regions,
+            topologySummary.ComponentIds,
+            topologySummary.BoundaryVertexFlags,
+            boundaryPreservationWeight);
+    }
+
+    private static void ResolveTopologyProjectionFrame(
+        TopologyTransformContext? topologyContext,
+        int vertexIndex,
+        float defaultCenterX,
+        float defaultCenterY,
+        float defaultMinZ,
+        float defaultZRange,
+        float defaultHalfRangeX,
+        float defaultHalfRangeY,
+        out float centerX,
+        out float centerY,
+        out float minZ,
+        out float zRange,
+        out float halfRangeX,
+        out float halfRangeY,
+        out float boundaryPreservationWeight)
+    {
+        centerX = defaultCenterX;
+        centerY = defaultCenterY;
+        minZ = defaultMinZ;
+        zRange = defaultZRange;
+        halfRangeX = defaultHalfRangeX;
+        halfRangeY = defaultHalfRangeY;
+        boundaryPreservationWeight = 0f;
+
+        if (topologyContext is null ||
+            vertexIndex < 0 ||
+            vertexIndex >= topologyContext.ComponentIds.Length)
+        {
+            return;
+        }
+
+        var componentId = topologyContext.ComponentIds[vertexIndex];
+        if (topologyContext.Regions.TryGetValue(componentId, out var region))
+        {
+            centerX = region.CenterX;
+            centerY = region.CenterY;
+            minZ = region.MinZ;
+            zRange = region.ZRange;
+            halfRangeX = region.HalfRangeX;
+            halfRangeY = region.HalfRangeY;
+        }
+
+        if (vertexIndex < topologyContext.BoundaryVertexFlags.Length &&
+            topologyContext.BoundaryVertexFlags[vertexIndex])
+        {
+            boundaryPreservationWeight = topologyContext.BoundaryPreservationWeight;
+        }
     }
 
     private static (double WidthScale, double DepthScale, double HeightScale) ComputeCageProjectionScales(
