@@ -1430,6 +1430,9 @@ public sealed class ConversionOrchestratorTests
         Assert.Contains("COCO UUNP Athletic", presets);
         Assert.Contains("SAM Light Lean", presets);
         Assert.Contains("Vanilla Beast Balanced", presets);
+        Assert.Contains("Feline Humanoid Balanced", presets);
+        Assert.Contains("Canine Humanoid Balanced", presets);
+        Assert.Contains("Draconic Humanoid Balanced", presets);
         Assert.Contains("Goat Humanoid Balanced", presets);
         Assert.Contains("Hagraven Balanced", presets);
         Assert.Contains("Spriggan Balanced", presets);
@@ -2690,6 +2693,9 @@ public sealed class ConversionOrchestratorTests
 
     [Theory]
     [InlineData("Serpentine Humanoid", "LamiaFollowerTailAddon", "meshes/armor/lamia/serpent_coil_0.nif", "Serpentine variant")]
+    [InlineData("Feline Humanoid", "CathayRebornFollowerAddon", "meshes/armor/feline/paw_harness_0.nif", "Khajiit variant")]
+    [InlineData("Canine Humanoid", "LykaiosJackalFollowerAddon", "meshes/armor/canine/paw_greaves_0.nif", "Canine variant")]
+    [InlineData("Draconic Humanoid", "DragonkinWingTailAddon", "meshes/armor/draconic/wing_tail_0.nif", "Draconic variant")]
     [InlineData("Goat Humanoid", "NamiraGoatFollowerAddon", "meshes/armor/goat/horn_collar_0.nif", "Goat variant")]
     [InlineData("Hagraven", "HagravenWingHarnessAddon", "meshes/armor/hagraven/feather_wrap_0.nif", "Hagraven variant")]
     [InlineData("Spriggan", "SprigganRootsArmorAddon", "meshes/armor/spriggan/bark_wrap_0.nif", "Spriggan variant")]
@@ -2724,14 +2730,18 @@ public sealed class ConversionOrchestratorTests
     [InlineData("avian_custom_race_patch.esp", "Avian variant")]
     [InlineData("khajiit_vampire_child_follower.esp", "Khajiit variant")]
     [InlineData("custom_race_vampire_child_follower.esp", "Humanoid variant")]
+    [InlineData("pantherfolk_cathay_follower.esp", "Khajiit variant")]
     [InlineData("lykaios_cathay_follower.esp", "Khajiit variant")]
     [InlineData("dagi_raht_child_patch.esp", "Khajiit variant")]
     [InlineData("saxhleel_draconid_patch.esp", "Argonian variant")]
     [InlineData("lamia_customrace_vampire_child.esp", "Serpentine variant")]
+    [InlineData("dragonkin_wyvern_follower.esp", "Draconic variant")]
+    [InlineData("kobold_customrace_child.esp", "Draconic variant")]
     [InlineData("faun_ramhorn_customrace.esp", "Goat variant")]
     [InlineData("equus_marefolk_follower.esp", "Equine variant")]
     [InlineData("featherfolk_pinion_follower.esp", "Avian variant")]
     [InlineData("werewolf_vulpine_child_patch.esp", "Canine variant")]
+    [InlineData("gnoll_hyena_customrace.esp", "Canine variant")]
     [InlineData("wolfbeast_customrace_follower.esp", "Canine variant")]
     [InlineData("creature_customrace_follower.esp", "Creature variant")]
     [InlineData("feather_witch_customrace.esp", "Hagraven variant")]
@@ -8710,6 +8720,14 @@ public sealed class PhysicsMeshTypeTuningTests
     [Fact]
     public void BuiltInBodyCatalog_ExposesBeastAppendageBones()
     {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Feline Humanoid", out var feline));
+        Assert.Contains("PawFront.L", feline.AvailablePhysicsBones);
+        Assert.Contains("Ear.L", feline.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Canine Humanoid", out var canine));
+        Assert.Contains("PawFront.L", canine.AvailablePhysicsBones);
+        Assert.Contains("Hock.L", canine.AvailablePhysicsBones);
+
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Goat Humanoid", out var goat));
         Assert.Contains("Horn.L", goat.AvailablePhysicsBones);
         Assert.Contains("Hock.L", goat.AvailablePhysicsBones);
@@ -8718,6 +8736,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hagraven", out var hagraven));
         Assert.Contains("WingTip.L", hagraven.AvailablePhysicsBones);
         Assert.Contains("Feather.L", hagraven.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Draconic Humanoid", out var draconic));
+        Assert.Contains("Horn.L", draconic.AvailablePhysicsBones);
+        Assert.Contains("Wing.L", draconic.AvailablePhysicsBones);
     }
 
     [Fact]
@@ -8739,6 +8761,15 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("beast", khajiitRace.Groups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));
         Assert.Equal("COCO CBBE", cocoRule.Body);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Cathay Reborn", out var felineRule));
+        Assert.Equal("Feline Humanoid", felineRule.Body);
+        Assert.Contains("khajiit", felineRule.CompatibleGroups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Lykaios", out var canineRule));
+        Assert.Equal("Canine Humanoid", canineRule.Body);
+        Assert.Contains("canine", canineRule.CompatibleGroups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Dragonkin", out var draconicRule));
+        Assert.Equal("Draconic Humanoid", draconicRule.Body);
+        Assert.Contains("draconic", draconicRule.CompatibleGroups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Serpentine Humanoid", out var serpentineRule));
         Assert.Contains("serpentine", serpentineRule.CompatibleGroups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Goat Humanoid", out var goatRule));
@@ -8834,6 +8865,9 @@ public sealed class ExpandedPresetTests
     [InlineData("Vanilla Zeroed","Vanilla")]
     [InlineData("Vanilla Balanced", "Vanilla")]
     [InlineData("Serpentine Humanoid Balanced", "Serpentine Humanoid")]
+    [InlineData("Feline Humanoid Balanced", "Feline Humanoid")]
+    [InlineData("Canine Humanoid Balanced", "Canine Humanoid")]
+    [InlineData("Draconic Humanoid Balanced", "Draconic Humanoid")]
     [InlineData("Goat Humanoid Balanced", "Goat Humanoid")]
     [InlineData("Hagraven Balanced", "Hagraven")]
     [InlineData("Spriggan Balanced", "Spriggan")]
@@ -8843,6 +8877,12 @@ public sealed class ExpandedPresetTests
     [InlineData("Vanilla Beast Lean", "Vanilla Beast")]
     [InlineData("Serpentine Humanoid Athletic", "Serpentine Humanoid")]
     [InlineData("Serpentine Humanoid Lean", "Serpentine Humanoid")]
+    [InlineData("Feline Humanoid Athletic", "Feline Humanoid")]
+    [InlineData("Feline Humanoid Lean", "Feline Humanoid")]
+    [InlineData("Canine Humanoid Athletic", "Canine Humanoid")]
+    [InlineData("Canine Humanoid Lean", "Canine Humanoid")]
+    [InlineData("Draconic Humanoid Athletic", "Draconic Humanoid")]
+    [InlineData("Draconic Humanoid Lean", "Draconic Humanoid")]
     [InlineData("Goat Humanoid Athletic", "Goat Humanoid")]
     [InlineData("Goat Humanoid Lean", "Goat Humanoid")]
     [InlineData("Goat Humanoid Muscular", "Goat Humanoid")]
@@ -8858,6 +8898,9 @@ public sealed class ExpandedPresetTests
     [InlineData("UBE Athletic", "UBE")]
     [InlineData("Vanilla to Vanilla Beast", "Vanilla Beast")]
     [InlineData("Vanilla to Serpentine Humanoid","Serpentine Humanoid")]
+    [InlineData("Vanilla to Feline Humanoid","Feline Humanoid")]
+    [InlineData("Vanilla to Canine Humanoid","Canine Humanoid")]
+    [InlineData("Vanilla to Draconic Humanoid","Draconic Humanoid")]
     [InlineData("Vanilla to TNG","TNG")]
     [InlineData("Vanilla to Goat Humanoid","Goat Humanoid")]
     [InlineData("Vanilla to Hagraven","Hagraven")]
@@ -8894,6 +8937,9 @@ public sealed class BodyTransformationFieldTests
     [InlineData("Vanilla")]
     [InlineData("Vanilla Beast")]
     [InlineData("Serpentine Humanoid")]
+    [InlineData("Feline Humanoid")]
+    [InlineData("Canine Humanoid")]
+    [InlineData("Draconic Humanoid")]
     [InlineData("Goat Humanoid")]
     [InlineData("Hagraven")]
     [InlineData("Spriggan")]
@@ -9021,7 +9067,7 @@ public sealed class BodyTypeCatalogTests
     public void BodyTypeCatalog_All_ContainsExpectedBodies()
     {
         var names = BodyTypeCatalog.All.Select(b => b.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
+        foreach (var expected in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Feline Humanoid", "Canine Humanoid", "Draconic Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
         {
             Assert.Contains(expected, names);
         }
@@ -9039,7 +9085,7 @@ public sealed class BodyTypeCatalogTests
     [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
-        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
+        foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Feline Humanoid", "Canine Humanoid", "Draconic Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(body, out var profile));
             Assert.False(string.IsNullOrWhiteSpace(profile.SkeletonFoundation));
@@ -9106,7 +9152,7 @@ public sealed class BodyTypeCatalogTests
         }
 
         // Bodies without built-in physics must report DefaultPhysics = "none".
-        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
+        foreach (var bodyName in new[] { "CBBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Feline Humanoid", "Canine Humanoid", "Draconic Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
         {
             Assert.True(BodyTechnicalProfileCatalog.TryGet(bodyName, out var profile),
                 $"No profile for {bodyName}");
@@ -9144,10 +9190,12 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Hooffolk", "Equine Humanoid")]
     [InlineData("Talonfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
-    [InlineData("Cathay", "Vanilla Beast")]
-    [InlineData("Lykaios", "Vanilla Beast")]
-    [InlineData("Canine Humanoid", "Vanilla Beast")]
-    [InlineData("Foxfolk", "Vanilla Beast")]
+    [InlineData("Cathay Reborn", "Feline Humanoid")]
+    [InlineData("Senche Humanoid", "Feline Humanoid")]
+    [InlineData("Lykaios", "Canine Humanoid")]
+    [InlineData("Foxfolk", "Canine Humanoid")]
+    [InlineData("Dragonkin", "Draconic Humanoid")]
+    [InlineData("Wyvernkin", "Draconic Humanoid")]
     [InlineData("Lamia", "Serpentine Humanoid")]
     [InlineData("Naga", "Serpentine Humanoid")]
     [InlineData("Nagakin", "Serpentine Humanoid")]
@@ -9181,7 +9229,12 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Featherfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
     [InlineData("Digitigrade Beast", "Vanilla Beast")]
-    [InlineData("Lupine", "Vanilla Beast")]
+    [InlineData("Cathay Reborn", "Feline Humanoid")]
+    [InlineData("Leonin", "Feline Humanoid")]
+    [InlineData("Lupine", "Canine Humanoid")]
+    [InlineData("Coyotefolk", "Canine Humanoid")]
+    [InlineData("Dragonkin", "Draconic Humanoid")]
+    [InlineData("Kobold", "Draconic Humanoid")]
     [InlineData("Lamia", "Serpentine Humanoid")]
     [InlineData("Naga", "Serpentine Humanoid")]
     [InlineData("SAM Lite", "SAM Light")]

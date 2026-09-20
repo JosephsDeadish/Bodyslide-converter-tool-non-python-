@@ -64,6 +64,22 @@
       "body": "Avian Humanoid",
       "compatibleGroups": ["humanoid", "beast", "avian", "winged", "creature"],
       "warningGroups": []
+    },
+    {
+      "body": "Feline Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "khajiit", "feline", "digitigrade", "tail", "creature"],
+      "warningGroups": []
+    },
+    {
+      "body": "Canine Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "canine", "lupine", "vulpine", "fox", "digitigrade", "tail", "creature"],
+      "warningGroups": []
+    },
+    {
+      "body": "Draconic Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "draconic", "reptile", "tail", "horned", "winged", "creature"],
+      "warningGroups": ["winged", "horned"],
+      "warningMessage": "wing membrane, horn seam, and tail clearance should still be verified in-game."
     }
   ],
   "inferenceRules": [
@@ -78,9 +94,9 @@
     {
       "name": "Khajiit variant",
       "groups": ["beast", "khajiit", "feline", "digitigrade"],
-      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay", "cathayraht", "ohmes", "ohmesraht", "dagi", "dagiraht"],
-      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "ohmes-raht", "dagi", "dagi-raht", "feline", "digitigrade", "vampire", "child", "follower", "custom race", "customrace"],
-      "meshPathHints": ["khajiit", "senche", "cathay", "ohmes", "dagi", "feline", "digitigrade", "tail"]
+      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay", "cathayraht", "ohmes", "ohmesraht", "dagi", "dagiraht", "panther", "tiger", "lion", "leonin", "sabrecat", "lynx"],
+      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "ohmes-raht", "dagi", "dagi-raht", "feline", "digitigrade", "panther", "tiger", "lion", "leonin", "sabrecat", "lynx", "vampire", "child", "follower", "custom race", "customrace"],
+      "meshPathHints": ["khajiit", "senche", "cathay", "ohmes", "dagi", "feline", "digitigrade", "tail", "panther", "tiger", "lion", "lynx", "sabrecat"]
     },
     {
       "name": "Argonian variant",
@@ -92,9 +108,16 @@
     {
       "name": "Canine variant",
       "groups": ["beast", "canine", "lupine", "vulpine", "fox", "digitigrade", "tail", "creature"],
-      "editorIdHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk"],
-      "pluginNameHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk", "creature race", "custom race", "vampire", "child", "follower"],
-      "meshPathHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "paw", "claw", "digitigrade", "tail"]
+      "editorIdHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "coyote", "hyena", "gnoll", "beastfolk"],
+      "pluginNameHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "coyote", "hyena", "gnoll", "beastfolk", "creature race", "custom race", "vampire", "child", "follower"],
+      "meshPathHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "coyote", "hyena", "gnoll", "paw", "claw", "digitigrade", "tail"]
+    },
+    {
+      "name": "Draconic variant",
+      "groups": ["beast", "draconic", "reptile", "tail", "horned", "winged", "creature"],
+      "editorIdHints": ["dragonkin", "draconic", "draconian", "drakefolk", "wyvernkin", "kobold", "dragonfolk"],
+      "pluginNameHints": ["dragonkin", "draconic", "draconian", "drakefolk", "wyvernkin", "kobold", "dragonfolk", "wing", "horn", "scaled", "custom race", "customrace", "follower", "vampire", "child"],
+      "meshPathHints": ["dragon", "drake", "wyvern", "kobold", "wing", "horn", "tail", "scale", "scales"]
     },
     {
       "name": "Creature variant",

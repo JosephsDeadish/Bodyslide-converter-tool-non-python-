@@ -1924,5 +1924,327 @@
       "Feather01.R"
     ],
     "skeletonFramework": "avian-humanoid"
+  },
+  {
+    "name": "Feline Humanoid",
+    "aliases": [
+      "Cathay Reborn",
+      "Senche Humanoid",
+      "Ohmes Elite",
+      "Dagi-Raht",
+      "Pantherfolk",
+      "Tigerfolk",
+      "Leonin",
+      "Sabrecat Humanoid"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Feline beast-humanoid skeleton",
+    "notes": "Custom-race feline target for Cathay, leonine, panther, and other Khajiit-adjacent humanoid ecosystems with paw, digitigrade, and tail-aware proportions. No built-in physics by default; tail balance, paw contact, and digitigrade shin weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R",
+      "Ear.L",
+      "Ear.R"
+    ],
+    "referenceTokens": [
+      "cathay",
+      "senche",
+      "ohmes",
+      "dagi",
+      "khajiit",
+      "feline",
+      "panther",
+      "tiger",
+      "lion",
+      "leonin",
+      "sabrecat"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "PawWidth"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 0.95,
+      "pelvis": 1.04,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 0.98,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 0.99,
+      "thighs": 1.05,
+      "calves": 1.06
+    },
+    "detectionTokens": [
+      "cathay",
+      "senche",
+      "ohmes",
+      "dagi",
+      "khajiit",
+      "feline",
+      "panther",
+      "tiger",
+      "lion",
+      "leonin",
+      "sabrecat",
+      "digitigrade"
+    ],
+    "textureTokens": [
+      "khajiit",
+      "feline",
+      "fur",
+      "tail",
+      "paw",
+      "claw"
+    ],
+    "physicsTokens": [
+      "tail",
+      "paw",
+      "ear"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.94,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R"
+    ],
+    "skeletonFramework": "digitigrade-beast"
+  },
+  {
+    "name": "Canine Humanoid",
+    "aliases": [
+      "Lykaios",
+      "Lupine",
+      "Wolffolk",
+      "Jackalfolk",
+      "Coyotefolk",
+      "Hyenafolk",
+      "Vulpine",
+      "Foxfolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Canine beast-humanoid skeleton",
+    "notes": "Custom-race canine target for wolf, jackal, hyena, fox, and Lykaios-style humanoid ecosystems with digitigrade feet, tail chains, and muzzle-heavy silhouettes. No built-in physics by default; tail swing, paw alignment, and hock weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R",
+      "Hock.L",
+      "Hock.R"
+    ],
+    "referenceTokens": [
+      "lykaios",
+      "canine",
+      "wolf",
+      "lupine",
+      "vulpine",
+      "fox",
+      "jackal",
+      "coyote",
+      "hyena",
+      "gnoll"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "PawWidth"
+    ],
+    "transformationField": {
+      "chest": 1.01,
+      "waist": 0.96,
+      "pelvis": 1.05,
+      "legs": 1.05,
+      "shoulders": 1.02,
+      "breasts": 0.97,
+      "butt": 1.04,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.06,
+      "calves": 1.07
+    },
+    "detectionTokens": [
+      "lykaios",
+      "canine",
+      "wolf",
+      "lupine",
+      "vulpine",
+      "fox",
+      "jackal",
+      "coyote",
+      "hyena",
+      "gnoll",
+      "digitigrade"
+    ],
+    "textureTokens": [
+      "wolf",
+      "fox",
+      "fur",
+      "tail",
+      "paw",
+      "claw"
+    ],
+    "physicsTokens": [
+      "tail",
+      "paw",
+      "hock"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.96,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "PawFront.L",
+      "PawFront.R",
+      "Hock.L",
+      "Hock.R"
+    ],
+    "skeletonFramework": "digitigrade-beast"
+  },
+  {
+    "name": "Draconic Humanoid",
+    "aliases": [
+      "Dragonkin",
+      "Draconian",
+      "Drakefolk",
+      "Wyvernkin",
+      "Kobold",
+      "Scaled Dragonborn",
+      "Dragonfolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Draconic beast-humanoid skeleton",
+    "notes": "Custom-race draconic target for dragonkin, kobold, and wyvern-adjacent humanoid ecosystems with horn, wing, and tail-heavy silhouettes. No built-in physics by default; horn seams, wing membranes, and tail-ground clearance should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "TailBarb",
+      "Horn.L",
+      "Horn.R",
+      "Wing.L",
+      "Wing.R",
+      "WingFinger01.L",
+      "WingFinger01.R"
+    ],
+    "referenceTokens": [
+      "dragonkin",
+      "draconic",
+      "draconian",
+      "drake",
+      "wyvern",
+      "kobold",
+      "scaled",
+      "tail",
+      "wing",
+      "horn"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "TailBase",
+      "WingSpan"
+    ],
+    "transformationField": {
+      "chest": 1.03,
+      "waist": 0.94,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.08,
+      "breasts": 0.96,
+      "butt": 1.03,
+      "belly": 1.02,
+      "arms": 1.06,
+      "thighs": 1.02,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "dragonkin",
+      "draconic",
+      "draconian",
+      "drake",
+      "wyvern",
+      "kobold",
+      "scaled",
+      "wing",
+      "horn",
+      "tail"
+    ],
+    "textureTokens": [
+      "dragon",
+      "drake",
+      "scale",
+      "scales",
+      "wing",
+      "horn"
+    ],
+    "physicsTokens": [
+      "tail",
+      "wing",
+      "horn"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.29,
+    "depthToWidthRatioMax": 0.98,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "TailBarb",
+      "Horn.L",
+      "Horn.R",
+      "Wing.L",
+      "Wing.R"
+    ],
+    "skeletonFramework": "draconic-humanoid"
   }
 ]
