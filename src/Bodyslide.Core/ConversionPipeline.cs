@@ -9163,33 +9163,29 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         foreach (var meshFile in meshFiles)
         {
             List<int> islandSizes;
+            var vertexCount = 0;
             var boundaryLoopCount = 0;
-            var boundaryVertexCoverage = 0d;
+            IReadOnlyList<bool> boundaryFlags = [];
             IReadOnlyList<TopologyIslandEdgeNetworkSummary>? edgeNetworks = null;
             var hasExplicitEdgeNetwork = false;
-            var interiorEdgeCount = 0;
-            var nonManifoldEdgeCount = 0;
             var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
             if (topologySummary is { VertexCount: > 0 } &&
                 topologySummary.ComponentIds.Length == topologySummary.VertexCount)
             {
+                vertexCount = topologySummary.VertexCount;
                 islandSizes = topologySummary.ComponentIds
                     .GroupBy(static componentId => componentId)
                     .Select(static group => group.Count())
                     .OrderByDescending(static count => count)
                     .ToList();
                 boundaryLoopCount = topologySummary.BoundaryLoopCount;
-                boundaryVertexCoverage = topologySummary.VertexCount <= 0
-                    ? 0d
-                    : topologySummary.BoundaryVertexCount / (double)topologySummary.VertexCount;
+                boundaryFlags = topologySummary.BoundaryVertexFlags;
                 if (topologySummary.ComponentEdgeNetworks is { Count: > 0 })
                 {
                     edgeNetworks = topologySummary.ComponentEdgeNetworks
                         .OrderBy(static network => network.ComponentId)
                         .ToArray();
                     hasExplicitEdgeNetwork = true;
-                    interiorEdgeCount = edgeNetworks.Sum(static network => network.InteriorEdgeCount);
-                    nonManifoldEdgeCount = edgeNetworks.Sum(static network => network.NonManifoldEdgeCount);
                 }
             }
             else
@@ -9200,6 +9196,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                     continue;
                 }
 
+                vertexCount = vertices.Count;
                 var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
                 if (sampledVertices.Count < 12)
                 {
@@ -9227,100 +9224,128 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 var synthesizedComponentIds = ComputeIslandAssignments(normalizedVertices, radius);
                 if (synthesizedComponentIds.Length == normalizedVertices.Count)
                 {
-                    var synthesizedBoundaryFlags = BuildEstimatedBoundaryVertexFlags(normalizedVertices, synthesizedComponentIds);
-                    boundaryVertexCoverage = synthesizedBoundaryFlags.Length == 0
-                        ? 0d
-                        : synthesizedBoundaryFlags.Count(static flag => flag) / (double)synthesizedBoundaryFlags.Length;
+                    boundaryFlags = BuildEstimatedBoundaryVertexFlags(normalizedVertices, synthesizedComponentIds);
                     var synthesizedEdgeNetworks = BuildEstimatedTopologyEdgeNetworks(
                         normalizedVertices,
                         synthesizedComponentIds,
-                        synthesizedBoundaryFlags);
+                        boundaryFlags);
                     if (synthesizedEdgeNetworks.Count > 0)
                     {
                         edgeNetworks = SummarizeTransferIslandEdgeNetworks(synthesizedEdgeNetworks);
-                        interiorEdgeCount = edgeNetworks.Sum(static network => network.InteriorEdgeCount);
-                        nonManifoldEdgeCount = edgeNetworks.Sum(static network => network.NonManifoldEdgeCount);
                     }
                 }
-            }
-
-            var totalVertices = islandSizes.Sum();
-            var largestIsland = islandSizes.Max();
-            var largestIslandCoverage = totalVertices <= 0 ? 1d : largestIsland / (double)totalVertices;
-            var smallestMeaningfulIsland = islandSizes
-                .Where(size => size >= Math.Max(4, totalVertices / 40))
-                .DefaultIfEmpty(largestIsland)
-                .Min();
-            var smallestMeaningfulCoverage = totalVertices <= 0 ? 1d : smallestMeaningfulIsland / (double)totalVertices;
-            var labels = new List<string>();
-            if (islandSizes.Count >= 2)
-            {
-                labels.Add("independent-islands");
-            }
-
-            if (islandSizes.Count >= 2 && largestIslandCoverage <= 0.78d)
-            {
-                labels.Add("split-cage-candidate");
-            }
-
-            if (smallestMeaningfulCoverage <= 0.12d && islandSizes.Count >= 2)
-            {
-                labels.Add("thin-strap-islands");
             }
 
             var meshName = Path.GetFileName(meshFile) ?? meshFile;
             var meshGeometryLabels = geometryPartLabels.TryGetValue(meshName, out var meshLabels)
                 ? meshLabels
                 : [];
-            if ((boundaryLoopCount > 1 || boundaryVertexCoverage >= 0.28d) &&
-                islandSizes.Count >= 1)
-            {
-                labels.Add("window-boundary-risk");
-                labels.Add("explicit-boundary-tracking");
-            }
-            else if (islandSizes.Count >= 2 &&
-                meshGeometryLabels.Any(label => label.Equals("open-window", StringComparison.OrdinalIgnoreCase) ||
-                                                label.Equals("cage-frame", StringComparison.OrdinalIgnoreCase)))
-            {
-                labels.Add("window-boundary-risk");
-            }
-
-            if (islandSizes.Count >= 3 &&
-                meshGeometryLabels.Any(label => label.Equals("outer-layer", StringComparison.OrdinalIgnoreCase) ||
-                                                label.Equals("lower-drape", StringComparison.OrdinalIgnoreCase)))
-            {
-                labels.Add("layered-island-stack");
-            }
-
-            if (interiorEdgeCount > 0)
-            {
-                labels.Add("interior-edge-network");
-            }
-
-            if (nonManifoldEdgeCount > 0)
-            {
-                labels.Add("non-manifold-risk");
-            }
-
-            if (!hasExplicitEdgeNetwork && edgeNetworks is { Count: > 0 })
-            {
-                labels.Add("estimated-edge-network");
-            }
-
-            summaries[meshName] = new TopologyIslandSummary(
-                islandSizes.Count,
-                largestIslandCoverage,
-                labels
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
-                    .ToArray(),
+            var summary = BuildTopologyIslandSummary(
+                vertexCount,
+                islandSizes,
+                boundaryLoopCount,
+                boundaryFlags,
                 edgeNetworks,
                 hasExplicitEdgeNetwork,
-                interiorEdgeCount,
-                nonManifoldEdgeCount);
+                meshGeometryLabels);
+            if (summary is not null)
+            {
+                summaries[meshName] = summary;
+            }
         }
 
         return summaries;
+    }
+
+    private static TopologyIslandSummary? BuildTopologyIslandSummary(
+        int vertexCount,
+        IReadOnlyList<int> islandSizes,
+        int boundaryLoopCount,
+        IReadOnlyList<bool> boundaryFlags,
+        IReadOnlyList<TopologyIslandEdgeNetworkSummary>? edgeNetworks,
+        bool hasExplicitEdgeNetwork,
+        IReadOnlyList<string> meshGeometryLabels)
+    {
+        if (vertexCount <= 0 || islandSizes.Count == 0)
+        {
+            return null;
+        }
+
+        var interiorEdgeCount = edgeNetworks?.Sum(static network => network.InteriorEdgeCount) ?? 0;
+        var nonManifoldEdgeCount = edgeNetworks?.Sum(static network => network.NonManifoldEdgeCount) ?? 0;
+        var boundaryVertexCoverage = boundaryFlags.Count == 0
+            ? 0d
+            : boundaryFlags.Count(static flag => flag) / (double)boundaryFlags.Count;
+        var totalVertices = islandSizes.Sum();
+        var largestIsland = islandSizes.Max();
+        var largestIslandCoverage = totalVertices <= 0 ? 1d : largestIsland / (double)totalVertices;
+        var smallestMeaningfulIsland = islandSizes
+            .Where(size => size >= Math.Max(4, totalVertices / 40))
+            .DefaultIfEmpty(largestIsland)
+            .Min();
+        var smallestMeaningfulCoverage = totalVertices <= 0 ? 1d : smallestMeaningfulIsland / (double)totalVertices;
+        var labels = new List<string>();
+        if (islandSizes.Count >= 2)
+        {
+            labels.Add("independent-islands");
+        }
+
+        if (islandSizes.Count >= 2 && largestIslandCoverage <= 0.78d)
+        {
+            labels.Add("split-cage-candidate");
+        }
+
+        if (smallestMeaningfulCoverage <= 0.12d && islandSizes.Count >= 2)
+        {
+            labels.Add("thin-strap-islands");
+        }
+
+        if ((boundaryLoopCount > 1 || boundaryVertexCoverage >= 0.28d) &&
+            islandSizes.Count >= 1)
+        {
+            labels.Add("window-boundary-risk");
+            labels.Add("explicit-boundary-tracking");
+        }
+        else if (islandSizes.Count >= 2 &&
+                 meshGeometryLabels.Any(label => label.Equals("open-window", StringComparison.OrdinalIgnoreCase) ||
+                                                 label.Equals("cage-frame", StringComparison.OrdinalIgnoreCase)))
+        {
+            labels.Add("window-boundary-risk");
+        }
+
+        if (islandSizes.Count >= 3 &&
+            meshGeometryLabels.Any(label => label.Equals("outer-layer", StringComparison.OrdinalIgnoreCase) ||
+                                            label.Equals("lower-drape", StringComparison.OrdinalIgnoreCase)))
+        {
+            labels.Add("layered-island-stack");
+        }
+
+        if (interiorEdgeCount > 0)
+        {
+            labels.Add("interior-edge-network");
+        }
+
+        if (nonManifoldEdgeCount > 0)
+        {
+            labels.Add("non-manifold-risk");
+        }
+
+        if (!hasExplicitEdgeNetwork && edgeNetworks is { Count: > 0 })
+        {
+            labels.Add("estimated-edge-network");
+        }
+
+        return new TopologyIslandSummary(
+            islandSizes.Count,
+            largestIslandCoverage,
+            labels
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            edgeNetworks,
+            hasExplicitEdgeNetwork,
+            interiorEdgeCount,
+            nonManifoldEdgeCount);
     }
 
     private static int[] ComputeIslandAssignments(IReadOnlyList<MeshVertex> vertices, float radius)
@@ -9615,27 +9640,28 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 
         return edgeNetworks
             .OrderBy(static pair => pair.Key)
-            .Select(static pair =>
-            {
-                var network = pair.Value;
-                var maxVertexValence = network.AdjacencyByVertex.Count == 0
-                    ? 0
-                    : network.AdjacencyByVertex.Max(static adjacency => adjacency.Value.Count);
-                var hasManifoldRisk = network.NonManifoldEdgeCount > 0 || network.ManifoldScore < 0.72f;
-                var isClosedManifold = network.BoundaryEdges.Count == 0 &&
-                                       network.InteriorEdges.Count > 0 &&
-                                       !hasManifoldRisk;
-                return new TopologyIslandEdgeNetworkSummary(
-                    pair.Key,
-                    network.BoundaryEdges.Count,
-                    network.InteriorEdges.Count,
-                    network.NonManifoldEdgeCount,
-                    network.BoundaryVertexIndexes.Count,
-                    maxVertexValence,
-                    isClosedManifold,
-                    hasManifoldRisk);
-            })
+            .Select(static pair => SummarizeTransferIslandEdgeNetwork(pair.Value))
             .ToArray();
+    }
+
+    private static TopologyIslandEdgeNetworkSummary SummarizeTransferIslandEdgeNetwork(TransferIslandEdgeNetwork network)
+    {
+        var maxVertexValence = network.AdjacencyByVertex.Count == 0
+            ? 0
+            : network.AdjacencyByVertex.Max(static adjacency => adjacency.Value.Count);
+        var hasManifoldRisk = network.NonManifoldEdgeCount > 0 || network.ManifoldScore < 0.72f;
+        var isClosedManifold = network.BoundaryEdges.Count == 0 &&
+                               network.InteriorEdges.Count > 0 &&
+                               !hasManifoldRisk;
+        return new TopologyIslandEdgeNetworkSummary(
+            network.IslandId,
+            network.BoundaryEdges.Count,
+            network.InteriorEdges.Count,
+            network.NonManifoldEdgeCount,
+            network.BoundaryVertexIndexes.Count,
+            maxVertexValence,
+            isClosedManifold,
+            hasManifoldRisk);
     }
 
     private static IReadOnlyList<MeshVertex> SampleTopologyVertices(IReadOnlyList<MeshVertex> vertices, int maxSamples)
@@ -25687,37 +25713,25 @@ internal sealed class LocalExportService(
                 Path = path,
                 FileName = Path.GetFileName(path) ?? path,
                 BaseName = GetMeshTopologyLookupKey(path),
-                Summary = NifGeometrySignatureReader.TryReadTopologySummary(path)
+                Snapshot = GetMeshTransferTopologySnapshot(path)
             })
-            .Where(entry => entry.Summary is { VertexCount: > 0 })
+            .Where(entry => entry.Snapshot?.TopologySummary is { VertexCount: > 0 })
             .ToList();
 
         foreach (var meshPath in meshPaths
                      .Where(path => !string.IsNullOrWhiteSpace(path))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            IReadOnlyList<MeshVertex>? vertices;
-            try
-            {
-                vertices = NifGeometrySignatureReader.TryReadFullVertices(meshPath);
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
+            var snapshot = GetMeshTransferTopologySnapshot(meshPath);
+            if (snapshot is null || snapshot.Vertices.Count == 0 || snapshot.ComponentIds.Length != snapshot.Vertices.Count)
             {
                 continue;
             }
 
-            if (vertices is null || vertices.Count == 0)
-            {
-                continue;
-            }
-
-            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath)
+            var vertices = snapshot.Vertices;
+            var topologySummary = snapshot.TopologySummary
                 ?? sourceTopologySummaries
-                    .Where(entry => entry.Summary!.VertexCount == vertices.Count)
+                    .Where(entry => entry.Snapshot!.TopologySummary!.VertexCount == vertices.Count)
                     .OrderByDescending(entry => string.Equals(
                         entry.FileName,
                         Path.GetFileName(meshPath),
@@ -25726,7 +25740,7 @@ internal sealed class LocalExportService(
                         entry.BaseName,
                         GetMeshTopologyLookupKey(meshPath),
                         StringComparison.OrdinalIgnoreCase))
-                    .Select(entry => entry.Summary)
+                    .Select(entry => entry.Snapshot!.TopologySummary)
                     .FirstOrDefault();
             var usesExplicitTopology = topologySummary is { VertexCount: > 0 } &&
                                        topologySummary.VertexCount == vertices.Count &&
@@ -25734,13 +25748,13 @@ internal sealed class LocalExportService(
             var explicitEdgeNetworksByIsland = topologySummary?.ComponentEdgeNetworks is { Count: > 0 }
                 ? topologySummary.ComponentEdgeNetworks.ToDictionary(static network => network.ComponentId)
                 : null;
-            var normalizedVertices = NormalizeVerticesForTransfer(vertices);
+            var normalizedVertices = snapshot.NormalizedVertices;
             var componentIds = usesExplicitTopology
                 ? topologySummary!.ComponentIds
-                : BuildMorphTransferIslandMap(normalizedVertices);
+                : snapshot.ComponentIds;
             var boundaryFlags = usesExplicitTopology && topologySummary!.BoundaryVertexFlags.Length == vertices.Count
                 ? topologySummary.BoundaryVertexFlags
-                : EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+                : snapshot.BoundaryVertexFlags;
 
             if (!usesExplicitTopology)
             {
@@ -25772,11 +25786,31 @@ internal sealed class LocalExportService(
                                                control.IslandId == group.Key);
                 var semanticLabels = islandControl?.SemanticLabels ?? [];
                 var propagatedEdgeNetwork = islandControl?.EdgeNetworkSummary;
+                TopologyIslandEdgeNetworkSummary? estimatedEdgeNetwork = null;
+                if (snapshot.EdgeNetworks.TryGetValue(group.Key, out var estimatedNetwork))
+                {
+                    var maxVertexValence = estimatedNetwork.AdjacencyByVertex.Count == 0
+                        ? 0
+                        : estimatedNetwork.AdjacencyByVertex.Max(static adjacency => adjacency.Value.Count);
+                    var estimatedHasManifoldRisk = estimatedNetwork.NonManifoldEdgeCount > 0 || estimatedNetwork.ManifoldScore < 0.72f;
+                    var isClosedManifold = estimatedNetwork.BoundaryEdges.Count == 0 &&
+                                           estimatedNetwork.InteriorEdges.Count > 0 &&
+                                           !estimatedHasManifoldRisk;
+                    estimatedEdgeNetwork = new TopologyIslandEdgeNetworkSummary(
+                        estimatedNetwork.IslandId,
+                        estimatedNetwork.BoundaryEdges.Count,
+                        estimatedNetwork.InteriorEdges.Count,
+                        estimatedNetwork.NonManifoldEdgeCount,
+                        estimatedNetwork.BoundaryVertexIndexes.Count,
+                        maxVertexValence,
+                        isClosedManifold,
+                        estimatedHasManifoldRisk);
+                }
                 var explicitEdgeNetwork = explicitEdgeNetworksByIsland is not null &&
                                           explicitEdgeNetworksByIsland.TryGetValue(group.Key, out var explicitNetwork)
                     ? explicitNetwork
                     : null;
-                var effectiveEdgeNetwork = explicitEdgeNetwork ?? propagatedEdgeNetwork;
+                var effectiveEdgeNetwork = explicitEdgeNetwork ?? propagatedEdgeNetwork ?? estimatedEdgeNetwork;
                 var cageRegions = islandControl?.CageRegions is { Count: > 0 }
                     ? islandControl.CageRegions
                     : ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);

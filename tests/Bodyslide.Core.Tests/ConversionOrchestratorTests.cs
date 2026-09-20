@@ -2789,6 +2789,40 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BuildCageTopologyReport_UsesEstimatedEdgeNetworkSummaryFromSharedSnapshot()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var outputFile = Path.Combine(workingDirectory, "estimated_report_topology_0.nif");
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(outputFile,
+        [
+            (-20f, -2f, 0f), (-16f, -1f, 2f), (-12f, -2f, 4f), (-8f, -1f, 6f), (-4f, -2f, 8f), (0f, -1f, 10f),
+            (-20f, 2f, 0f), (-16f, 1f, 2f), (-12f, 2f, 4f), (-8f, 1f, 6f), (-4f, 2f, 8f), (0f, 1f, 10f),
+            (90f, -1f, 28f), (92f, -1f, 34f), (94f, -1f, 40f), (96f, -1f, 46f), (98f, -1f, 52f), (100f, -1f, 58f),
+            (90f, 1f, 28f), (92f, 1f, 34f), (94f, 1f, 40f), (96f, 1f, 46f), (98f, 1f, 52f), (100f, 1f, 58f)
+        ]);
+
+        try
+        {
+            var topologyReportMethod = typeof(LocalExportService).GetMethod("BuildCageTopologyReport", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(topologyReportMethod);
+
+            var topologyReport = topologyReportMethod!.Invoke(null, [new[] { outputFile }, null, null]);
+            Assert.NotNull(topologyReport);
+
+            var report = Assert.IsType<CageTopologyReport>(topologyReport);
+            Assert.True(report.UsesEstimatedMemberships);
+            Assert.True(report.InteriorEdgeCount > 0);
+            Assert.True(report.Islands.Count >= 1);
+            Assert.Contains(report.Islands, island => island.InteriorEdgeCount > 0 && !island.UsesPropagatedEdgeNetwork);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuildIslandBoundaryLoopControls_UsesEdgeNetworkSummaryToRaiseLoopDamping()
     {
         var method = typeof(LocalExportService).GetMethod("BuildIslandBoundaryLoopControls", BindingFlags.NonPublic | BindingFlags.Static);
