@@ -9157,6 +9157,10 @@ public sealed class PhysicsMeshTypeTuningTests
         var longTailToken = $"{new string('X', 384)}TailChain";
         Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
         Assert.Equal("tail", longTokenGroup);
+        var detectedGroups = PhysicsRepairCatalog.DetectGroups([" TailFluffSwing ", "PinionFeatherSwing01", "UnknownBone"]);
+        Assert.Contains("tail", detectedGroups);
+        Assert.Contains("wing", detectedGroups);
+        Assert.DoesNotContain("UnknownBone", detectedGroups);
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingFinger01.L", "TailBarbTip"]));
         Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Antenna.L", "Mandible.R"]));
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFin.L", "Whisker.R"]));
