@@ -3650,13 +3650,7 @@ public sealed class MainForm : Form
                 return;
             }
 
-            promoteGate(packStatus switch
-            {
-                var value when string.Equals(value, "HIGH-RISK", StringComparison.OrdinalIgnoreCase) => "high-risk",
-                var value when string.Equals(value, "NEEDS-REVIEW", StringComparison.OrdinalIgnoreCase) => "needs-review",
-                var value when string.Equals(value, "READY", StringComparison.OrdinalIgnoreCase) => "ready",
-                _ => null
-            });
+            promoteGate(NormalizeGateStatus(packStatus));
 
             if (failedCount > 0 || needsReviewCount > 0 || highRiskCount > 0 || missingQualityCount > 0)
             {
@@ -4025,15 +4019,10 @@ public sealed class MainForm : Form
                 return;
             }
 
-            promoteGate(status switch
-            {
-                var value when string.Equals(value, "HIGH-RISK", StringComparison.OrdinalIgnoreCase) => "high-risk",
-                var value when string.Equals(value, "NEEDS-REVIEW", StringComparison.OrdinalIgnoreCase) => "needs-review",
-                var value when string.Equals(value, "READY", StringComparison.OrdinalIgnoreCase) => "ready",
-                _ => null
-            });
+            var normalizedStatus = NormalizeGateStatus(status);
+            promoteGate(normalizedStatus);
 
-            if (!status.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+            if (!string.Equals(normalizedStatus, "ready", StringComparison.OrdinalIgnoreCase) ||
                 needsReviewCount > 0 ||
                 highRiskCount > 0)
             {
@@ -4042,7 +4031,7 @@ public sealed class MainForm : Form
 
             add(
                 "Packaging",
-                status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
+                string.Equals(normalizedStatus, "ready", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
                 $"Pack readiness: {status}. Needs review: {needsReviewCount}. High risk: {highRiskCount}. Open armor-pack-validation.json before publishing or sharing.",
                 reportPath);
 
@@ -4334,8 +4323,14 @@ public sealed class MainForm : Form
                 ?? fallbackPath;
         }
 
-        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "race-compatibility.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json")
+                ?? fallbackPath;
+        }
+
+        if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase))
         {
             return ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json") ?? fallbackPath;
         }
@@ -4431,6 +4426,27 @@ public sealed class MainForm : Form
         }
 
         return fallbackPath;
+    }
+
+    private static string? NormalizeGateStatus(string? status)
+    {
+        var rank = ConversionValidationPresentation.GetGateRank(status);
+        if (rank >= ConversionValidationPresentation.GetGateRank("high-risk"))
+        {
+            return "high-risk";
+        }
+
+        if (rank >= ConversionValidationPresentation.GetGateRank("needs-review"))
+        {
+            return "needs-review";
+        }
+
+        if (rank >= ConversionValidationPresentation.GetGateRank("ready"))
+        {
+            return "ready";
+        }
+
+        return null;
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>
