@@ -125,7 +125,8 @@ public sealed record CageIslandControl(
     float DepthScaleBias = 1.0f,
     float HeightScaleBias = 1.0f,
     IReadOnlyList<CageIslandBoundaryLoopControl>? BoundaryLoops = null,
-    IReadOnlyList<CageIslandAuthoredRegion>? AuthoredRegions = null);
+    IReadOnlyList<CageIslandAuthoredRegion>? AuthoredRegions = null,
+    TopologyIslandEdgeNetworkSummary? EdgeNetworkSummary = null);
 public sealed record CageIslandBoundaryLoopControl(
     int LoopIndex,
     IReadOnlyList<string> CageRegions,
@@ -842,6 +843,8 @@ public sealed record CageTopologyReport(
     int BoundaryLoopCount,
     int BoundaryVertexCount,
     bool UsesEstimatedMemberships,
+    int InteriorEdgeCount,
+    int NonManifoldEdgeCount,
     IReadOnlyList<CageIslandMembershipSummary> Islands);
 
 public sealed record CageIslandMembershipSummary(
@@ -852,7 +855,11 @@ public sealed record CageIslandMembershipSummary(
     bool UsesExplicitTopology,
     IReadOnlyList<string> CageRegions,
     IReadOnlyList<string>? SemanticLabels = null,
-    int BoundaryLoopCount = 0);
+    int BoundaryLoopCount = 0,
+    int InteriorEdgeCount = 0,
+    int NonManifoldEdgeCount = 0,
+    bool HasManifoldRisk = false,
+    bool UsesPropagatedEdgeNetwork = false);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -17080,6 +17087,11 @@ internal sealed class LocalExportService(
                                 explicitBoundaryFlags.Length == vertices.Count
                 ? explicitBoundaryFlags
                 : EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+            var edgeNetworks = BuildTransferIslandEdgeNetworks(
+                normalizedVertices,
+                componentIds,
+                boundaryFlags,
+                hasExplicitTopology ? topologySummary : null);
 
             if (componentIds.Distinct().Take(2).Count() < 2 && !boundaryFlags.Any(static flag => flag))
             {
@@ -17128,11 +17140,26 @@ internal sealed class LocalExportService(
                     ? componentBoundaryVertexCounts[group.Key]
                     : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
                 var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
+                TopologyIslandEdgeNetworkSummary? edgeNetworkSummary = null;
+                if (edgeNetworks.TryGetValue(group.Key, out var edgeNetwork))
+                {
+                                    edgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
+                                        ComponentId: edgeNetwork.IslandId,
+                                        BoundaryEdgeCount: edgeNetwork.BoundaryEdges.Count,
+                                        InteriorEdgeCount: edgeNetwork.InteriorEdges.Count,
+                                        NonManifoldEdgeCount: edgeNetwork.NonManifoldEdgeCount,
+                                        BoundaryVertexCount: edgeNetwork.BoundaryVertexIndexes.Count,
+                                        MaxVertexValence: edgeNetwork.AdjacencyByVertex.Count == 0
+                                            ? 0
+                                            : edgeNetwork.AdjacencyByVertex.Values.Max(static neighbors => neighbors.Count),
+                                        IsClosedManifold: edgeNetwork.BoundaryEdges.Count == 0 && edgeNetwork.NonManifoldEdgeCount == 0,
+                                        HasManifoldRisk: edgeNetwork.NonManifoldEdgeCount > 0 || edgeNetwork.ManifoldScore < 0.82f);
+                }
                 var rigidityBias = Math.Clamp(
-                    (hasExplicitTopology ? 0.04f : 0f) +
-                    semanticProfile.RigidityBias +
-                    MathF.Min(0.12f, boundaryRatio * 0.22f),
-                    0f,
+                                    (hasExplicitTopology ? 0.04f : 0f) +
+                                    semanticProfile.RigidityBias +
+                                    MathF.Min(0.12f, boundaryRatio * 0.22f),
+                                    0f,
                     0.28f);
                 var boundaryDamping = Math.Clamp(
                     (hasExplicitTopology ? 0.05f : 0.02f) +
@@ -17151,7 +17178,8 @@ internal sealed class LocalExportService(
                     DepthScaleBias: semanticProfile.DepthScaleBias,
                     HeightScaleBias: semanticProfile.HeightScaleBias,
                     BoundaryLoops: boundaryLoopControls,
-                    AuthoredRegions: authoredRegions));
+                    AuthoredRegions: authoredRegions,
+                    EdgeNetworkSummary: edgeNetworkSummary));
             }
         }
 
@@ -24739,7 +24767,7 @@ internal sealed class LocalExportService(
         var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
         var cageIslandItemsHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? string.Join(Environment.NewLine, payload.CageTopology.Islands.Take(8).Select(static island =>
-                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, {island.BoundaryLoopCount} boundary loops, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
+                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, {island.BoundaryLoopCount} boundary loops, {island.InteriorEdgeCount} interior edges, {island.NonManifoldEdgeCount} non-manifold edges{(island.UsesPropagatedEdgeNetwork ? ", propagated edge network" : string.Empty)}, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
             : string.Empty;
         var cageTopologyHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? $$"""
@@ -24749,6 +24777,8 @@ internal sealed class LocalExportService(
                       <li><strong>Islands:</strong> {{payload.CageTopology.IslandCount}}</li>
                       <li><strong>Boundary loops:</strong> {{payload.CageTopology.BoundaryLoopCount}}</li>
                       <li><strong>Boundary vertices:</strong> {{payload.CageTopology.BoundaryVertexCount}}</li>
+                      <li><strong>Interior edges:</strong> {{payload.CageTopology.InteriorEdgeCount}}</li>
+                      <li><strong>Non-manifold edges:</strong> {{payload.CageTopology.NonManifoldEdgeCount}}</li>
                       <li><strong>Membership source:</strong> {{HtmlEncode(payload.CageTopology.UsesEstimatedMemberships ? "mixed explicit + estimated" : "explicit topology")}}</li>
                     </ul>
                     <ul class="kvs" style="margin-top:10px">
@@ -25012,6 +25042,8 @@ internal sealed class LocalExportService(
         var islandSummaries = new List<CageIslandMembershipSummary>();
         var totalBoundaryLoops = 0;
         var totalBoundaryVertices = 0;
+        var totalInteriorEdges = 0;
+        var totalNonManifoldEdges = 0;
         var usesEstimatedMemberships = false;
         var sourceTopologySummaries = (sourceMeshPaths ?? [])
             .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
@@ -25064,6 +25096,9 @@ internal sealed class LocalExportService(
             var usesExplicitTopology = topologySummary is { VertexCount: > 0 } &&
                                        topologySummary.VertexCount == vertices.Count &&
                                        topologySummary.ComponentIds.Length == vertices.Count;
+            var explicitEdgeNetworksByIsland = topologySummary?.ComponentEdgeNetworks is { Count: > 0 }
+                ? topologySummary.ComponentEdgeNetworks.ToDictionary(static network => network.ComponentId)
+                : null;
             var normalizedVertices = NormalizeVerticesForTransfer(vertices);
             var componentIds = usesExplicitTopology
                 ? topologySummary!.ComponentIds
@@ -25101,9 +25136,21 @@ internal sealed class LocalExportService(
                     .FirstOrDefault(control => control.MeshKey.Equals(meshKey, StringComparison.OrdinalIgnoreCase) &&
                                                control.IslandId == group.Key);
                 var semanticLabels = islandControl?.SemanticLabels ?? [];
+                var propagatedEdgeNetwork = islandControl?.EdgeNetworkSummary;
+                var explicitEdgeNetwork = explicitEdgeNetworksByIsland is not null &&
+                                          explicitEdgeNetworksByIsland.TryGetValue(group.Key, out var explicitNetwork)
+                    ? explicitNetwork
+                    : null;
+                var effectiveEdgeNetwork = explicitEdgeNetwork ?? propagatedEdgeNetwork;
                 var cageRegions = islandControl?.CageRegions is { Count: > 0 }
                     ? islandControl.CageRegions
                     : ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
+                var interiorEdgeCount = effectiveEdgeNetwork?.InteriorEdgeCount ?? 0;
+                var nonManifoldEdgeCount = effectiveEdgeNetwork?.NonManifoldEdgeCount ?? 0;
+                var hasManifoldRisk = effectiveEdgeNetwork?.HasManifoldRisk ?? false;
+                var usesPropagatedEdgeNetwork = explicitEdgeNetwork is null && propagatedEdgeNetwork is not null;
+                totalInteriorEdges += interiorEdgeCount;
+                totalNonManifoldEdges += nonManifoldEdgeCount;
                 islandSummaries.Add(new CageIslandMembershipSummary(
                     MeshFile: Path.GetFileName(meshPath) ?? meshPath,
                     IslandId: group.Key,
@@ -25112,7 +25159,11 @@ internal sealed class LocalExportService(
                     UsesExplicitTopology: usesExplicitTopology,
                     CageRegions: cageRegions,
                     SemanticLabels: semanticLabels,
-                    BoundaryLoopCount: boundaryLoopCount));
+                    BoundaryLoopCount: boundaryLoopCount,
+                    InteriorEdgeCount: interiorEdgeCount,
+                    NonManifoldEdgeCount: nonManifoldEdgeCount,
+                    HasManifoldRisk: hasManifoldRisk,
+                    UsesPropagatedEdgeNetwork: usesPropagatedEdgeNetwork));
             }
         }
 
@@ -25123,6 +25174,8 @@ internal sealed class LocalExportService(
                 BoundaryLoopCount: totalBoundaryLoops,
                 BoundaryVertexCount: totalBoundaryVertices,
                 UsesEstimatedMemberships: usesEstimatedMemberships,
+                InteriorEdgeCount: totalInteriorEdges,
+                NonManifoldEdgeCount: totalNonManifoldEdges,
                 Islands: islandSummaries);
     }
 
