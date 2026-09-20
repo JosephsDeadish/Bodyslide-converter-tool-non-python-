@@ -20137,7 +20137,7 @@ internal sealed class LocalExportService(
             ? 0d
             : extremeRegionalDrift.Max(static pair => Math.Abs(pair.Value - 1d));
         if (extremeRegionalDrift.Count >= 2 &&
-            (clippingDetected || voxelPenetrationsFound || highRiskPoseCount > 0 || strongestRegionalDrift >= 0.24d))
+            (clippingDetected || voxelPenetrationsFound || highRiskPoseCount > 0 || strongestRegionalDrift >= 0.24d || extremeRegionalDrift.Count >= 3))
         {
             topologyRisk = true;
             warnings.Add($"regional-drift:{string.Join(",", extremeRegionalDrift.Select(static pair => $"{NormalizeTopologyWarningToken(pair.Key)}={pair.Value:0.00}"))}");

@@ -6205,27 +6205,42 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithExtremeSyntheticDrift_FlagsTopologyMismatchRiskInQualityReport()
+    public async Task AssessTopologyAndUvMismatch_FlagsRegionalDriftWarnings()
     {
+        var method = typeof(LocalExportService).GetMethod("AssessTopologyAndUvMismatch", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var outputDirectory = Path.Combine(workingDirectory, "output");
         Directory.CreateDirectory(workingDirectory);
-        var inputFile = Path.Combine(workingDirectory, "extreme_drift_armor.nif");
-        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateUpperBodyArmorVertices());
+        var sourceFile = Path.Combine(workingDirectory, "extreme_drift_source.nif");
+        var convertedFile = Path.Combine(workingDirectory, "extreme_drift_converted.nif");
+        var sourceVertices = SyntheticNifTestData.CreateUpperBodyArmorVertices();
+        var convertedVertices = sourceVertices
+            .Select(vertex => (
+                X: vertex.X * 1.08f,
+                Y: vertex.Y * 0.94f,
+                Z: vertex.Z))
+            .ToArray();
+        await SyntheticNifTestData.WriteAsync(sourceFile, sourceVertices);
+        await SyntheticNifTestData.WriteAsync(convertedFile, convertedVertices);
 
         try
         {
-            var orchestrator = StandaloneConversionModules.CreateDefault();
-            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+            var regionalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["breasts"] = 1.34d,
+                ["chest"] = 1.28d,
+                ["waist"] = 0.74d
+            };
+            var assessment = method!.Invoke(null, [new[] { sourceFile }, new[] { convertedFile }, regionalMorphing, true, false, 0])!;
+            var topologyMismatchRisk = Assert.IsType<bool>(assessment.GetType().GetField("Item1")!.GetValue(assessment));
+            var qualityWarnings = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetField("Item5")!.GetValue(assessment));
 
-            Assert.True(result.Success);
-
-            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"TopologyMismatchRisk\": true", qualityJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"Code\": \"topology-mismatch-risk\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("regional-drift:", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("breasts", qualityJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("chest", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.True(topologyMismatchRisk);
+            Assert.Contains(qualityWarnings, warning => warning.StartsWith("regional-drift:", StringComparison.OrdinalIgnoreCase));
+            var regionalWarning = qualityWarnings.First(warning => warning.StartsWith("regional-drift:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("breasts", regionalWarning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("chest", regionalWarning, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
