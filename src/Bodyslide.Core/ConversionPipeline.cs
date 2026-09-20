@@ -101,7 +101,8 @@ public sealed record CageIslandControl(
     float WidthScaleBias = 1.0f,
     float DepthScaleBias = 1.0f,
     float HeightScaleBias = 1.0f,
-    IReadOnlyList<CageIslandBoundaryLoopControl>? BoundaryLoops = null);
+    IReadOnlyList<CageIslandBoundaryLoopControl>? BoundaryLoops = null,
+    IReadOnlyList<CageIslandAuthoredRegion>? AuthoredRegions = null);
 public sealed record CageIslandBoundaryLoopControl(
     int LoopIndex,
     IReadOnlyList<string> CageRegions,
@@ -109,6 +110,11 @@ public sealed record CageIslandBoundaryLoopControl(
     float InfluenceRadius = 0.0f,
     float RigidityBias = 0.0f,
     float BoundaryDamping = 0.0f);
+public sealed record CageIslandAuthoredRegion(
+    string RegionName,
+    CageRegion Region,
+    int? LoopIndex = null,
+    bool IsHole = false);
 public sealed record DeformationCage(
     string Mode,
     IReadOnlyDictionary<string, CageRegion>? Regions = null,
@@ -16631,6 +16637,14 @@ internal sealed class LocalExportService(
                     topologySummary?.BoundaryLoops,
                     group.Key,
                     effectiveRegions);
+                var authoredRegions = BuildIslandAuthoredRegions(
+                    normalizedVertices,
+                    topologySummary?.BoundaryLoops,
+                    group.Key,
+                    indexes,
+                    effectiveRegions,
+                    deformationCage.Regions,
+                    semanticProfile);
                 if (effectiveRegions.Count == 0)
                 {
                     continue;
@@ -16664,7 +16678,8 @@ internal sealed class LocalExportService(
                     WidthScaleBias: semanticProfile.WidthScaleBias,
                     DepthScaleBias: semanticProfile.DepthScaleBias,
                     HeightScaleBias: semanticProfile.HeightScaleBias,
-                    BoundaryLoops: boundaryLoopControls));
+                    BoundaryLoops: boundaryLoopControls,
+                    AuthoredRegions: authoredRegions));
             }
         }
 
@@ -16877,6 +16892,178 @@ internal sealed class LocalExportService(
         }
 
         return ordered.Count > 0 ? ordered : dominantRegions;
+    }
+
+    private static IReadOnlyList<CageIslandAuthoredRegion>? BuildIslandAuthoredRegions(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? boundaryLoops,
+        int islandId,
+        IReadOnlyList<int> indexes,
+        IReadOnlyList<string> effectiveRegions,
+        IReadOnlyDictionary<string, CageRegion>? baseRegions,
+        CageIslandSemanticProfile semanticProfile)
+    {
+        if (indexes.Count == 0 ||
+            effectiveRegions.Count == 0 ||
+            baseRegions is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var validIndexes = indexes
+            .Where(index => index >= 0 && index < normalizedVertices.Count)
+            .Distinct()
+            .ToArray();
+        if (validIndexes.Length == 0)
+        {
+            return null;
+        }
+
+        var islandProfile = ComputeAuthoredCageAxisProfile(normalizedVertices, validIndexes, validIndexes);
+        var authored = new List<CageIslandAuthoredRegion>();
+        foreach (var regionName in effectiveRegions)
+        {
+            if (!baseRegions.TryGetValue(regionName, out var baseRegion))
+            {
+                continue;
+            }
+
+            authored.Add(new CageIslandAuthoredRegion(
+                regionName,
+                CreateAuthoredCageRegion(baseRegion, islandProfile, semanticProfile)));
+        }
+
+        if (boundaryLoops is { Count: > 0 })
+        {
+            foreach (var loop in boundaryLoops
+                         .Where(loop => loop.ComponentId == islandId && loop.VertexIndexes.Count >= 3)
+                         .OrderBy(loop => loop.LoopIndex))
+            {
+                var loopIndexes = loop.VertexIndexes
+                    .Where(index => index >= 0 && index < normalizedVertices.Count)
+                    .Distinct()
+                    .ToArray();
+                if (loopIndexes.Length == 0)
+                {
+                    continue;
+                }
+
+                var loopProfile = ComputeAuthoredCageAxisProfile(normalizedVertices, validIndexes, loopIndexes);
+                var isHole = loop.LoopIndex > 0;
+                foreach (var regionName in effectiveRegions)
+                {
+                    if (!baseRegions.TryGetValue(regionName, out var baseRegion))
+                    {
+                        continue;
+                    }
+
+                    authored.Add(new CageIslandAuthoredRegion(
+                        regionName,
+                        CreateAuthoredCageRegion(baseRegion, loopProfile, semanticProfile, isBoundaryLoop: true, isHole),
+                        LoopIndex: loop.LoopIndex,
+                        IsHole: isHole));
+                }
+            }
+        }
+
+        return authored.Count == 0 ? null : authored;
+    }
+
+    private sealed record AuthoredCageAxisProfile(
+        float HeightCenter,
+        float HeightFalloff,
+        float LateralCenter,
+        float LateralFalloff,
+        float DepthCenter,
+        float DepthFalloff);
+
+    private static AuthoredCageAxisProfile ComputeAuthoredCageAxisProfile(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> islandIndexes,
+        IReadOnlyList<int> profileIndexes)
+    {
+        var islandMinX = float.MaxValue;
+        var islandMaxX = float.MinValue;
+        var islandMinY = float.MaxValue;
+        var islandMaxY = float.MinValue;
+        foreach (var index in islandIndexes)
+        {
+            var vertex = normalizedVertices[index];
+            islandMinX = MathF.Min(islandMinX, vertex.X);
+            islandMaxX = MathF.Max(islandMaxX, vertex.X);
+            islandMinY = MathF.Min(islandMinY, vertex.Y);
+            islandMaxY = MathF.Max(islandMaxY, vertex.Y);
+        }
+
+        var islandCenterX = (islandMinX + islandMaxX) * 0.5f;
+        var islandCenterY = (islandMinY + islandMaxY) * 0.5f;
+        var islandHalfRangeX = MathF.Max((islandMaxX - islandMinX) * 0.5f, 0.0001f);
+        var islandHalfRangeY = MathF.Max((islandMaxY - islandMinY) * 0.5f, 0.0001f);
+
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+        var lateralSum = 0f;
+        var depthSum = 0f;
+        var heightSum = 0f;
+        var minLateral = float.MaxValue;
+        var maxLateral = float.MinValue;
+        var minDepth = float.MaxValue;
+        var maxDepth = float.MinValue;
+        var count = 0;
+        foreach (var index in profileIndexes)
+        {
+            var vertex = normalizedVertices[index];
+            var lateral = MathF.Min(1f, MathF.Abs(vertex.X - islandCenterX) / islandHalfRangeX);
+            var depth = MathF.Min(1f, MathF.Abs(vertex.Y - islandCenterY) / islandHalfRangeY);
+            minZ = MathF.Min(minZ, vertex.Z);
+            maxZ = MathF.Max(maxZ, vertex.Z);
+            heightSum += vertex.Z;
+            lateralSum += lateral;
+            depthSum += depth;
+            minLateral = MathF.Min(minLateral, lateral);
+            maxLateral = MathF.Max(maxLateral, lateral);
+            minDepth = MathF.Min(minDepth, depth);
+            maxDepth = MathF.Max(maxDepth, depth);
+            count++;
+        }
+
+        count = Math.Max(1, count);
+        var heightSpan = MathF.Max(0.0001f, maxZ - minZ);
+        var lateralSpan = MathF.Max(0.0001f, maxLateral - minLateral);
+        var depthSpan = MathF.Max(0.0001f, maxDepth - minDepth);
+        return new AuthoredCageAxisProfile(
+            HeightCenter: Math.Clamp(heightSum / count, 0f, 1f),
+            HeightFalloff: Math.Clamp((heightSpan * 0.70f) + 0.04f, 0.03f, 0.42f),
+            LateralCenter: Math.Clamp(lateralSum / count, 0f, 1f),
+            LateralFalloff: Math.Clamp((lateralSpan * 0.85f) + 0.10f, 0.08f, 1f),
+            DepthCenter: Math.Clamp(depthSum / count, 0f, 1f),
+            DepthFalloff: Math.Clamp((depthSpan * 0.85f) + 0.10f, 0.08f, 1f));
+    }
+
+    private static CageRegion CreateAuthoredCageRegion(
+        CageRegion baseRegion,
+        AuthoredCageAxisProfile profile,
+        CageIslandSemanticProfile semanticProfile,
+        bool isBoundaryLoop = false,
+        bool isHole = false)
+    {
+        var widthBias = semanticProfile.WidthScaleBias * (isBoundaryLoop ? (isHole ? 0.72f : 0.86f) : 1f);
+        var depthBias = semanticProfile.DepthScaleBias * (isBoundaryLoop ? (isHole ? 0.76f : 0.88f) : 1f);
+        var heightBias = semanticProfile.HeightScaleBias * (isBoundaryLoop ? 0.92f : 1f);
+        var rigidityBias = semanticProfile.RigidityBias + (isBoundaryLoop ? (isHole ? 0.08f : 0.04f) : 0f);
+        return baseRegion with
+        {
+            HeightCenter = Math.Clamp((baseRegion.HeightCenter * 0.35f) + (profile.HeightCenter * 0.65f), 0f, 1f),
+            HeightFalloff = Math.Clamp(MathF.Min(baseRegion.HeightFalloff, profile.HeightFalloff), 0.03f, 1f),
+            LateralCenter = Math.Clamp((baseRegion.LateralCenter * 0.35f) + (profile.LateralCenter * 0.65f), 0f, 1f),
+            LateralFalloff = Math.Clamp(MathF.Min(baseRegion.LateralFalloff, profile.LateralFalloff), 0.08f, 1f),
+            DepthCenter = Math.Clamp((baseRegion.DepthCenter * 0.35f) + (profile.DepthCenter * 0.65f), 0f, 1f),
+            DepthFalloff = Math.Clamp(MathF.Min(baseRegion.DepthFalloff, profile.DepthFalloff), 0.08f, 1f),
+            WidthInfluence = MathF.Max(0.02f, baseRegion.WidthInfluence * widthBias),
+            DepthInfluence = MathF.Max(0.02f, baseRegion.DepthInfluence * depthBias),
+            HeightInfluence = MathF.Max(0.02f, baseRegion.HeightInfluence * heightBias),
+            Rigidity = Math.Clamp(baseRegion.Rigidity + rigidityBias, 0f, 0.95f)
+        };
     }
 
     private static IReadOnlyList<CageIslandBoundaryLoopControl>? BuildIslandBoundaryLoopControls(
@@ -17818,16 +18005,34 @@ internal sealed class LocalExportService(
             return ComputeLegacyTransformScales(regionalMorphing, normalizedHeight);
         }
 
+        var authoredRegions = boundaryLoopControl is not null
+            ? islandControl?.AuthoredRegions?
+                .Where(region => region.LoopIndex == boundaryLoopControl.LoopIndex)
+                .ToArray()
+            : null;
+        if (authoredRegions is not { Length: > 0 })
+        {
+            authoredRegions = islandControl?.AuthoredRegions?
+                .Where(static region => region.LoopIndex is null)
+                .ToArray();
+        }
+
         var preferredRegionNames = boundaryLoopControl?.CageRegions is { Count: > 0 }
             ? boundaryLoopControl.CageRegions
             : islandControl?.CageRegions;
-        IEnumerable<KeyValuePair<string, CageRegion>> activeRegions = preferredRegionNames is { Count: > 0 }
+        IEnumerable<KeyValuePair<string, CageRegion>> activeRegions = authoredRegions is { Length: > 0 }
+            ? authoredRegions
+                .Select(static region => new KeyValuePair<string, CageRegion>(region.RegionName, region.Region))
+                .ToArray()
+            : preferredRegionNames is { Count: > 0 }
             ? preferredRegionNames
                 .Where(regionName => regions.ContainsKey(regionName))
                 .Select(regionName => new KeyValuePair<string, CageRegion>(regionName, regions[regionName]))
                 .ToArray()
             : regions;
-        if (preferredRegionNames is { Count: > 0 } && !activeRegions.Any())
+        if (authoredRegions is not { Length: > 0 } &&
+            preferredRegionNames is { Count: > 0 } &&
+            !activeRegions.Any())
         {
             activeRegions = regions;
         }

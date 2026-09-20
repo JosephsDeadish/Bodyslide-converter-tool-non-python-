@@ -2483,6 +2483,9 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal(2, control.BoundaryLoops!.Count);
             Assert.Contains(control.BoundaryLoops, loop => loop.IsHole);
             Assert.All(control.BoundaryLoops, loop => Assert.True(loop.InfluenceRadius > 0f));
+            Assert.NotNull(control.AuthoredRegions);
+            Assert.Contains(control.AuthoredRegions!, region => region.LoopIndex is null);
+            Assert.Contains(control.AuthoredRegions!, region => region.IsHole);
 
             var topologyReport = topologyReportMethod!.Invoke(null, [new[] { inputFile }, result, null]);
             Assert.NotNull(topologyReport);
@@ -2879,7 +2882,15 @@ public sealed class ConversionOrchestratorTests
                 Assert.Equal("upstream_island_cage_regions", control.MeshKey, ignoreCase: true);
                 Assert.NotEmpty(control.CageRegions);
                 Assert.True(control.BoundaryDamping > 0f);
+                Assert.NotNull(control.AuthoredRegions);
+                Assert.NotEmpty(control.AuthoredRegions!);
+                Assert.All(control.AuthoredRegions!, region => Assert.Contains(region.RegionName, control.CageRegions, StringComparer.OrdinalIgnoreCase));
             });
+
+            var orderedControls = cage.IslandControls.OrderBy(control => control.IslandId).ToArray();
+            var leftRegion = orderedControls[0].AuthoredRegions!.First(region => region.LoopIndex is null);
+            var rightRegion = orderedControls[1].AuthoredRegions!.First(region => region.LoopIndex is null);
+            Assert.NotEqual(leftRegion.Region.LateralCenter, rightRegion.Region.LateralCenter);
         }
         finally
         {
@@ -6651,6 +6662,58 @@ public sealed class NifOutputAndSourceOverrideTests
 
         Assert.Contains("arms", islandControl.CageRegions, StringComparer.OrdinalIgnoreCase);
         Assert.True(islandScales.WidthScale < baselineScales.WidthScale - 0.10d, $"Expected per-island cage object to reduce unrelated chest-driven width scaling on the second island. baseline={baselineScales.WidthScale:F4}, island={islandScales.WidthScale:F4}");
+    }
+
+    [Fact]
+    public void ExportCageProjection_PrefersAuthoredLoopRegionsOverBroadIslandRegions()
+    {
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(scaleMethod);
+
+        var regionalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.60
+        };
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = new(0.78f, 0.24f, 0.50f, 0.92f, 0.50f, 0.92f, 0.84f, 0.36f, 0.12f, 0.02f)
+        };
+
+        var islandWideRegion = new CageIslandAuthoredRegion(
+            "chest",
+            new CageRegion(0.78f, 0.18f, 0.46f, 0.64f, 0.46f, 0.64f, 0.76f, 0.32f, 0.10f, 0.08f));
+        var loopLocalRegion = new CageIslandAuthoredRegion(
+            "chest",
+            new CageRegion(0.78f, 0.08f, 0.22f, 0.14f, 0.18f, 0.14f, 0.28f, 0.18f, 0.06f, 0.28f),
+            LoopIndex: 1,
+            IsHole: true);
+
+        var cage = new DeformationCage(
+            "test-cage",
+            cageRegions,
+            [
+                new CageIslandControl(
+                    "authored_loop_projection",
+                    0,
+                    ["chest"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(1, ["chest"], IsHole: true, InfluenceRadius: 0.16f, RigidityBias: 0.10f, BoundaryDamping: 0.12f)
+                    ],
+                    AuthoredRegions:
+                    [
+                        islandWideRegion,
+                        loopLocalRegion
+                    ])
+            ]);
+
+        var islandControl = Assert.Single(cage.IslandControls!);
+        var loopControl = Assert.Single(islandControl.BoundaryLoops!);
+        var broadScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(null, [0.78f, 0.22f, 0.18f, regionalMorphing, cage, islandControl, null])!;
+        var loopScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod.Invoke(null, [0.78f, 0.22f, 0.18f, regionalMorphing, cage, islandControl, loopControl])!;
+
+        Assert.True(loopScales.WidthScale < broadScales.WidthScale, $"Expected loop-authored cage region to localize width deformation more tightly than the broad island region. broad={broadScales.WidthScale:F4}, loop={loopScales.WidthScale:F4}");
+        Assert.True(loopScales.DepthScale <= broadScales.DepthScale);
     }
 
     // ── --source override ─────────────────────────────────────────────────────
