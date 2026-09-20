@@ -75,16 +75,16 @@ internal static class PhysicsRepairCatalog
             .Where(static bone => !string.IsNullOrWhiteSpace(bone))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var supportedGroups = new HashSet<string>(DetectGroups(supported), StringComparer.OrdinalIgnoreCase);
         var targetGroups = new HashSet<string>(DetectGroups(repaired), StringComparer.OrdinalIgnoreCase);
-        targetGroups.UnionWith(DetectGroups(supported));
 
         if (sourceBones is not null)
         {
             foreach (var sourceBone in sourceBones.Where(static bone => !string.IsNullOrWhiteSpace(bone)))
             {
-                if (TryMatchGroup(sourceBone, out var groupName) && targetGroups.Contains(groupName))
+                if (TryMatchGroup(sourceBone, out var groupName) && supportedGroups.Contains(groupName))
                 {
-                    repaired.Add(sourceBone.Trim());
+                    targetGroups.Add(groupName);
                 }
             }
         }

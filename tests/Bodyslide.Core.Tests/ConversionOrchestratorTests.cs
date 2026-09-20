@@ -1438,6 +1438,9 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("plugin-patches.json", moduleConfig, StringComparison.Ordinal);
+            Assert.DoesNotContain("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
+            Assert.DoesNotContain("race-compatibility.json", moduleConfig, StringComparison.Ordinal);
         }
         finally
         {
@@ -17166,41 +17169,49 @@ public sealed class BasicWeightTransferServicePhysicsTests
             ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
             ["Custom Breast Swing L", "Custom Breast Swing R", "Custom Tail Chain"]);
 
-        Assert.Contains("NPC Belly", repaired);
-        Assert.Contains("Custom Breast Swing L", repaired);
-        Assert.Contains("Custom Breast Swing R", repaired);
+        Assert.DoesNotContain("NPC Belly", repaired);
+        Assert.DoesNotContain("Custom Breast Swing L", repaired);
+        Assert.DoesNotContain("Custom Breast Swing R", repaired);
         Assert.DoesNotContain("Custom Tail Chain", repaired);
     }
 
     [Fact]
-    public void RepairTargetBones_PreservesUncommonFrameworkChains()
+    public void RepairTargetBones_ActivatesSupportedUncommonFrameworkGroupsWithoutReaddingSourceBones()
     {
         var repaired = PhysicsRepairCatalog.RepairTargetBones(
             ["Wing.L", "Wing.R"],
             ["Wing.L", "Wing.R", "Feather01.L", "Feather01.R", "ManeRoot"],
             ["Custom Wing Membrane L", "Custom Wing Membrane R", "Pinion Sweep L", "Pinion Sweep R", "Mane Toss Chain", "Horn Trail"]);
 
-        Assert.Contains("Custom Wing Membrane L", repaired);
-        Assert.Contains("Custom Wing Membrane R", repaired);
-        Assert.Contains("Pinion Sweep L", repaired);
-        Assert.Contains("Pinion Sweep R", repaired);
-        Assert.Contains("Mane Toss Chain", repaired);
+        Assert.Contains("Feather01.L", repaired);
+        Assert.Contains("Feather01.R", repaired);
+        Assert.Contains("ManeRoot", repaired);
+        Assert.DoesNotContain("Custom Wing Membrane L", repaired);
+        Assert.DoesNotContain("Custom Wing Membrane R", repaired);
+        Assert.DoesNotContain("Pinion Sweep L", repaired);
+        Assert.DoesNotContain("Pinion Sweep R", repaired);
+        Assert.DoesNotContain("Mane Toss Chain", repaired);
         Assert.DoesNotContain("Horn Trail", repaired);
     }
 
     [Fact]
-    public void RepairTargetBones_PreservesDigitigradeAndTailTipChains()
+    public void RepairTargetBones_MapsDigitigradeAndTailTipGroupsToSupportedBonesOnly()
     {
         var repaired = PhysicsRepairCatalog.RepairTargetBones(
             ["Tail5", "Hoof.L", "Hoof.R"],
             ["Tail5", "TailTip", "PawFront.L", "PawFront.R", "DewClaw.L", "DewClaw.R"],
             ["TailFluffChain", "TailTipCurl", "PawFrontGuardL", "PawRearGuardR", "DewClawBackR", "WingMembraneL"]);
 
-        Assert.Contains("TailFluffChain", repaired);
-        Assert.Contains("TailTipCurl", repaired);
-        Assert.Contains("PawFrontGuardL", repaired);
-        Assert.Contains("PawRearGuardR", repaired);
-        Assert.Contains("DewClawBackR", repaired);
+        Assert.Contains("TailTip", repaired);
+        Assert.Contains("PawFront.L", repaired);
+        Assert.Contains("PawFront.R", repaired);
+        Assert.Contains("DewClaw.L", repaired);
+        Assert.Contains("DewClaw.R", repaired);
+        Assert.DoesNotContain("TailFluffChain", repaired);
+        Assert.DoesNotContain("TailTipCurl", repaired);
+        Assert.DoesNotContain("PawFrontGuardL", repaired);
+        Assert.DoesNotContain("PawRearGuardR", repaired);
+        Assert.DoesNotContain("DewClawBackR", repaired);
         Assert.DoesNotContain("WingMembraneL", repaired);
     }
 
