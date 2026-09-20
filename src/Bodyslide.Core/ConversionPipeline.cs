@@ -399,6 +399,8 @@ internal static class ConversionValidationGuidance
                 "Open plugin-patches.json and compare every linked armor family variant (world, first-person, female/male, and addon-specific meshes), then re-run only after each linked ARMO/ARMA record resolves to a converted counterpart.",
             "plugin-link-unscanned-master-reference" =>
                 "Install or extract the missing plugin masters, then re-run with the full master chain available so linked ARMA references stop being skipped during rewrite verification.",
+            "plugin-ambiguous-layout" =>
+                "Open plugin-patches.json and inspect the flagged plugin in xEdit, confirm whether it should be treated as ESPFE or a normal ESP/ESL, verify FE-range FormIDs and the full master chain, then re-run or keep the rewrite/manual patching steps limited to the resolved plugin layout.",
             "plugin-patch-missing-master-chain" or
             "plugin-patch-master-order-mismatch" =>
                 "Open plugin-patches.json in xEdit context, fix the generated patch plugin master chain/order so every required source master is present, then verify the *_SlidesmithPatch.esp loads after the source plugin and inherited masters.",
@@ -508,6 +510,7 @@ internal static class ConversionValidationGuidance
             "plugin-rewrite-verification-warning" or "plugin-link-missing-converted-match" or
             "plugin-link-missing-staged-mesh" or "plugin-link-missing-arma-record" or
             "plugin-link-partial-family-failure" or "plugin-link-unscanned-master-reference" or
+            "plugin-ambiguous-layout" or
             "plugin-patch-missing-master-chain" or "plugin-patch-master-order-mismatch" =>
                 ["plugin-patches.json", "patch-armor.pas", "conversion-quality.json"],
             "plugin-link-unsupported-nif-layout" =>
@@ -15665,6 +15668,14 @@ internal sealed class LocalExportService(
                     "plugin-rewrite-verification-warning",
                     "medium",
                     $"Some generated plugin patches could not be re-verified for rewritten mesh paths: {string.Join(", ", pluginRewriteVerification.UnverifiedPatchedPlugins.Take(4))}."));
+            }
+
+            if (pluginAnalysis.AmbiguousPlugins is { Count: > 0 } ambiguousPlugins)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "plugin-ambiguous-layout",
+                    "medium",
+                    $"Some source plugins use an ambiguous ESL/ESPFE layout and need manual xEdit review before trusting automated rewrite output: {string.Join(", ", ambiguousPlugins.Take(4))}."));
             }
 
             if (pluginRewriteVerification.MissingPatchPluginMasters is { Count: > 0 })

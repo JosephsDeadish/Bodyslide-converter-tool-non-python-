@@ -202,6 +202,30 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversAmbiguousPluginLayoutCases()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            41,
+            1,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("plugin-ambiguous-layout", "medium", "A plugin used an ambiguous ESL/ESPFE layout."),
+                new ConversionValidationIssue("plugin-link-unscanned-master-reference", "high", "Missing masters prevented linked ARMA verification."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "CBBE", maxActions: 6);
+        var artifacts = ConversionValidationGuidance.BuildReviewArtifacts(summary, maxArtifacts: 6);
+
+        Assert.Contains(actions, action => action.Contains("ESPFE", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("xEdit", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("full master chain", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_DeepensRaceAndUnsupportedNifGuidance()
     {
         var summary = new ConversionValidationSummary(

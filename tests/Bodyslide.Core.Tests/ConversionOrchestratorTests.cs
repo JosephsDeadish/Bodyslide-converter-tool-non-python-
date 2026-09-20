@@ -8156,6 +8156,47 @@ public sealed class PluginPatchGuidanceTests
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_AmbiguousPluginLayout_AddsExplicitValidationIssue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("AmbiguousArmor\0"))
+            .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+            .ToArray();
+        var pluginBytes = new List<byte>(BuildTes4HeaderWithFlags(0x00000200u))
+        {
+        };
+        pluginBytes.AddRange(BuildFlatRecordForTests("ARMA", armaData, 0x00012345u));
+
+        await File.WriteAllBytesAsync(Path.Combine(workingDirectory, "AmbiguousArmor.esp"), [.. pluginBytes]);
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            var readme = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "README.txt"));
+
+            Assert.Contains("\"Code\": \"plugin-ambiguous-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("AmbiguousArmor.esp", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("ambiguous ESL/ESPFE layout", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("plugin-patches.json", readme, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("xEdit", readme, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     private static byte[] BuildMinimalSsePluginWithArmaMod2Path(string meshPath)
     {
         var mod2Data = BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes(meshPath + "\0"));
