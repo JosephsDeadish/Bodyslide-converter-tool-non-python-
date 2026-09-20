@@ -9082,6 +9082,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
         Assert.Contains("NPC L Breast02", fallbacks);
+        Assert.True(SkeletonMappingCatalog.ContainsFrameworkBone(" NPC L Breast01 "));
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates(" NPC L Breast03 ", "xpmsse-female-advanced", out var trimmedFallbacks));
+        Assert.Contains("NPC L Breast02", trimmedFallbacks);
         Assert.True(RaceCompatibilityCatalog.TryGetRace(0x00023FE9u, out var khajiitRace));
         Assert.Contains("beast", khajiitRace.Groups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));

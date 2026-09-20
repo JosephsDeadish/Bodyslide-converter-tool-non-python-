@@ -1138,10 +1138,12 @@ public sealed class MainForm : Form
             File.WriteAllText(tempPath, json);
             if (File.Exists(settingsPath))
             {
-                File.Delete(settingsPath);
+                File.Replace(tempPath, settingsPath, destinationBackupFileName: null);
             }
-
-            File.Move(tempPath, settingsPath);
+            else
+            {
+                File.Move(tempPath, settingsPath);
+            }
         }
         catch (Exception ex)
         {

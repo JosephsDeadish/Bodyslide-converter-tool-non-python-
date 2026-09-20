@@ -89,8 +89,12 @@ internal static class SkeletonMappingCatalog
         return false;
     }
 
-    public static bool ContainsFrameworkBone(string boneName) =>
-        Data.Value.FrameworkBoneIndex.Contains(boneName);
+    public static bool ContainsFrameworkBone(string boneName)
+    {
+        var normalizedBoneName = boneName?.Trim();
+        return !string.IsNullOrWhiteSpace(normalizedBoneName) &&
+               Data.Value.FrameworkBoneIndex.Contains(normalizedBoneName);
+    }
 
     public static bool TryGetFallbackCandidates(
         string sourceBone,
@@ -98,20 +102,21 @@ internal static class SkeletonMappingCatalog
         out IReadOnlyList<string> fallbackCandidates)
     {
         fallbackCandidates = [];
-        if (string.IsNullOrWhiteSpace(sourceBone))
+        var normalizedSourceBone = sourceBone?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedSourceBone))
         {
             return false;
         }
 
         if (!string.IsNullOrWhiteSpace(frameworkId) &&
             Data.Value.Frameworks.TryGetValue(frameworkId.Trim(), out var framework) &&
-            framework.FallbackMappings.TryGetValue(sourceBone, out var frameworkCandidates))
+            framework.FallbackMappings.TryGetValue(normalizedSourceBone, out var frameworkCandidates))
         {
             fallbackCandidates = frameworkCandidates;
             return true;
         }
 
-        if (Data.Value.FallbackMappings.TryGetValue(sourceBone, out var candidates))
+        if (Data.Value.FallbackMappings.TryGetValue(normalizedSourceBone, out var candidates))
         {
             fallbackCandidates = candidates;
             return true;
