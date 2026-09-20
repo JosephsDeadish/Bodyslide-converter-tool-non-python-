@@ -22639,6 +22639,25 @@ internal sealed class LocalExportService(
             int VertexCount,
             MeshVertex Centroid);
 
+        private sealed record MorphTransferTargetDecision(
+            float WeightedSourceHeight,
+            float SourceCrossSectionSpan,
+            float TargetCrossSectionSpan,
+            float LocalTopologyScale,
+            float EdgeDrivenDamping,
+            float StructuralDivergence,
+            int TargetIsland,
+            int PreferredSourceIsland,
+            bool BoundarySensitive);
+
+        private sealed record MorphTransferDecisionCache(
+            IReadOnlyList<MeshVertex> NormalizedSourceVertices,
+            IReadOnlyList<MeshVertex> NormalizedTargetVertices,
+            float GlobalSourceSpan,
+            float GlobalTargetSpan,
+            float GlobalSpanRatio,
+            IReadOnlyList<MorphTransferTargetDecision> TargetDecisions);
+
         private sealed record MorphTransferContext(
             IReadOnlyList<MeshVertex> SourceVertices,
             IReadOnlyList<MeshVertex> TargetVertices,
@@ -22657,7 +22676,8 @@ internal sealed class LocalExportService(
             float SourceGlobalNeighborDistance,
             float TargetGlobalNeighborDistance,
             bool ExtremeTopologyAdaptationRisk,
-            IReadOnlyList<string> PartHints);
+            IReadOnlyList<string> PartHints,
+            MorphTransferDecisionCache? DecisionCache = null);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
@@ -22761,10 +22781,16 @@ internal sealed class LocalExportService(
                 sourceGlobalNeighborDistance,
                 targetGlobalNeighborDistance,
                 false,
-                partHints);
+                partHints,
+                null);
+            var decisionCache = BuildMorphTransferDecisionCache(
+                context,
+                normalizedSourceVertices,
+                normalizedTargetVertices);
             return context with
             {
-                ExtremeTopologyAdaptationRisk = HasExtremeTopologyAdaptation(normalizedSourceVertices, normalizedTargetVertices, context)
+                ExtremeTopologyAdaptationRisk = HasExtremeTopologyAdaptation(context, decisionCache),
+                DecisionCache = decisionCache
             };
         }
 
@@ -22903,27 +22929,19 @@ internal sealed class LocalExportService(
                 return retargetedDeltas;
             }
 
-            var normalizedSourceVertices = NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
-            var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
+            var decisionCache = morphTransferContext.DecisionCache;
+            var normalizedSourceVertices = decisionCache?.NormalizedSourceVertices ?? NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
+            var normalizedTargetVertices = decisionCache?.NormalizedTargetVertices ?? NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
             var adapted = retargetedDeltas.ToArray();
-            var globalTargetSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.TargetVertices);
-            var globalSourceSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.SourceVertices);
-            var globalSpanRatio = globalTargetSpan <= 0.0001f || globalSourceSpan <= 0.0001f
-                ? 1f
-                : globalTargetSpan / globalSourceSpan;
+            var globalSpanRatio = decisionCache?.GlobalSpanRatio ?? 1f;
 
             for (var targetIndex = 0; targetIndex < adapted.Length; targetIndex++)
             {
-                var targetHeight = normalizedTargetVertices[targetIndex].Z;
-                var sourceHeight = ComputeWeightedSourceHeight(normalizedSourceVertices, morphTransferContext, targetIndex);
-                var targetSpan = ComputeCrossSectionSpanAtHeight(
-                    morphTransferContext.TargetVertices,
-                    normalizedTargetVertices,
-                    targetHeight);
-                var sourceSpan = ComputeCrossSectionSpanAtHeight(
-                    morphTransferContext.SourceVertices,
-                    normalizedSourceVertices,
-                    sourceHeight);
+                var decision = decisionCache is { TargetDecisions.Count: > 0 } && targetIndex < decisionCache.TargetDecisions.Count
+                    ? decisionCache.TargetDecisions[targetIndex]
+                    : null;
+                var targetSpan = decision?.TargetCrossSectionSpan ?? 0f;
+                var sourceSpan = decision?.SourceCrossSectionSpan ?? 0f;
 
                 if (targetSpan <= 0.0001f || sourceSpan <= 0.0001f)
                 {
@@ -22934,7 +22952,7 @@ internal sealed class LocalExportService(
                 var structureScale = sourceSpan > 0.0001f && targetSpan > 0.0001f
                     ? Math.Clamp((targetSpan / sourceSpan) / globalSpanRatio, 0.70f, 1.40f)
                     : 1f;
-                var localStructureScale = ComputeLocalTopologyScale(
+                var localStructureScale = decision?.LocalTopologyScale ?? ComputeLocalTopologyScale(
                     normalizedSourceVertices,
                     normalizedTargetVertices,
                     morphTransferContext,
@@ -22952,8 +22970,10 @@ internal sealed class LocalExportService(
                     morphTransferContext,
                     targetIndex,
                     ambiguity);
-                var edgeDrivenDamping = ComputeEdgeDrivenTopologyDamping(morphTransferContext, targetIndex);
-                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping * edgeDrivenDamping);
+                var edgeDrivenDamping = decision?.EdgeDrivenDamping ?? ComputeEdgeDrivenTopologyDamping(morphTransferContext, targetIndex);
+                var structuralDivergence = decision?.StructuralDivergence ?? 0f;
+                var divergenceDamping = 1f - MathF.Min(0.34f, structuralDivergence * 0.30f);
+                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping * edgeDrivenDamping * divergenceDamping);
                 if (MathF.Abs(combinedScale - 1f) < 0.10f)
                 {
                     continue;
@@ -23904,6 +23924,127 @@ internal sealed class LocalExportService(
             shellBand = Math.Clamp(remaining / 3, 0, 1);
         }
 
+        private static MorphTransferDecisionCache BuildMorphTransferDecisionCache(
+            MorphTransferContext morphTransferContext,
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<MeshVertex> normalizedTargetVertices)
+        {
+            var globalSourceSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.SourceVertices);
+            var globalTargetSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.TargetVertices);
+            var globalSpanRatio = globalTargetSpan <= 0.0001f || globalSourceSpan <= 0.0001f
+                ? 1f
+                : globalTargetSpan / globalSourceSpan;
+            var decisions = new MorphTransferTargetDecision[normalizedTargetVertices.Count];
+            for (var targetIndex = 0; targetIndex < normalizedTargetVertices.Count; targetIndex++)
+            {
+                var targetHeight = normalizedTargetVertices[targetIndex].Z;
+                var weightedSourceHeight = ComputeWeightedSourceHeight(normalizedSourceVertices, morphTransferContext, targetIndex);
+                var targetSpan = ComputeCrossSectionSpanAtHeight(
+                    morphTransferContext.TargetVertices,
+                    normalizedTargetVertices,
+                    targetHeight);
+                var sourceSpan = ComputeCrossSectionSpanAtHeight(
+                    morphTransferContext.SourceVertices,
+                    normalizedSourceVertices,
+                    weightedSourceHeight);
+                var localTopologyScale = ComputeLocalTopologyScale(
+                    normalizedSourceVertices,
+                    normalizedTargetVertices,
+                    morphTransferContext,
+                    targetIndex);
+                var edgeDrivenDamping = ComputeEdgeDrivenTopologyDamping(morphTransferContext, targetIndex);
+                var targetIsland = targetIndex < morphTransferContext.TargetTransferIslands.Length
+                    ? morphTransferContext.TargetTransferIslands[targetIndex]
+                    : -1;
+                var preferredSourceIsland = targetIsland >= 0 && targetIsland < morphTransferContext.TargetIslandToSourceIslandMap.Length
+                    ? morphTransferContext.TargetIslandToSourceIslandMap[targetIsland]
+                    : -1;
+                var boundarySensitive = IsMorphTransferBoundarySensitive(morphTransferContext, targetIndex, targetIsland, preferredSourceIsland);
+                var structuralDivergence = ComputeMorphTransferStructuralDivergence(
+                    localTopologyScale,
+                    sourceSpan,
+                    targetSpan,
+                    edgeDrivenDamping,
+                    boundarySensitive,
+                    preferredSourceIsland);
+                decisions[targetIndex] = new MorphTransferTargetDecision(
+                    weightedSourceHeight,
+                    sourceSpan,
+                    targetSpan,
+                    localTopologyScale,
+                    edgeDrivenDamping,
+                    structuralDivergence,
+                    targetIsland,
+                    preferredSourceIsland,
+                    boundarySensitive);
+            }
+
+            return new MorphTransferDecisionCache(
+                normalizedSourceVertices,
+                normalizedTargetVertices,
+                globalSourceSpan,
+                globalTargetSpan,
+                globalSpanRatio,
+                decisions);
+        }
+
+        private static bool IsMorphTransferBoundarySensitive(
+            MorphTransferContext morphTransferContext,
+            int targetIndex,
+            int targetIsland,
+            int preferredSourceIsland)
+        {
+            if (targetIndex < 0 ||
+                targetIsland < 0 ||
+                preferredSourceIsland < 0 ||
+                morphTransferContext.TargetEdgeNetworks.Count == 0 ||
+                morphTransferContext.SourceEdgeNetworks.Count == 0 ||
+                !morphTransferContext.TargetEdgeNetworks.TryGetValue(targetIsland, out var targetEdgeNetwork) ||
+                !morphTransferContext.SourceEdgeNetworks.TryGetValue(preferredSourceIsland, out var sourceEdgeNetwork))
+            {
+                return false;
+            }
+
+            var boundaryPenalty = ComputeTransferIslandEdgePenalty(sourceEdgeNetwork, targetEdgeNetwork);
+            return targetEdgeNetwork.BoundaryVertexIndexes.Contains(targetIndex) || boundaryPenalty >= 0.10f;
+        }
+
+        private static float ComputeMorphTransferStructuralDivergence(
+            float localTopologyScale,
+            float sourceSpan,
+            float targetSpan,
+            float edgeDrivenDamping,
+            bool boundarySensitive,
+            int preferredSourceIsland)
+        {
+            var divergence = 0f;
+            divergence += MathF.Min(0.42f, MathF.Abs(localTopologyScale - 1f) * 0.90f);
+            if (sourceSpan <= 0.0001f || targetSpan <= 0.0001f)
+            {
+                divergence += 0.18f;
+            }
+            else
+            {
+                var spanRatio = MathF.Max(
+                    sourceSpan / MathF.Max(0.0001f, targetSpan),
+                    targetSpan / MathF.Max(0.0001f, sourceSpan));
+                divergence += MathF.Min(0.22f, MathF.Max(0f, spanRatio - 1f) * 0.20f);
+            }
+
+            divergence += MathF.Min(0.30f, (1f - edgeDrivenDamping) * 1.15f);
+            if (boundarySensitive)
+            {
+                divergence += 0.08f;
+            }
+
+            if (preferredSourceIsland < 0)
+            {
+                divergence += 0.10f;
+            }
+
+            return Math.Clamp(divergence, 0f, 1f);
+        }
+
         private static float ComputeAverageNeighborDistance(
             IReadOnlyList<MeshVertex> vertices,
             int vertexIndex,
@@ -24000,10 +24141,21 @@ internal sealed class LocalExportService(
         }
 
         private static bool HasExtremeTopologyAdaptation(
-            IReadOnlyList<MeshVertex> normalizedSourceVertices,
-            IReadOnlyList<MeshVertex> normalizedTargetVertices,
-            MorphTransferContext morphTransferContext)
+            MorphTransferContext morphTransferContext,
+            MorphTransferDecisionCache? decisionCache = null)
         {
+            decisionCache ??= morphTransferContext.DecisionCache;
+            if (decisionCache is { TargetDecisions.Count: > 0 })
+            {
+                var cachedExtremeRatio = decisionCache.TargetDecisions.Count(static decision => MathF.Abs(decision.LocalTopologyScale - 1f) >= 0.22f || decision.StructuralDivergence >= 0.30f)
+                    / (double)Math.Max(1, decisionCache.TargetDecisions.Count);
+                var cachedSevereRatio = decisionCache.TargetDecisions.Count(static decision => MathF.Abs(decision.LocalTopologyScale - 1f) >= 0.35f || decision.StructuralDivergence >= 0.42f)
+                    / (double)Math.Max(1, decisionCache.TargetDecisions.Count);
+                return cachedSevereRatio >= 0.08d || cachedExtremeRatio >= 0.22d;
+            }
+
+            var normalizedSourceVertices = NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
+            var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
             if (normalizedSourceVertices.Count == 0 ||
                 normalizedTargetVertices.Count == 0 ||
                 normalizedSourceVertices.Count != normalizedTargetVertices.Count)
@@ -24386,7 +24538,8 @@ internal sealed class LocalExportService(
             }
 
             var stabilized = retargetedDeltas.ToArray();
-            var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
+            var decisionCache = morphTransferContext.DecisionCache;
+            var normalizedTargetVertices = decisionCache?.NormalizedTargetVertices ?? NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
             for (var targetIndex = 0; targetIndex < stabilized.Length; targetIndex++)
             {
                 var ambiguity = morphTransferContext.TargetTransferAmbiguity[targetIndex];
@@ -24404,9 +24557,12 @@ internal sealed class LocalExportService(
                 var targetZone = targetIndex < morphTransferContext.TargetTransferZones.Length
                     ? morphTransferContext.TargetTransferZones[targetIndex]
                     : -1;
-                var targetIsland = targetIndex < morphTransferContext.TargetTransferIslands.Length
+                var decision = decisionCache is { TargetDecisions.Count: > 0 } && targetIndex < decisionCache.TargetDecisions.Count
+                    ? decisionCache.TargetDecisions[targetIndex]
+                    : null;
+                var targetIsland = decision?.TargetIsland ?? (targetIndex < morphTransferContext.TargetTransferIslands.Length
                     ? morphTransferContext.TargetTransferIslands[targetIndex]
-                    : -1;
+                    : -1);
                 var sampleCount = 0;
                 var averageX = 0f;
                 var averageY = 0f;
@@ -24476,8 +24632,10 @@ internal sealed class LocalExportService(
                     morphTransferContext,
                     targetIndex,
                     ambiguity);
+                var structuralDivergence = decision?.StructuralDivergence ?? 0f;
+                var edgeDrivenDamping = decision?.EdgeDrivenDamping ?? 1f;
                 var blendStrength = Math.Clamp(
-                    0.12f + (ambiguity * 0.48f) + ((1f - partAwareDamping) * 0.35f),
+                    0.12f + (ambiguity * 0.48f) + ((1f - partAwareDamping) * 0.35f) + (structuralDivergence * 0.18f) + ((1f - edgeDrivenDamping) * 0.12f),
                     0.12f,
                     0.72f);
                 stabilized[targetIndex] = (

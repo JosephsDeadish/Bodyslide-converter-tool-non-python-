@@ -19090,7 +19090,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 18);
+            .Single(ctor => ctor.GetParameters().Length == 19);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -19122,7 +19122,8 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             false,
-            Array.Empty<string>()
+            Array.Empty<string>(),
+            null
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -19179,7 +19180,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 18);
+            .Single(ctor => ctor.GetParameters().Length == 19);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -19211,7 +19212,8 @@ public sealed class OutputCompletenessTests
             0.50f,
             0.54f,
             false,
-            Array.Empty<string>()
+            Array.Empty<string>(),
+            null
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -19265,7 +19267,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 18);
+            .Single(ctor => ctor.GetParameters().Length == 19);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -19285,7 +19287,8 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             false,
-            Array.Empty<string>()
+            Array.Empty<string>(),
+            null
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -19408,6 +19411,63 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public async Task CreateMorphTransferContext_BuildsSharedDecisionCacheForHardDivergence()
+    {
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-divergent.nif");
+            var targetPath = Path.Combine(tmpDir, "target-divergent.nif");
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (-0.8f, -0.2f, 0f), (-0.2f, -0.2f, 0f), (0.2f, 0.2f, 0f), (0.8f, 0.2f, 0f),
+                (-0.7f, -0.2f, 0.35f), (-0.2f, -0.2f, 0.35f), (0.2f, 0.2f, 0.35f), (0.7f, 0.2f, 0.35f),
+                (-0.35f, -0.15f, 1.0f), (-0.12f, -0.15f, 1.0f), (0.12f, 0.15f, 1.0f), (0.35f, 0.15f, 1.0f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (-0.8f, -0.2f, 0f), (-0.2f, -0.2f, 0f), (0.2f, 0.2f, 0f), (0.8f, 0.2f, 0f),
+                (-0.7f, -0.2f, 0.35f), (-0.2f, -0.2f, 0.35f), (0.2f, 0.2f, 0.35f), (0.7f, 0.2f, 0.35f),
+                (-2.6f, -0.55f, 1.0f), (-1.1f, -0.55f, 1.0f), (1.1f, 0.55f, 1.0f), (2.6f, 0.55f, 1.0f)
+            ]);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath },
+                new MeshAnalysis("plate", false, 1)
+            });
+
+            Assert.NotNull(context);
+            var extremeRisk = Assert.IsType<bool>(context!.GetType().GetProperty("ExtremeTopologyAdaptationRisk", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(context));
+            Assert.True(extremeRisk);
+
+            var decisionCache = context.GetType().GetProperty("DecisionCache", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(context);
+            Assert.NotNull(decisionCache);
+
+            var targetDecisions = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+                    decisionCache!.GetType().GetProperty("TargetDecisions", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decisionCache))
+                .Cast<object>()
+                .ToArray();
+            Assert.Equal(12, targetDecisions.Length);
+
+            var divergenceScores = targetDecisions
+                .Select(decision => (float)(decision.GetType().GetProperty("StructuralDivergence", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decision) ?? 0f))
+                .ToArray();
+            Assert.Contains(divergenceScores, score => score >= 0.30f);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void StabilizeRetargetedMorphPayload_PrefersMatchingIslandBeforeCrossBoundaryNeighbors()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
@@ -19441,7 +19501,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 18);
+            .Single(ctor => ctor.GetParameters().Length == 19);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -19461,7 +19521,8 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             false,
-            Array.Empty<string>()
+            Array.Empty<string>(),
+            null
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -19512,7 +19573,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 18);
+            .Single(ctor => ctor.GetParameters().Length == 19);
         object CreateContext(IReadOnlyList<string> partHints) => contextCtor.Invoke(
         [
             new[]
@@ -19544,7 +19605,8 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             true,
-            partHints
+            partHints,
+            null
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
