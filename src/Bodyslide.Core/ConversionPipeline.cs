@@ -20136,6 +20136,8 @@ internal sealed class LocalExportService(
             IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences,
             IReadOnlyList<IReadOnlyList<int>> SourceNeighborIndexes,
             IReadOnlyList<IReadOnlyList<int>> TargetNeighborIndexes,
+            int[] SourceTransferZones,
+            int[] TargetTransferZones,
             float[] TargetTransferAmbiguity,
             float SourceGlobalNeighborDistance,
             float TargetGlobalNeighborDistance,
@@ -20159,16 +20161,22 @@ internal sealed class LocalExportService(
                 return null;
             }
 
-            var influenceMap = BuildMorphTransferInfluenceMap(sourceVertices, targetVertices);
             var normalizedSourceVertices = NormalizeVerticesForTransfer(sourceVertices);
             var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
+            var sourceTransferZones = BuildMorphTransferZoneMap(normalizedSourceVertices);
+            var targetTransferZones = BuildMorphTransferZoneMap(normalizedTargetVertices);
+            var influenceMap = BuildMorphTransferInfluenceMap(
+                normalizedSourceVertices,
+                normalizedTargetVertices,
+                sourceTransferZones,
+                targetTransferZones);
             var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
                 ? influenceMap
                     .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
                     .ToArray()
                 : BuildNearestSurfaceMap(sourceVertices, targetVertices);
-            var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(NormalizeVerticesForTransfer(sourceVertices));
-            var neighborIndexes = BuildMorphTransferNeighborIndexes(normalizedTargetVertices);
+            var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(normalizedSourceVertices, sourceTransferZones);
+            var neighborIndexes = BuildMorphTransferNeighborIndexes(normalizedTargetVertices, targetTransferZones);
             var transferAmbiguity = influenceMap
                 .Select(ComputeMorphTransferAmbiguity)
                 .ToArray();
@@ -20183,6 +20191,8 @@ internal sealed class LocalExportService(
                 influenceMap,
                 sourceNeighborIndexes,
                 neighborIndexes,
+                sourceTransferZones,
+                targetTransferZones,
                 transferAmbiguity,
                 sourceGlobalNeighborDistance,
                 targetGlobalNeighborDistance,
@@ -20495,27 +20505,31 @@ internal sealed class LocalExportService(
         }
 
         private static IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> BuildMorphTransferInfluenceMap(
-            IReadOnlyList<MeshVertex> sourceVertices,
-            IReadOnlyList<MeshVertex> targetVertices)
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<MeshVertex> normalizedTargetVertices,
+            IReadOnlyList<int> sourceTransferZones,
+            IReadOnlyList<int> targetTransferZones)
         {
-            if (sourceVertices.Count == 0 || targetVertices.Count == 0)
+            if (normalizedSourceVertices.Count == 0 ||
+                normalizedTargetVertices.Count == 0 ||
+                sourceTransferZones.Count != normalizedSourceVertices.Count ||
+                targetTransferZones.Count != normalizedTargetVertices.Count)
             {
                 return [];
             }
 
-            var normalizedSource = NormalizeVerticesForTransfer(sourceVertices);
-            var normalizedTarget = NormalizeVerticesForTransfer(targetVertices);
-            var sourceByHeight = normalizedSource
+            var sourceByHeight = normalizedSourceVertices
                 .Select(static (vertex, index) => (Vertex: vertex, Index: index))
                 .OrderBy(static entry => entry.Vertex.Z)
                 .ToArray();
             var sortedSourceHeights = sourceByHeight.Select(static entry => entry.Vertex.Z).ToArray();
-            var influences = new IReadOnlyList<MorphTransferInfluence>[targetVertices.Count];
-            var candidateWindowRadius = Math.Clamp(sourceVertices.Count / 40, 48, 256);
+            var influences = new IReadOnlyList<MorphTransferInfluence>[normalizedTargetVertices.Count];
+            var candidateWindowRadius = Math.Clamp(normalizedSourceVertices.Count / 40, 48, 256);
 
-            for (var targetIndex = 0; targetIndex < normalizedTarget.Count; targetIndex++)
+            for (var targetIndex = 0; targetIndex < normalizedTargetVertices.Count; targetIndex++)
             {
-                var targetVertex = normalizedTarget[targetIndex];
+                var targetVertex = normalizedTargetVertices[targetIndex];
+                var targetZone = targetTransferZones[targetIndex];
                 var insertionIndex = Array.BinarySearch(sortedSourceHeights, targetVertex.Z);
                 if (insertionIndex < 0)
                 {
@@ -20533,15 +20547,16 @@ internal sealed class LocalExportService(
                     var dy = targetVertex.Y - candidate.Vertex.Y;
                     var dz = targetVertex.Z - candidate.Vertex.Z;
                     var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
-                    InsertMorphTransferCandidate(bestCandidates, candidate.Index, distanceSquared);
+                    var zonePenalty = ComputeMorphTransferZonePenalty(sourceTransferZones[candidate.Index], targetZone);
+                    InsertMorphTransferCandidate(bestCandidates, candidate.Index, distanceSquared * zonePenalty);
                 }
 
                 if (bestCandidates.Count == 0)
                 {
                     var fallbackIndex = Math.Clamp(
-                        (int)Math.Round(((double)targetIndex / Math.Max(1, targetVertices.Count - 1)) * Math.Max(0, sourceVertices.Count - 1)),
+                        (int)Math.Round(((double)targetIndex / Math.Max(1, normalizedTargetVertices.Count - 1)) * Math.Max(0, normalizedSourceVertices.Count - 1)),
                         0,
-                        Math.Max(0, sourceVertices.Count - 1));
+                        Math.Max(0, normalizedSourceVertices.Count - 1));
                     influences[targetIndex] = [new MorphTransferInfluence(fallbackIndex, 1f)];
                     continue;
                 }
@@ -20592,9 +20607,10 @@ internal sealed class LocalExportService(
         }
 
         private static IReadOnlyList<IReadOnlyList<int>> BuildMorphTransferNeighborIndexes(
-            IReadOnlyList<MeshVertex> normalizedTargetVertices)
+            IReadOnlyList<MeshVertex> normalizedTargetVertices,
+            IReadOnlyList<int> transferZones)
         {
-            if (normalizedTargetVertices.Count == 0)
+            if (normalizedTargetVertices.Count == 0 || transferZones.Count != normalizedTargetVertices.Count)
             {
                 return [];
             }
@@ -20610,6 +20626,7 @@ internal sealed class LocalExportService(
             for (var targetIndex = 0; targetIndex < normalizedTargetVertices.Count; targetIndex++)
             {
                 var targetVertex = normalizedTargetVertices[targetIndex];
+                var targetZone = transferZones[targetIndex];
                 var insertionIndex = Array.BinarySearch(sortedTargetHeights, targetVertex.Z);
                 if (insertionIndex < 0)
                 {
@@ -20631,7 +20648,8 @@ internal sealed class LocalExportService(
                     var dy = targetVertex.Y - candidate.Vertex.Y;
                     var dz = targetVertex.Z - candidate.Vertex.Z;
                     var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
-                    InsertMorphTransferNeighbor(bestNeighbors, candidate.Index, distanceSquared);
+                    var zonePenalty = ComputeMorphTransferZonePenalty(transferZones[candidate.Index], targetZone);
+                    InsertMorphTransferNeighbor(bestNeighbors, candidate.Index, distanceSquared * zonePenalty);
                 }
 
                 neighbors[targetIndex] = bestNeighbors.Select(static candidate => candidate.TargetIndex).ToArray();
@@ -20682,6 +20700,92 @@ internal sealed class LocalExportService(
 
             var competingWeight = Math.Max(0f, totalWeight - dominantWeight);
             return Math.Clamp(((1f - dominantWeight) * 0.65f) + (MathF.Min(competingWeight, 1f) * 0.35f), 0f, 1f);
+        }
+
+        private static int[] BuildMorphTransferZoneMap(IReadOnlyList<MeshVertex> normalizedVertices)
+        {
+            if (normalizedVertices.Count == 0)
+            {
+                return [];
+            }
+
+            var zones = new int[normalizedVertices.Count];
+            for (var index = 0; index < normalizedVertices.Count; index++)
+            {
+                zones[index] = ComputeMorphTransferZoneId(normalizedVertices[index]);
+            }
+
+            return zones;
+        }
+
+        private static int ComputeMorphTransferZoneId(MeshVertex vertex)
+        {
+            var normalizedHeight = Math.Clamp(vertex.Z, 0f, 1f);
+            var normalizedX = Math.Clamp(vertex.X, 0f, 1f);
+            var normalizedY = Math.Clamp(vertex.Y, 0f, 1f);
+            var heightBand = Math.Min(4, (int)MathF.Floor(normalizedHeight * 5f));
+            var lateralBand = normalizedX <= 0.32f ? 0 : normalizedX >= 0.68f ? 2 : 1;
+            var depthBand = normalizedY <= 0.30f ? 0 : normalizedY >= 0.70f ? 2 : 1;
+            var centeredX = MathF.Abs(normalizedX - 0.5f);
+            var centeredY = MathF.Abs(normalizedY - 0.5f);
+            var shellBand = MathF.Max(centeredX, centeredY) >= 0.24f ? 1 : 0;
+            return (((shellBand * 3) + depthBand) * 3 + lateralBand) * 5 + heightBand;
+        }
+
+        private static float ComputeMorphTransferZonePenalty(int candidateZone, int targetZone)
+        {
+            if (candidateZone == targetZone)
+            {
+                return 1f;
+            }
+
+            DecodeMorphTransferZone(candidateZone, out var candidateShell, out var candidateDepth, out var candidateLateral, out var candidateHeight);
+            DecodeMorphTransferZone(targetZone, out var targetShell, out var targetDepth, out var targetLateral, out var targetHeight);
+
+            var penalty = 1f;
+            if (candidateShell != targetShell)
+            {
+                penalty += 0.24f;
+            }
+
+            if (candidateLateral != targetLateral)
+            {
+                penalty += (candidateLateral == 1 || targetLateral == 1) ? 0.10f : 0.18f;
+            }
+
+            if (candidateDepth != targetDepth)
+            {
+                penalty += (candidateDepth == 1 || targetDepth == 1) ? 0.08f : 0.14f;
+            }
+
+            penalty += Math.Min(0.15f, Math.Abs(candidateHeight - targetHeight) * 0.05f);
+            return penalty;
+        }
+
+        private static bool AreMorphTransferZonesCompatible(int leftZone, int rightZone)
+        {
+            if (leftZone == rightZone)
+            {
+                return true;
+            }
+
+            DecodeMorphTransferZone(leftZone, out var leftShell, out var leftDepth, out var leftLateral, out var leftHeight);
+            DecodeMorphTransferZone(rightZone, out var rightShell, out var rightDepth, out var rightLateral, out var rightHeight);
+
+            return leftShell == rightShell &&
+                   leftLateral == rightLateral &&
+                   Math.Abs(leftDepth - rightDepth) <= 1 &&
+                   Math.Abs(leftHeight - rightHeight) <= 1;
+        }
+
+        private static void DecodeMorphTransferZone(int zoneId, out int shellBand, out int depthBand, out int lateralBand, out int heightBand)
+        {
+            heightBand = Math.Abs(zoneId % 5);
+            var remaining = Math.Max(0, zoneId / 5);
+            lateralBand = remaining % 3;
+            remaining /= 3;
+            depthBand = remaining % 3;
+            shellBand = Math.Clamp(remaining / 3, 0, 1);
         }
 
         private static float ComputeAverageNeighborDistance(
@@ -21139,6 +21243,9 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
+                var targetZone = targetIndex < morphTransferContext.TargetTransferZones.Length
+                    ? morphTransferContext.TargetTransferZones[targetIndex]
+                    : -1;
                 var sampleCount = 0;
                 var averageX = 0f;
                 var averageY = 0f;
@@ -21146,6 +21253,13 @@ internal sealed class LocalExportService(
                 foreach (var neighborIndex in neighbors)
                 {
                     if (neighborIndex < 0 || neighborIndex >= retargetedDeltas.Count)
+                    {
+                        continue;
+                    }
+
+                    if (targetZone >= 0 &&
+                        neighborIndex < morphTransferContext.TargetTransferZones.Length &&
+                        !AreMorphTransferZonesCompatible(morphTransferContext.TargetTransferZones[neighborIndex], targetZone))
                     {
                         continue;
                     }
