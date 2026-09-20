@@ -2320,6 +2320,49 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DerivesExplicitWindowBoundaryTrackingFromBsTriShapeConnectivity()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "openwork_bs_trishape_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            ( 1.20f,  0.00f, 0.40f), ( 0.60f,  1.04f, 0.40f), (-0.60f,  1.04f, 0.40f),
+            (-1.20f,  0.00f, 0.40f), (-0.60f, -1.04f, 0.40f), ( 0.60f, -1.04f, 0.40f),
+            ( 0.45f,  0.00f, 0.40f), ( 0.225f,  0.39f, 0.40f), (-0.225f,  0.39f, 0.40f),
+            (-0.45f,  0.00f, 0.40f), (-0.225f, -0.39f, 0.40f), ( 0.225f, -0.39f, 0.40f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 7), (0, 7, 6),
+            (1, 2, 8), (1, 8, 7),
+            (2, 3, 9), (2, 9, 8),
+            (3, 4,10), (3,10, 9),
+            (4, 5,11), (4,11,10),
+            (5, 0, 6), (5, 6,11)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.TopologyIslandSummaries);
+            var summary = Assert.Single(result.TopologyIslandSummaries!.Values);
+            Assert.Equal(1, summary.IslandCount);
+            Assert.Contains(summary.Labels, label => label.Equals("window-boundary-risk", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("explicit-boundary-tracking", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4934,6 +4977,13 @@ internal static class SyntheticNifTestData
     public static async Task WriteBsTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
         => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape", stride);
 
+    public static async Task WriteBsTriShapeStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        IReadOnlyList<(ushort A, ushort B, ushort C)> triangles,
+        int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSTriShape", stride, triangles);
+
     public static async Task WriteBsSubIndexTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
         => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSubIndexTriShape", stride);
 
@@ -4953,7 +5003,8 @@ internal static class SyntheticNifTestData
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
         string blockTypeName,
-        int stride)
+        int stride,
+        IReadOnlyList<(ushort A, ushort B, ushort C)>? explicitTriangles = null)
     {
         Assert.True(stride >= 12 && stride <= 60 && stride % 4 == 0, "Stride must be a 4-byte multiple between 12 and 60.");
         await using var stream = File.Create(path);
@@ -4971,17 +5022,21 @@ internal static class SyntheticNifTestData
         var bsVertexDesc = (0x0000_5000_0000_0057UL & ~(0xFUL << 44)) | ((ulong)(stride / 4) << 44);
 
         // Minimal triangle list (degenerate but sufficient for the transform test)
-        var numTriangles = Math.Max(1, vertices.Count / 3);
+        var triangles = explicitTriangles is { Count: > 0 }
+            ? explicitTriangles
+            : Enumerable.Range(0, Math.Max(1, vertices.Count / 3))
+                .Select(static _ => ((ushort)0, (ushort)0, (ushort)0))
+                .ToArray();
+        var numTriangles = triangles.Count;
         writer.Write(bsVertexDesc);
         writer.Write(numTriangles);
         writer.Write((ushort)vertices.Count);
 
-        // Triangle data: degenerate triangles (all indices 0) just to fill the expected bytes
-        for (var t = 0; t < numTriangles; t++)
+        foreach (var (a, b, c) in triangles)
         {
-            writer.Write((ushort)0);
-            writer.Write((ushort)0);
-            writer.Write((ushort)0);
+            writer.Write(a);
+            writer.Write(b);
+            writer.Write(c);
         }
 
         // Vertex data: BSVertexData layout — Half XYZ at bytes 0,2,4; remaining 14 bytes zero.
@@ -18129,6 +18184,75 @@ public sealed class OutputCompletenessTests
         var sourceIndex = (int)(firstInfluence.GetType().GetProperty("SourceIndex")?.GetValue(firstInfluence) ?? -1);
 
         Assert.Equal(0, sourceIndex);
+    }
+
+    [Fact]
+    public async Task CreateMorphTransferContext_UsesExplicitTopologyConnectivityForIslandMembership()
+    {
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-topology.nif");
+            var targetPath = Path.Combine(tmpDir, "target-topology.nif");
+            var vertices = new List<(float X, float Y, float Z)>();
+            for (var column = 0; column < 6; column++)
+            {
+                vertices.Add((column * 0.010f, 0.000f, 0.000f));
+                vertices.Add((column * 0.010f, 0.010f, 0.000f));
+            }
+
+            for (var column = 0; column < 6; column++)
+            {
+                vertices.Add((0.002f + (column * 0.010f), 0.002f, 0.000f));
+                vertices.Add((0.002f + (column * 0.010f), 0.012f, 0.000f));
+            }
+
+            var triangles = new List<(ushort A, ushort B, ushort C)>();
+            for (ushort column = 0; column < 5; column++)
+            {
+                var top = (ushort)(column * 2);
+                var bottom = (ushort)(top + 1);
+                var nextTop = (ushort)(top + 2);
+                var nextBottom = (ushort)(top + 3);
+                triangles.Add((top, bottom, nextTop));
+                triangles.Add((bottom, nextBottom, nextTop));
+            }
+
+            for (ushort column = 0; column < 5; column++)
+            {
+                var baseIndex = (ushort)(12 + (column * 2));
+                var top = baseIndex;
+                var bottom = (ushort)(baseIndex + 1);
+                var nextTop = (ushort)(baseIndex + 2);
+                var nextBottom = (ushort)(baseIndex + 3);
+                triangles.Add((top, bottom, nextTop));
+                triangles.Add((bottom, nextBottom, nextTop));
+            }
+
+            await SyntheticNifTestData.WriteBsTriShapeStyleAsync(sourcePath, vertices, triangles);
+            await SyntheticNifTestData.WriteBsTriShapeStyleAsync(targetPath, vertices, triangles);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath },
+                new MeshAnalysis("mixed", false, 1)
+            });
+
+            Assert.NotNull(context);
+            var targetTransferIslands = Assert.IsType<int[]>(context!.GetType().GetProperty("TargetTransferIslands", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(context));
+            Assert.Equal(vertices.Count, targetTransferIslands.Length);
+            Assert.Equal(2, targetTransferIslands.Distinct().Count());
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     [Fact]

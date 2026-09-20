@@ -2372,6 +2372,12 @@ internal static class NifGeometrySignatureReader
         IReadOnlyList<int> PartitionSlots,
         IReadOnlyList<string> BoneNames);
 
+    internal sealed record MeshTopologySummary(
+        int VertexCount,
+        int[] ComponentIds,
+        int BoundaryLoopCount,
+        int BoundaryVertexCount);
+
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
         int VertexCount,
@@ -2572,6 +2578,37 @@ internal static class NifGeometrySignatureReader
         }
 
         return null;
+    }
+
+    public static MeshTopologySummary? TryReadTopologySummary(string meshFile)
+    {
+        if (!File.Exists(meshFile) || !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            return TryReadTopologySummary(File.ReadAllBytes(meshFile));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public static MeshTopologySummary? TryReadTopologySummary(byte[] bytes)
+    {
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return null;
+        }
+
+        return TryReadHalfFloatTopologySummary(bytes);
     }
 
     internal static string GetCapabilitySummary()
@@ -3202,6 +3239,263 @@ internal static class NifGeometrySignatureReader
             .OrderBy(static candidate => candidate.VertexDataOffset)
             .ThenByDescending(static candidate => candidate.Score)
             .ToList();
+    }
+
+    private static MeshTopologySummary? TryReadHalfFloatTopologySummary(byte[] bytes)
+    {
+        if (bytes.Length < 64 || !ContainsSupportedSseHalfFloatShape(bytes))
+        {
+            return null;
+        }
+
+        var bestVertexCount = 0;
+        ushort[]? bestTriangles = null;
+        var bestScore = 0;
+
+        var scanEnd = bytes.Length - 16;
+        for (var offset = 32; offset <= scanEnd; offset++)
+        {
+            if (LooksLikeAsciiTokenWindow(bytes, offset, sizeof(ulong)))
+            {
+                continue;
+            }
+
+            var desc = BitConverter.ToUInt64(bytes, offset);
+            var strideDiv4 = (int)((desc >> 44) & 0xF);
+            if (strideDiv4 < 3 || strideDiv4 > 15)
+            {
+                continue;
+            }
+
+            var candidateStride = strideDiv4 * 4;
+            var numTriangles = BitConverter.ToInt32(bytes, offset + 8);
+            if (numTriangles <= 0 || numTriangles > 200_000)
+            {
+                continue;
+            }
+
+            var numVertices = (int)BitConverter.ToUInt16(bytes, offset + 12);
+            if (numVertices < 3 || numVertices > MaxPlausibleVertexCount)
+            {
+                continue;
+            }
+
+            var triangleBytes = checked(numTriangles * 6);
+            var vertStart = offset + 14 + triangleBytes;
+            if (vertStart < 0 || vertStart >= bytes.Length)
+            {
+                continue;
+            }
+
+            var requiredVertexBytes = (long)numVertices * candidateStride;
+            if (vertStart + requiredVertexBytes > bytes.Length)
+            {
+                continue;
+            }
+
+            var triangles = new ushort[numTriangles * 3];
+            var nonDegenerateTriangleCount = 0;
+            for (var triangleIndex = 0; triangleIndex < numTriangles; triangleIndex++)
+            {
+                var triangleOffset = offset + 14 + (triangleIndex * 6);
+                var a = BitConverter.ToUInt16(bytes, triangleOffset);
+                var b = BitConverter.ToUInt16(bytes, triangleOffset + 2);
+                var c = BitConverter.ToUInt16(bytes, triangleOffset + 4);
+                if (a >= numVertices || b >= numVertices || c >= numVertices)
+                {
+                    continue;
+                }
+
+                if (a != b && b != c && a != c)
+                {
+                    nonDegenerateTriangleCount++;
+                }
+
+                var baseIndex = triangleIndex * 3;
+                triangles[baseIndex] = a;
+                triangles[baseIndex + 1] = b;
+                triangles[baseIndex + 2] = c;
+            }
+
+            if (nonDegenerateTriangleCount == 0)
+            {
+                continue;
+            }
+
+            var vertexScore = ScoreHalfFloatVertexBlock(bytes, vertStart, numVertices, candidateStride);
+            if (vertexScore < Math.Max(1, numVertices / 3))
+            {
+                continue;
+            }
+
+            var score = (nonDegenerateTriangleCount * 8) + vertexScore;
+            if (score > bestScore ||
+                (score == bestScore && numVertices > bestVertexCount))
+            {
+                bestScore = score;
+                bestVertexCount = numVertices;
+                bestTriangles = triangles;
+            }
+        }
+
+        if (bestVertexCount <= 0 || bestTriangles is null)
+        {
+            return null;
+        }
+
+        var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
+        var (boundaryLoopCount, boundaryVertexCount) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles);
+        return new MeshTopologySummary(bestVertexCount, componentIds, boundaryLoopCount, boundaryVertexCount);
+    }
+
+    private static int[] BuildTopologyComponentIds(int vertexCount, IReadOnlyList<ushort> triangles)
+    {
+        var parent = Enumerable.Range(0, vertexCount).ToArray();
+
+        int Find(int index)
+        {
+            while (parent[index] != index)
+            {
+                parent[index] = parent[parent[index]];
+                index = parent[index];
+            }
+
+            return index;
+        }
+
+        void Union(int left, int right)
+        {
+            var leftRoot = Find(left);
+            var rightRoot = Find(right);
+            if (leftRoot != rightRoot)
+            {
+                parent[rightRoot] = leftRoot;
+            }
+        }
+
+        for (var index = 0; index + 2 < triangles.Count; index += 3)
+        {
+            var a = triangles[index];
+            var b = triangles[index + 1];
+            var c = triangles[index + 2];
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount)
+            {
+                continue;
+            }
+
+            if (a != b)
+            {
+                Union(a, b);
+            }
+
+            if (b != c)
+            {
+                Union(b, c);
+            }
+
+            if (a != c)
+            {
+                Union(a, c);
+            }
+        }
+
+        var normalized = new int[vertexCount];
+        var idsByRoot = new Dictionary<int, int>();
+        var nextId = 0;
+        for (var index = 0; index < vertexCount; index++)
+        {
+            var root = Find(index);
+            if (!idsByRoot.TryGetValue(root, out var componentId))
+            {
+                componentId = nextId++;
+                idsByRoot[root] = componentId;
+            }
+
+            normalized[index] = componentId;
+        }
+
+        return normalized;
+    }
+
+    private static (int BoundaryLoopCount, int BoundaryVertexCount) AnalyzeBoundaryEdges(int vertexCount, IReadOnlyList<ushort> triangles)
+    {
+        var edgeCounts = new Dictionary<(int Left, int Right), int>();
+        for (var index = 0; index + 2 < triangles.Count; index += 3)
+        {
+            var a = triangles[index];
+            var b = triangles[index + 1];
+            var c = triangles[index + 2];
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount)
+            {
+                continue;
+            }
+
+            AddEdge(a, b);
+            AddEdge(b, c);
+            AddEdge(c, a);
+        }
+
+        var boundaryAdjacency = new Dictionary<int, HashSet<int>>();
+        foreach (var (edge, count) in edgeCounts)
+        {
+            if (count != 1 || edge.Left == edge.Right)
+            {
+                continue;
+            }
+
+            if (!boundaryAdjacency.TryGetValue(edge.Left, out var leftNeighbors))
+            {
+                leftNeighbors = [];
+                boundaryAdjacency[edge.Left] = leftNeighbors;
+            }
+
+            if (!boundaryAdjacency.TryGetValue(edge.Right, out var rightNeighbors))
+            {
+                rightNeighbors = [];
+                boundaryAdjacency[edge.Right] = rightNeighbors;
+            }
+
+            leftNeighbors.Add(edge.Right);
+            rightNeighbors.Add(edge.Left);
+        }
+
+        var visited = new HashSet<int>();
+        var loopCount = 0;
+        foreach (var vertex in boundaryAdjacency.Keys)
+        {
+            if (!visited.Add(vertex))
+            {
+                continue;
+            }
+
+            loopCount++;
+            var queue = new Queue<int>();
+            queue.Enqueue(vertex);
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                if (!boundaryAdjacency.TryGetValue(current, out var neighbors))
+                {
+                    continue;
+                }
+
+                foreach (var neighbor in neighbors)
+                {
+                    if (visited.Add(neighbor))
+                    {
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+        }
+
+        return (loopCount, boundaryAdjacency.Count);
+
+        void AddEdge(int left, int right)
+        {
+            var normalized = left <= right ? (left, right) : (right, left);
+            edgeCounts[normalized] = edgeCounts.TryGetValue(normalized, out var count) ? count + 1 : 1;
+        }
     }
 
     /// <summary>
@@ -8517,34 +8811,54 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         var summaries = new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase);
         foreach (var meshFile in meshFiles)
         {
-            var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
-            if (vertices is null || vertices.Count < 12)
+            List<int> islandSizes;
+            var boundaryLoopCount = 0;
+            var boundaryVertexCoverage = 0d;
+            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
+            if (topologySummary is { VertexCount: > 0 } &&
+                topologySummary.ComponentIds.Length == topologySummary.VertexCount)
             {
-                continue;
+                islandSizes = topologySummary.ComponentIds
+                    .GroupBy(static componentId => componentId)
+                    .Select(static group => group.Count())
+                    .OrderByDescending(static count => count)
+                    .ToList();
+                boundaryLoopCount = topologySummary.BoundaryLoopCount;
+                boundaryVertexCoverage = topologySummary.VertexCount <= 0
+                    ? 0d
+                    : topologySummary.BoundaryVertexCount / (double)topologySummary.VertexCount;
             }
-
-            var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
-            if (sampledVertices.Count < 12)
+            else
             {
-                continue;
-            }
+                var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
+                if (vertices is null || vertices.Count < 12)
+                {
+                    continue;
+                }
 
-            var normalizedVertices = NormalizeTopologyVertices(sampledVertices);
-            if (normalizedVertices.Count < 12)
-            {
-                continue;
-            }
+                var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
+                if (sampledVertices.Count < 12)
+                {
+                    continue;
+                }
 
-            var radius = ComputeIslandConnectionRadius(normalizedVertices);
-            if (radius <= 0.0001f)
-            {
-                continue;
-            }
+                var normalizedVertices = NormalizeTopologyVertices(sampledVertices);
+                if (normalizedVertices.Count < 12)
+                {
+                    continue;
+                }
 
-            var islandSizes = ComputeIslandComponentSizes(normalizedVertices, radius);
-            if (islandSizes.Count == 0)
-            {
-                continue;
+                var radius = ComputeIslandConnectionRadius(normalizedVertices);
+                if (radius <= 0.0001f)
+                {
+                    continue;
+                }
+
+                islandSizes = ComputeIslandComponentSizes(normalizedVertices, radius).ToList();
+                if (islandSizes.Count == 0)
+                {
+                    continue;
+                }
             }
 
             var totalVertices = islandSizes.Sum();
@@ -8575,7 +8889,13 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             var meshGeometryLabels = geometryPartLabels.TryGetValue(meshName, out var meshLabels)
                 ? meshLabels
                 : [];
-            if (islandSizes.Count >= 2 &&
+            if ((boundaryLoopCount > 1 || boundaryVertexCoverage >= 0.28d) &&
+                islandSizes.Count >= 1)
+            {
+                labels.Add("window-boundary-risk");
+                labels.Add("explicit-boundary-tracking");
+            }
+            else if (islandSizes.Count >= 2 &&
                 meshGeometryLabels.Any(label => label.Equals("open-window", StringComparison.OrdinalIgnoreCase) ||
                                                 label.Equals("cage-frame", StringComparison.OrdinalIgnoreCase)))
             {
@@ -20267,8 +20587,18 @@ internal sealed class LocalExportService(
             var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
             var sourceTransferZones = BuildMorphTransferZoneMap(normalizedSourceVertices);
             var targetTransferZones = BuildMorphTransferZoneMap(normalizedTargetVertices);
-            var sourceTransferIslands = BuildMorphTransferIslandMap(normalizedSourceVertices);
-            var targetTransferIslands = BuildMorphTransferIslandMap(normalizedTargetVertices);
+            var sourceTransferIslands = sourceMeshFiles
+                .Select(NifGeometrySignatureReader.TryReadTopologySummary)
+                .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
+                                           summary.ComponentIds.Length == sourceVertices.Count)?
+                .ComponentIds
+                ?? BuildMorphTransferIslandMap(normalizedSourceVertices);
+            var targetTransferIslands = writtenNifs
+                .Select(NifGeometrySignatureReader.TryReadTopologySummary)
+                .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
+                                           summary.ComponentIds.Length == targetVertices.Count)?
+                .ComponentIds
+                ?? BuildMorphTransferIslandMap(normalizedTargetVertices);
             var targetIslandToSourceIslandMap = BuildMorphTransferIslandMatches(
                 normalizedSourceVertices,
                 normalizedTargetVertices,
