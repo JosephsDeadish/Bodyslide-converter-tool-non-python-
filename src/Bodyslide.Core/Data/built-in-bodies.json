@@ -1243,7 +1243,14 @@
       "Argonian Body",
       "Saxhleel",
       "Cathay",
-      "Senche"
+      "Senche",
+      "Lykaios",
+      "Lupine",
+      "Wolffolk",
+      "Canine Humanoid",
+      "Vulpine",
+      "Foxfolk",
+      "Digitigrade Beast"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1264,7 +1271,14 @@
       "tail",
       "saxhleel",
       "cathay",
-      "senche"
+      "senche",
+      "lykaios",
+      "lupine",
+      "canine",
+      "wolf",
+      "werewolf",
+      "vulpine",
+      "fox"
     ],
     "sliderNames": [
       "Belly",
@@ -1295,6 +1309,13 @@
       "saxhleel",
       "cathay",
       "senche",
+      "lykaios",
+      "lupine",
+      "canine",
+      "wolf",
+      "werewolf",
+      "vulpine",
+      "fox",
       "feline",
       "reptile",
       "digitigrade"
@@ -1306,7 +1327,9 @@
       "khajiit",
       "argonian",
       "scales",
-      "fur"
+      "fur",
+      "wolf",
+      "fox"
     ],
     "physicsTokens": [],
     "vertexCountMin": 4000,

@@ -1231,9 +1231,11 @@ public static class PresetCatalog
         ["Vanilla Zeroed"]    = new("Vanilla Zeroed",     "Vanilla", "zeroed",   "none"),
         ["Vanilla Beast Balanced"] = new("Vanilla Beast Balanced", "Vanilla Beast", "balanced", "none"),
         ["Vanilla Beast Athletic"] = new("Vanilla Beast Athletic", "Vanilla Beast", "athletic", "none"),
+        ["Vanilla Beast Lean"] = new("Vanilla Beast Lean", "Vanilla Beast", "lean", "none"),
         ["Vanilla Beast Zeroed"] = new("Vanilla Beast Zeroed", "Vanilla Beast", "zeroed", "none"),
         ["Goat Humanoid Balanced"] = new("Goat Humanoid Balanced", "Goat Humanoid", "balanced", "none"),
         ["Goat Humanoid Athletic"] = new("Goat Humanoid Athletic", "Goat Humanoid", "athletic", "none"),
+        ["Goat Humanoid Lean"] = new("Goat Humanoid Lean", "Goat Humanoid", "lean", "none"),
         ["Goat Humanoid Zeroed"] = new("Goat Humanoid Zeroed", "Goat Humanoid", "zeroed", "none"),
         ["Hagraven Balanced"] = new("Hagraven Balanced", "Hagraven", "balanced", "none"),
         ["Hagraven Lean"] = new("Hagraven Lean", "Hagraven", "lean", "none"),
@@ -1243,9 +1245,11 @@ public static class PresetCatalog
         ["Spriggan Zeroed"] = new("Spriggan Zeroed", "Spriggan", "zeroed", "none"),
         ["Equine Humanoid Balanced"] = new("Equine Humanoid Balanced", "Equine Humanoid", "balanced", "none"),
         ["Equine Humanoid Athletic"] = new("Equine Humanoid Athletic", "Equine Humanoid", "athletic", "none"),
+        ["Equine Humanoid Lean"] = new("Equine Humanoid Lean", "Equine Humanoid", "lean", "none"),
         ["Equine Humanoid Zeroed"] = new("Equine Humanoid Zeroed", "Equine Humanoid", "zeroed", "none"),
         ["Avian Humanoid Balanced"] = new("Avian Humanoid Balanced", "Avian Humanoid", "balanced", "none"),
         ["Avian Humanoid Athletic"] = new("Avian Humanoid Athletic", "Avian Humanoid", "athletic", "none"),
+        ["Avian Humanoid Lean"] = new("Avian Humanoid Lean", "Avian Humanoid", "lean", "none"),
         ["Avian Humanoid Zeroed"] = new("Avian Humanoid Zeroed", "Avian Humanoid", "zeroed", "none"),
         ["Vanilla to Vanilla Beast"] = new("Vanilla to Vanilla Beast", "Vanilla Beast", "balanced", "none"),
         ["Vanilla to CBBE"]   = new("Vanilla to CBBE",    "CBBE",    "balanced", "none"),
@@ -18720,7 +18724,17 @@ internal sealed class LocalExportService(
     private static bool IsFomodRootSupportFile(string? fileName) =>
         !string.IsNullOrWhiteSpace(fileName) &&
         (fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
+         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Builds a BSD (BodySlide Data) binary payload for a single slider.

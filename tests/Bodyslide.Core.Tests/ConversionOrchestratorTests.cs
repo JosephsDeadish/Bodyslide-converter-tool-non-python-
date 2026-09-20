@@ -1107,6 +1107,9 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("TestArmor_SlidesmithPatch.esp", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("README.txt", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("conversion-quality.json", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("plugin-patches.json", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("preview-workbench.html", moduleConfig, StringComparison.Ordinal);
         }
         finally
         {
@@ -2433,6 +2436,29 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForCanineVariantOnVanillaBeastBody()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["lykaios_customrace_vampire_follower.esp"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/lykaios/paw_boots_0.nif"],
+                    0x100,
+                    "LykaiosWerewolfFollowerAddon",
+                    [32, 37]),
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Vanilla Beast", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Canine variant", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BasicRaceCompatibilityService_WarnsForKhajiitRaceWithHumanoidBody()
     {
         var service = new BasicRaceCompatibilityService();
@@ -2579,6 +2605,8 @@ public sealed class ConversionOrchestratorTests
     [InlineData("faun_ramhorn_customrace.esp", "Goat variant")]
     [InlineData("equus_marefolk_follower.esp", "Equine variant")]
     [InlineData("featherfolk_pinion_follower.esp", "Avian variant")]
+    [InlineData("lykaios_customrace_vampire_follower.esp", "Canine variant")]
+    [InlineData("werewolf_vulpine_child_patch.esp", "Canine variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -8459,8 +8487,17 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("tail", groupName);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("PinionFeatherSwing01", out var wingGroup));
         Assert.Equal("wing", wingGroup);
-        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ManeRoot", "Forelock"]));
-        Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Feather01.L", "Feather01.R"]));
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("PawFront.L", "digitigrade-beast", out var pawFallbacks));
+        Assert.Contains("Hoof.L", pawFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingMembrane.L", "avian-humanoid", out var membraneFallbacks));
+        Assert.Contains("WingTip.L", membraneFallbacks);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailFluffSwing", out var tailGroup));
+        Assert.Equal("tail", tailGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("DewClawRearL", out var hoofGroup));
+        Assert.Equal("hoof", hoofGroup);
+        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ManeTip", "TailTip"]));
+        Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingMembrane.L", "Feather03.R"]));
+        Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["PawFront.L", "DigitigradeToe.R"]));
     }
 }
 
@@ -8502,11 +8539,15 @@ public sealed class ExpandedPresetTests
     [InlineData("Equine Humanoid Balanced", "Equine Humanoid")]
     [InlineData("Avian Humanoid Balanced", "Avian Humanoid")]
     [InlineData("Vanilla Beast Athletic", "Vanilla Beast")]
+    [InlineData("Vanilla Beast Lean", "Vanilla Beast")]
     [InlineData("Goat Humanoid Athletic", "Goat Humanoid")]
+    [InlineData("Goat Humanoid Lean", "Goat Humanoid")]
     [InlineData("Hagraven Lean", "Hagraven")]
     [InlineData("Spriggan Lean", "Spriggan")]
     [InlineData("Equine Humanoid Athletic", "Equine Humanoid")]
+    [InlineData("Equine Humanoid Lean", "Equine Humanoid")]
     [InlineData("Avian Humanoid Athletic", "Avian Humanoid")]
+    [InlineData("Avian Humanoid Lean", "Avian Humanoid")]
     [InlineData("SAM Light Balanced", "SAM Light")]
     [InlineData("UBE Athletic", "UBE")]
     [InlineData("Vanilla to Vanilla Beast", "Vanilla Beast")]
@@ -8794,6 +8835,9 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Featherfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
     [InlineData("Cathay", "Vanilla Beast")]
+    [InlineData("Lykaios", "Vanilla Beast")]
+    [InlineData("Canine Humanoid", "Vanilla Beast")]
+    [InlineData("Foxfolk", "Vanilla Beast")]
     [InlineData("Schlongs-of-Skyrim", "SOS")]
     [InlineData("Sam-Light", "SAM Light")]
     [InlineData("SAM Lite", "SAM Light")]
@@ -8820,6 +8864,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Birdfolk", "Avian Humanoid")]
     [InlineData("Featherfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
+    [InlineData("Digitigrade Beast", "Vanilla Beast")]
+    [InlineData("Lupine", "Vanilla Beast")]
     [InlineData("SAM Lite", "SAM Light")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
@@ -17140,6 +17186,67 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.Contains("Pinion Sweep R", repaired);
         Assert.Contains("Mane Toss Chain", repaired);
         Assert.DoesNotContain("Horn Trail", repaired);
+    }
+
+    [Fact]
+    public void RepairTargetBones_PreservesDigitigradeAndTailTipChains()
+    {
+        var repaired = PhysicsRepairCatalog.RepairTargetBones(
+            ["Tail5", "Hoof.L", "Hoof.R"],
+            ["Tail5", "TailTip", "PawFront.L", "PawFront.R", "DewClaw.L", "DewClaw.R"],
+            ["TailFluffChain", "TailTipCurl", "PawFrontGuardL", "PawRearGuardR", "DewClawBackR", "WingMembraneL"]);
+
+        Assert.Contains("TailFluffChain", repaired);
+        Assert.Contains("TailTipCurl", repaired);
+        Assert.Contains("PawFrontGuardL", repaired);
+        Assert.Contains("PawRearGuardR", repaired);
+        Assert.Contains("DewClawBackR", repaired);
+        Assert.DoesNotContain("WingMembraneL", repaired);
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingFomodEntriesForRootReviewArtifacts()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            var pluginPatchReportPath = Path.Combine(outputDirectory, "plugin-patches.json");
+            var qualityReportPath = Path.Combine(outputDirectory, "conversion-quality.json");
+            var previewWorkbenchPath = Path.Combine(outputDirectory, "preview-workbench.html");
+            File.WriteAllText(pluginPatchReportPath, "{}");
+            File.WriteAllText(qualityReportPath, "{}");
+            File.WriteAllText(previewWorkbenchPath, "<html/>");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><file source=\"README.txt\" destination=\"README.txt\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                new ConversionRequest(
+                    InputPath: Path.Combine(outputDirectory, "input.nif"),
+                    TargetBody: "CBBE",
+                    OutputDirectory: outputDirectory),
+                outputDirectory,
+                [pluginPatchReportPath, qualityReportPath, previewWorkbenchPath],
+                new BodySlideProject("UnusedProject", "CBBE", [], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("plugin-patches.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
     }
 }
 
