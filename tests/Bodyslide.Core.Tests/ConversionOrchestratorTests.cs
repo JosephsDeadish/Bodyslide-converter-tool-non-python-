@@ -17167,7 +17167,9 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"ReusedVariantCount\": 0", qualityJson);
             Assert.Contains("\"FallbackVariantCount\": 1", qualityJson);
             Assert.Contains("\"RetargetedVariantCount\": 1", qualityJson);
+            Assert.Contains("\"ExtremelyAdaptedVariantCount\": 1", qualityJson);
             Assert.Contains("\"Code\": \"retargeted-morph-reuse\"", qualityJson);
+            Assert.Contains("\"Code\": \"extreme-topology-adaptation\"", qualityJson);
         }
         finally
         {
@@ -17328,7 +17330,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 9);
+            .Single(ctor => ctor.GetParameters().Length == 10);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17351,7 +17353,8 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
             new[] { 0f, 0f, 0f, 0f },
             1f,
-            1f
+            1f,
+            false
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17408,7 +17411,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 9);
+            .Single(ctor => ctor.GetParameters().Length == 10);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17431,7 +17434,8 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
             new[] { 0f, 0f, 0f, 0f },
             0.50f,
-            0.54f
+            0.54f,
+            false
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17485,7 +17489,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 9);
+            .Single(ctor => ctor.GetParameters().Length == 10);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -17496,7 +17500,8 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
             new[] { 0f, 0.80f, 0f },
             1f,
-            1f
+            1f,
+            false
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]

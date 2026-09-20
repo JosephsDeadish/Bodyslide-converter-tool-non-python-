@@ -248,6 +248,31 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversExtremeTopologyAdaptationArtifacts()
+    {
+        var summary = new ConversionValidationSummary(
+            "REVIEW",
+            36,
+            1,
+            1,
+            0,
+            [
+                new ConversionValidationIssue("extreme-topology-adaptation", "medium", "Reused morphs needed extreme structural adaptation."),
+                new ConversionValidationIssue("retargeted-morph-reuse", "low", "Source deltas were reused through retargeting."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "3BA", maxActions: 6);
+        var artifacts = ConversionValidationGuidance.GetIssueReviewArtifacts(
+            new ConversionValidationIssue("extreme-topology-adaptation", "medium", "Reused morphs needed extreme structural adaptation."));
+
+        Assert.Contains(actions, action => action.Contains("morphs.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("split parts", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("straps", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("morphs.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Contains("ShapeData", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPartialOutputAndMasterChainCases()
     {
         var summary = new ConversionValidationSummary(

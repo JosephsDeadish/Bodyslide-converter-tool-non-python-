@@ -132,7 +132,9 @@ public sealed record MorphPayloadReuseSummary(
     int RetargetedVariantCount = 0,
     IReadOnlyList<string>? ReusedVariants = null,
     IReadOnlyList<string>? FallbackVariants = null,
-    IReadOnlyList<string>? RetargetedVariants = null);
+    IReadOnlyList<string>? RetargetedVariants = null,
+    int ExtremelyAdaptedVariantCount = 0,
+    IReadOnlyList<string>? ExtremelyAdaptedVariants = null);
 public sealed record MorphSet(
     string LowMorph,
     string HighMorph,
@@ -357,6 +359,8 @@ internal static class ConversionValidationGuidance
                 "Build the generated project in BodySlide at low and high weights, then compare the results in preview-workbench.html or Outfit Studio for slider drift before release.",
             "retargeted-morph-reuse" =>
                 "Build the generated BodySlide project at low/high weights, then compare the reused morph result in Outfit Studio and preview-workbench.html to catch slider drift caused by vertex-count retargeting.",
+            "extreme-topology-adaptation" =>
+                "Open morphs.json, preview-workbench.html, and the generated BodySlide ShapeData in Outfit Studio, then inspect split parts, holes, straps, and layered pieces for over-smoothed or over-scaled reuse before shipping. If those regions drift badly, switch to a closer source body or plan manual cleanup instead of trusting the reused morph payloads.",
             "topology-mismatch-risk" =>
                 "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
             "missing-source-partitions" =>
@@ -501,6 +505,8 @@ internal static class ConversionValidationGuidance
                 ["conversion-quality.json", "CalienteTools/BodySlide/ShapeData/"],
             "synthetic-morph-fallback" or "retargeted-morph-reuse" =>
                 ["conversion-quality.json", "preview-workbench.html", "CalienteTools/BodySlide/ShapeData/"],
+            "extreme-topology-adaptation" =>
+                ["conversion-quality.json", "morphs.json", "preview-workbench.html", "CalienteTools/BodySlide/ShapeData/"],
             "topology-mismatch-risk" or "clipping-detected" or "voxel-penetration" or "pose-risk" or "auto-correction-applied" =>
                 ["conversion-quality.json", "preview-workbench.html", "pose-simulation-report.json"],
             "missing-source-partitions" or "unknown-export-partitions" =>
@@ -14022,7 +14028,7 @@ internal sealed class LocalExportService(
                 morphs.ReusableSourceMorphPayloads,
                 EstimateMorphVertexCount(writtenNifs, request.TargetBody),
                 morphTransferContext)
-            : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
+            : new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], [], 0, []);
         var sourceNifSupport = NifGeometrySignatureReader.Inspect(armor.MeshFiles);
         var convertedNifSupport = NifGeometrySignatureReader.Inspect(writtenNifs);
         var nifSupport = sourceNifSupport
@@ -16080,6 +16086,17 @@ internal sealed class LocalExportService(
                 "retargeted-morph-reuse",
                 "low",
                 $"{payloadReuse.RetargetedVariantCount} morph variant(s) reused source TRI/BSD deltas through conservative topology retargeting{detail}."));
+        }
+
+        if (payloadReuse.ExtremelyAdaptedVariantCount > 0)
+        {
+            var detail = payloadReuse.ExtremelyAdaptedVariants is { Count: > 0 }
+                ? $": {string.Join(", ", payloadReuse.ExtremelyAdaptedVariants.Take(6))}"
+                : string.Empty;
+            issues.Add(new ConversionValidationIssue(
+                "extreme-topology-adaptation",
+                "medium",
+                $"{payloadReuse.ExtremelyAdaptedVariantCount} reused morph variant(s) required extreme topology adaptation and should be reviewed for split parts, holes, straps, or layered-piece drift{detail}."));
         }
 
         if (topologyMismatchRisk)
@@ -19546,12 +19563,13 @@ internal sealed class LocalExportService(
         {
             if (sliders.Count == 0 || reusableSourceMorphPayloads is null || reusableSourceMorphPayloads.Count == 0)
             {
-                return new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], []);
+                return new MorphPayloadReuseSummary(0, 0, 0, 0, [], [], [], 0, []);
             }
 
             var reusedVariants = new List<string>();
             var fallbackVariants = new List<string>();
             var retargetedVariants = new List<string>();
+            var extremelyAdaptedVariants = new List<string>();
             foreach (var slider in sliders)
             {
                 if (!reusableSourceMorphPayloads.TryGetValue(slider, out var variants))
@@ -19570,15 +19588,29 @@ internal sealed class LocalExportService(
                 retargetedVariants.Count,
                 reusedVariants,
                 fallbackVariants,
-                retargetedVariants);
+                retargetedVariants,
+                extremelyAdaptedVariants.Count,
+                extremelyAdaptedVariants);
 
             void TrackPayloadReuseVariant(string sliderKey, string variantName, bool isHighWeight)
             {
-                if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderKey, isHighWeight, vertexCount, morphTransferContext, out _, out var wasRetargeted))
+                if (TryGetReusableMorphPayload(
+                        reusableSourceMorphPayloads,
+                        sliderKey,
+                        isHighWeight,
+                        vertexCount,
+                        morphTransferContext,
+                        out _,
+                        out var wasRetargeted,
+                        out var usedExtremeAdaptation))
                 {
                     if (wasRetargeted)
                     {
                         retargetedVariants.Add(variantName);
+                        if (usedExtremeAdaptation)
+                        {
+                            extremelyAdaptedVariants.Add(variantName);
+                        }
                     }
                     else
                     {
@@ -19605,7 +19637,8 @@ internal sealed class LocalExportService(
             IReadOnlyList<IReadOnlyList<int>> TargetNeighborIndexes,
             float[] TargetTransferAmbiguity,
             float SourceGlobalNeighborDistance,
-            float TargetGlobalNeighborDistance);
+            float TargetGlobalNeighborDistance,
+            bool ExtremeTopologyAdaptationRisk);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
@@ -19639,7 +19672,7 @@ internal sealed class LocalExportService(
             var sourceGlobalNeighborDistance = ComputeGlobalNeighborDistance(normalizedSourceVertices, sourceNeighborIndexes);
             var targetGlobalNeighborDistance = ComputeGlobalNeighborDistance(normalizedTargetVertices, neighborIndexes);
 
-            return new MorphTransferContext(
+            var context = new MorphTransferContext(
                 sourceVertices,
                 targetVertices,
                 nearestSurfaceMap,
@@ -19648,7 +19681,12 @@ internal sealed class LocalExportService(
                 neighborIndexes,
                 transferAmbiguity,
                 sourceGlobalNeighborDistance,
-                targetGlobalNeighborDistance);
+                targetGlobalNeighborDistance,
+                false);
+            return context with
+            {
+                ExtremeTopologyAdaptationRisk = HasExtremeTopologyAdaptation(normalizedSourceVertices, normalizedTargetVertices, context)
+            };
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
@@ -19659,7 +19697,7 @@ internal sealed class LocalExportService(
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
             MorphTransferContext? morphTransferContext)
         {
-            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out _))
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out _, out _))
             {
                 return sourcePayload.Deltas;
             }
@@ -19680,10 +19718,12 @@ internal sealed class LocalExportService(
             int vertexCount,
             MorphTransferContext? morphTransferContext,
             out SourceMorphPayload payload,
-            out bool wasRetargeted)
+            out bool wasRetargeted,
+            out bool usedExtremeAdaptation)
         {
             payload = default!;
             wasRetargeted = false;
+            usedExtremeAdaptation = false;
             if (reusableSourceMorphPayloads is null ||
                 !reusableSourceMorphPayloads.TryGetValue(sliderName, out var variants))
             {
@@ -19714,6 +19754,7 @@ internal sealed class LocalExportService(
                 Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount, morphTransferContext)
             };
             wasRetargeted = true;
+            usedExtremeAdaptation = IsExtremeTopologyAdaptation(candidate.VertexCount, vertexCount, morphTransferContext);
             return true;
         }
 
@@ -20146,6 +20187,63 @@ internal sealed class LocalExportService(
             }
 
             return Math.Clamp((targetNeighborDistance / sourceNeighborDistance) / globalNeighborRatio, 0.65f, 1.50f);
+        }
+
+        private static bool IsExtremeTopologyAdaptation(
+            int sourceVertexCount,
+            int targetVertexCount,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (sourceVertexCount <= 0 || targetVertexCount <= 0)
+            {
+                return false;
+            }
+
+            var vertexDeltaRatio = Math.Abs(targetVertexCount - sourceVertexCount) / (double)Math.Max(1, sourceVertexCount);
+            if (vertexDeltaRatio >= 0.50d)
+            {
+                return true;
+            }
+
+            return morphTransferContext?.ExtremeTopologyAdaptationRisk ?? false;
+        }
+
+        private static bool HasExtremeTopologyAdaptation(
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<MeshVertex> normalizedTargetVertices,
+            MorphTransferContext morphTransferContext)
+        {
+            if (normalizedSourceVertices.Count == 0 ||
+                normalizedTargetVertices.Count == 0 ||
+                normalizedSourceVertices.Count != normalizedTargetVertices.Count)
+            {
+                return false;
+            }
+
+            var extremeLocalScaleCount = 0;
+            var severeLocalScaleCount = 0;
+            for (var targetIndex = 0; targetIndex < normalizedTargetVertices.Count; targetIndex++)
+            {
+                var localScale = ComputeLocalTopologyScale(
+                    normalizedSourceVertices,
+                    normalizedTargetVertices,
+                    morphTransferContext,
+                    targetIndex);
+                var drift = MathF.Abs(localScale - 1f);
+                if (drift >= 0.22f)
+                {
+                    extremeLocalScaleCount++;
+                }
+
+                if (drift >= 0.35f)
+                {
+                    severeLocalScaleCount++;
+                }
+            }
+
+            var extremeRatio = extremeLocalScaleCount / (double)Math.Max(1, normalizedTargetVertices.Count);
+            var severeRatio = severeLocalScaleCount / (double)Math.Max(1, normalizedTargetVertices.Count);
+            return severeRatio >= 0.08d || extremeRatio >= 0.22d;
         }
 
         private static float ComputeWeightedSourceNeighborDistance(
