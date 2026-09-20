@@ -17157,60 +17157,80 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public async Task RetargetMorphPayload_ScalesReusedMorphsForStructurallyDifferentTargets()
+    public void AdaptRetargetedMorphPayload_ScalesReusedMorphsForStructurallyDifferentTargets()
     {
-        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
+        var adaptMethod = typeof(LocalExportService).GetMethod("AdaptRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        Assert.NotNull(adaptMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
 
-        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(createContext);
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
 
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-
-        try
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
         {
-            var sourcePath = Path.Combine(tmpDir, "source-bell.nif");
-            var targetPath = Path.Combine(tmpDir, "target-bell.nif");
-            await SyntheticNifTestData.WriteAsync(sourcePath,
-            [
-                (-0.20f, 0f, 0f),
-                (0.20f, 0f, 0f),
-                (-0.20f, 0f, 1f),
-                (0.20f, 0f, 1f),
-                (-0.20f, 0f, 2f),
-                (0.20f, 0f, 2f)
-            ]);
-            await SyntheticNifTestData.WriteAsync(targetPath,
-            [
-                (-0.10f, 0f, 0f),
-                (0.10f, 0f, 0f),
-                (-0.95f, 0f, 1f),
-                (0.95f, 0f, 1f)
-            ]);
-
-            var context = createContext!.Invoke(null, new object[]
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
             {
-                new[] { sourcePath },
-                new[] { targetPath }
-            });
-            Assert.NotNull(context);
+                list.Add(influence);
+            }
 
-            var sourceDeltas = Enumerable.Repeat((X: 1f, Y: 0f, Z: 0.25f), 6).ToArray();
-
-            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                method!.Invoke(null, [sourceDeltas, 4, context]));
-
-            Assert.Equal(4, result.Count);
-            Assert.True(result[2].X > 1.10f, $"Expected widened mid-body topology to amplify lateral delta reuse, got {result[2].X}.");
-            Assert.True(result[3].X > 1.10f, $"Expected widened mid-body topology to amplify lateral delta reuse, got {result[3].X}.");
-            Assert.True(result[2].Z > 0.25f, $"Expected axial delta to scale slightly with topology adaptation, got {result[2].Z}.");
-            Assert.True(result[3].Z > 0.25f, $"Expected axial delta to scale slightly with topology adaptation, got {result[3].Z}.");
+            return list;
         }
-        finally
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
+
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6);
+        var context = contextCtor.Invoke(
+        [
+            new[]
+            {
+                new MeshVertex(-1f, 0f, 0f),
+                new MeshVertex(1f, 0f, 0f),
+                new MeshVertex(-1f, 0f, 1f),
+                new MeshVertex(1f, 0f, 1f)
+            },
+            new[]
+            {
+                new MeshVertex(-0.5f, 0f, 0f),
+                new MeshVertex(0.5f, 0f, 0f),
+                new MeshVertex(-4f, 0f, 1f),
+                new MeshVertex(4f, 0f, 1f)
+            },
+            new[] { 0, 1, 2, 3 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            new[] { 0f, 0f, 0f, 0f }
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
         {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f)
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            adaptMethod!.Invoke(null, [retargeted, context]));
+
+        Assert.Equal(4, result.Count);
+        Assert.True(result[0].X < 0.90f, $"Expected narrowed lower-body topology to reduce lateral delta reuse, got {result[0].X}.");
+        Assert.True(result[1].X < 0.90f, $"Expected narrowed lower-body topology to reduce lateral delta reuse, got {result[1].X}.");
+        Assert.True(result[0].Z < 0.25f, $"Expected axial delta to scale down slightly with topology adaptation, got {result[0].Z}.");
+        Assert.True(result[1].Z < 0.25f, $"Expected axial delta to scale down slightly with topology adaptation, got {result[1].Z}.");
+        Assert.Equal(1f, result[2].X, 3);
+        Assert.Equal(1f, result[3].X, 3);
     }
 
     [Fact]

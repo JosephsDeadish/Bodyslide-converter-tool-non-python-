@@ -19394,58 +19394,6 @@ internal sealed class LocalExportService(
                 return retargeted;
             }
 
-            private static IReadOnlyList<(float X, float Y, float Z)> AdaptRetargetedMorphPayload(
-                IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas,
-                MorphTransferContext morphTransferContext)
-            {
-                if (retargetedDeltas.Count < 3 ||
-                    morphTransferContext.SourceVertices.Count < 3 ||
-                    morphTransferContext.TargetVertices.Count != retargetedDeltas.Count ||
-                    morphTransferContext.TargetToSourceInfluences.Count != retargetedDeltas.Count ||
-                    morphTransferContext.TargetNeighborIndexes.Count != retargetedDeltas.Count)
-                {
-                    return retargetedDeltas;
-                }
-
-                var normalizedSourceVertices = NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
-                var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
-                var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(normalizedSourceVertices);
-                var adapted = retargetedDeltas.ToArray();
-
-                for (var targetIndex = 0; targetIndex < adapted.Length; targetIndex++)
-                {
-                    var targetSpacing = ComputeAverageNeighborDistance(
-                        normalizedTargetVertices,
-                        targetIndex,
-                        morphTransferContext.TargetNeighborIndexes[targetIndex]);
-                    var sourceSpacing = ComputeAverageSourceNeighborDistance(
-                        normalizedSourceVertices,
-                        sourceNeighborIndexes,
-                        morphTransferContext,
-                        targetIndex);
-
-                    if (targetSpacing <= 0.0001f || sourceSpacing <= 0.0001f)
-                    {
-                        continue;
-                    }
-
-                    var structureScale = Math.Clamp(targetSpacing / sourceSpacing, 0.75f, 1.65f);
-                    if (MathF.Abs(structureScale - 1f) < 0.12f)
-                    {
-                        continue;
-                    }
-
-                    var current = adapted[targetIndex];
-                    var axialScale = 1f + ((structureScale - 1f) * 0.25f);
-                    adapted[targetIndex] = (
-                        current.X * structureScale,
-                        current.Y * structureScale,
-                        current.Z * axialScale);
-                }
-
-                return adapted;
-            }
-
             for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
             {
                 var normalizedPosition = targetVertexCount == 1
@@ -19464,6 +19412,63 @@ internal sealed class LocalExportService(
             }
 
             return retargeted;
+        }
+
+        private static IReadOnlyList<(float X, float Y, float Z)> AdaptRetargetedMorphPayload(
+            IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas,
+            MorphTransferContext morphTransferContext)
+        {
+            if (retargetedDeltas.Count < 3 ||
+                morphTransferContext.SourceVertices.Count < 3 ||
+                morphTransferContext.TargetVertices.Count != retargetedDeltas.Count ||
+                morphTransferContext.TargetToSourceInfluences.Count != retargetedDeltas.Count ||
+                morphTransferContext.TargetNeighborIndexes.Count != retargetedDeltas.Count)
+            {
+                return retargetedDeltas;
+            }
+
+            var normalizedSourceVertices = NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
+            var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
+            var adapted = retargetedDeltas.ToArray();
+            var globalTargetSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.TargetVertices);
+            var globalSourceSpan = ComputeGlobalCrossSectionSpan(morphTransferContext.SourceVertices);
+            var globalSpanRatio = globalTargetSpan <= 0.0001f || globalSourceSpan <= 0.0001f
+                ? 1f
+                : globalTargetSpan / globalSourceSpan;
+
+            for (var targetIndex = 0; targetIndex < adapted.Length; targetIndex++)
+            {
+                var targetHeight = normalizedTargetVertices[targetIndex].Z;
+                var sourceHeight = ComputeWeightedSourceHeight(normalizedSourceVertices, morphTransferContext, targetIndex);
+                var targetSpan = ComputeCrossSectionSpanAtHeight(
+                    morphTransferContext.TargetVertices,
+                    normalizedTargetVertices,
+                    targetHeight);
+                var sourceSpan = ComputeCrossSectionSpanAtHeight(
+                    morphTransferContext.SourceVertices,
+                    normalizedSourceVertices,
+                    sourceHeight);
+
+                if (targetSpan <= 0.0001f || sourceSpan <= 0.0001f)
+                {
+                    continue;
+                }
+
+                var structureScale = Math.Clamp((targetSpan / sourceSpan) / globalSpanRatio, 0.70f, 1.40f);
+                if (MathF.Abs(structureScale - 1f) < 0.12f)
+                {
+                    continue;
+                }
+
+                var current = adapted[targetIndex];
+                var axialScale = 1f + ((structureScale - 1f) * 0.25f);
+                adapted[targetIndex] = (
+                    current.X * structureScale,
+                    current.Y * structureScale,
+                    current.Z * axialScale);
+            }
+
+            return adapted;
         }
 
         private static int[] BuildNearestSurfaceMap(
@@ -19726,9 +19731,8 @@ internal sealed class LocalExportService(
             return sampleCount == 0 ? 0f : totalDistance / sampleCount;
         }
 
-        private static float ComputeAverageSourceNeighborDistance(
+        private static float ComputeWeightedSourceHeight(
             IReadOnlyList<MeshVertex> normalizedSourceVertices,
-            IReadOnlyList<IReadOnlyList<int>> sourceNeighborIndexes,
             MorphTransferContext morphTransferContext,
             int targetIndex)
         {
@@ -19738,52 +19742,87 @@ internal sealed class LocalExportService(
             }
 
             var influences = morphTransferContext.TargetToSourceInfluences[targetIndex];
-            var weightedDistance = 0f;
+            var weightedHeight = 0f;
             var totalWeight = 0f;
-
             foreach (var influence in influences)
             {
                 if (influence.SourceIndex < 0 ||
                     influence.SourceIndex >= normalizedSourceVertices.Count ||
-                    influence.SourceIndex >= sourceNeighborIndexes.Count ||
                     influence.Weight <= 0f)
                 {
                     continue;
                 }
 
-                var localDistance = ComputeAverageNeighborDistance(
-                    normalizedSourceVertices,
-                    influence.SourceIndex,
-                    sourceNeighborIndexes[influence.SourceIndex]);
-                if (localDistance <= 0.0001f)
-                {
-                    continue;
-                }
-
-                weightedDistance += localDistance * influence.Weight;
+                weightedHeight += normalizedSourceVertices[influence.SourceIndex].Z * influence.Weight;
                 totalWeight += influence.Weight;
             }
 
             if (totalWeight > 0.0001f)
             {
-                return weightedDistance / totalWeight;
+                return weightedHeight / totalWeight;
             }
 
             if (targetIndex < morphTransferContext.TargetToSourceIndexMap.Length)
             {
                 var fallbackSourceIndex = morphTransferContext.TargetToSourceIndexMap[targetIndex];
-                if (fallbackSourceIndex >= 0 &&
-                    fallbackSourceIndex < normalizedSourceVertices.Count &&
-                    fallbackSourceIndex < sourceNeighborIndexes.Count)
+                if (fallbackSourceIndex >= 0 && fallbackSourceIndex < normalizedSourceVertices.Count)
                 {
-                    return ComputeAverageNeighborDistance(
-                        normalizedSourceVertices,
-                        fallbackSourceIndex,
-                        sourceNeighborIndexes[fallbackSourceIndex]);
+                    return normalizedSourceVertices[fallbackSourceIndex].Z;
                 }
             }
 
             return 0f;
+        }
+
+        private static float ComputeGlobalCrossSectionSpan(IReadOnlyList<MeshVertex> vertices)
+        {
+            if (vertices.Count == 0)
+            {
+                return 0f;
+            }
+
+            var spanX = vertices.Max(static vertex => vertex.X) - vertices.Min(static vertex => vertex.X);
+            var spanY = vertices.Max(static vertex => vertex.Y) - vertices.Min(static vertex => vertex.Y);
+            return MathF.Max(spanX, spanY);
+        }
+
+        private static float ComputeCrossSectionSpanAtHeight(
+            IReadOnlyList<MeshVertex> vertices,
+            IReadOnlyList<MeshVertex> normalizedVertices,
+            float normalizedHeight)
+        {
+            if (vertices.Count == 0 || normalizedVertices.Count != vertices.Count)
+            {
+                return 0f;
+            }
+
+            const float window = 0.12f;
+            var minX = float.MaxValue;
+            var maxX = float.MinValue;
+            var minY = float.MaxValue;
+            var maxY = float.MinValue;
+            var matched = 0;
+            for (var index = 0; index < vertices.Count; index++)
+            {
+                if (MathF.Abs(normalizedVertices[index].Z - normalizedHeight) > window)
+                {
+                    continue;
+                }
+
+                var vertex = vertices[index];
+                minX = Math.Min(minX, vertex.X);
+                maxX = Math.Max(maxX, vertex.X);
+                minY = Math.Min(minY, vertex.Y);
+                maxY = Math.Max(maxY, vertex.Y);
+                matched++;
+            }
+
+            if (matched == 0)
+            {
+                return 0f;
+            }
+
+            return MathF.Max(maxX - minX, maxY - minY);
         }
 
         private static (float X, float Y, float Z)? TryBlendRetargetedDelta(
