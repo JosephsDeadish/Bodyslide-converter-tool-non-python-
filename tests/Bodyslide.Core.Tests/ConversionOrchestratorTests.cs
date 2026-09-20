@@ -11817,6 +11817,7 @@ public sealed class RealisticModPackFixtureTests
             var transformedBytes = Assert.IsType<byte[]>(transformMethod!.Invoke(null, new object[]
             {
                 sourceBytes,
+                sourceNifPath,
                 new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["chest"] = 1.32d,
