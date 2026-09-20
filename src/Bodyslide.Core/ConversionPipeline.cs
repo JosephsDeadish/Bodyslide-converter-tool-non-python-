@@ -18520,11 +18520,30 @@ internal sealed class LocalExportService(
             var perVertexWeight = vertexIndex < topologyContext.BoundaryVertexWeights.Length
                 ? topologyContext.BoundaryVertexWeights[vertexIndex]
                 : 0f;
+            var edgeAmplification = ComputeIslandEdgePreservationAmplification(
+                topologyContext.EdgeNetworks,
+                componentId);
             boundaryPreservationWeight = Math.Clamp(
-                topologyContext.BoundaryPreservationWeight + perVertexWeight,
+                (topologyContext.BoundaryPreservationWeight + perVertexWeight) * (1f + edgeAmplification),
                 0f,
                 0.72f);
         }
+    }
+
+    private static float ComputeIslandEdgePreservationAmplification(
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks,
+        int componentId)
+    {
+        if (!edgeNetworks.TryGetValue(componentId, out var network) ||
+            network.VertexIndexes.Count == 0)
+        {
+            return 0f;
+        }
+
+        var manifoldRisk = 1f - network.ManifoldScore;
+        var boundaryRatio = network.BoundaryVertexIndexes.Count / (float)Math.Max(1, network.VertexIndexes.Count);
+        var nonManifoldBias = network.NonManifoldEdgeCount > 0 ? 0.15f : 0f;
+        return Math.Min(0.22f, (manifoldRisk * 0.12f) + (boundaryRatio * 0.08f) + nonManifoldBias);
     }
 
     private static (double WidthScale, double DepthScale, double HeightScale) ComputeCageProjectionScales(

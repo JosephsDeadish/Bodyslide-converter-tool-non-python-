@@ -5957,6 +5957,71 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public async Task BuildTopologyTransformContext_GivesNonManifoldIslandsStrongerBoundaryPreservationBias()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var nonManifoldPath = Path.Combine(dir, "nonmanifold_transform_weights_0.nif");
+        var manifoldPath = Path.Combine(dir, "manifold_transform_weights_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            (-0.60f,  0.00f, 0.50f),
+            ( 0.60f,  0.00f, 0.50f),
+            ( 0.00f,  0.60f, 0.50f),
+            ( 0.00f, -0.60f, 0.50f),
+            ( 0.00f,  0.60f, 1.00f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 2),
+            (1, 0, 3),
+            (0, 1, 4),
+            (0, 2, 4)
+        };
+        var manifoldTriangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 2, 1),
+            (0, 3, 1),
+            (0, 2, 4),
+            (1, 4, 2)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(nonManifoldPath, vertices, triangles);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(manifoldPath, vertices, manifoldTriangles);
+
+        try
+        {
+            var nonManifoldSummary = NifGeometrySignatureReader.TryReadTopologySummary(nonManifoldPath);
+            var manifoldSummary = NifGeometrySignatureReader.TryReadTopologySummary(manifoldPath);
+            Assert.NotNull(nonManifoldSummary);
+            Assert.NotNull(manifoldSummary);
+
+            var buildContextMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildContextMethod);
+
+            var nonManifoldContext = buildContextMethod!.Invoke(null,
+            [
+                vertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                nonManifoldSummary
+            ]);
+            var manifoldContext = buildContextMethod.Invoke(null,
+            [
+                vertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                manifoldSummary
+            ]);
+            Assert.NotNull(nonManifoldContext);
+            Assert.NotNull(manifoldContext);
+
+            var nonManifoldBias = Assert.IsType<float>(nonManifoldContext!.GetType().GetProperty("BoundaryPreservationWeight", BindingFlags.Public | BindingFlags.Instance)!.GetValue(nonManifoldContext));
+            var manifoldBias = Assert.IsType<float>(manifoldContext!.GetType().GetProperty("BoundaryPreservationWeight", BindingFlags.Public | BindingFlags.Instance)!.GetValue(manifoldContext));
+            Assert.True(nonManifoldBias > manifoldBias, $"Expected explicit non-manifold topology to raise transform-stage preservation bias above a comparable manifold mesh, got non-manifold={nonManifoldBias} manifold={manifoldBias}.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithSyntheticNif_AppliesVertexTransform()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -7066,6 +7131,102 @@ public sealed class NifOutputAndSourceOverrideTests
                 .Any(changed => changed);
 
             Assert.True(anyChanged, "Expected at least one SSE half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveTopologyProjectionFrame_AmplifiesBoundaryPreservationForNonManifoldEdgeIslands()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var nonManifoldPath = Path.Combine(workingDirectory, "nonmanifold_edge_preservation_0.nif");
+        var manifoldPath = Path.Combine(workingDirectory, "manifold_edge_preservation_0.nif");
+        var sourceVertices = new (float X, float Y, float Z)[]
+        {
+            (-0.60f,  0.00f, 0.50f),
+            ( 0.60f,  0.00f, 0.50f),
+            ( 0.00f,  0.60f, 0.50f),
+            ( 0.00f, -0.60f, 0.50f),
+            ( 0.00f,  0.60f, 1.00f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 2),
+            (1, 0, 3),
+            (0, 1, 4),
+            (0, 2, 4)
+        };
+        var manifoldTriangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 2, 1),
+            (0, 3, 1),
+            (0, 2, 4),
+            (1, 4, 2)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(nonManifoldPath, sourceVertices, triangles);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(manifoldPath, sourceVertices, manifoldTriangles);
+
+        try
+        {
+            var nonManifoldSummary = NifGeometrySignatureReader.TryReadTopologySummary(nonManifoldPath);
+            var manifoldSummary = NifGeometrySignatureReader.TryReadTopologySummary(manifoldPath);
+            Assert.NotNull(nonManifoldSummary);
+            Assert.NotNull(manifoldSummary);
+
+            var buildContextMethod = typeof(LocalExportService).GetMethod(
+                "BuildTopologyTransformContext",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            var resolveMethod = typeof(LocalExportService).GetMethod(
+                "ResolveTopologyProjectionFrame",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildContextMethod);
+            Assert.NotNull(resolveMethod);
+
+            var rawVertices = sourceVertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray();
+            var nonManifoldContext = buildContextMethod!.Invoke(null, [rawVertices, nonManifoldSummary]);
+            var manifoldContext = buildContextMethod.Invoke(null, [rawVertices, manifoldSummary]);
+            Assert.NotNull(nonManifoldContext);
+            Assert.NotNull(manifoldContext);
+
+            var minX = rawVertices.Min(static vertex => vertex.X);
+            var maxX = rawVertices.Max(static vertex => vertex.X);
+            var minY = rawVertices.Min(static vertex => vertex.Y);
+            var maxY = rawVertices.Max(static vertex => vertex.Y);
+            var minZ = rawVertices.Min(static vertex => vertex.Z);
+            var maxZ = rawVertices.Max(static vertex => vertex.Z);
+            var centerX = (minX + maxX) * 0.5f;
+            var centerY = (minY + maxY) * 0.5f;
+            var zRange = MathF.Max(0.0001f, maxZ - minZ);
+            var halfRangeX = MathF.Max(0.0001f, (maxX - minX) * 0.5f);
+            var halfRangeY = MathF.Max(0.0001f, (maxY - minY) * 0.5f);
+
+            object[] SharedArgs(object context, int index) =>
+            [
+                context,
+                index,
+                centerX,
+                centerY,
+                minZ,
+                zRange,
+                halfRangeX,
+                halfRangeY,
+                null!, null!, null!, null!, null!, null!, null!
+            ];
+
+            var sharedArgs = SharedArgs(nonManifoldContext!, 0);
+            resolveMethod!.Invoke(null, sharedArgs);
+            var nonManifoldWeight = Assert.IsType<float>(sharedArgs[14]);
+
+            var manifoldArgs = SharedArgs(manifoldContext!, 0);
+            resolveMethod.Invoke(null, manifoldArgs);
+            var manifoldWeight = Assert.IsType<float>(manifoldArgs[14]);
+
+            Assert.True(nonManifoldWeight > manifoldWeight, $"Expected non-manifold edge islands to amplify transform-stage preservation above a comparable manifold mesh, got non-manifold={nonManifoldWeight} manifold={manifoldWeight}.");
+            Assert.True(nonManifoldWeight > 0f);
         }
         finally
         {
