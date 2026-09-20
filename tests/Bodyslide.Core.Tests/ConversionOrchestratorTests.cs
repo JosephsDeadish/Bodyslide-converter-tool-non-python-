@@ -2399,6 +2399,11 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(summary.ComponentBoundaryVertexCounts);
             Assert.Single(summary.ComponentBoundaryVertexCounts!);
             Assert.Equal(vertices.Length, summary.ComponentBoundaryVertexCounts[0]);
+            Assert.NotNull(summary.ComponentEdgeNetworks);
+            var edgeNetwork = Assert.Single(summary.ComponentEdgeNetworks!);
+            Assert.True(edgeNetwork.InteriorEdgeCount > 0);
+            Assert.Equal(0, edgeNetwork.NonManifoldEdgeCount);
+            Assert.False(edgeNetwork.HasManifoldRisk);
             Assert.NotNull(summary.BoundaryLoops);
             Assert.Equal(2, summary.BoundaryLoops!.Count);
             Assert.All(summary.BoundaryLoops, loop => Assert.Equal(6, loop.VertexIndexes.Count));
@@ -2415,6 +2420,85 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([0, 1, 2, 3, 4, 5]));
             Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([6, 7, 8, 9, 10, 11]));
             Assert.True(summary.BoundaryVertexFlags.All(static flag => flag), "Expected the synthetic openwork ring to mark every vertex as part of an explicit boundary loop.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NifGeometrySignatureReader_ReadsNonManifoldEdgeNetworkFromBsTriShapeConnectivity()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "nonmanifold_edge_network_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            (0f, 0f, 0f), (1f, 0f, 0f), (0.2f, 0.9f, 0f), (0.2f, -0.8f, 0f), (0.8f, 0.65f, 0.35f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 2),
+            (1, 0, 3),
+            (0, 1, 4),
+            (0, 2, 4)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var summary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath);
+
+            Assert.NotNull(summary);
+            Assert.NotNull(summary!.ComponentEdgeNetworks);
+            var edgeNetwork = Assert.Single(summary.ComponentEdgeNetworks!);
+            Assert.True(edgeNetwork.InteriorEdgeCount > 0);
+            Assert.Equal(1, edgeNetwork.NonManifoldEdgeCount);
+            Assert.True(edgeNetwork.HasManifoldRisk);
+            Assert.False(edgeNetwork.IsClosedManifold);
+            Assert.True(edgeNetwork.MaxVertexValence >= 3);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicMeshAnalysisService_DerivesEdgeNetworkLabelsFromExplicitNonManifoldTopology()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "nonmanifold_labels_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            (0f, 0f, 0f), (1f, 0f, 0f), (0.2f, 0.9f, 0f), (0.2f, -0.8f, 0f), (0.8f, 0.65f, 0.35f)
+        };
+        var triangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 2),
+            (1, 0, 3),
+            (0, 1, 4),
+            (0, 2, 4)
+        };
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.TopologyIslandSummaries);
+            var summary = Assert.Single(result.TopologyIslandSummaries!.Values);
+            Assert.True(summary.HasExplicitEdgeNetwork);
+            Assert.True(summary.InteriorEdgeCount > 0);
+            Assert.True(summary.NonManifoldEdgeCount > 0);
+            Assert.NotNull(summary.EdgeNetworks);
+            Assert.Contains(summary.Labels, label => label.Equals("interior-edge-network", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("non-manifold-risk", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

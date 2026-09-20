@@ -79,7 +79,20 @@ public sealed record MeshAnalysis(
 public sealed record TopologyIslandSummary(
     int IslandCount,
     double LargestIslandCoverage,
-    IReadOnlyList<string> Labels);
+    IReadOnlyList<string> Labels,
+    IReadOnlyList<TopologyIslandEdgeNetworkSummary>? EdgeNetworks = null,
+    bool HasExplicitEdgeNetwork = false,
+    int InteriorEdgeCount = 0,
+    int NonManifoldEdgeCount = 0);
+public sealed record TopologyIslandEdgeNetworkSummary(
+    int ComponentId,
+    int BoundaryEdgeCount,
+    int InteriorEdgeCount,
+    int NonManifoldEdgeCount,
+    int BoundaryVertexCount,
+    int MaxVertexValence,
+    bool IsClosedManifold,
+    bool HasManifoldRisk);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -2426,7 +2439,8 @@ internal static class NifGeometrySignatureReader
         bool[] BoundaryVertexFlags,
         int[]? ComponentBoundaryLoopCounts = null,
         int[]? ComponentBoundaryVertexCounts = null,
-        IReadOnlyList<BoundaryLoopSequence>? BoundaryLoops = null);
+        IReadOnlyList<BoundaryLoopSequence>? BoundaryLoops = null,
+        IReadOnlyList<TopologyIslandEdgeNetworkSummary>? ComponentEdgeNetworks = null);
 
     internal sealed record BoundaryLoopSequence(
         int ComponentId,
@@ -3400,7 +3414,7 @@ internal static class NifGeometrySignatureReader
         }
 
         var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
-        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
+        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
         return new MeshTopologySummary(
             bestVertexCount,
             componentIds,
@@ -3409,7 +3423,8 @@ internal static class NifGeometrySignatureReader
             boundaryVertexFlags,
             componentBoundaryLoopCounts,
             componentBoundaryVertexCounts,
-            boundaryLoops);
+            boundaryLoops,
+            componentEdgeNetworks);
     }
 
     private static int[] BuildTopologyComponentIds(int vertexCount, IReadOnlyList<ushort> triangles)
@@ -3481,7 +3496,7 @@ internal static class NifGeometrySignatureReader
         return normalized;
     }
 
-    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts, IReadOnlyList<BoundaryLoopSequence> BoundaryLoops) AnalyzeBoundaryEdges(
+    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts, IReadOnlyList<BoundaryLoopSequence> BoundaryLoops, IReadOnlyList<TopologyIslandEdgeNetworkSummary> ComponentEdgeNetworks) AnalyzeBoundaryEdges(
         int vertexCount,
         IReadOnlyList<ushort> triangles,
         IReadOnlyList<int> componentIds)
@@ -3509,9 +3524,42 @@ internal static class NifGeometrySignatureReader
             : 0;
         var componentBoundaryLoopCounts = new int[Math.Max(0, componentCount)];
         var componentBoundaryVertexCounts = new int[Math.Max(0, componentCount)];
+        var componentBoundaryEdgeCounts = new int[Math.Max(0, componentCount)];
+        var componentInteriorEdgeCounts = new int[Math.Max(0, componentCount)];
+        var componentNonManifoldEdgeCounts = new int[Math.Max(0, componentCount)];
+        var componentMaxVertexValence = new int[Math.Max(0, componentCount)];
+        var fullAdjacency = new Dictionary<int, HashSet<int>>();
         foreach (var (edge, count) in edgeCounts)
         {
-            if (count != 1 || edge.Left == edge.Right)
+            if (edge.Left == edge.Right)
+            {
+                continue;
+            }
+
+            AddAdjacency(edge.Left, edge.Right);
+            AddAdjacency(edge.Right, edge.Left);
+            var componentId = componentIds.Count == vertexCount &&
+                              edge.Left >= 0 &&
+                              edge.Left < componentIds.Count
+                ? componentIds[edge.Left]
+                : -1;
+            if (componentId >= 0 && componentId < componentBoundaryEdgeCounts.Length)
+            {
+                if (count == 1)
+                {
+                    componentBoundaryEdgeCounts[componentId]++;
+                }
+                else if (count == 2)
+                {
+                    componentInteriorEdgeCounts[componentId]++;
+                }
+                else if (count > 2)
+                {
+                    componentNonManifoldEdgeCounts[componentId]++;
+                }
+            }
+
+            if (count != 1)
             {
                 continue;
             }
@@ -3554,6 +3602,25 @@ internal static class NifGeometrySignatureReader
                 if (componentId >= 0 && componentId < componentBoundaryVertexCounts.Length)
                 {
                     componentBoundaryVertexCounts[componentId]++;
+                }
+            }
+        }
+
+        if (componentIds.Count == vertexCount)
+        {
+            foreach (var (vertexIndex, neighbors) in fullAdjacency)
+            {
+                if (vertexIndex < 0 || vertexIndex >= componentIds.Count)
+                {
+                    continue;
+                }
+
+                var componentId = componentIds[vertexIndex];
+                if (componentId >= 0 &&
+                    componentId < componentMaxVertexValence.Length &&
+                    neighbors.Count > componentMaxVertexValence[componentId])
+                {
+                    componentMaxVertexValence[componentId] = neighbors.Count;
                 }
             }
         }
@@ -3639,12 +3706,37 @@ internal static class NifGeometrySignatureReader
             }
         }
 
-        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops);
+        var componentEdgeNetworks = Enumerable.Range(0, Math.Max(0, componentCount))
+            .Select(componentId => new TopologyIslandEdgeNetworkSummary(
+                componentId,
+                componentBoundaryEdgeCounts[componentId],
+                componentInteriorEdgeCounts[componentId],
+                componentNonManifoldEdgeCounts[componentId],
+                componentBoundaryVertexCounts[componentId],
+                componentMaxVertexValence[componentId],
+                componentBoundaryEdgeCounts[componentId] == 0 &&
+                componentInteriorEdgeCounts[componentId] > 0 &&
+                componentNonManifoldEdgeCounts[componentId] == 0,
+                componentNonManifoldEdgeCounts[componentId] > 0))
+            .ToArray();
+
+        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks);
 
         void AddEdge(int left, int right)
         {
             var normalized = left <= right ? (left, right) : (right, left);
             edgeCounts[normalized] = edgeCounts.TryGetValue(normalized, out var count) ? count + 1 : 1;
+        }
+
+        void AddAdjacency(int from, int to)
+        {
+            if (!fullAdjacency.TryGetValue(from, out var neighbors))
+            {
+                neighbors = [];
+                fullAdjacency[from] = neighbors;
+            }
+
+            neighbors.Add(to);
         }
     }
 
@@ -6031,9 +6123,11 @@ public sealed class ConversionOrchestrator(
                     .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 var totalIslands = analysis.TopologyIslandSummaries.Values.Sum(static summary => summary.IslandCount);
+                var interiorEdgeCount = analysis.TopologyIslandSummaries.Values.Sum(static summary => summary.InteriorEdgeCount);
+                var nonManifoldEdgeCount = analysis.TopologyIslandSummaries.Values.Sum(static summary => summary.NonManifoldEdgeCount);
                 steps.Add(topologyLabels.Count > 0
-                    ? $"mesh-topology:islands={totalIslands},labels={string.Join('+', topologyLabels)}"
-                    : $"mesh-topology:islands={totalIslands}");
+                    ? $"mesh-topology:islands={totalIslands},interior-edges={interiorEdgeCount},non-manifold-edges={nonManifoldEdgeCount},labels={string.Join('+', topologyLabels)}"
+                    : $"mesh-topology:islands={totalIslands},interior-edges={interiorEdgeCount},non-manifold-edges={nonManifoldEdgeCount}");
             }
 
             ReportStage("Binding armor regions", 7);
@@ -9053,6 +9147,10 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             List<int> islandSizes;
             var boundaryLoopCount = 0;
             var boundaryVertexCoverage = 0d;
+            IReadOnlyList<TopologyIslandEdgeNetworkSummary>? edgeNetworks = null;
+            var hasExplicitEdgeNetwork = false;
+            var interiorEdgeCount = 0;
+            var nonManifoldEdgeCount = 0;
             var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
             if (topologySummary is { VertexCount: > 0 } &&
                 topologySummary.ComponentIds.Length == topologySummary.VertexCount)
@@ -9066,6 +9164,15 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 boundaryVertexCoverage = topologySummary.VertexCount <= 0
                     ? 0d
                     : topologySummary.BoundaryVertexCount / (double)topologySummary.VertexCount;
+                if (topologySummary.ComponentEdgeNetworks is { Count: > 0 })
+                {
+                    edgeNetworks = topologySummary.ComponentEdgeNetworks
+                        .OrderBy(static network => network.ComponentId)
+                        .ToArray();
+                    hasExplicitEdgeNetwork = true;
+                    interiorEdgeCount = edgeNetworks.Sum(static network => network.InteriorEdgeCount);
+                    nonManifoldEdgeCount = edgeNetworks.Sum(static network => network.NonManifoldEdgeCount);
+                }
             }
             else
             {
@@ -9148,13 +9255,27 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 labels.Add("layered-island-stack");
             }
 
+            if (hasExplicitEdgeNetwork && interiorEdgeCount > 0)
+            {
+                labels.Add("interior-edge-network");
+            }
+
+            if (nonManifoldEdgeCount > 0)
+            {
+                labels.Add("non-manifold-risk");
+            }
+
             summaries[meshName] = new TopologyIslandSummary(
                 islandSizes.Count,
                 largestIslandCoverage,
                 labels
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
-                    .ToArray());
+                    .ToArray(),
+                edgeNetworks,
+                hasExplicitEdgeNetwork,
+                interiorEdgeCount,
+                nonManifoldEdgeCount);
         }
 
         return summaries;
@@ -23161,6 +23282,17 @@ internal sealed class LocalExportService(
                 normalizedHeight is >= 0.18f and <= 0.88f)
             {
                 damping = MathF.Min(damping, centerBias >= 0.18f ? 0.70f : 0.78f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "interior-edge-network") &&
+                normalizedHeight is >= 0.16f and <= 0.90f)
+            {
+                damping = MathF.Min(damping, centerBias >= 0.22f ? 0.78f : 0.84f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "non-manifold-risk"))
+            {
+                damping = MathF.Min(damping, ambiguity >= 0.08f || centerBias >= 0.16f ? 0.72f : 0.80f);
             }
 
             if (HasMorphTransferPartHint(morphTransferContext, "layered-island-stack") &&
