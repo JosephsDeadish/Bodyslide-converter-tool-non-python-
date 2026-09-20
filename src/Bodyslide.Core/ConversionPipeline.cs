@@ -17316,6 +17316,11 @@ internal sealed class LocalExportService(
                 continue;
             }
 
+            if (!snapshot.HasExplicitTopology && snapshot.Vertices.Count < 12)
+            {
+                continue;
+            }
+
             var rawVertices = snapshot.Vertices
                 .Select(static vertex => (vertex.X, vertex.Y, vertex.Z))
                 .ToArray();
@@ -17329,6 +17334,9 @@ internal sealed class LocalExportService(
                 continue;
             }
 
+            var explicitTopologySummary = snapshot.HasExplicitTopology
+                ? snapshot.TopologySummary
+                : null;
             foreach (var group in snapshot.ComponentIds
                          .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
                          .GroupBy(static entry => entry.ComponentId)
@@ -17340,7 +17348,7 @@ internal sealed class LocalExportService(
                     indexes,
                     snapshot.BoundaryVertexFlags,
                     snapshot.HasExplicitTopology,
-                    snapshot.TopologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
+                    explicitTopologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
                     group.Key >= 0 &&
                     group.Key < componentBoundaryLoopCounts.Length
                         ? componentBoundaryLoopCounts[group.Key]
@@ -17364,13 +17372,13 @@ internal sealed class LocalExportService(
                 var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
                 var boundaryLoopControls = BuildIslandBoundaryLoopControls(
                     rawVertices,
-                    snapshot.TopologySummary?.BoundaryLoops,
+                    explicitTopologySummary?.BoundaryLoops,
                     group.Key,
                     effectiveRegions,
                     edgeNetworkSummary);
                 var authoredRegions = BuildIslandAuthoredRegions(
                     snapshot.NormalizedVertices,
-                    snapshot.TopologySummary?.BoundaryLoops,
+                    explicitTopologySummary?.BoundaryLoops,
                     group.Key,
                     indexes,
                     effectiveRegions,
@@ -17382,7 +17390,7 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
-                var boundaryCount = snapshot.TopologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
+                var boundaryCount = explicitTopologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
                                     group.Key >= 0 &&
                                     group.Key < componentBoundaryVertexCounts.Length
                     ? componentBoundaryVertexCounts[group.Key]
@@ -25756,23 +25764,28 @@ internal sealed class LocalExportService(
             }
 
             var vertices = snapshot.Vertices;
-            var topologySummary = snapshot.TopologySummary
-                ?? sourceTopologySummaries
-                    .Where(entry => entry.Snapshot!.TopologySummary!.VertexCount == vertices.Count)
-                    .OrderByDescending(entry => string.Equals(
-                        entry.FileName,
-                        Path.GetFileName(meshPath),
-                        StringComparison.OrdinalIgnoreCase))
-                    .ThenByDescending(entry => string.Equals(
-                        entry.BaseName,
-                        GetMeshTopologyLookupKey(meshPath),
-                        StringComparison.OrdinalIgnoreCase))
-                    .Select(entry => entry.Snapshot!.TopologySummary)
-                    .FirstOrDefault();
-            var usesExplicitTopology = topologySummary is { VertexCount: > 0 } &&
-                                       topologySummary.VertexCount == vertices.Count &&
-                                       topologySummary.ComponentIds.Length == vertices.Count;
-            var explicitEdgeNetworksByIsland = topologySummary?.ComponentEdgeNetworks is { Count: > 0 }
+            var propagatedTopologySummary = sourceTopologySummaries
+                .Where(entry => entry.Snapshot!.HasExplicitTopology &&
+                                entry.Snapshot.TopologySummary!.VertexCount == vertices.Count &&
+                                entry.Snapshot.TopologySummary.ComponentEdgeNetworks is { Count: > 0 })
+                .OrderByDescending(entry => string.Equals(
+                    entry.FileName,
+                    Path.GetFileName(meshPath),
+                    StringComparison.OrdinalIgnoreCase))
+                .ThenByDescending(entry => string.Equals(
+                    entry.BaseName,
+                    GetMeshTopologyLookupKey(meshPath),
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(entry => entry.Snapshot!.TopologySummary)
+                .FirstOrDefault();
+            var topologySummary = snapshot.HasExplicitTopology
+                ? snapshot.TopologySummary
+                : propagatedTopologySummary ?? snapshot.TopologySummary;
+            var usesExplicitTopology = snapshot.HasExplicitTopology ||
+                                       (propagatedTopologySummary is { VertexCount: > 0 } &&
+                                        propagatedTopologySummary.VertexCount == vertices.Count &&
+                                        propagatedTopologySummary.ComponentIds.Length == vertices.Count);
+            var explicitEdgeNetworksByIsland = usesExplicitTopology && topologySummary?.ComponentEdgeNetworks is { Count: > 0 }
                 ? topologySummary.ComponentEdgeNetworks.ToDictionary(static network => network.ComponentId)
                 : null;
             var normalizedVertices = snapshot.NormalizedVertices;
@@ -25782,6 +25795,7 @@ internal sealed class LocalExportService(
             var boundaryFlags = usesExplicitTopology && topologySummary!.BoundaryVertexFlags.Length == vertices.Count
                 ? topologySummary.BoundaryVertexFlags
                 : snapshot.BoundaryVertexFlags;
+            var primaryEstimatedIslandId = componentIds.Length == 0 ? -1 : componentIds.Min();
 
             if (!usesExplicitTopology)
             {
@@ -25813,6 +25827,20 @@ internal sealed class LocalExportService(
                                                control.IslandId == group.Key);
                 var semanticLabels = islandControl?.SemanticLabels ?? [];
                 var propagatedEdgeNetwork = islandControl?.EdgeNetworkSummary;
+                if (propagatedEdgeNetwork is null)
+                {
+                    var meshIslandControls = deformationCage?.IslandControls?
+                        .Where(control => control.MeshKey.Equals(meshKey, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    var propagatedFallback = meshIslandControls?
+                        .FirstOrDefault(static control => control.EdgeNetworkSummary is not null);
+                    if (propagatedFallback is not null && group.Key == primaryEstimatedIslandId)
+                    {
+                        islandControl = propagatedFallback;
+                        semanticLabels = islandControl.SemanticLabels;
+                        propagatedEdgeNetwork = islandControl.EdgeNetworkSummary;
+                    }
+                }
                 TopologyIslandEdgeNetworkSummary? estimatedEdgeNetwork = null;
                 if (snapshot.EdgeNetworks.TryGetValue(group.Key, out var estimatedNetwork))
                 {
