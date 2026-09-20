@@ -3039,19 +3039,21 @@ internal static class NifGeometrySignatureReader
     {
         if (!TryLocateVertexBlockFromGraph(bytes, out var vertexDataOffset, out var vertexCount))
         {
-            return (null, false);
+            if (!TryLocatePartialVertexBlockFromGraph(bytes, out vertexDataOffset, out vertexCount))
+            {
+                return (null, false);
+            }
+
+            var partialSignature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+            return partialSignature is null
+                ? (null, false)
+                : (AttachUvSignature(bytes, vertexDataOffset, vertexCount, partialSignature, preferEmbeddedMarker: false), true);
         }
 
         var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
         if (signature is null)
         {
-            var partialSignature = TryBuildPartialFloatSignature(bytes, vertexDataOffset, vertexCount, out var recoveredVertexCount);
-            if (partialSignature is null)
-            {
-                return (null, false);
-            }
-
-            return (AttachUvSignature(bytes, vertexDataOffset, recoveredVertexCount, partialSignature, preferEmbeddedMarker: false), true);
+            return (null, false);
         }
 
         return (AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false), false);
@@ -3150,6 +3152,79 @@ internal static class NifGeometrySignatureReader
         return true;
     }
 
+    private static bool TryLocatePartialVertexBlockFromGraph(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount,
+        Func<string, bool>? nodeFilter = null)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (!NifBlockGraphParser.TryParse(bytes, out var graph) || graph is null)
+        {
+            return false;
+        }
+
+        var bestScore = int.MinValue;
+        var bestCount = 0;
+        var bestOffset = -1;
+        var preferredNodes = graph.GeometryCandidates.Count > 0 ? graph.GeometryCandidates : graph.Nodes;
+
+        foreach (var node in preferredNodes)
+        {
+            if (nodeFilter is not null && !nodeFilter(node.TypeName))
+            {
+                continue;
+            }
+
+            var nodeScore = GetBlockVertexCandidateScore(node.TypeName);
+            if (nodeScore <= 0)
+            {
+                continue;
+            }
+
+            var scanStart = Math.Max(node.StartOffset, 0);
+            var scanEnd = Math.Min(node.EndOffset - sizeof(int), bytes.Length - sizeof(int));
+
+            for (var offset = scanStart; offset <= scanEnd; offset++)
+            {
+                var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                {
+                    continue;
+                }
+
+                for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                {
+                    var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                    var candidate = TryBuildPartialFloatSignature(bytes, candidateOffset, candidateVertexCount, out var recoveredCount);
+                    if (candidate is null)
+                    {
+                        continue;
+                    }
+
+                    var score = nodeScore - paddingIndex;
+                    if (score > bestScore || (score == bestScore && recoveredCount > bestCount))
+                    {
+                        bestScore = score;
+                        bestCount = recoveredCount;
+                        bestOffset = candidateOffset;
+                    }
+                }
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
     private static int GetBlockVertexCandidateScore(string typeName)
     {
         if (typeName.Contains("TriShapeData", StringComparison.Ordinal))
@@ -3222,19 +3297,21 @@ internal static class NifGeometrySignatureReader
     {
         if (!TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var vertexDataOffset, out var vertexCount))
         {
-            return (null, false);
+            if (!TryLocatePartialVertexBlockNearKnownGeometryTokens(bytes, out vertexDataOffset, out vertexCount))
+            {
+                return (null, false);
+            }
+
+            var partialSignature = BuildSignature(bytes, vertexDataOffset, vertexCount);
+            return partialSignature is null
+                ? (null, false)
+                : (AttachUvSignature(bytes, vertexDataOffset, vertexCount, partialSignature, preferEmbeddedMarker: false), true);
         }
 
         var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
         if (signature is null)
         {
-            var partialSignature = TryBuildPartialFloatSignature(bytes, vertexDataOffset, vertexCount, out var recoveredVertexCount);
-            if (partialSignature is null)
-            {
-                return (null, false);
-            }
-
-            return (AttachUvSignature(bytes, vertexDataOffset, recoveredVertexCount, partialSignature, preferEmbeddedMarker: false), true);
+            return (null, false);
         }
 
         return (AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false), false);
@@ -3298,6 +3375,84 @@ internal static class NifGeometrySignatureReader
                         {
                             bestScore = score;
                             bestCount = candidate.VertexCount;
+                            bestOffset = candidateOffset;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+
+                tokenSearchStart = tokenOffset + tokenBytes.Length;
+            }
+        }
+
+        if (bestOffset < 0)
+        {
+            return false;
+        }
+
+        vertexDataOffset = bestOffset;
+        vertexCount = bestCount;
+        return true;
+    }
+
+    private static bool TryLocatePartialVertexBlockNearKnownGeometryTokens(
+        byte[] bytes,
+        out int vertexDataOffset,
+        out int vertexCount)
+    {
+        vertexDataOffset = 0;
+        vertexCount = 0;
+
+        if (bytes.Length < 32 || bytes.AsSpan().IndexOf(NifHeaderToken) < 0)
+        {
+            return false;
+        }
+
+        var bestScore = int.MinValue;
+        var bestCount = 0;
+        var bestOffset = -1;
+        var bestDistance = int.MaxValue;
+
+        foreach (var (tokenBytes, typeName) in KnownFloatGeometryTokens)
+        {
+            var tokenSearchStart = 0;
+            var tokenScore = GetBlockVertexCandidateScore(typeName);
+            while (tokenSearchStart <= bytes.Length - tokenBytes.Length)
+            {
+                var relativeIndex = bytes.AsSpan(tokenSearchStart).IndexOf(tokenBytes);
+                if (relativeIndex < 0)
+                {
+                    break;
+                }
+
+                var tokenOffset = tokenSearchStart + relativeIndex;
+                var scanStart = tokenOffset + tokenBytes.Length;
+                var scanEnd = Math.Min(bytes.Length - sizeof(int), scanStart + GeometryTokenScanByteLimit);
+                for (var offset = scanStart; offset <= scanEnd; offset++)
+                {
+                    var candidateVertexCount = BitConverter.ToInt32(bytes, offset);
+                    if (candidateVertexCount is < MinPlausibleExplicitVertexCount or > MaxPlausibleVertexCount)
+                    {
+                        continue;
+                    }
+
+                    for (var paddingIndex = 0; paddingIndex < CommonFloatVertexPrefixPaddings.Length; paddingIndex++)
+                    {
+                        var candidateOffset = offset + sizeof(int) + CommonFloatVertexPrefixPaddings[paddingIndex];
+                        var candidate = TryBuildPartialFloatSignature(bytes, candidateOffset, candidateVertexCount, out var recoveredCount);
+                        if (candidate is null)
+                        {
+                            continue;
+                        }
+
+                        var distance = Math.Max(0, candidateOffset - tokenOffset);
+                        var score = tokenScore * 1000 - distance - paddingIndex;
+                        if (score > bestScore ||
+                            (score == bestScore && recoveredCount > bestCount) ||
+                            (score == bestScore && recoveredCount == bestCount && distance < bestDistance))
+                        {
+                            bestScore = score;
+                            bestCount = recoveredCount;
                             bestOffset = candidateOffset;
                             bestDistance = distance;
                         }
