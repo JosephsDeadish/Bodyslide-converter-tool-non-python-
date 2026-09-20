@@ -2280,6 +2280,12 @@ internal static class NifGeometrySignatureReader
     ];
     private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
     [
+        (System.Text.Encoding.ASCII.GetBytes("BSTriShape"), "BSTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSDynamicTriShape"), "BSDynamicTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"), "BSLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"), "BSMeshLODTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"), "BSSubIndexTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShape"), "NiTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStrips"), "NiTriStrips"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
@@ -3029,20 +3035,26 @@ internal static class NifGeometrySignatureReader
         return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: true);
     }
 
-    private static MeshGeometrySignature? TryReadBlockGraphVertexBlock(byte[] bytes)
+    private static (MeshGeometrySignature? Signature, bool UsedPartialRecovery) TryReadBlockGraphVertexBlock(byte[] bytes)
     {
         if (!TryLocateVertexBlockFromGraph(bytes, out var vertexDataOffset, out var vertexCount))
         {
-            return null;
+            return (null, false);
         }
 
         var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
         if (signature is null)
         {
-            return null;
+            var partialSignature = TryBuildPartialFloatSignature(bytes, vertexDataOffset, vertexCount, out var recoveredVertexCount);
+            if (partialSignature is null)
+            {
+                return (null, false);
+            }
+
+            return (AttachUvSignature(bytes, vertexDataOffset, recoveredVertexCount, partialSignature, preferEmbeddedMarker: false), true);
         }
 
-        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+        return (AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false), false);
     }
 
     private static MeshGeometrySignature? TryReadTriStripsVertexBlock(byte[] bytes)
@@ -3206,20 +3218,26 @@ internal static class NifGeometrySignatureReader
         return best;
     }
 
-    private static MeshGeometrySignature? TryReadKnownGeometryTokenVertexBlock(byte[] bytes)
+    private static (MeshGeometrySignature? Signature, bool UsedPartialRecovery) TryReadKnownGeometryTokenVertexBlock(byte[] bytes)
     {
         if (!TryLocateVertexBlockNearKnownGeometryTokens(bytes, out var vertexDataOffset, out var vertexCount))
         {
-            return null;
+            return (null, false);
         }
 
         var signature = BuildSignature(bytes, vertexDataOffset, vertexCount);
         if (signature is null)
         {
-            return null;
+            var partialSignature = TryBuildPartialFloatSignature(bytes, vertexDataOffset, vertexCount, out var recoveredVertexCount);
+            if (partialSignature is null)
+            {
+                return (null, false);
+            }
+
+            return (AttachUvSignature(bytes, vertexDataOffset, recoveredVertexCount, partialSignature, preferEmbeddedMarker: false), true);
         }
 
-        return AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false);
+        return (AttachUvSignature(bytes, vertexDataOffset, vertexCount, signature, preferEmbeddedMarker: false), false);
     }
 
     private static bool TryLocateVertexBlockNearKnownGeometryTokens(
@@ -3322,10 +3340,15 @@ internal static class NifGeometrySignatureReader
         var heelAnalysis = AnalyzeHeelProfile(path, metadata, result.Signature);
         if (result.Signature is not null)
         {
-            var status = result.Mode == "heuristic-float" ? "degraded" : "supported";
+            var degradedMode =
+                string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal) ||
+                result.Mode.Contains("partial-float", StringComparison.Ordinal);
+            var status = degradedMode ? "degraded" : "supported";
             var messages = BuildMetadataMessages(
                 status == "degraded"
-                    ? ["heuristic-geometry-read", "manual-review-recommended"]
+                    ? string.Equals(result.Mode, "heuristic-float", StringComparison.Ordinal)
+                        ? ["heuristic-geometry-read", "manual-review-recommended"]
+                        : ["partial-geometry-recovered", "manual-review-recommended"]
                     : [],
                 metadata,
                 heelAnalysis,
@@ -3665,15 +3688,15 @@ internal static class NifGeometrySignatureReader
         }
 
         var graphSignature = TryReadBlockGraphVertexBlock(bytes);
-        if (graphSignature is not null)
+        if (graphSignature.Signature is not null)
         {
-            return (graphSignature, "block-graph-float");
+            return (graphSignature.Signature, graphSignature.UsedPartialRecovery ? "block-graph-partial-float" : "block-graph-float");
         }
 
         var tokenGuidedSignature = TryReadKnownGeometryTokenVertexBlock(bytes);
-        if (tokenGuidedSignature is not null)
+        if (tokenGuidedSignature.Signature is not null)
         {
-            return (tokenGuidedSignature, "geometry-token-float");
+            return (tokenGuidedSignature.Signature, tokenGuidedSignature.UsedPartialRecovery ? "geometry-token-partial-float" : "geometry-token-float");
         }
 
         if (TryLocateInterleavedFloatVertexBlock(bytes, out var interleavedDataOffset, out var interleavedVertexCount, out var interleavedVertexStride))
@@ -3692,6 +3715,40 @@ internal static class NifGeometrySignatureReader
         }
 
         return (null, "unreadable-geometry");
+    }
+
+    private static MeshGeometrySignature? TryBuildPartialFloatSignature(
+        byte[] bytes,
+        int vertexDataOffset,
+        int requestedVertexCount,
+        out int recoveredVertexCount)
+    {
+        recoveredVertexCount = 0;
+        if (vertexDataOffset < 0 || vertexDataOffset >= bytes.Length)
+        {
+            return null;
+        }
+
+        var availableVertexCount = (bytes.Length - vertexDataOffset) / 12;
+        if (availableVertexCount <= 0 || availableVertexCount >= requestedVertexCount)
+        {
+            return null;
+        }
+
+        var minimumRetainedCount = Math.Max(MinPlausibleExplicitVertexCount, (int)Math.Ceiling(requestedVertexCount * 0.5d));
+        if (availableVertexCount < minimumRetainedCount)
+        {
+            return null;
+        }
+
+        var signature = BuildSignature(bytes, vertexDataOffset, availableVertexCount);
+        if (signature is null)
+        {
+            return null;
+        }
+
+        recoveredVertexCount = availableVertexCount;
+        return signature;
     }
 
     private static MeshGeometrySignature? BuildHalfFloatSignature(byte[] bytes, int vertexDataOffset, int vertexCount, int vertexStride)
@@ -15552,7 +15609,7 @@ internal sealed class LocalExportService(
 
             var degraded = nifSupport
                 .Where(report => report.Status.Equals("degraded", StringComparison.OrdinalIgnoreCase))
-                .Select(report => Path.GetFileName(report.MeshPath))
+                .Select(report => $"{Path.GetFileName(report.MeshPath)} [{report.ParseMode}]")
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (degraded.Count > 0)
@@ -15560,7 +15617,7 @@ internal sealed class LocalExportService(
                 issues.Add(new ConversionValidationIssue(
                     "heuristic-nif-read",
                     "medium",
-                    $"Some NIF meshes were handled through heuristic geometry scanning instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
+                    $"Some NIF meshes were handled through degraded geometry recovery instead of explicit format support: {string.Join(", ", degraded.Take(6))}."));
             }
 
             var raisedHeels = nifSupport

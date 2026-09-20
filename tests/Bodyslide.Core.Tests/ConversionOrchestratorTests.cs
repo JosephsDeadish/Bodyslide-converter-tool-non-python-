@@ -476,6 +476,72 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task NifGeometrySignatureReader_TruncatedBsSubIndexTokenStub_IsRecoveredAsDegraded()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "bssubindex_truncated_stub.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedTruncatedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            declaredVertexCount: 128,
+            geometryToken: "BSSubIndexTriShape",
+            prefixPadding: 12,
+            additionalTokens: ["BSLightingShaderProperty", "NiAlphaProperty"]);
+
+        try
+        {
+            var report = NifGeometrySignatureReader.Inspect(inputFile);
+
+            Assert.Equal("degraded", report.Status);
+            Assert.Equal("geometry-token-partial-float", report.ParseMode);
+            Assert.Equal(96, report.VertexCount);
+            Assert.Contains("partial-geometry-recovered", report.Messages ?? []);
+            Assert.Contains("shader-property:BSLightingShaderProperty", report.Messages ?? []);
+            Assert.Contains("property-node:NiAlphaProperty", report.Messages ?? []);
+            Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Convert_WithTruncatedBsSubIndexTokenGuidedNif_UsesDegradedRecoveryWarningInsteadOfUnsupportedFailure()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "bssubindex_truncated_convert.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteTokenGuidedTruncatedPlainFloatStyleAsync(
+            inputFile,
+            sourceVertices,
+            declaredVertexCount: 128,
+            geometryToken: "BSSubIndexTriShape",
+            prefixPadding: 12,
+            additionalTokens: ["BSLightingShaderProperty"]);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"heuristic-nif-read\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("geometry-token-partial-float", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task NifGeometrySignatureReader_UnsupportedGeometryStub_ReportsShaderAndPropertyVariants()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -4389,6 +4455,47 @@ internal static class SyntheticNifTestData
         writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
         writer.Write(new byte[Math.Max(0, bytesBeforeCount)]);
         writer.Write(vertices.Count);
+        writer.Write(new byte[Math.Max(0, prefixPadding)]);
+
+        foreach (var (x, y, z) in vertices)
+        {
+            writer.Write(x);
+            writer.Write(y);
+            writer.Write(z);
+        }
+    }
+
+    public static async Task WriteTokenGuidedTruncatedPlainFloatStyleAsync(
+        string path,
+        IReadOnlyList<(float X, float Y, float Z)> vertices,
+        int declaredVertexCount,
+        string geometryToken = "NiTriShapeData",
+        int bytesBeforeCount = 0,
+        int prefixPadding = 0,
+        IReadOnlyList<string>? additionalTokens = null)
+    {
+        if (declaredVertexCount <= vertices.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(declaredVertexCount), "Declared vertex count must exceed the written vertex count.");
+        }
+
+        await using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("Gamebryo File Format, Version 20.2.0.7\n"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("NiNode"));
+        writer.Write(0);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes(geometryToken));
+        if (additionalTokens is { Count: > 0 })
+        {
+            foreach (var token in additionalTokens.Where(static token => !string.IsNullOrWhiteSpace(token)))
+            {
+                writer.Write((byte)0);
+                writer.Write(System.Text.Encoding.ASCII.GetBytes(token));
+            }
+        }
+        writer.Write(new byte[Math.Max(0, bytesBeforeCount)]);
+        writer.Write(declaredVertexCount);
         writer.Write(new byte[Math.Max(0, prefixPadding)]);
 
         foreach (var (x, y, z) in vertices)
