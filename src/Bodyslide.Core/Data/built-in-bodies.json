@@ -1451,7 +1451,8 @@
       "Hag Raven",
       "Hagraven Humanoid",
       "Raven Hag",
-      "Crow Witch"
+      "Crow Witch",
+      "Feather Witch"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1531,27 +1532,33 @@
       "Spriggan Body",
       "Briarfolk",
       "Rootfolk",
-      "Dryad"
+      "Dryad",
+      "Nature Spirit",
+      "Treefolk"
     ],
     "gender": "female",
     "defaultPhysics": "none",
-    "skeletonFoundation": "Winged or branch creature-humanoid skeleton",
-    "notes": "Humanoid nature-creature target for spriggan-style bodies with narrow torsos and branch or leaf appendages. No built-in physics by default; bark, leaf, and branch seam alignment should still be verified in-game.",
+    "skeletonFoundation": "Branch or vine creature-humanoid skeleton",
+    "notes": "Humanoid nature-creature target for spriggan-style bodies with narrow torsos and branch or leaf appendages. No built-in physics by default; bark, leaf, branch, and vine seam alignment should still be verified in-game.",
     "availablePhysicsBones": [
       "NPC Belly",
-      "Wing.L",
-      "Wing.R",
-      "WingTip.L",
-      "WingTip.R",
-      "Feather.L",
-      "Feather.R"
+      "Branch.L",
+      "Branch.R",
+      "BranchTip.L",
+      "BranchTip.R",
+      "Vine.L",
+      "Vine.R",
+      "RootClaw.L",
+      "RootClaw.R"
     ],
     "referenceTokens": [
       "spriggan",
       "branch",
       "vine",
       "bark",
-      "leaf"
+      "leaf",
+      "tendril",
+      "briar"
     ],
     "sliderNames": [
       "Belly",
@@ -1580,6 +1587,8 @@
       "vine",
       "bark",
       "leaf",
+      "tendril",
+      "root",
       "briarfolk",
       "rootfolk",
       "dryad"
@@ -1588,11 +1597,14 @@
       "spriggan",
       "bark",
       "leaf",
-      "vine"
+      "vine",
+      "branch",
+      "root"
     ],
     "physicsTokens": [
       "vine",
-      "branch"
+      "branch",
+      "tendril"
     ],
     "vertexCountMin": 4300,
     "vertexCountMax": 7000,
@@ -1601,12 +1613,14 @@
     "depthToWidthRatioMin": 0.27,
     "depthToWidthRatioMax": 0.9,
     "physicsBoneSignatures": [
-      "Wing.L",
-      "Wing.R",
-      "WingTip.L",
-      "WingTip.R"
+      "Branch.L",
+      "Branch.R",
+      "Vine.L",
+      "Vine.R",
+      "RootClaw.L",
+      "RootClaw.R"
     ],
-    "skeletonFramework": "winged-humanoid"
+    "skeletonFramework": "spriggan-branch"
   },
   {
     "name": "Equine Humanoid",

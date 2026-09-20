@@ -9,6 +9,7 @@
     { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfin", "tailfur", "tailfluff"] },
     { "name": "thigh", "tokens": ["thigh"] },
     { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "wingmembrane", "feather", "pinion", "plume", "talon"] },
+    { "name": "branch", "tokens": ["branch", "branchtip", "vine", "vinetip", "tendril", "briar", "twig", "rootclaw", "rootbranch", "leaf"] },
     { "name": "horn", "tokens": ["horn", "goathorn", "ramhorn"] },
     { "name": "hoof", "tokens": ["hoof", "hock", "digitigrade", "paw", "claw", "dewclaw", "fetlock", "talon"] },
     { "name": "mane", "tokens": ["mane", "forelock", "manetip", "crest"] },

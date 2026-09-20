@@ -2610,6 +2610,7 @@ public sealed class ConversionOrchestratorTests
     [InlineData("featherfolk_pinion_follower.esp", "Avian variant")]
     [InlineData("werewolf_vulpine_child_patch.esp", "Canine variant")]
     [InlineData("wolfbeast_customrace_follower.esp", "Canine variant")]
+    [InlineData("creature_customrace_follower.esp", "Creature variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -8501,6 +8502,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ManeTip", "TailTip"]));
         Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingMembrane.L", "Feather03.R"]));
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["PawFront.L", "DigitigradeToe.R"]));
+        Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["Branch.L", "Vine.R"]));
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchTip.L", "spriggan-branch", out var branchFallbacks));
+        Assert.Contains("Branch.L", branchFallbacks);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("BriarTendrilChain", out var branchGroup));
+        Assert.Equal("branch", branchGroup);
     }
 }
 
@@ -8545,7 +8551,10 @@ public sealed class ExpandedPresetTests
     [InlineData("Vanilla Beast Lean", "Vanilla Beast")]
     [InlineData("Goat Humanoid Athletic", "Goat Humanoid")]
     [InlineData("Goat Humanoid Lean", "Goat Humanoid")]
+    [InlineData("Goat Humanoid Muscular", "Goat Humanoid")]
+    [InlineData("Hagraven Athletic", "Hagraven")]
     [InlineData("Hagraven Lean", "Hagraven")]
+    [InlineData("Spriggan Athletic", "Spriggan")]
     [InlineData("Spriggan Lean", "Spriggan")]
     [InlineData("Equine Humanoid Athletic", "Equine Humanoid")]
     [InlineData("Equine Humanoid Lean", "Equine Humanoid")]
@@ -8841,6 +8850,9 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Lykaios", "Vanilla Beast")]
     [InlineData("Canine Humanoid", "Vanilla Beast")]
     [InlineData("Foxfolk", "Vanilla Beast")]
+    [InlineData("Nature Spirit", "Spriggan")]
+    [InlineData("Treefolk", "Spriggan")]
+    [InlineData("Feather Witch", "Hagraven")]
     [InlineData("Schlongs-of-Skyrim", "SOS")]
     [InlineData("Sam-Light", "SAM Light")]
     [InlineData("SAM Lite", "SAM Light")]
@@ -17212,6 +17224,24 @@ public sealed class BasicWeightTransferServicePhysicsTests
         Assert.DoesNotContain("PawFrontGuardL", repaired);
         Assert.DoesNotContain("PawRearGuardR", repaired);
         Assert.DoesNotContain("DewClawBackR", repaired);
+        Assert.DoesNotContain("WingMembraneL", repaired);
+    }
+
+    [Fact]
+    public void RepairTargetBones_ActivatesBranchGroupsUsingSupportedSprigganBonesOnly()
+    {
+        var repaired = PhysicsRepairCatalog.RepairTargetBones(
+            ["Branch.L"],
+            ["Branch.L", "Branch.R", "Vine.L", "RootClaw.L"],
+            ["BriarTendrilSwing", "VineTipWhip", "RootClawHook", "WingMembraneL"]);
+
+        Assert.Contains("Branch.L", repaired);
+        Assert.Contains("Branch.R", repaired);
+        Assert.Contains("Vine.L", repaired);
+        Assert.Contains("RootClaw.L", repaired);
+        Assert.DoesNotContain("BriarTendrilSwing", repaired);
+        Assert.DoesNotContain("VineTipWhip", repaired);
+        Assert.DoesNotContain("RootClawHook", repaired);
         Assert.DoesNotContain("WingMembraneL", repaired);
     }
 

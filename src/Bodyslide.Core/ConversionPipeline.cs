@@ -442,6 +442,11 @@ internal static class ConversionValidationGuidance
                 "Re-run the conversion and confirm plugin-patches.json is present before release so plugin rewrite mappings, load-order hints, and linked-family review steps ship with the output.",
             "missing-root-plugin" =>
                 "Copy the source or generated ESP/ESM/ESL into the package root before release, then verify the FOMOD/plugin install flow still enables the rewritten plugin in your mod manager.",
+            "missing-fomod-info" =>
+                "Rebuild fomod/info.xml before release so the packaged installer keeps its basic metadata when opened in MO2, Vortex, or other FOMOD-capable tooling.",
+            "missing-root-support-file" or
+            "zip-missing-root-support-file" =>
+                "Open armor-pack-validation.json, restore the missing root support report or preview artifact to the package root, then rebuild the archive so downstream users keep the same diagnostics that were validated locally.",
             "missing-preview-workbench" =>
                 "Re-run the conversion to regenerate preview-workbench.html, then confirm preview.html and preview.svg are also present so the converted mesh, ground mesh, and flagged risk regions remain reviewable outside the app before release.",
             "missing-preview-html" or
@@ -1236,11 +1241,14 @@ public static class PresetCatalog
         ["Goat Humanoid Balanced"] = new("Goat Humanoid Balanced", "Goat Humanoid", "balanced", "none"),
         ["Goat Humanoid Athletic"] = new("Goat Humanoid Athletic", "Goat Humanoid", "athletic", "none"),
         ["Goat Humanoid Lean"] = new("Goat Humanoid Lean", "Goat Humanoid", "lean", "none"),
+        ["Goat Humanoid Muscular"] = new("Goat Humanoid Muscular", "Goat Humanoid", "muscular", "none"),
         ["Goat Humanoid Zeroed"] = new("Goat Humanoid Zeroed", "Goat Humanoid", "zeroed", "none"),
         ["Hagraven Balanced"] = new("Hagraven Balanced", "Hagraven", "balanced", "none"),
+        ["Hagraven Athletic"] = new("Hagraven Athletic", "Hagraven", "athletic", "none"),
         ["Hagraven Lean"] = new("Hagraven Lean", "Hagraven", "lean", "none"),
         ["Hagraven Zeroed"] = new("Hagraven Zeroed", "Hagraven", "zeroed", "none"),
         ["Spriggan Balanced"] = new("Spriggan Balanced", "Spriggan", "balanced", "none"),
+        ["Spriggan Athletic"] = new("Spriggan Athletic", "Spriggan", "athletic", "none"),
         ["Spriggan Lean"] = new("Spriggan Lean", "Spriggan", "lean", "none"),
         ["Spriggan Zeroed"] = new("Spriggan Zeroed", "Spriggan", "zeroed", "none"),
         ["Equine Humanoid Balanced"] = new("Equine Humanoid Balanced", "Equine Humanoid", "balanced", "none"),

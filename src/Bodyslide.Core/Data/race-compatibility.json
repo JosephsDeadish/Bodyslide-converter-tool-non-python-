@@ -37,27 +37,27 @@
     },
     {
       "body": "Goat Humanoid",
-      "compatibleGroups": ["humanoid", "beast", "goat", "horned"],
+      "compatibleGroups": ["humanoid", "beast", "goat", "horned", "creature"],
       "warningGroups": []
     },
     {
       "body": "Hagraven",
-      "compatibleGroups": ["humanoid", "beast", "hagraven", "winged"],
+      "compatibleGroups": ["humanoid", "beast", "hagraven", "winged", "creature"],
       "warningGroups": []
     },
     {
       "body": "Spriggan",
-      "compatibleGroups": ["humanoid", "beast", "spriggan", "horned"],
+      "compatibleGroups": ["humanoid", "beast", "spriggan", "horned", "creature"],
       "warningGroups": []
     },
     {
       "body": "Equine Humanoid",
-      "compatibleGroups": ["humanoid", "beast", "equine", "hoofed"],
+      "compatibleGroups": ["humanoid", "beast", "equine", "hoofed", "creature"],
       "warningGroups": []
     },
     {
       "body": "Avian Humanoid",
-      "compatibleGroups": ["humanoid", "beast", "avian", "winged"],
+      "compatibleGroups": ["humanoid", "beast", "avian", "winged", "creature"],
       "warningGroups": []
     }
   ],
@@ -90,6 +90,13 @@
       "editorIdHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk"],
       "pluginNameHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk", "creature race", "custom race", "vampire", "child", "follower"],
       "meshPathHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "paw", "claw", "digitigrade", "tail"]
+    },
+    {
+      "name": "Creature variant",
+      "groups": ["beast", "creature"],
+      "editorIdHints": ["creature", "monster", "feral", "beastfolk", "wildling", "chimera"],
+      "pluginNameHints": ["creature", "monster", "feral", "beastfolk", "wildling", "chimera", "custom race", "customrace", "follower", "child", "vampire"],
+      "meshPathHints": ["creature", "monster", "feral", "beast", "claw", "fang", "tendril", "paw"]
     },
     {
       "name": "Goat variant",

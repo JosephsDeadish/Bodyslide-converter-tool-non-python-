@@ -250,6 +250,28 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversMissingFomodMetadataAndRootSupportFiles()
+    {
+        var summary = new ConversionValidationSummary(
+            "UNSAFE",
+            24,
+            1,
+            2,
+            0,
+            [
+                new ConversionValidationIssue("missing-fomod-info", "medium", "fomod/info.xml was not generated."),
+                new ConversionValidationIssue("missing-root-support-file", "medium", "A root support report is missing."),
+                new ConversionValidationIssue("zip-missing-root-support-file", "medium", "The distributable ZIP is missing a root support report."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Spriggan", maxActions: 8);
+
+        Assert.Contains(actions, action => action.Contains("fomod/info.xml", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("root support report", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("armor-pack-validation.json", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildValidationPreviewPanelHtml_UsesPassReviewFailLabels()
     {
         var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");

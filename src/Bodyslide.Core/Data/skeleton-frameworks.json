@@ -42,6 +42,13 @@
     "minimumSignatureMatches": 2
   },
   {
+    "label": "spriggan-branch",
+    "bonePrefixes": ["Branch", "Vine", "Tendril", "RootClaw", "Briar"],
+    "boneTokens": ["Branch.L", "Branch.R", "BranchTip", "Vine.L", "Vine.R", "VineTip", "Tendril", "RootClaw", "Briar", "Twig", "Spriggan"],
+    "distinctiveSignatures": ["Branch.L", "Branch.R", "Vine.L", "Vine.R", "RootClaw.L", "RootClaw.R"],
+    "minimumSignatureMatches": 2
+  },
+  {
     "label": "digitigrade-beast",
     "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe"],
     "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe", "Lykaios", "Canine", "Lupine", "Vulpine"],
