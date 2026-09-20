@@ -96,7 +96,11 @@ public sealed record CageIslandControl(
     int IslandId,
     IReadOnlyList<string> CageRegions,
     float RigidityBias = 0.0f,
-    float BoundaryDamping = 0.0f);
+    float BoundaryDamping = 0.0f,
+    IReadOnlyList<string>? SemanticLabels = null,
+    float WidthScaleBias = 1.0f,
+    float DepthScaleBias = 1.0f,
+    float HeightScaleBias = 1.0f);
 public sealed record DeformationCage(
     string Mode,
     IReadOnlyDictionary<string, CageRegion>? Regions = null,
@@ -809,7 +813,8 @@ public sealed record CageIslandMembershipSummary(
     int VertexCount,
     int BoundaryVertexCount,
     bool UsesExplicitTopology,
-    IReadOnlyList<string> CageRegions);
+    IReadOnlyList<string> CageRegions,
+    IReadOnlyList<string>? SemanticLabels = null);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -16409,8 +16414,14 @@ internal sealed class LocalExportService(
                          .OrderBy(static group => group.Key))
             {
                 var indexes = group.Select(static entry => entry.Index).ToArray();
+                var semanticProfile = DeriveCageIslandSemanticProfile(
+                    normalizedVertices,
+                    indexes,
+                    boundaryFlags,
+                    hasExplicitTopology);
                 var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
-                if (dominantRegions.Count == 0)
+                var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
+                if (effectiveRegions.Count == 0)
                 {
                     continue;
                 }
@@ -16419,20 +16430,26 @@ internal sealed class LocalExportService(
                 var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
                 var rigidityBias = Math.Clamp(
                     (hasExplicitTopology ? 0.04f : 0f) +
+                    semanticProfile.RigidityBias +
                     MathF.Min(0.12f, boundaryRatio * 0.22f),
                     0f,
-                    0.16f);
+                    0.28f);
                 var boundaryDamping = Math.Clamp(
                     (hasExplicitTopology ? 0.05f : 0.02f) +
+                    semanticProfile.BoundaryDamping +
                     MathF.Min(0.18f, boundaryRatio * 0.45f),
                     0f,
-                    0.24f);
+                    0.36f);
                 islandControls.Add(new CageIslandControl(
                     MeshKey: GetMeshTopologyLookupKey(meshFile),
                     IslandId: group.Key,
-                    CageRegions: dominantRegions,
+                    CageRegions: effectiveRegions,
                     RigidityBias: rigidityBias,
-                    BoundaryDamping: boundaryDamping));
+                    BoundaryDamping: boundaryDamping,
+                    SemanticLabels: semanticProfile.Labels,
+                    WidthScaleBias: semanticProfile.WidthScaleBias,
+                    DepthScaleBias: semanticProfile.DepthScaleBias,
+                    HeightScaleBias: semanticProfile.HeightScaleBias));
             }
         }
 
@@ -16449,6 +16466,199 @@ internal sealed class LocalExportService(
             .ThenBy(static control => control.IslandId)
             .ToArray();
         return deformationCage with { IslandControls = merged };
+    }
+
+    private sealed record CageIslandSemanticProfile(
+        IReadOnlyList<string> Labels,
+        float RigidityBias,
+        float BoundaryDamping,
+        float WidthScaleBias,
+        float DepthScaleBias,
+        float HeightScaleBias);
+
+    private static CageIslandSemanticProfile DeriveCageIslandSemanticProfile(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> indexes,
+        IReadOnlyList<bool> boundaryFlags,
+        bool hasExplicitTopology)
+    {
+        if (indexes.Count == 0)
+        {
+            return new CageIslandSemanticProfile([], 0f, 0f, 1f, 1f, 1f);
+        }
+
+        var minX = float.MaxValue;
+        var maxX = float.MinValue;
+        var minY = float.MaxValue;
+        var maxY = float.MinValue;
+        var minZ = float.MaxValue;
+        var maxZ = float.MinValue;
+        var sumX = 0f;
+        var sumY = 0f;
+        var sumZ = 0f;
+        var boundaryCount = 0;
+
+        foreach (var index in indexes)
+        {
+            if (index < 0 || index >= normalizedVertices.Count)
+            {
+                continue;
+            }
+
+            var vertex = normalizedVertices[index];
+            minX = MathF.Min(minX, vertex.X);
+            maxX = MathF.Max(maxX, vertex.X);
+            minY = MathF.Min(minY, vertex.Y);
+            maxY = MathF.Max(maxY, vertex.Y);
+            minZ = MathF.Min(minZ, vertex.Z);
+            maxZ = MathF.Max(maxZ, vertex.Z);
+            sumX += vertex.X;
+            sumY += vertex.Y;
+            sumZ += vertex.Z;
+            if (index < boundaryFlags.Count && boundaryFlags[index])
+            {
+                boundaryCount++;
+            }
+        }
+
+        var count = Math.Max(1, indexes.Count);
+        var centerX = sumX / count;
+        var centerY = sumY / count;
+        var centerZ = sumZ / count;
+        var spanX = MathF.Max(0.0001f, maxX - minX);
+        var spanY = MathF.Max(0.0001f, maxY - minY);
+        var spanZ = MathF.Max(0.0001f, maxZ - minZ);
+        var boundaryRatio = boundaryCount / (float)count;
+        var outerBias = MathF.Max(MathF.Abs(centerX - 0.5f) * 2f, MathF.Abs(centerY - 0.5f) * 2f);
+        var labels = new List<string>();
+        var rigidityBias = 0f;
+        var boundaryDamping = 0f;
+        var widthScaleBias = 1f;
+        var depthScaleBias = 1f;
+        var heightScaleBias = 1f;
+
+        if ((hasExplicitTopology && boundaryRatio >= 0.42f) || boundaryRatio >= 0.58f)
+        {
+            labels.Add("window-frame-island");
+            rigidityBias += 0.06f;
+            boundaryDamping += 0.07f;
+            widthScaleBias = MathF.Min(widthScaleBias, 0.76f);
+            depthScaleBias = MathF.Min(depthScaleBias, 0.82f);
+            heightScaleBias = MathF.Min(heightScaleBias, 0.88f);
+        }
+
+        if (spanZ <= 0.18f && outerBias >= 0.34f)
+        {
+            labels.Add("bridge-strap-island");
+            rigidityBias += 0.05f;
+            boundaryDamping += 0.03f;
+            widthScaleBias = MathF.Min(widthScaleBias, 0.74f);
+            depthScaleBias = MathF.Min(depthScaleBias, 0.84f);
+            heightScaleBias = MathF.Min(heightScaleBias, 0.92f);
+        }
+
+        if (outerBias >= 0.52f && spanX >= 0.08f)
+        {
+            labels.Add(centerZ >= 0.72f ? "outer-shell-island" : "outer-flank-island");
+            rigidityBias += 0.03f;
+            widthScaleBias = MathF.Min(widthScaleBias, 0.86f);
+        }
+        else if (outerBias <= 0.24f)
+        {
+            labels.Add("core-panel-island");
+            depthScaleBias = MathF.Min(depthScaleBias, 0.90f);
+        }
+
+        if (centerZ >= 0.74f)
+        {
+            labels.Add(outerBias >= 0.40f ? "upper-lateral-island" : "upper-core-island");
+        }
+        else if (centerZ <= 0.52f)
+        {
+            labels.Add(outerBias >= 0.36f ? "lower-lateral-island" : "lower-core-island");
+        }
+
+        return new CageIslandSemanticProfile(
+            labels
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            Math.Clamp(rigidityBias, 0f, 0.12f),
+            Math.Clamp(boundaryDamping, 0f, 0.12f),
+            Math.Clamp(widthScaleBias, 0.64f, 1f),
+            Math.Clamp(depthScaleBias, 0.72f, 1f),
+            Math.Clamp(heightScaleBias, 0.80f, 1f));
+    }
+
+    private static IReadOnlyList<string> ResolveSemanticIslandCageRegions(
+        IReadOnlyList<string> dominantRegions,
+        CageIslandSemanticProfile semanticProfile,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.Regions is not { Count: > 0 } availableRegions)
+        {
+            return dominantRegions;
+        }
+
+        var ordered = new List<string>();
+        void AddRegion(string name)
+        {
+            if (availableRegions.ContainsKey(name) &&
+                !ordered.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                ordered.Add(name);
+            }
+        }
+
+        foreach (var label in semanticProfile.Labels)
+        {
+            switch (label)
+            {
+                case "window-frame-island":
+                    AddRegion("chest");
+                    AddRegion("breasts");
+                    AddRegion("waist");
+                    AddRegion("belly");
+                    AddRegion("pelvis");
+                    break;
+                case "bridge-strap-island":
+                    AddRegion("shoulders");
+                    AddRegion("arms");
+                    AddRegion("thighs");
+                    AddRegion("calves");
+                    break;
+                case "outer-shell-island":
+                case "upper-lateral-island":
+                    AddRegion("shoulders");
+                    AddRegion("arms");
+                    AddRegion("chest");
+                    break;
+                case "outer-flank-island":
+                case "lower-lateral-island":
+                    AddRegion("thighs");
+                    AddRegion("calves");
+                    AddRegion("pelvis");
+                    break;
+                case "core-panel-island":
+                case "upper-core-island":
+                    AddRegion("chest");
+                    AddRegion("breasts");
+                    AddRegion("waist");
+                    break;
+                case "lower-core-island":
+                    AddRegion("belly");
+                    AddRegion("pelvis");
+                    AddRegion("butt");
+                    break;
+            }
+        }
+
+        foreach (var region in dominantRegions)
+        {
+            AddRegion(region);
+        }
+
+        return ordered.Count > 0 ? ordered : dominantRegions;
     }
 
     private static byte[] TryApplyNifVertexTransform(
@@ -17145,10 +17355,20 @@ internal sealed class LocalExportService(
             return ComputeLegacyTransformScales(regionalMorphing, normalizedHeight);
         }
 
+        var widthScale = widthTotal / totalWeight;
+        var depthScale = depthTotal / totalWeight;
+        var heightScale = heightTotal / totalWeight;
+        if (islandControl is not null)
+        {
+            widthScale = 1d + ((widthScale - 1d) * islandControl.WidthScaleBias);
+            depthScale = 1d + ((depthScale - 1d) * islandControl.DepthScaleBias);
+            heightScale = 1d + ((heightScale - 1d) * islandControl.HeightScaleBias);
+        }
+
         return (
-            widthTotal / totalWeight,
-            depthTotal / totalWeight,
-            heightTotal / totalWeight);
+            widthScale,
+            depthScale,
+            heightScale);
     }
 
     private static CageIslandControl? ResolveIslandCageControl(
@@ -22894,7 +23114,7 @@ internal sealed class LocalExportService(
         var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
         var cageIslandItemsHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? string.Join(Environment.NewLine, payload.CageTopology.Islands.Take(8).Select(static island =>
-                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}</li>"))
+                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
             : string.Empty;
         var cageTopologyHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? $$"""
@@ -23242,13 +23462,22 @@ internal sealed class LocalExportService(
             {
                 var indexes = group.Select(static entry => entry.Index).ToArray();
                 var boundaryVertexCount = indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                var meshKey = GetMeshTopologyLookupKey(meshPath);
+                var islandControl = deformationCage?.IslandControls?
+                    .FirstOrDefault(control => control.MeshKey.Equals(meshKey, StringComparison.OrdinalIgnoreCase) &&
+                                               control.IslandId == group.Key);
+                var semanticLabels = islandControl?.SemanticLabels ?? [];
+                var cageRegions = islandControl?.CageRegions is { Count: > 0 }
+                    ? islandControl.CageRegions
+                    : ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
                 islandSummaries.Add(new CageIslandMembershipSummary(
                     MeshFile: Path.GetFileName(meshPath) ?? meshPath,
                     IslandId: group.Key,
                     VertexCount: indexes.Length,
                     BoundaryVertexCount: boundaryVertexCount,
                     UsesExplicitTopology: usesExplicitTopology,
-                    CageRegions: ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage)));
+                    CageRegions: cageRegions,
+                    SemanticLabels: semanticLabels));
             }
         }
 

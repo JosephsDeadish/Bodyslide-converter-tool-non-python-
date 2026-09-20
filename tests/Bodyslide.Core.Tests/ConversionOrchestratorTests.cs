@@ -6278,6 +6278,11 @@ public sealed class NifOutputAndSourceOverrideTests
                                                            control.CageRegions.Contains("chest", StringComparer.OrdinalIgnoreCase));
             Assert.Contains(result.IslandControls, control => control.MeshKey.Equals("island_cage_regions", StringComparison.OrdinalIgnoreCase) &&
                                                            control.CageRegions.Contains("arms", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(result.IslandControls, control => control.SemanticLabels is { Count: > 0 } &&
+                                                            control.SemanticLabels.Contains("window-frame-island", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(result.IslandControls, control => control.WidthScaleBias < 1f &&
+                                                            control.DepthScaleBias < 1f &&
+                                                            control.HeightScaleBias < 1f);
         }
         finally
         {
