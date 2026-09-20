@@ -78,8 +78,7 @@
     {
       "body": "Draconic Humanoid",
       "compatibleGroups": ["humanoid", "beast", "draconic", "reptile", "tail", "horned", "winged", "creature"],
-      "warningGroups": ["winged", "horned"],
-      "warningMessage": "wing membrane, horn seam, and tail clearance should still be verified in-game."
+      "warningGroups": []
     }
   ],
   "inferenceRules": [

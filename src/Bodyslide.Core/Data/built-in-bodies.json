@@ -1951,9 +1951,7 @@
       "PawFront.L",
       "PawFront.R",
       "PawRear.L",
-      "PawRear.R",
-      "Ear.L",
-      "Ear.R"
+      "PawRear.R"
     ],
     "referenceTokens": [
       "cathay",
@@ -2165,8 +2163,6 @@
       "Tail2",
       "Tail3",
       "TailBarb",
-      "Horn.L",
-      "Horn.R",
       "Wing.L",
       "Wing.R",
       "WingFinger01.L",
@@ -2240,8 +2236,6 @@
     "physicsBoneSignatures": [
       "NPC Tail",
       "TailBarb",
-      "Horn.L",
-      "Horn.R",
       "Wing.L",
       "Wing.R"
     ],

@@ -8722,7 +8722,7 @@ public sealed class PhysicsMeshTypeTuningTests
     {
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Feline Humanoid", out var feline));
         Assert.Contains("PawFront.L", feline.AvailablePhysicsBones);
-        Assert.Contains("Ear.L", feline.AvailablePhysicsBones);
+        Assert.Contains("PawRear.L", feline.AvailablePhysicsBones);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Canine Humanoid", out var canine));
         Assert.Contains("PawFront.L", canine.AvailablePhysicsBones);
@@ -8738,8 +8738,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Feather.L", hagraven.AvailablePhysicsBones);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Draconic Humanoid", out var draconic));
-        Assert.Contains("Horn.L", draconic.AvailablePhysicsBones);
         Assert.Contains("Wing.L", draconic.AvailablePhysicsBones);
+        Assert.Contains("TailBarb", draconic.AvailablePhysicsBones);
     }
 
     [Fact]
