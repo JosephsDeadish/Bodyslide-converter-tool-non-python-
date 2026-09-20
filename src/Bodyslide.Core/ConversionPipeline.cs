@@ -6185,7 +6185,8 @@ public sealed class ConversionOrchestrator(
                     converted.MeshType,
                     $"{converted.Strategy}+cache-reuse",
                     converted.MeshCount,
-                    mergedMorphing);
+                    mergedMorphing,
+                    converted.DeformationCage);
                 steps.Add("learning-cache:reused");
             }
 
@@ -6313,7 +6314,8 @@ public sealed class ConversionOrchestrator(
                     converted.MeshType,
                     $"{converted.Strategy}+auto-corrected",
                     converted.MeshCount,
-                    correctedMorphing);
+                    correctedMorphing,
+                    converted.DeformationCage);
                 steps.Add($"correction-applied:regions={clipping.Regions.Count}");
             }
 
@@ -6343,7 +6345,8 @@ public sealed class ConversionOrchestrator(
                     converted.MeshType,
                     converted.Strategy,
                     converted.MeshCount,
-                    voxelMorphing);
+                    voxelMorphing,
+                    converted.DeformationCage);
                 steps.Add($"voxel-push-applied:regions={voxelResult.AffectedRegions.Count}");
             }
 

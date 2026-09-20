@@ -20977,7 +20977,8 @@ public sealed class CorrectionFeedbackLoopTests
     private static ConversionOrchestrator BuildOrchestrator(
         IMeshConversionService? meshConverter = null,
         IAutoCorrectionService? autoCorrection = null,
-        IVoxelCollisionService? voxelCollision = null)
+        IVoxelCollisionService? voxelCollision = null,
+        IExportService? exporter = null)
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
@@ -21001,7 +21002,7 @@ public sealed class CorrectionFeedbackLoopTests
             voxelCollision ?? new SimplifiedVoxelCollisionService(),
             new BasicArmorRegionBindingService(),
             new AnimationDrivenPoseSimulationService(),
-            new LocalExportService());
+            exporter ?? new LocalExportService());
     }
 
     [Fact]
@@ -21045,6 +21046,66 @@ public sealed class CorrectionFeedbackLoopTests
         Assert.Contains(result.Steps, s => s.StartsWith("voxel-push-applied:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task ConvertAsync_WithCorrectionFeedback_PreservesDeformationCageForExport()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(64));
+
+        try
+        {
+            var exporter = new CaptureConvertedMeshExporter();
+            var orchestrator = BuildOrchestrator(
+                meshConverter: new ForcedClippingMeshConversionService(),
+                autoCorrection: new BasicAutoCorrectionService(),
+                exporter: exporter);
+
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.NotNull(exporter.CapturedMesh);
+            Assert.NotNull(exporter.CapturedMesh!.DeformationCage);
+            Assert.Equal("hybrid-cage", exporter.CapturedMesh.DeformationCage!.Mode);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithVoxelPushOut_PreservesDeformationCageForExport()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(64));
+
+        try
+        {
+            var exporter = new CaptureConvertedMeshExporter();
+            var orchestrator = BuildOrchestrator(
+                meshConverter: new ForcedClippingMeshConversionService(),
+                voxelCollision: new AlwaysPenetratingVoxelCollisionService(),
+                exporter: exporter);
+
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.NotNull(exporter.CapturedMesh);
+            Assert.NotNull(exporter.CapturedMesh!.DeformationCage);
+            Assert.Equal("hybrid-cage", exporter.CapturedMesh.DeformationCage!.Mode);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     // Mesh conversion service that forces high regional morphing to trigger clipping.
     private sealed class ForcedClippingMeshConversionService : IMeshConversionService
     {
@@ -21065,7 +21126,8 @@ public sealed class CorrectionFeedbackLoopTests
                     ["butt"]      = 1.25,
                     ["pelvis"]    = 1.22,
                     ["thighs"]    = 1.18,
-                }));
+                },
+                cage));
     }
 
     // Voxel service that always reports penetrations in the chest region.
@@ -21082,6 +21144,35 @@ public sealed class CorrectionFeedbackLoopTests
                     ["waist"] = 1.5,
                 },
                 8));
+    }
+
+    private sealed class CaptureConvertedMeshExporter : IExportService
+    {
+        public ConvertedMesh? CapturedMesh { get; private set; }
+
+        public Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
+            ConversionRequest request,
+            ImportedArmor armor,
+            MeshAnalysis analysis,
+            ConvertedMesh mesh,
+            MorphSet morphs,
+            PhysicsConfig physics,
+            ClippingReport clipping,
+            CorrectionResult correction,
+            BodySlideProject bodySlideProject,
+            PluginAnalysisResult pluginAnalysis,
+            TextureSummary textureSummary,
+            PoseSimulationResult poseSimulation,
+            IReadOnlyList<string> steps,
+            BodyDetectionReport detectedBody,
+            SkeletonMappingResult skeletonMapping,
+            RaceCompatibilityReport? raceCompatibility,
+            VoxelCollisionResult voxelResult,
+            CancellationToken cancellationToken)
+        {
+            CapturedMesh = mesh;
+            return Task.FromResult<(string, IReadOnlyList<string>)>((request.OutputDirectory ?? Path.GetTempPath(), []));
+        }
     }
 }
 
