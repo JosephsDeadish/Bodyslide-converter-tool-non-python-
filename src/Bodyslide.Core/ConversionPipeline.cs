@@ -17942,10 +17942,10 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
-        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
-            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
-            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
+        var topologyContext = BuildTopologyTransformContext(
+            rawVertices,
+            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         // Run animation-driven solver to get per-region push-out corrections
@@ -18100,10 +18100,10 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
-        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
-            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
-            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
+        var topologyContext = BuildTopologyTransformContext(
+            rawVertices,
+            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -18214,7 +18214,7 @@ internal sealed class LocalExportService(
 
         var transformed = sourceBytes.ToArray();
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
-        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
+        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
         var transformedAny = false;
         foreach (var block in blocks)
         {
@@ -18230,6 +18230,18 @@ internal sealed class LocalExportService(
         }
 
         return transformedAny ? transformed : sourceBytes;
+    }
+
+    private static MeshTransferTopologySnapshot? ResolveSharedTopologySnapshotForTransform(byte[] sourceBytes, string? sourcePath)
+    {
+        if (!string.IsNullOrWhiteSpace(sourcePath) &&
+            File.Exists(sourcePath) &&
+            Path.GetExtension(sourcePath).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return GetMeshTransferTopologySnapshot(sourcePath);
+        }
+
+        return GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
     }
 
     private static bool TryApplyHalfFloatVertexBlockTransform(
@@ -18281,9 +18293,9 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
-            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
-            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed));
+        var topologyContext = BuildTopologyTransformContext(
+            rawVertices,
+            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed));
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
