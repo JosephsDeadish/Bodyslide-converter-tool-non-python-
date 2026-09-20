@@ -1375,7 +1375,12 @@
       "NPC Tail",
       "Tail1",
       "Tail2",
-      "Tail3"
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "CoilRoot",
+      "CoilMid",
+      "CoilTip"
     ],
     "referenceTokens": [
       "lamia",
@@ -1430,7 +1435,8 @@
       "coil"
     ],
     "physicsTokens": [
-      "tail"
+      "tail",
+      "coil"
     ],
     "vertexCountMin": 4300,
     "vertexCountMax": 7000,
@@ -1442,9 +1448,12 @@
       "NPC Tail",
       "Tail1",
       "Tail2",
-      "Tail3"
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "CoilTip"
     ],
-    "skeletonFramework": "beast-humanoid"
+    "skeletonFramework": "serpentine-humanoid"
   },
   {
     "name": "Goat Humanoid",

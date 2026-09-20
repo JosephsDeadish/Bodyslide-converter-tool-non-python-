@@ -49,6 +49,9 @@
     "TailEnd": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
     "Tail4": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
     "Tail5": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "CoilRoot": ["Tail2", "Tail1", "NPC Tail"],
+    "CoilMid": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+    "CoilTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
     "WingOuter.L": ["Wing.L", "LeftWing"],
     "WingOuter.R": ["Wing.R", "RightWing"],
     "WingMid.L": ["Wing.L", "LeftWing"],
@@ -184,6 +187,27 @@
         "LeftWing",
         "RightWing"
       ]
+    },
+    {
+      "id": "serpentine-humanoid",
+      "bones": [
+        "NPC Tail",
+        "Tail1",
+        "Tail2",
+        "Tail3",
+        "Tail4",
+        "Tail5",
+        "CoilRoot",
+        "CoilMid",
+        "CoilTip"
+      ],
+      "fallbackMappings": {
+        "Tail4": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
+        "Tail5": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+        "CoilRoot": ["Tail2", "Tail1", "NPC Tail"],
+        "CoilMid": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+        "CoilTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"]
+      }
     },
     {
       "id": "horned-humanoid",

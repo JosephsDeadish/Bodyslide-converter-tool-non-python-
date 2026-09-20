@@ -28,6 +28,13 @@
     "minimumSignatureMatches": 2
   },
   {
+    "label": "serpentine-humanoid",
+    "bonePrefixes": ["Tail", "Coil", "Serpent"],
+    "boneTokens": ["NPC Tail", "Tail4", "Tail5", "TailTip", "CoilRoot", "CoilMid", "CoilTip", "Lamia", "Naga", "Serpent"],
+    "distinctiveSignatures": ["Tail4", "Tail5", "CoilRoot", "CoilMid", "CoilTip"],
+    "minimumSignatureMatches": 2
+  },
+  {
     "label": "horned-humanoid",
     "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn", "HornTip", "RamHorn", "Cloven"],
     "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof", "HornTip", "HornTrail", "Cloven", "Ramhorn"],

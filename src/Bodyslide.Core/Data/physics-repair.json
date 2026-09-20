@@ -6,7 +6,7 @@
     { "name": "pec", "tokens": ["pec", "chest"] },
     { "name": "lat", "tokens": ["lat"] },
     { "name": "genitals", "tokens": ["genital", "schlong", "balls", "scrot", "penis", "sos", "tng"] },
-    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfin", "tailfur", "tailfluff"] },
+    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfin", "tailfur", "tailfluff", "coil", "serpenttail", "serpentine", "snake", "cobra", "viper"] },
     { "name": "thigh", "tokens": ["thigh"] },
     { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "wingmembrane", "feather", "pinion", "plume", "talon"] },
     { "name": "branch", "tokens": ["branch", "branchtip", "vine", "vinetip", "tendril", "briar", "twig", "rootclaw", "rootbranch", "leaf"] },

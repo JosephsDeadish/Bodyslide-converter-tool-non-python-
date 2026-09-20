@@ -8494,6 +8494,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Wing.L", wingFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Tail4", "equine-humanoid", out var equineTailFallbacks));
         Assert.Contains("Tail3", equineTailFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("CoilTip", "serpentine-humanoid", out var serpentineFallbacks));
+        Assert.Contains("Tail5", serpentineFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Hock.L", "digitigrade-beast", out var digitigradeFallbacks));
         Assert.Contains("NPC L Calf", digitigradeFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("CustomTailChain02", out var groupName));
@@ -8506,11 +8508,14 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("WingTip.L", membraneFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailFluffSwing", out var tailGroup));
         Assert.Equal("tail", tailGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("SerpentTailCoilSwing", out var serpentTailGroup));
+        Assert.Equal("tail", serpentTailGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("DewClawRearL", out var hoofGroup));
         Assert.Equal("hoof", hoofGroup);
         Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ManeTip", "TailTip"]));
         Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingMembrane.L", "Feather03.R"]));
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["PawFront.L", "DigitigradeToe.R"]));
+        Assert.Equal("serpentine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CoilRoot", "CoilTip"]));
         Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["Branch.L", "Vine.R"]));
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchTip.L", "spriggan-branch", out var branchFallbacks));
         Assert.Contains("Branch.L", branchFallbacks);
