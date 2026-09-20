@@ -17114,32 +17114,6 @@ internal sealed class LocalExportService(
                     group.Key < componentBoundaryLoopCounts.Length
                         ? componentBoundaryLoopCounts[group.Key]
                         : 0);
-                var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
-                var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
-                var boundaryLoopControls = BuildIslandBoundaryLoopControls(
-                    rawVertices,
-                    topologySummary?.BoundaryLoops,
-                    group.Key,
-                    effectiveRegions);
-                var authoredRegions = BuildIslandAuthoredRegions(
-                    normalizedVertices,
-                    topologySummary?.BoundaryLoops,
-                    group.Key,
-                    indexes,
-                    effectiveRegions,
-                    deformationCage.Regions,
-                    semanticProfile);
-                if (effectiveRegions.Count == 0)
-                {
-                    continue;
-                }
-
-                var boundaryCount = topologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
-                                    group.Key >= 0 &&
-                                    group.Key < componentBoundaryVertexCounts.Length
-                    ? componentBoundaryVertexCounts[group.Key]
-                    : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
-                var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
                 TopologyIslandEdgeNetworkSummary? edgeNetworkSummary = null;
                 if (edgeNetworks.TryGetValue(group.Key, out var edgeNetwork))
                 {
@@ -17155,6 +17129,34 @@ internal sealed class LocalExportService(
                                         IsClosedManifold: edgeNetwork.BoundaryEdges.Count == 0 && edgeNetwork.NonManifoldEdgeCount == 0,
                                         HasManifoldRisk: edgeNetwork.NonManifoldEdgeCount > 0 || edgeNetwork.ManifoldScore < 0.82f);
                 }
+                var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
+                var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
+                var boundaryLoopControls = BuildIslandBoundaryLoopControls(
+                    rawVertices,
+                    topologySummary?.BoundaryLoops,
+                    group.Key,
+                    effectiveRegions,
+                    edgeNetworkSummary);
+                var authoredRegions = BuildIslandAuthoredRegions(
+                    normalizedVertices,
+                    topologySummary?.BoundaryLoops,
+                    group.Key,
+                    indexes,
+                    effectiveRegions,
+                    deformationCage.Regions,
+                    semanticProfile,
+                    edgeNetworkSummary);
+                if (effectiveRegions.Count == 0)
+                {
+                    continue;
+                }
+
+                var boundaryCount = topologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
+                                    group.Key >= 0 &&
+                                    group.Key < componentBoundaryVertexCounts.Length
+                    ? componentBoundaryVertexCounts[group.Key]
+                    : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
                 var rigidityBias = Math.Clamp(
                                     (hasExplicitTopology ? 0.04f : 0f) +
                                     semanticProfile.RigidityBias +
@@ -17401,7 +17403,8 @@ internal sealed class LocalExportService(
         IReadOnlyList<int> indexes,
         IReadOnlyList<string> effectiveRegions,
         IReadOnlyDictionary<string, CageRegion>? baseRegions,
-        CageIslandSemanticProfile semanticProfile)
+        CageIslandSemanticProfile semanticProfile,
+        TopologyIslandEdgeNetworkSummary? edgeNetworkSummary)
     {
         if (indexes.Count == 0 ||
             effectiveRegions.Count == 0 ||
@@ -17430,7 +17433,7 @@ internal sealed class LocalExportService(
 
             authored.Add(new CageIslandAuthoredRegion(
                 regionName,
-                CreateAuthoredCageRegion(baseRegion, islandProfile, semanticProfile)));
+                CreateAuthoredCageRegion(baseRegion, islandProfile, semanticProfile, edgeNetworkSummary: edgeNetworkSummary)));
         }
 
         if (boundaryLoops is { Count: > 0 })
@@ -17459,7 +17462,7 @@ internal sealed class LocalExportService(
 
                     authored.Add(new CageIslandAuthoredRegion(
                         regionName,
-                        CreateAuthoredCageRegion(baseRegion, loopProfile, semanticProfile, isBoundaryLoop: true, isHole),
+                        CreateAuthoredCageRegion(baseRegion, loopProfile, semanticProfile, isBoundaryLoop: true, isHole, edgeNetworkSummary),
                         LoopIndex: loop.LoopIndex,
                         IsHole: isHole));
                 }
@@ -17545,20 +17548,22 @@ internal sealed class LocalExportService(
         AuthoredCageAxisProfile profile,
         CageIslandSemanticProfile semanticProfile,
         bool isBoundaryLoop = false,
-        bool isHole = false)
+        bool isHole = false,
+        TopologyIslandEdgeNetworkSummary? edgeNetworkSummary = null)
     {
-        var widthBias = semanticProfile.WidthScaleBias * (isBoundaryLoop ? (isHole ? 0.72f : 0.86f) : 1f);
-        var depthBias = semanticProfile.DepthScaleBias * (isBoundaryLoop ? (isHole ? 0.76f : 0.88f) : 1f);
-        var heightBias = semanticProfile.HeightScaleBias * (isBoundaryLoop ? 0.92f : 1f);
-        var rigidityBias = semanticProfile.RigidityBias + (isBoundaryLoop ? (isHole ? 0.08f : 0.04f) : 0f);
+        var edgeRegionTuning = ComputeEdgeDrivenCageRegionTuning(edgeNetworkSummary, isBoundaryLoop, isHole);
+        var widthBias = semanticProfile.WidthScaleBias * (isBoundaryLoop ? (isHole ? 0.72f : 0.86f) : 1f) * edgeRegionTuning.WidthInfluenceScale;
+        var depthBias = semanticProfile.DepthScaleBias * (isBoundaryLoop ? (isHole ? 0.76f : 0.88f) : 1f) * edgeRegionTuning.DepthInfluenceScale;
+        var heightBias = semanticProfile.HeightScaleBias * (isBoundaryLoop ? 0.92f : 1f) * edgeRegionTuning.HeightInfluenceScale;
+        var rigidityBias = semanticProfile.RigidityBias + (isBoundaryLoop ? (isHole ? 0.08f : 0.04f) : 0f) + edgeRegionTuning.RigidityBias;
         return baseRegion with
         {
             HeightCenter = Math.Clamp((baseRegion.HeightCenter * 0.35f) + (profile.HeightCenter * 0.65f), 0f, 1f),
-            HeightFalloff = Math.Clamp(MathF.Min(baseRegion.HeightFalloff, profile.HeightFalloff), 0.03f, 1f),
+            HeightFalloff = Math.Clamp(MathF.Min(baseRegion.HeightFalloff, profile.HeightFalloff) * edgeRegionTuning.HeightFalloffScale, 0.03f, 1f),
             LateralCenter = Math.Clamp((baseRegion.LateralCenter * 0.35f) + (profile.LateralCenter * 0.65f), 0f, 1f),
-            LateralFalloff = Math.Clamp(MathF.Min(baseRegion.LateralFalloff, profile.LateralFalloff), 0.08f, 1f),
+            LateralFalloff = Math.Clamp(MathF.Min(baseRegion.LateralFalloff, profile.LateralFalloff) * edgeRegionTuning.LateralFalloffScale, 0.08f, 1f),
             DepthCenter = Math.Clamp((baseRegion.DepthCenter * 0.35f) + (profile.DepthCenter * 0.65f), 0f, 1f),
-            DepthFalloff = Math.Clamp(MathF.Min(baseRegion.DepthFalloff, profile.DepthFalloff), 0.08f, 1f),
+            DepthFalloff = Math.Clamp(MathF.Min(baseRegion.DepthFalloff, profile.DepthFalloff) * edgeRegionTuning.DepthFalloffScale, 0.08f, 1f),
             WidthInfluence = MathF.Max(0.02f, baseRegion.WidthInfluence * widthBias),
             DepthInfluence = MathF.Max(0.02f, baseRegion.DepthInfluence * depthBias),
             HeightInfluence = MathF.Max(0.02f, baseRegion.HeightInfluence * heightBias),
@@ -17566,11 +17571,99 @@ internal sealed class LocalExportService(
         };
     }
 
+    private sealed record EdgeDrivenCageRegionTuning(
+        float WidthInfluenceScale,
+        float DepthInfluenceScale,
+        float HeightInfluenceScale,
+        float LateralFalloffScale,
+        float DepthFalloffScale,
+        float HeightFalloffScale,
+        float RigidityBias);
+
+    private static EdgeDrivenCageRegionTuning ComputeEdgeDrivenCageRegionTuning(
+        TopologyIslandEdgeNetworkSummary? edgeNetworkSummary,
+        bool isBoundaryLoop,
+        bool isHole)
+    {
+        if (edgeNetworkSummary is null)
+        {
+            return new EdgeDrivenCageRegionTuning(1f, 1f, 1f, 1f, 1f, 1f, 0f);
+        }
+
+        var boundaryRatio = edgeNetworkSummary.BoundaryVertexCount <= 0
+            ? 0f
+            : edgeNetworkSummary.BoundaryVertexCount / (float)Math.Max(1, edgeNetworkSummary.BoundaryVertexCount + edgeNetworkSummary.InteriorEdgeCount);
+        var interiorDensity = edgeNetworkSummary.BoundaryVertexCount <= 0
+            ? edgeNetworkSummary.InteriorEdgeCount
+            : edgeNetworkSummary.InteriorEdgeCount / (float)Math.Max(1, edgeNetworkSummary.BoundaryVertexCount);
+        var manifoldRisk = edgeNetworkSummary.HasManifoldRisk
+            ? 1f
+            : Math.Clamp((edgeNetworkSummary.NonManifoldEdgeCount * 0.20f) + Math.Max(0f, edgeNetworkSummary.MaxVertexValence - 4) * 0.04f, 0f, 1f);
+
+        var widthInfluenceScale = 1f;
+        var depthInfluenceScale = 1f;
+        var heightInfluenceScale = 1f;
+        var lateralFalloffScale = 1f;
+        var depthFalloffScale = 1f;
+        var heightFalloffScale = 1f;
+        var rigidityBias = 0f;
+
+        if (boundaryRatio >= 0.35f)
+        {
+            lateralFalloffScale *= 0.92f;
+            depthFalloffScale *= 0.94f;
+            rigidityBias += 0.02f;
+        }
+
+        if (interiorDensity >= 0.75f)
+        {
+            widthInfluenceScale *= 0.94f;
+            depthInfluenceScale *= 0.95f;
+            lateralFalloffScale *= 0.94f;
+            depthFalloffScale *= 0.95f;
+        }
+
+        if (manifoldRisk > 0f)
+        {
+            widthInfluenceScale *= 1f - MathF.Min(0.12f, manifoldRisk * 0.10f);
+            depthInfluenceScale *= 1f - MathF.Min(0.10f, manifoldRisk * 0.08f);
+            heightInfluenceScale *= 1f - MathF.Min(0.08f, manifoldRisk * 0.06f);
+            lateralFalloffScale *= 1f - MathF.Min(0.18f, manifoldRisk * 0.14f);
+            depthFalloffScale *= 1f - MathF.Min(0.14f, manifoldRisk * 0.10f);
+            heightFalloffScale *= 1f - MathF.Min(0.10f, manifoldRisk * 0.07f);
+            rigidityBias += MathF.Min(0.08f, manifoldRisk * 0.06f);
+        }
+
+        if (isBoundaryLoop)
+        {
+            lateralFalloffScale *= isHole ? 0.90f : 0.95f;
+            depthFalloffScale *= isHole ? 0.92f : 0.96f;
+            heightFalloffScale *= 0.96f;
+            rigidityBias += isHole ? 0.02f : 0.01f;
+
+            if (edgeNetworkSummary.BoundaryEdgeCount > 0 && interiorDensity >= 0.50f)
+            {
+                widthInfluenceScale *= isHole ? 0.92f : 0.96f;
+                depthInfluenceScale *= isHole ? 0.94f : 0.97f;
+            }
+        }
+
+        return new EdgeDrivenCageRegionTuning(
+            Math.Clamp(widthInfluenceScale, 0.76f, 1f),
+            Math.Clamp(depthInfluenceScale, 0.80f, 1f),
+            Math.Clamp(heightInfluenceScale, 0.86f, 1f),
+            Math.Clamp(lateralFalloffScale, 0.74f, 1f),
+            Math.Clamp(depthFalloffScale, 0.78f, 1f),
+            Math.Clamp(heightFalloffScale, 0.84f, 1f),
+            Math.Clamp(rigidityBias, 0f, 0.12f));
+    }
+
     private static IReadOnlyList<CageIslandBoundaryLoopControl>? BuildIslandBoundaryLoopControls(
         IReadOnlyList<(float X, float Y, float Z)> rawVertices,
         IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? boundaryLoops,
         int islandId,
-        IReadOnlyList<string> effectiveRegions)
+        IReadOnlyList<string> effectiveRegions,
+        TopologyIslandEdgeNetworkSummary? edgeNetworkSummary)
     {
         if (boundaryLoops is not { Count: > 0 } || effectiveRegions.Count == 0)
         {
@@ -17598,13 +17691,14 @@ internal sealed class LocalExportService(
             var entry = componentLoops[index];
             var isHole = index > 0;
             var influenceRadius = ComputeBoundaryLoopInfluenceRadius(rawVertices, entry.Loop.VertexIndexes, entry.Area);
+            var edgeRegionTuning = ComputeEdgeDrivenCageRegionTuning(edgeNetworkSummary, isBoundaryLoop: true, isHole);
             controls.Add(new CageIslandBoundaryLoopControl(
                 entry.Loop.LoopIndex,
                 effectiveRegions,
                 IsHole: isHole,
-                InfluenceRadius: influenceRadius,
-                RigidityBias: isHole ? 0.05f : 0.02f,
-                BoundaryDamping: isHole ? 0.10f : 0.05f));
+                InfluenceRadius: influenceRadius * (isHole ? 0.94f : 1f),
+                RigidityBias: Math.Clamp((isHole ? 0.05f : 0.02f) + edgeRegionTuning.RigidityBias, 0f, 0.18f),
+                BoundaryDamping: Math.Clamp((isHole ? 0.10f : 0.05f) + ((1f - edgeRegionTuning.LateralFalloffScale) * 0.18f), 0f, 0.22f)));
         }
 
         return controls;

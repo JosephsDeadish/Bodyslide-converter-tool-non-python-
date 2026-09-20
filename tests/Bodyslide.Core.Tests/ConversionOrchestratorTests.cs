@@ -2697,6 +2697,69 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void BuildIslandBoundaryLoopControls_UsesEdgeNetworkSummaryToRaiseLoopDamping()
+    {
+        var method = typeof(LocalExportService).GetMethod("BuildIslandBoundaryLoopControls", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var rawVertices = new (float X, float Y, float Z)[]
+        {
+            (-1f, -1f, 0.5f),
+            ( 1f, -1f, 0.5f),
+            ( 1f,  1f, 0.5f),
+            (-1f,  1f, 0.5f)
+        };
+        var loops = new[]
+        {
+            new NifGeometrySignatureReader.BoundaryLoopSequence(
+                0,
+                0,
+                new[] { 0, 1, 2, 3 },
+                new (int From, int To)[] { (0, 1), (1, 2), (2, 3), (3, 0) })
+        };
+        var safe = new TopologyIslandEdgeNetworkSummary(0, 4, 2, 0, 4, 2, false, false);
+        var risky = new TopologyIslandEdgeNetworkSummary(0, 4, 12, 2, 4, 6, false, true);
+
+        var safeControls = Assert.IsAssignableFrom<IReadOnlyList<CageIslandBoundaryLoopControl>>(
+            method!.Invoke(null, [rawVertices, loops, 0, new[] { "chest" }, safe]));
+        var riskyControls = Assert.IsAssignableFrom<IReadOnlyList<CageIslandBoundaryLoopControl>>(
+            method.Invoke(null, [rawVertices, loops, 0, new[] { "chest" }, risky]));
+
+        var safeControl = Assert.Single(safeControls);
+        var riskyControl = Assert.Single(riskyControls);
+        Assert.True(riskyControl.BoundaryDamping > safeControl.BoundaryDamping, $"Expected risky edge-network loops to increase boundary damping, got safe={safeControl.BoundaryDamping:F3} risky={riskyControl.BoundaryDamping:F3}.");
+        Assert.True(riskyControl.RigidityBias > safeControl.RigidityBias, $"Expected risky edge-network loops to increase rigidity bias, got safe={safeControl.RigidityBias:F3} risky={riskyControl.RigidityBias:F3}.");
+    }
+
+    [Fact]
+    public void CreateAuthoredCageRegion_UsesEdgeNetworkSummaryToTightenNonManifoldRegions()
+    {
+        var method = typeof(LocalExportService).GetMethod("CreateAuthoredCageRegion", BindingFlags.NonPublic | BindingFlags.Static);
+        var profileType = typeof(LocalExportService).GetNestedType("AuthoredCageAxisProfile", BindingFlags.NonPublic);
+        var semanticType = typeof(LocalExportService).GetNestedType("CageIslandSemanticProfile", BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        Assert.NotNull(profileType);
+        Assert.NotNull(semanticType);
+
+        var profile = profileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6)
+            .Invoke([0.64f, 0.18f, 0.52f, 0.44f, 0.48f, 0.42f]);
+        var semanticProfile = semanticType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6)
+            .Invoke([Array.Empty<string>(), 0.01f, 0.02f, 0.96f, 0.94f, 0.92f]);
+        var baseRegion = new CageRegion(0.70f, 0.28f, 0.50f, 0.92f, 0.50f, 0.92f, 0.72f, 0.18f, 0.08f, 0.02f);
+        var safe = new TopologyIslandEdgeNetworkSummary(0, 4, 2, 0, 4, 2, false, false);
+        var risky = new TopologyIslandEdgeNetworkSummary(0, 4, 12, 2, 4, 6, false, true);
+
+        var safeRegion = Assert.IsType<CageRegion>(method!.Invoke(null, [baseRegion, profile, semanticProfile, false, false, safe]));
+        var riskyRegion = Assert.IsType<CageRegion>(method.Invoke(null, [baseRegion, profile, semanticProfile, false, false, risky]));
+
+        Assert.True(riskyRegion.Rigidity > safeRegion.Rigidity, $"Expected non-manifold edge networks to tighten authored-region rigidity. safe={safeRegion.Rigidity:F3} risky={riskyRegion.Rigidity:F3}");
+        Assert.True(riskyRegion.WidthInfluence < safeRegion.WidthInfluence, $"Expected non-manifold edge networks to reduce authored width influence. safe={safeRegion.WidthInfluence:F3} risky={riskyRegion.WidthInfluence:F3}");
+        Assert.True(riskyRegion.LateralFalloff < safeRegion.LateralFalloff, $"Expected non-manifold edge networks to narrow authored lateral falloff. safe={safeRegion.LateralFalloff:F3} risky={riskyRegion.LateralFalloff:F3}");
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
