@@ -5320,7 +5320,7 @@ public interface IMeshAnalysisService
 
 public interface ICageGenerationService
 {
-    Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken);
+    Task<DeformationCage> BuildAsync(ImportedArmor armor, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken);
 }
 
 public interface IMeshConversionService
@@ -5839,7 +5839,7 @@ public sealed class ConversionOrchestrator(
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
 
             ReportStage("Building deformation cage", 8);
-            var cage = await cageGenerator.BuildAsync(analysis, normalized.Request.TargetBody, cancellationToken);
+            var cage = await cageGenerator.BuildAsync(armor, analysis, normalized.Request.TargetBody, cancellationToken);
             steps.Add($"cage:{cage.Mode}");
 
             var sourceBodyForDelta = detectedBody.Body;
@@ -9154,11 +9154,15 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 
 internal sealed class BasicCageGenerationService : ICageGenerationService
 {
-    public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
+    public Task<DeformationCage> BuildAsync(ImportedArmor armor, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
     {
         var cage = CreatePresetCage(analysis.MeshType, analysis.HeadgearSubType);
-        return Task.FromResult(ApplyLocalControlAdjustments(cage, analysis));
+        cage = ApplyLocalControlAdjustments(cage, analysis);
+        return Task.FromResult(LocalExportService.BuildExportDeformationCage(armor.MeshFiles, cage) ?? cage);
     }
+
+    public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
+        BuildAsync(new ImportedArmor(string.Empty, [], [], [], []), analysis, targetBody, cancellationToken);
 
     internal static DeformationCage CreatePresetCage(string meshType, string? headgearSubType = null)
     {
@@ -16338,11 +16342,16 @@ internal sealed class LocalExportService(
             ["arms"] = 0.055f,
         };
 
-    private static DeformationCage? BuildExportDeformationCage(
+    internal static DeformationCage? BuildExportDeformationCage(
         IReadOnlyList<string> meshFiles,
         DeformationCage? deformationCage)
     {
         if (deformationCage?.Regions is not { Count: > 0 } || meshFiles.Count == 0)
+        {
+            return deformationCage;
+        }
+
+        if (deformationCage.IslandControls is { Count: > 0 })
         {
             return deformationCage;
         }

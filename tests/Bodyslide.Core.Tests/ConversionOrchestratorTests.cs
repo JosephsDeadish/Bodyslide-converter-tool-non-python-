@@ -2009,7 +2009,7 @@ public sealed class ConversionOrchestratorTests
 
     private sealed class TestCageGenerator : ICageGenerationService
     {
-        public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
+        public Task<DeformationCage> BuildAsync(ImportedArmor armor, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken) =>
             Task.FromResult(new DeformationCage("hybrid-cage"));
     }
 
@@ -2523,6 +2523,73 @@ public sealed class ConversionOrchestratorTests
         Assert.True(tuned.Regions["chest"].WidthInfluence < baseline.Regions["chest"].WidthInfluence);
         Assert.True(tuned.Regions["arms"].Rigidity > baseline.Regions["arms"].Rigidity);
         Assert.True(tuned.Regions["arms"].LateralFalloff < baseline.Regions["arms"].LateralFalloff);
+    }
+
+    [Fact]
+    public async Task BasicCageGenerationService_BuildAsync_AuthorsPerIslandControlsUpstream()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "upstream_island_cage_regions_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        for (var column = 0; column < 6; column++)
+        {
+            vertices.Add((-0.22f + (column * 0.03f), 0.00f, 0.82f + (column * 0.02f)));
+            vertices.Add((-0.22f + (column * 0.03f), 0.03f, 0.86f + (column * 0.02f)));
+        }
+
+        for (var column = 0; column < 6; column++)
+        {
+            vertices.Add((0.52f + (column * 0.03f), 0.00f, 0.82f + (column * 0.02f)));
+            vertices.Add((0.52f + (column * 0.03f), 0.03f, 0.86f + (column * 0.02f)));
+        }
+
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        for (ushort column = 0; column < 5; column++)
+        {
+            var top = (ushort)(column * 2);
+            var bottom = (ushort)(top + 1);
+            var nextTop = (ushort)(top + 2);
+            var nextBottom = (ushort)(top + 3);
+            triangles.Add((top, bottom, nextTop));
+            triangles.Add((bottom, nextBottom, nextTop));
+        }
+
+        for (ushort column = 0; column < 5; column++)
+        {
+            var baseIndex = (ushort)(12 + (column * 2));
+            var top = baseIndex;
+            var bottom = (ushort)(baseIndex + 1);
+            var nextTop = (ushort)(baseIndex + 2);
+            var nextBottom = (ushort)(baseIndex + 3);
+            triangles.Add((top, bottom, nextTop));
+            triangles.Add((bottom, nextBottom, nextTop));
+        }
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+        try
+        {
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var service = new BasicCageGenerationService();
+
+            var cage = await service.BuildAsync(armor, analysis, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(cage.IslandControls);
+            Assert.True(cage.IslandControls!.Count >= 2);
+            Assert.All(cage.IslandControls, control =>
+            {
+                Assert.Equal("upstream_island_cage_regions", control.MeshKey, ignoreCase: true);
+                Assert.NotEmpty(control.CageRegions);
+                Assert.True(control.BoundaryDamping > 0f);
+            });
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -19124,7 +19191,7 @@ public sealed class ConversionOrchestratorRigidIslandTests
     }
     private sealed class TestRigidCageGenerator : ICageGenerationService
     {
-        public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken ct) =>
+        public Task<DeformationCage> BuildAsync(ImportedArmor armor, MeshAnalysis analysis, string targetBody, CancellationToken ct) =>
             Task.FromResult(new DeformationCage("hybrid-cage"));
     }
     private sealed class TestRigidMeshConverter : IMeshConversionService
