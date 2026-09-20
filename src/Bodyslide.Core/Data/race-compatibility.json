@@ -87,9 +87,9 @@
     {
       "name": "Canine variant",
       "groups": ["beast", "canine", "lupine", "vulpine", "fox", "digitigrade", "tail", "creature"],
-      "editorIdHints": ["lykaios", "canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk"],
-      "pluginNameHints": ["lykaios", "canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk", "creature race", "custom race", "vampire", "child", "follower"],
-      "meshPathHints": ["lykaios", "canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "paw", "claw", "digitigrade", "tail"]
+      "editorIdHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk"],
+      "pluginNameHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "beastfolk", "creature race", "custom race", "vampire", "child", "follower"],
+      "meshPathHints": ["canine", "wolf", "werewolf", "lupine", "vulpine", "fox", "jackal", "paw", "claw", "digitigrade", "tail"]
     },
     {
       "name": "Goat variant",

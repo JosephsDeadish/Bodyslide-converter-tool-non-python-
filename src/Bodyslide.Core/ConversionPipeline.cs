@@ -13795,12 +13795,27 @@ internal sealed class LocalExportService(
             .ToList();
         // Root install files are placed directly under Data\ by mod managers.
         // Keep only files that remain useful after install (plugins + human/manual support files).
+        var expectedGeneratedRootSupportFiles = new[]
+        {
+            "README.txt",
+            "dependency-map.json",
+            "conversion-quality.json",
+            "skeleton-compatibility.json",
+            "race-compatibility.json",
+            "pose-simulation-report.json",
+            "world-physics.json",
+            "patch-armor.pas",
+            "plugin-patches.json",
+            "preview.html",
+            "preview.svg",
+            "preview-workbench.html"
+        };
         var fomodRootFiles = outputFiles
             .Where(f => string.Equals(
                             Path.GetDirectoryName(f), outputDirectory, StringComparison.OrdinalIgnoreCase)
                         && IsFomodRootInstallFile(Path.GetFileName(f)))
             .Select(f => Path.GetFileName(f)!)
-            .Concat(["README.txt"])
+            .Concat(expectedGeneratedRootSupportFiles)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         await File.WriteAllTextAsync(

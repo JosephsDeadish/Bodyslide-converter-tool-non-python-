@@ -2605,8 +2605,8 @@ public sealed class ConversionOrchestratorTests
     [InlineData("faun_ramhorn_customrace.esp", "Goat variant")]
     [InlineData("equus_marefolk_follower.esp", "Equine variant")]
     [InlineData("featherfolk_pinion_follower.esp", "Avian variant")]
-    [InlineData("lykaios_customrace_vampire_follower.esp", "Canine variant")]
     [InlineData("werewolf_vulpine_child_patch.esp", "Canine variant")]
+    [InlineData("wolfbeast_customrace_follower.esp", "Canine variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)

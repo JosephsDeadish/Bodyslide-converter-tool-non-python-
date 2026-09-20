@@ -49,7 +49,6 @@
     "TailEnd": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
     "Tail4": ["Tail3", "Tail2", "Tail1", "NPC Tail"],
     "Tail5": ["Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
-    "TailTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
     "WingOuter.L": ["Wing.L", "LeftWing"],
     "WingOuter.R": ["Wing.R", "RightWing"],
     "WingMid.L": ["Wing.L", "LeftWing"],
@@ -176,14 +175,10 @@
         "Tail1",
         "Tail2",
         "Tail3",
-        "Tail4",
-        "Tail5",
         "Wing.L",
         "Wing.R",
         "LeftWing",
-        "RightWing",
-        "TailBase",
-        "TailTip"
+        "RightWing"
       ]
     },
     {

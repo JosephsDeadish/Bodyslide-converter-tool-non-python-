@@ -59,7 +59,7 @@
     "label": "avian-humanoid",
     "bonePrefixes": ["WingMid", "WingTip", "WingMembrane", "Feather"],
     "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "WingMembrane", "Feather01", "Feather02", "Feather03", "Pinion", "Talon"],
-    "distinctiveSignatures": ["WingMid.L", "WingMid.R", "WingMembrane.L", "WingMembrane.R", "Feather01.L", "Feather01.R"],
+    "distinctiveSignatures": ["WingMid.L", "WingMid.R", "WingMembrane.L", "WingMembrane.R", "Feather01.L", "Feather01.R", "Feather03.L", "Feather03.R"],
     "minimumSignatureMatches": 2
   }
 ]
