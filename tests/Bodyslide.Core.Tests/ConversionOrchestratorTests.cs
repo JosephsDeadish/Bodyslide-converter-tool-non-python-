@@ -17328,7 +17328,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 6);
+            .Single(ctor => ctor.GetParameters().Length == 9);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17348,7 +17348,10 @@ public sealed class OutputCompletenessTests
             new[] { 0, 1, 2, 3 },
             influenceLists,
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
-            new[] { 0f, 0f, 0f, 0f }
+            new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            new[] { 0f, 0f, 0f, 0f },
+            1f,
+            1f
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17369,6 +17372,84 @@ public sealed class OutputCompletenessTests
         Assert.True(result[1].Z < 0.25f, $"Expected axial delta to scale down slightly with topology adaptation, got {result[1].Z}.");
         Assert.Equal(1f, result[2].X, 3);
         Assert.Equal(1f, result[3].X, 3);
+    }
+
+    [Fact]
+    public void AdaptRetargetedMorphPayload_UsesLocalNeighborDensityForDifferentStructures()
+    {
+        var adaptMethod = typeof(LocalExportService).GetMethod("AdaptRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        Assert.NotNull(adaptMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
+
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        var context = contextCtor.Invoke(
+        [
+            new[]
+            {
+                new MeshVertex(0f, 0f, 0f),
+                new MeshVertex(1f, 0f, 0.33f),
+                new MeshVertex(2f, 0f, 0.66f),
+                new MeshVertex(3f, 0f, 1f)
+            },
+            new[]
+            {
+                new MeshVertex(0f, 0f, 0f),
+                new MeshVertex(0.15f, 0f, 0.33f),
+                new MeshVertex(0.45f, 0f, 0.66f),
+                new MeshVertex(3f, 0f, 1f)
+            },
+            new[] { 0, 1, 2, 3 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
+            new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
+            new[] { 0f, 0f, 0f, 0f },
+            0.50f,
+            0.54f
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (1f, 0f, 0.2f),
+            (1f, 0f, 0.2f),
+            (1f, 0f, 0.2f),
+            (1f, 0f, 0.2f)
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            adaptMethod!.Invoke(null, [retargeted, context]));
+
+        Assert.Equal(4, result.Count);
+        Assert.True(result[1].X < 0.95f, $"Expected compressed local target structure to reduce reused lateral delta, got {result[1].X}.");
+        Assert.True(result[1].Z < 0.2f, $"Expected compressed local target structure to slightly reduce axial delta, got {result[1].Z}.");
+        Assert.True(result[2].X > 1.05f, $"Expected expanded local target structure to increase reused lateral delta, got {result[2].X}.");
+        Assert.True(result[2].Z > 0.2f, $"Expected expanded local target structure to slightly increase axial delta, got {result[2].Z}.");
     }
 
     [Fact]
@@ -17404,7 +17485,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 6);
+            .Single(ctor => ctor.GetParameters().Length == 9);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -17412,7 +17493,10 @@ public sealed class OutputCompletenessTests
             new[] { 0, 1, 2 },
             influenceLists,
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
-            new[] { 0f, 0.80f, 0f }
+            new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            new[] { 0f, 0.80f, 0f },
+            1f,
+            1f
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
