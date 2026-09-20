@@ -424,6 +424,8 @@ internal static class ConversionValidationGuidance
                 "Re-run the conversion or copy the generated smp-config.xml into SKSE/Plugins/hdtSMP64, then confirm the staged mod output contains the expected SMP config before packaging.",
             "missing-staged-mesh-output" =>
                 "Open dependency-map.json and the meshes/slidesmith output folder, re-run the conversion for the missing variants, and do not package the mod until every referenced staged mesh exists under the Data-relative output path.",
+            "missing-fomod-module-config" =>
+                "Rebuild fomod/ModuleConfig.xml before release, restore the missing installer entries, and test the package in MO2 or Vortex so the staged meshes, plugins, and support files install into the same layout that passed local validation.",
             "fomod-missing-folder-entry" or
             "fomod-missing-root-plugin-entry" or
             "fomod-missing-root-support-entry" =>
@@ -534,8 +536,14 @@ internal static class ConversionValidationGuidance
                 ["dependency-map.json", "armor-pack-validation.json"],
             "missing-staged-cbpc-config" or "missing-staged-smp-config" =>
                 ["armor-pack-validation.json"],
+            "missing-fomod-module-config" =>
+                ["fomod/ModuleConfig.xml", "armor-pack-validation.json", "conversion-quality.json"],
+            "missing-fomod-info" =>
+                ["fomod/info.xml", "armor-pack-validation.json", "conversion-quality.json"],
             "fomod-missing-folder-entry" or "fomod-missing-root-plugin-entry" or "fomod-missing-root-support-entry" =>
                 ["fomod/ModuleConfig.xml", "armor-pack-validation.json"],
+            "missing-root-support-file" =>
+                ["armor-pack-validation.json", "conversion-quality.json"],
             "missing-bodyslide-osp" =>
                 ["CalienteTools/BodySlide/SliderSets/", "conversion-quality.json"],
             "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" =>

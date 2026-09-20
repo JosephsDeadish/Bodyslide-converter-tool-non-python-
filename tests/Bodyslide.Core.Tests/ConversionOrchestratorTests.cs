@@ -2611,6 +2611,10 @@ public sealed class ConversionOrchestratorTests
     [InlineData("werewolf_vulpine_child_patch.esp", "Canine variant")]
     [InlineData("wolfbeast_customrace_follower.esp", "Canine variant")]
     [InlineData("creature_customrace_follower.esp", "Creature variant")]
+    [InlineData("feather_witch_customrace.esp", "Hagraven variant")]
+    [InlineData("nature_spirit_vampire_child_follower.esp", "Spriggan variant")]
+    [InlineData("hooffolk_child_follower.esp", "Equine variant")]
+    [InlineData("talonfolk_customrace.esp", "Avian variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -8845,6 +8849,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Equus", "Equine Humanoid")]
     [InlineData("Harpy", "Avian Humanoid")]
     [InlineData("Featherfolk", "Avian Humanoid")]
+    [InlineData("Hooffolk", "Equine Humanoid")]
+    [InlineData("Talonfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
     [InlineData("Cathay", "Vanilla Beast")]
     [InlineData("Lykaios", "Vanilla Beast")]

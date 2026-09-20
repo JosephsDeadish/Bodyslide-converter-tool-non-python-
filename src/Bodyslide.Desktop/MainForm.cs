@@ -4411,6 +4411,13 @@ public sealed class MainForm : Form
                 ?? outputDirectory;
         }
 
+        if (normalized is "missing-root-support-file")
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "armor-pack-validation.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+                ?? outputDirectory;
+        }
+
         if (normalized is "missing-root-plugin")
         {
             return ResolveFirstExistingPath(outputDirectory, "*.esp", "*.esm", "*.esl") ?? outputDirectory;

@@ -1631,7 +1631,8 @@
       "Marekin",
       "Horsefolk",
       "Marefolk",
-      "Equus"
+      "Equus",
+      "Hooffolk"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1728,7 +1729,8 @@
       "Ravenwing",
       "Winged Avian",
       "Featherfolk",
-      "Pinionfolk"
+      "Pinionfolk",
+      "Talonfolk"
     ],
     "gender": "female",
     "defaultPhysics": "none",

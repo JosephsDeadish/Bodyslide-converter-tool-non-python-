@@ -108,29 +108,29 @@
     {
       "name": "Hagraven variant",
       "groups": ["beast", "hagraven", "winged", "avian"],
-      "editorIdHints": ["hagraven", "hagravenrace", "hag raven", "raven hag", "crow witch"],
-      "pluginNameHints": ["hagraven", "hag raven", "raven hag", "crow witch", "wing", "feather", "follower", "custom race"],
+      "editorIdHints": ["hagraven", "hagravenrace", "hag raven", "raven hag", "crow witch", "feather witch"],
+      "pluginNameHints": ["hagraven", "hag raven", "raven hag", "crow witch", "feather witch", "wing", "feather", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["hagraven", "wing", "feather", "pinion", "crow"]
     },
     {
       "name": "Spriggan variant",
       "groups": ["beast", "spriggan", "horned"],
       "editorIdHints": ["spriggan", "briar", "nature spirit", "treefolk", "dryad", "rootfolk"],
-      "pluginNameHints": ["spriggan", "briar", "dryad", "rootfolk", "branch", "vine", "follower", "custom race"],
-      "meshPathHints": ["spriggan", "briar", "roots", "bark", "branches", "vines"]
+      "pluginNameHints": ["spriggan", "briar", "dryad", "rootfolk", "nature spirit", "treefolk", "branch", "vine", "follower", "custom race", "customrace", "vampire", "child"],
+      "meshPathHints": ["spriggan", "briar", "roots", "bark", "branches", "vines", "tendril"]
     },
     {
       "name": "Equine variant",
       "groups": ["beast", "equine", "hoofed"],
-      "editorIdHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus"],
-      "pluginNameHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "hoof", "follower", "custom race"],
+      "editorIdHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "horsefolk", "hooffolk"],
+      "pluginNameHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "horsefolk", "hooffolk", "hoof", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["horse", "mane", "hoof", "equine", "centaur", "marefolk", "equus", "forelock"]
     },
     {
       "name": "Avian variant",
       "groups": ["beast", "avian", "winged"],
-      "editorIdHints": ["avian", "harpy", "bird", "ravenwing", "featherfolk", "pinionfolk"],
-      "pluginNameHints": ["avian", "harpy", "bird", "ravenwing", "featherfolk", "pinionfolk", "feather", "wing", "follower", "custom race"],
+      "editorIdHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk"],
+      "pluginNameHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk", "feather", "wing", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["avian", "wing", "feather", "bird", "pinion", "talon"]
     }
   ]
