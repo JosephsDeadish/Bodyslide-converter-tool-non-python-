@@ -19383,7 +19383,8 @@ internal sealed class LocalExportService(
                     nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
                 }
 
-                return StabilizeRetargetedMorphPayload(nearestSurface, morphTransferContext);
+                var topologyAdapted = AdaptRetargetedMorphPayload(nearestSurface, morphTransferContext);
+                return StabilizeRetargetedMorphPayload(topologyAdapted, morphTransferContext);
             }
 
             var retargeted = new (float X, float Y, float Z)[targetVertexCount];
@@ -19391,6 +19392,58 @@ internal sealed class LocalExportService(
             {
                 Array.Fill(retargeted, sourceDeltas[0]);
                 return retargeted;
+            }
+
+            private static IReadOnlyList<(float X, float Y, float Z)> AdaptRetargetedMorphPayload(
+                IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas,
+                MorphTransferContext morphTransferContext)
+            {
+                if (retargetedDeltas.Count < 3 ||
+                    morphTransferContext.SourceVertices.Count < 3 ||
+                    morphTransferContext.TargetVertices.Count != retargetedDeltas.Count ||
+                    morphTransferContext.TargetToSourceInfluences.Count != retargetedDeltas.Count ||
+                    morphTransferContext.TargetNeighborIndexes.Count != retargetedDeltas.Count)
+                {
+                    return retargetedDeltas;
+                }
+
+                var normalizedSourceVertices = NormalizeVerticesForTransfer(morphTransferContext.SourceVertices);
+                var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
+                var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(normalizedSourceVertices);
+                var adapted = retargetedDeltas.ToArray();
+
+                for (var targetIndex = 0; targetIndex < adapted.Length; targetIndex++)
+                {
+                    var targetSpacing = ComputeAverageNeighborDistance(
+                        normalizedTargetVertices,
+                        targetIndex,
+                        morphTransferContext.TargetNeighborIndexes[targetIndex]);
+                    var sourceSpacing = ComputeAverageSourceNeighborDistance(
+                        normalizedSourceVertices,
+                        sourceNeighborIndexes,
+                        morphTransferContext,
+                        targetIndex);
+
+                    if (targetSpacing <= 0.0001f || sourceSpacing <= 0.0001f)
+                    {
+                        continue;
+                    }
+
+                    var structureScale = Math.Clamp(targetSpacing / sourceSpacing, 0.75f, 1.65f);
+                    if (MathF.Abs(structureScale - 1f) < 0.12f)
+                    {
+                        continue;
+                    }
+
+                    var current = adapted[targetIndex];
+                    var axialScale = 1f + ((structureScale - 1f) * 0.25f);
+                    adapted[targetIndex] = (
+                        current.X * structureScale,
+                        current.Y * structureScale,
+                        current.Z * axialScale);
+                }
+
+                return adapted;
             }
 
             for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
@@ -19640,6 +19693,97 @@ internal sealed class LocalExportService(
 
             var competingWeight = Math.Max(0f, totalWeight - dominantWeight);
             return Math.Clamp(((1f - dominantWeight) * 0.65f) + (MathF.Min(competingWeight, 1f) * 0.35f), 0f, 1f);
+        }
+
+        private static float ComputeAverageNeighborDistance(
+            IReadOnlyList<MeshVertex> vertices,
+            int vertexIndex,
+            IReadOnlyList<int> neighborIndexes)
+        {
+            if (vertexIndex < 0 || vertexIndex >= vertices.Count || neighborIndexes.Count == 0)
+            {
+                return 0f;
+            }
+
+            var vertex = vertices[vertexIndex];
+            var totalDistance = 0f;
+            var sampleCount = 0;
+            foreach (var neighborIndex in neighborIndexes)
+            {
+                if (neighborIndex < 0 || neighborIndex >= vertices.Count || neighborIndex == vertexIndex)
+                {
+                    continue;
+                }
+
+                var neighbor = vertices[neighborIndex];
+                var dx = vertex.X - neighbor.X;
+                var dy = vertex.Y - neighbor.Y;
+                var dz = vertex.Z - neighbor.Z;
+                totalDistance += MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+                sampleCount++;
+            }
+
+            return sampleCount == 0 ? 0f : totalDistance / sampleCount;
+        }
+
+        private static float ComputeAverageSourceNeighborDistance(
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<IReadOnlyList<int>> sourceNeighborIndexes,
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            if (targetIndex < 0 || targetIndex >= morphTransferContext.TargetToSourceInfluences.Count)
+            {
+                return 0f;
+            }
+
+            var influences = morphTransferContext.TargetToSourceInfluences[targetIndex];
+            var weightedDistance = 0f;
+            var totalWeight = 0f;
+
+            foreach (var influence in influences)
+            {
+                if (influence.SourceIndex < 0 ||
+                    influence.SourceIndex >= normalizedSourceVertices.Count ||
+                    influence.SourceIndex >= sourceNeighborIndexes.Count ||
+                    influence.Weight <= 0f)
+                {
+                    continue;
+                }
+
+                var localDistance = ComputeAverageNeighborDistance(
+                    normalizedSourceVertices,
+                    influence.SourceIndex,
+                    sourceNeighborIndexes[influence.SourceIndex]);
+                if (localDistance <= 0.0001f)
+                {
+                    continue;
+                }
+
+                weightedDistance += localDistance * influence.Weight;
+                totalWeight += influence.Weight;
+            }
+
+            if (totalWeight > 0.0001f)
+            {
+                return weightedDistance / totalWeight;
+            }
+
+            if (targetIndex < morphTransferContext.TargetToSourceIndexMap.Length)
+            {
+                var fallbackSourceIndex = morphTransferContext.TargetToSourceIndexMap[targetIndex];
+                if (fallbackSourceIndex >= 0 &&
+                    fallbackSourceIndex < normalizedSourceVertices.Count &&
+                    fallbackSourceIndex < sourceNeighborIndexes.Count)
+                {
+                    return ComputeAverageNeighborDistance(
+                        normalizedSourceVertices,
+                        fallbackSourceIndex,
+                        sourceNeighborIndexes[fallbackSourceIndex]);
+                }
+            }
+
+            return 0f;
         }
 
         private static (float X, float Y, float Z)? TryBlendRetargetedDelta(

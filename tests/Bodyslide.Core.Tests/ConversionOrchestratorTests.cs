@@ -17157,6 +17157,63 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public async Task RetargetMorphPayload_ScalesReusedMorphsForStructurallyDifferentTargets()
+    {
+        var method = typeof(LocalExportService).GetMethod("RetargetMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source-bell.nif");
+            var targetPath = Path.Combine(tmpDir, "target-bell.nif");
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (-0.20f, 0f, 0f),
+                (0.20f, 0f, 0f),
+                (-0.20f, 0f, 1f),
+                (0.20f, 0f, 1f),
+                (-0.20f, 0f, 2f),
+                (0.20f, 0f, 2f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (-0.10f, 0f, 0f),
+                (0.10f, 0f, 0f),
+                (-0.95f, 0f, 1f),
+                (0.95f, 0f, 1f)
+            ]);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath }
+            });
+            Assert.NotNull(context);
+
+            var sourceDeltas = Enumerable.Repeat((X: 1f, Y: 0f, Z: 0.25f), 6).ToArray();
+
+            var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+                method!.Invoke(null, [sourceDeltas, 4, context]));
+
+            Assert.Equal(4, result.Count);
+            Assert.True(result[2].X > 1.10f, $"Expected widened mid-body topology to amplify lateral delta reuse, got {result[2].X}.");
+            Assert.True(result[3].X > 1.10f, $"Expected widened mid-body topology to amplify lateral delta reuse, got {result[3].X}.");
+            Assert.True(result[2].Z > 0.25f, $"Expected axial delta to scale slightly with topology adaptation, got {result[2].Z}.");
+            Assert.True(result[3].Z > 0.25f, $"Expected axial delta to scale slightly with topology adaptation, got {result[3].Z}.");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RetargetMorphPayload_SmoothsAmbiguousTopologyTransfers()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
