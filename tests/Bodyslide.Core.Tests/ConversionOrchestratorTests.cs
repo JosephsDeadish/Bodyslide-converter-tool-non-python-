@@ -20910,4 +20910,104 @@ public async Task ConvertAsync_WithSkinPartitionNif_SurfacesParsedPartitionMetad
         Directory.Delete(workingDirectory, recursive: true);
     }
 }
+
+[Fact]
+public async Task ConvertAsync_WithExplicitTopology_ExportsPerIslandCageMemberships()
+{
+    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    var outputDirectory = Path.Combine(workingDirectory, "output");
+    Directory.CreateDirectory(workingDirectory);
+    var inputFile = Path.Combine(workingDirectory, "islanded_cuirass_0.nif");
+
+    var vertices = new List<(float X, float Y, float Z)>();
+    for (var column = 0; column < 6; column++)
+    {
+        vertices.Add((-0.25f + (column * 0.03f), 0.00f, 0.62f + (column * 0.02f)));
+        vertices.Add((-0.25f + (column * 0.03f), 0.03f, 0.66f + (column * 0.02f)));
+    }
+
+    for (var column = 0; column < 6; column++)
+    {
+        vertices.Add((0.08f + (column * 0.03f), 0.02f, 1.02f + (column * 0.02f)));
+        vertices.Add((0.08f + (column * 0.03f), 0.05f, 1.06f + (column * 0.02f)));
+    }
+
+    var triangles = new List<(ushort A, ushort B, ushort C)>();
+    for (ushort column = 0; column < 5; column++)
+    {
+        var top = (ushort)(column * 2);
+        var bottom = (ushort)(top + 1);
+        var nextTop = (ushort)(top + 2);
+        var nextBottom = (ushort)(top + 3);
+        triangles.Add((top, bottom, nextTop));
+        triangles.Add((bottom, nextBottom, nextTop));
+    }
+
+    for (ushort column = 0; column < 5; column++)
+    {
+        var baseIndex = (ushort)(12 + (column * 2));
+        var top = baseIndex;
+        var bottom = (ushort)(baseIndex + 1);
+        var nextTop = (ushort)(baseIndex + 2);
+        var nextBottom = (ushort)(baseIndex + 3);
+        triangles.Add((top, bottom, nextTop));
+        triangles.Add((bottom, nextBottom, nextTop));
+    }
+
+    await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+    try
+    {
+        var orchestrator = StandaloneConversionModules.CreateDefault();
+        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+        Assert.True(result.Success);
+        var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+        Assert.Contains("\"CageTopology\":", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"IslandCount\":", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"UsesEstimatedMemberships\": false", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"UsesExplicitTopology\": true", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"CageRegions\": [", qualityJson, StringComparison.Ordinal);
+
+        var workbenchHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
+        Assert.Contains("Per-island cage memberships", workbenchHtml, StringComparison.Ordinal);
+        Assert.Contains("Boundary loops", workbenchHtml, StringComparison.Ordinal);
+    }
+    finally
+    {
+        Directory.Delete(workingDirectory, recursive: true);
+    }
+}
+
+[Fact]
+public async Task ConvertAsync_WithHeuristicTopology_ExportsEstimatedIslandMemberships()
+{
+    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+    var outputDirectory = Path.Combine(workingDirectory, "output");
+    Directory.CreateDirectory(workingDirectory);
+    var inputFile = Path.Combine(workingDirectory, "heuristic_islands_0.nif");
+    await SyntheticNifTestData.WriteAsync(inputFile,
+    [
+        (-0.20f, 0.00f, 0.48f), (-0.18f, 0.02f, 0.54f), (-0.16f, 0.00f, 0.60f), (-0.14f, 0.02f, 0.66f),
+        (-0.12f, 0.00f, 0.72f), (-0.10f, 0.02f, 0.78f), (-0.08f, 0.00f, 0.84f), (-0.06f, 0.02f, 0.90f),
+        (0.32f, 0.00f, 0.52f), (0.34f, 0.02f, 0.58f), (0.36f, 0.00f, 0.64f), (0.38f, 0.02f, 0.70f),
+        (0.40f, 0.00f, 0.76f), (0.42f, 0.02f, 0.82f), (0.44f, 0.00f, 0.88f), (0.46f, 0.02f, 0.94f)
+    ]);
+
+    try
+    {
+        var orchestrator = StandaloneConversionModules.CreateDefault();
+        var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+        Assert.True(result.Success);
+        var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+        Assert.Contains("\"CageTopology\":", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"UsesEstimatedMemberships\": true", qualityJson, StringComparison.Ordinal);
+        Assert.Contains("\"IslandCount\":", qualityJson, StringComparison.Ordinal);
+    }
+    finally
+    {
+        Directory.Delete(workingDirectory, recursive: true);
+    }
+}
 }

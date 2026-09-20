@@ -784,7 +784,23 @@ public sealed record ConversionQualityReport(
     MorphPayloadReuseSummary? PayloadReuse = null,
     IReadOnlyList<NifSupportReport>? NifSupport = null,
     PluginRewriteVerificationReport? PluginRewriteVerification = null,
-    PartitionSignalReport? PartitionSignals = null);
+    PartitionSignalReport? PartitionSignals = null,
+    CageTopologyReport? CageTopology = null);
+
+public sealed record CageTopologyReport(
+    int IslandCount,
+    int BoundaryLoopCount,
+    int BoundaryVertexCount,
+    bool UsesEstimatedMemberships,
+    IReadOnlyList<CageIslandMembershipSummary> Islands);
+
+public sealed record CageIslandMembershipSummary(
+    string MeshFile,
+    int IslandId,
+    int VertexCount,
+    int BoundaryVertexCount,
+    bool UsesExplicitTopology,
+    IReadOnlyList<string> CageRegions);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -1168,7 +1184,8 @@ public sealed record PreviewWorkbenchPayload(
     int VertexCount,
     IReadOnlyList<float> Positions,
     string Mode,
-    string Note);
+    string Note,
+    CageTopologyReport? CageTopology = null);
 
 /// <summary>
 /// Per-bone rotation delta for a single animation pose (Skyrim Z-up coordinate space).
@@ -14972,6 +14989,7 @@ internal sealed class LocalExportService(
         var nifSupport = sourceNifSupport
             .Concat(convertedNifSupport)
             .ToList();
+        var cageTopology = BuildCageTopologyReport(writtenNifs, mesh.DeformationCage, armor.MeshFiles);
 
         // Write conversion-quality.json — machine-readable quality metrics that tooling,
         // mod managers, and the learning cache can consume without parsing the conversion log.
@@ -15546,7 +15564,8 @@ internal sealed class LocalExportService(
             PayloadReuse:              payloadReuse,
             NifSupport:                nifSupport,
             PluginRewriteVerification: pluginRewriteVerification,
-            PartitionSignals:          partitionSignals);
+            PartitionSignals:          partitionSignals,
+            CageTopology:              cageTopology);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -22672,9 +22691,29 @@ internal sealed class LocalExportService(
         ConversionValidationSummary? validationSummary)
     {
         var armorName = Path.GetFileNameWithoutExtension(armor.MeshFiles.FirstOrDefault() ?? "armor");
-        var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths);
+        var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths, mesh.DeformationCage, armor.MeshFiles);
         var payloadJson = JsonSerializer.Serialize(payload);
         var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
+        var cageIslandItemsHtml = payload.CageTopology is { Islands.Count: > 0 }
+            ? string.Join(Environment.NewLine, payload.CageTopology.Islands.Take(8).Select(static island =>
+                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}</li>"))
+            : string.Empty;
+        var cageTopologyHtml = payload.CageTopology is { Islands.Count: > 0 }
+            ? $$"""
+                  <div class="panel">
+                    <h3 style="margin:0 0 8px;color:#9bb7f2">Per-island cage memberships</h3>
+                    <ul class="kvs">
+                      <li><strong>Islands:</strong> {{payload.CageTopology.IslandCount}}</li>
+                      <li><strong>Boundary loops:</strong> {{payload.CageTopology.BoundaryLoopCount}}</li>
+                      <li><strong>Boundary vertices:</strong> {{payload.CageTopology.BoundaryVertexCount}}</li>
+                      <li><strong>Membership source:</strong> {{HtmlEncode(payload.CageTopology.UsesEstimatedMemberships ? "mixed explicit + estimated" : "explicit topology")}}</li>
+                    </ul>
+                    <ul class="kvs" style="margin-top:10px">
+                      {{cageIslandItemsHtml}}
+                    </ul>
+                  </div>
+              """
+            : string.Empty;
 
         return $$"""
             <!DOCTYPE html>
@@ -22724,6 +22763,7 @@ internal sealed class LocalExportService(
                       <a href="preview.html">preview.html</a> for regional heatmap, pose-risk, and conversion diagnostics.
                     </p>
                   </div>
+            {{cageTopologyHtml}}
             {{validationPanelHtml}}
                 </div>
               </div>
@@ -22868,8 +22908,12 @@ internal sealed class LocalExportService(
             """;
     }
 
-    private static PreviewWorkbenchPayload BuildPreviewWorkbenchPayload(IReadOnlyList<string> convertedMeshPaths)
+    private static PreviewWorkbenchPayload BuildPreviewWorkbenchPayload(
+        IReadOnlyList<string> convertedMeshPaths,
+        DeformationCage? deformationCage = null,
+        IReadOnlyList<string>? sourceMeshPaths = null)
     {
+        var cageTopology = BuildCageTopologyReport(convertedMeshPaths, deformationCage, sourceMeshPaths);
         foreach (var path in convertedMeshPaths)
         {
             if (!File.Exists(path))
@@ -22899,7 +22943,8 @@ internal sealed class LocalExportService(
                     VertexCount: vertices.Count,
                     Positions: positions,
                     Mode: "real-3d-point-cloud",
-                    Note: "Rendered from converted mesh vertex data. Use drag + zoom controls to inspect shape and proportions.");
+                    Note: "Rendered from converted mesh vertex data. Use drag + zoom controls to inspect shape and proportions.",
+                    CageTopology: cageTopology);
             }
             catch
             {
@@ -22912,7 +22957,215 @@ internal sealed class LocalExportService(
             VertexCount: 0,
             Positions: [],
             Mode: "unavailable",
-            Note: "No readable converted NIF vertex data was found for 3D preview.");
+            Note: "No readable converted NIF vertex data was found for 3D preview.",
+            CageTopology: cageTopology);
+    }
+
+    private static CageTopologyReport? BuildCageTopologyReport(
+        IReadOnlyList<string> meshPaths,
+        DeformationCage? deformationCage,
+        IReadOnlyList<string>? sourceMeshPaths = null)
+    {
+        var islandSummaries = new List<CageIslandMembershipSummary>();
+        var totalBoundaryLoops = 0;
+        var totalBoundaryVertices = 0;
+        var usesEstimatedMemberships = false;
+        var sourceTopologySummaries = (sourceMeshPaths ?? [])
+            .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            .Select(path => new
+            {
+                Path = path,
+                FileName = Path.GetFileName(path) ?? path,
+                BaseName = GetMeshTopologyLookupKey(path),
+                Summary = NifGeometrySignatureReader.TryReadTopologySummary(path)
+            })
+            .Where(entry => entry.Summary is { VertexCount: > 0 })
+            .ToList();
+
+        foreach (var meshPath in meshPaths
+                     .Where(path => !string.IsNullOrWhiteSpace(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            IReadOnlyList<MeshVertex>? vertices;
+            try
+            {
+                vertices = NifGeometrySignatureReader.TryReadFullVertices(meshPath);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (vertices is null || vertices.Count == 0)
+            {
+                continue;
+            }
+
+            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath)
+                ?? sourceTopologySummaries
+                    .Where(entry => entry.Summary!.VertexCount == vertices.Count)
+                    .OrderByDescending(entry => string.Equals(
+                        entry.FileName,
+                        Path.GetFileName(meshPath),
+                        StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(entry => string.Equals(
+                        entry.BaseName,
+                        GetMeshTopologyLookupKey(meshPath),
+                        StringComparison.OrdinalIgnoreCase))
+                    .Select(entry => entry.Summary)
+                    .FirstOrDefault();
+            var usesExplicitTopology = topologySummary is { VertexCount: > 0 } &&
+                                       topologySummary.VertexCount == vertices.Count &&
+                                       topologySummary.ComponentIds.Length == vertices.Count;
+            var normalizedVertices = NormalizeVerticesForTransfer(vertices);
+            var componentIds = usesExplicitTopology
+                ? topologySummary!.ComponentIds
+                : BuildMorphTransferIslandMap(normalizedVertices);
+            var boundaryFlags = usesExplicitTopology && topologySummary!.BoundaryVertexFlags.Length == vertices.Count
+                ? topologySummary.BoundaryVertexFlags
+                : EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+
+            if (!usesExplicitTopology)
+            {
+                usesEstimatedMemberships = true;
+            }
+
+            totalBoundaryLoops += usesExplicitTopology ? topologySummary!.BoundaryLoopCount : 0;
+            totalBoundaryVertices += boundaryFlags.Count(static flag => flag);
+
+            foreach (var group in componentIds
+                         .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
+                         .GroupBy(static entry => entry.ComponentId)
+                         .OrderBy(static group => group.Key))
+            {
+                var indexes = group.Select(static entry => entry.Index).ToArray();
+                var boundaryVertexCount = indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                islandSummaries.Add(new CageIslandMembershipSummary(
+                    MeshFile: Path.GetFileName(meshPath) ?? meshPath,
+                    IslandId: group.Key,
+                    VertexCount: indexes.Length,
+                    BoundaryVertexCount: boundaryVertexCount,
+                    UsesExplicitTopology: usesExplicitTopology,
+                    CageRegions: ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage)));
+            }
+        }
+
+        return islandSummaries.Count == 0
+            ? null
+            : new CageTopologyReport(
+                IslandCount: islandSummaries.Count,
+                BoundaryLoopCount: totalBoundaryLoops,
+                BoundaryVertexCount: totalBoundaryVertices,
+                UsesEstimatedMemberships: usesEstimatedMemberships,
+                Islands: islandSummaries);
+    }
+
+    private static string GetMeshTopologyLookupKey(string path)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(path) ?? path;
+        if (fileName.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            fileName = fileName[..^2];
+        }
+
+        return fileName;
+    }
+
+    private static bool[] EstimateBoundaryVertexFlags(IReadOnlyList<MeshVertex> normalizedVertices, IReadOnlyList<int> componentIds)
+    {
+        if (normalizedVertices.Count == 0 || componentIds.Count != normalizedVertices.Count)
+        {
+            return [];
+        }
+
+        var transferZones = BuildMorphTransferZoneMap(normalizedVertices);
+        var neighbors = BuildMorphTransferNeighborIndexes(normalizedVertices, transferZones, componentIds);
+        var globalDistance = ComputeGlobalNeighborDistance(normalizedVertices, neighbors);
+        if (globalDistance <= 0.0001f)
+        {
+            return new bool[normalizedVertices.Count];
+        }
+
+        var flags = new bool[normalizedVertices.Count];
+        for (var index = 0; index < normalizedVertices.Count; index++)
+        {
+            if (index >= neighbors.Count)
+            {
+                continue;
+            }
+
+            var localDistance = ComputeAverageNeighborDistance(normalizedVertices, index, neighbors[index]);
+            if (localDistance <= 0.0001f)
+            {
+                continue;
+            }
+
+            var crossIslandNeighbors = neighbors[index]
+                .Count(neighborIndex => neighborIndex >= 0 &&
+                                        neighborIndex < componentIds.Count &&
+                                        componentIds[neighborIndex] != componentIds[index]);
+            flags[index] = localDistance >= globalDistance * 1.22f || crossIslandNeighbors > 0;
+        }
+
+        return flags;
+    }
+
+    private static IReadOnlyList<string> ResolveDominantCageRegions(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> indexes,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.Regions is not { Count: > 0 } regions || indexes.Count == 0)
+        {
+            return [];
+        }
+
+        var scores = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        foreach (var index in indexes)
+        {
+            if (index < 0 || index >= normalizedVertices.Count)
+            {
+                continue;
+            }
+
+            var vertex = normalizedVertices[index];
+            var normalizedHeight = Math.Clamp(vertex.Z, 0f, 1f);
+            var lateralPosition = Math.Clamp(MathF.Abs(vertex.X - 0.5f) * 2f, 0f, 1f);
+            var depthPosition = Math.Clamp(MathF.Abs(vertex.Y - 0.5f) * 2f, 0f, 1f);
+            foreach (var (regionName, region) in regions)
+            {
+                var heightWeight = ComputeCageAxisWeight(normalizedHeight, region.HeightCenter, region.HeightFalloff);
+                var lateralWeight = ComputeCageAxisWeight(lateralPosition, region.LateralCenter, region.LateralFalloff);
+                var depthWeight = ComputeCageAxisWeight(depthPosition, region.DepthCenter, region.DepthFalloff);
+                var combinedWeight = ((heightWeight * 0.45f) + (lateralWeight * 0.30f) + (depthWeight * 0.25f)) * (1f + region.Rigidity);
+                if (combinedWeight <= 0.0001f)
+                {
+                    continue;
+                }
+
+                scores[regionName] = scores.TryGetValue(regionName, out var current)
+                    ? current + combinedWeight
+                    : combinedWeight;
+            }
+        }
+
+        if (scores.Count == 0)
+        {
+            return [];
+        }
+
+        var bestScore = scores.Max(static pair => pair.Value);
+        return scores
+            .OrderByDescending(static pair => pair.Value)
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(static pair => pair.Key)
+            .Take(3)
+            .ToArray();
     }
 
     private static IReadOnlyList<(float X, float Y, float Z)> ExtractPreviewWorkbenchVertices(byte[] bytes, int maxVertices)
