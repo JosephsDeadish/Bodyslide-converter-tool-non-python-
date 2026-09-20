@@ -9215,6 +9215,25 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 {
                     continue;
                 }
+
+                var synthesizedComponentIds = ComputeIslandAssignments(normalizedVertices, radius);
+                if (synthesizedComponentIds.Length == normalizedVertices.Count)
+                {
+                    var synthesizedBoundaryFlags = BuildEstimatedBoundaryVertexFlags(normalizedVertices, synthesizedComponentIds);
+                    boundaryVertexCoverage = synthesizedBoundaryFlags.Length == 0
+                        ? 0d
+                        : synthesizedBoundaryFlags.Count(static flag => flag) / (double)synthesizedBoundaryFlags.Length;
+                    var synthesizedEdgeNetworks = BuildEstimatedTopologyEdgeNetworks(
+                        normalizedVertices,
+                        synthesizedComponentIds,
+                        synthesizedBoundaryFlags);
+                    if (synthesizedEdgeNetworks.Count > 0)
+                    {
+                        edgeNetworks = SummarizeTransferIslandEdgeNetworks(synthesizedEdgeNetworks);
+                        interiorEdgeCount = edgeNetworks.Sum(static network => network.InteriorEdgeCount);
+                        nonManifoldEdgeCount = edgeNetworks.Sum(static network => network.NonManifoldEdgeCount);
+                    }
+                }
             }
 
             var totalVertices = islandSizes.Sum();
@@ -9265,7 +9284,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 labels.Add("layered-island-stack");
             }
 
-            if (hasExplicitEdgeNetwork && interiorEdgeCount > 0)
+            if (interiorEdgeCount > 0)
             {
                 labels.Add("interior-edge-network");
             }
@@ -9273,6 +9292,11 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             if (nonManifoldEdgeCount > 0)
             {
                 labels.Add("non-manifold-risk");
+            }
+
+            if (!hasExplicitEdgeNetwork && edgeNetworks is { Count: > 0 })
+            {
+                labels.Add("estimated-edge-network");
             }
 
             summaries[meshName] = new TopologyIslandSummary(
@@ -9289,6 +9313,321 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         }
 
         return summaries;
+    }
+
+    private static int[] ComputeIslandAssignments(IReadOnlyList<MeshVertex> vertices, float radius)
+    {
+        if (vertices.Count == 0 || radius <= 0.0001f)
+        {
+            return [];
+        }
+
+        var visited = new bool[vertices.Count];
+        var components = new List<List<int>>();
+        var radiusSquared = radius * radius;
+        for (var start = 0; start < vertices.Count; start++)
+        {
+            if (visited[start])
+            {
+                continue;
+            }
+
+            var queue = new Queue<int>();
+            var component = new List<int>();
+            queue.Enqueue(start);
+            visited[start] = true;
+            while (queue.Count > 0)
+            {
+                var currentIndex = queue.Dequeue();
+                component.Add(currentIndex);
+                var current = vertices[currentIndex];
+                for (var candidateIndex = 0; candidateIndex < vertices.Count; candidateIndex++)
+                {
+                    if (visited[candidateIndex] || candidateIndex == currentIndex)
+                    {
+                        continue;
+                    }
+
+                    var candidate = vertices[candidateIndex];
+                    var dx = current.X - candidate.X;
+                    var dy = current.Y - candidate.Y;
+                    var dz = current.Z - candidate.Z;
+                    var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                    if (distanceSquared > radiusSquared)
+                    {
+                        continue;
+                    }
+
+                    visited[candidateIndex] = true;
+                    queue.Enqueue(candidateIndex);
+                }
+            }
+
+            components.Add(component);
+        }
+
+        var ordered = components
+            .Select(static (component, originalIndex) => new { component, originalIndex })
+            .OrderByDescending(static entry => entry.component.Count)
+            .ThenBy(static entry => entry.originalIndex)
+            .ToArray();
+        var assignments = new int[vertices.Count];
+        for (var islandId = 0; islandId < ordered.Length; islandId++)
+        {
+            foreach (var vertexIndex in ordered[islandId].component)
+            {
+                assignments[vertexIndex] = islandId;
+            }
+        }
+
+        return assignments;
+    }
+
+    private static bool[] BuildEstimatedBoundaryVertexFlags(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> componentIds)
+    {
+        if (normalizedVertices.Count == 0 || componentIds.Count != normalizedVertices.Count)
+        {
+            return [];
+        }
+
+        var globalDistances = new List<float>(normalizedVertices.Count);
+        var localDistances = new float[normalizedVertices.Count];
+        for (var index = 0; index < normalizedVertices.Count; index++)
+        {
+            var distance = ComputeAverageLocalIslandNeighborDistance(normalizedVertices, componentIds, index, neighborLimit: 4);
+            localDistances[index] = distance;
+            if (distance > 0.0001f)
+            {
+                globalDistances.Add(distance);
+            }
+        }
+
+        if (globalDistances.Count == 0)
+        {
+            return new bool[normalizedVertices.Count];
+        }
+
+        globalDistances.Sort();
+        var globalMedian = globalDistances[globalDistances.Count / 2];
+        var flags = new bool[normalizedVertices.Count];
+        for (var index = 0; index < normalizedVertices.Count; index++)
+        {
+            var localDistance = localDistances[index];
+            if (localDistance <= 0.0001f)
+            {
+                continue;
+            }
+
+            var islandSize = componentIds.Count(islandId => islandId == componentIds[index]);
+            flags[index] = islandSize <= 3 || localDistance >= globalMedian * 1.20f;
+        }
+
+        return flags;
+    }
+
+    private static IReadOnlyDictionary<int, TransferIslandEdgeNetwork> BuildEstimatedTopologyEdgeNetworks(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> componentIds,
+        IReadOnlyList<bool> boundaryFlags)
+    {
+        var networks = new Dictionary<int, TransferIslandEdgeNetwork>();
+        if (normalizedVertices.Count == 0 ||
+            componentIds.Count != normalizedVertices.Count ||
+            boundaryFlags.Count != normalizedVertices.Count)
+        {
+            return networks;
+        }
+
+        foreach (var group in componentIds
+                     .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
+                     .GroupBy(static entry => entry.ComponentId)
+                     .OrderBy(static group => group.Key))
+        {
+            if (group.Key < 0)
+            {
+                continue;
+            }
+
+            var vertexIndexes = group.Select(static entry => entry.Index).ToArray();
+            var boundaryVertexIndexes = vertexIndexes
+                .Where(index => index >= 0 && index < boundaryFlags.Count && boundaryFlags[index])
+                .ToArray();
+            var adjacency = new Dictionary<int, HashSet<int>>();
+            var edgeSet = new HashSet<(int Left, int Right)>();
+            foreach (var vertexIndex in vertexIndexes)
+            {
+                var nearestNeighbors = vertexIndexes
+                    .Where(candidateIndex => candidateIndex != vertexIndex)
+                    .Select(candidateIndex =>
+                    {
+                        var current = normalizedVertices[vertexIndex];
+                        var candidate = normalizedVertices[candidateIndex];
+                        var dx = current.X - candidate.X;
+                        var dy = current.Y - candidate.Y;
+                        var dz = current.Z - candidate.Z;
+                        return (Index: candidateIndex, DistanceSquared: (dx * dx) + (dy * dy) + (dz * dz));
+                    })
+                    .OrderBy(static candidate => candidate.DistanceSquared)
+                    .Take(Math.Min(4, Math.Max(1, vertexIndexes.Length - 1)));
+
+                foreach (var neighbor in nearestNeighbors)
+                {
+                    var edge = vertexIndex <= neighbor.Index
+                        ? (vertexIndex, neighbor.Index)
+                        : (neighbor.Index, vertexIndex);
+                    if (!edgeSet.Add(edge))
+                    {
+                        continue;
+                    }
+
+                    if (!adjacency.TryGetValue(edge.Item1, out var leftNeighbors))
+                    {
+                        leftNeighbors = [];
+                        adjacency[edge.Item1] = leftNeighbors;
+                    }
+
+                    if (!adjacency.TryGetValue(edge.Item2, out var rightNeighbors))
+                    {
+                        rightNeighbors = [];
+                        adjacency[edge.Item2] = rightNeighbors;
+                    }
+
+                    leftNeighbors.Add(edge.Item2);
+                    rightNeighbors.Add(edge.Item1);
+                }
+            }
+
+            var boundaryEdges = edgeSet
+                .Where(edge => boundaryVertexIndexes.Contains(edge.Left) && boundaryVertexIndexes.Contains(edge.Right))
+                .OrderBy(static edge => edge.Left)
+                .ThenBy(static edge => edge.Right)
+                .ToArray();
+            var interiorEdges = edgeSet
+                .Where(edge => !boundaryEdges.Contains(edge))
+                .OrderBy(static edge => edge.Left)
+                .ThenBy(static edge => edge.Right)
+                .ToArray();
+            var adjacencyMap = adjacency.ToDictionary(
+                static pair => pair.Key,
+                static pair => (IReadOnlyList<int>)pair.Value.OrderBy(static index => index).ToArray());
+            var manifoldScore = ComputeEstimatedTopologyManifoldScore(vertexIndexes, boundaryVertexIndexes, adjacencyMap);
+            networks[group.Key] = new TransferIslandEdgeNetwork(
+                group.Key,
+                vertexIndexes,
+                boundaryVertexIndexes,
+                boundaryEdges,
+                interiorEdges,
+                adjacencyMap,
+                0,
+                manifoldScore,
+                UsesExplicitTopology: false);
+        }
+
+        return networks;
+    }
+
+    private static float ComputeAverageLocalIslandNeighborDistance(
+        IReadOnlyList<MeshVertex> normalizedVertices,
+        IReadOnlyList<int> componentIds,
+        int vertexIndex,
+        int neighborLimit)
+    {
+        if (vertexIndex < 0 || vertexIndex >= normalizedVertices.Count || vertexIndex >= componentIds.Count)
+        {
+            return 0f;
+        }
+
+        var islandId = componentIds[vertexIndex];
+        var distances = normalizedVertices
+            .Select((vertex, index) => (Vertex: vertex, Index: index))
+            .Where(candidate => candidate.Index != vertexIndex && componentIds[candidate.Index] == islandId)
+            .Select(candidate =>
+            {
+                var current = normalizedVertices[vertexIndex];
+                var dx = current.X - candidate.Vertex.X;
+                var dy = current.Y - candidate.Vertex.Y;
+                var dz = current.Z - candidate.Vertex.Z;
+                return MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+            })
+            .OrderBy(static distance => distance)
+            .Take(Math.Max(1, neighborLimit))
+            .ToArray();
+
+        return distances.Length == 0 ? 0f : distances.Average();
+    }
+
+    private static float ComputeEstimatedTopologyManifoldScore(
+        IReadOnlyList<int> vertexIndexes,
+        IReadOnlyList<int> boundaryVertexIndexes,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> adjacencyByVertex)
+    {
+        if (vertexIndexes.Count == 0)
+        {
+            return 1f;
+        }
+
+        var boundaryVertexSet = boundaryVertexIndexes.ToHashSet();
+        var anomalyCount = 0;
+        foreach (var vertexIndex in vertexIndexes)
+        {
+            var degree = adjacencyByVertex.TryGetValue(vertexIndex, out var neighbors)
+                ? neighbors.Count
+                : 0;
+            if (degree == 0)
+            {
+                anomalyCount++;
+                continue;
+            }
+
+            if (boundaryVertexSet.Contains(vertexIndex))
+            {
+                if (degree > 4)
+                {
+                    anomalyCount++;
+                }
+            }
+            else if (degree is < 2 or > 8)
+            {
+                anomalyCount++;
+            }
+        }
+
+        return Math.Clamp(1f - (anomalyCount / (float)Math.Max(1, vertexIndexes.Count)), 0.15f, 1f);
+    }
+
+    private static IReadOnlyList<TopologyIslandEdgeNetworkSummary> SummarizeTransferIslandEdgeNetworks(
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+    {
+        if (edgeNetworks.Count == 0)
+        {
+            return [];
+        }
+
+        return edgeNetworks
+            .OrderBy(static pair => pair.Key)
+            .Select(static pair =>
+            {
+                var network = pair.Value;
+                var maxVertexValence = network.AdjacencyByVertex.Count == 0
+                    ? 0
+                    : network.AdjacencyByVertex.Max(static adjacency => adjacency.Value.Count);
+                var hasManifoldRisk = network.NonManifoldEdgeCount > 0 || network.ManifoldScore < 0.72f;
+                var isClosedManifold = network.BoundaryEdges.Count == 0 &&
+                                       network.InteriorEdges.Count > 0 &&
+                                       !hasManifoldRisk;
+                return new TopologyIslandEdgeNetworkSummary(
+                    pair.Key,
+                    network.BoundaryEdges.Count,
+                    network.InteriorEdges.Count,
+                    network.NonManifoldEdgeCount,
+                    network.BoundaryVertexIndexes.Count,
+                    maxVertexValence,
+                    isClosedManifold,
+                    hasManifoldRisk);
+            })
+            .ToArray();
     }
 
     private static IReadOnlyList<MeshVertex> SampleTopologyVertices(IReadOnlyList<MeshVertex> vertices, int maxSamples)

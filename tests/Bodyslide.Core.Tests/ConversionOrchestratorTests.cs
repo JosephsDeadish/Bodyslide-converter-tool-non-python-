@@ -2507,6 +2507,43 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DerivesEstimatedEdgeNetworksFromInterleavedFloatGeometry()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "estimated_edge_networks_0.nif");
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(meshPath,
+        [
+            (-20f, -2f, 0f), (-16f, -1f, 2f), (-12f, -2f, 4f), (-8f, -1f, 6f), (-4f, -2f, 8f), (0f, -1f, 10f),
+            (-20f, 2f, 0f), (-16f, 1f, 2f), (-12f, 2f, 4f), (-8f, 1f, 6f), (-4f, 2f, 8f), (0f, 1f, 10f),
+            (90f, -1f, 28f), (92f, -1f, 34f), (94f, -1f, 40f), (96f, -1f, 46f), (98f, -1f, 52f), (100f, -1f, 58f),
+            (90f, 1f, 28f), (92f, 1f, 34f), (94f, 1f, 40f), (96f, 1f, 46f), (98f, 1f, 52f), (100f, 1f, 58f)
+        ]);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.NotNull(result.TopologyIslandSummaries);
+            var summary = Assert.Single(result.TopologyIslandSummaries!.Values);
+            Assert.True(summary.IslandCount >= 2);
+            Assert.False(summary.HasExplicitEdgeNetwork);
+            Assert.True(summary.InteriorEdgeCount > 0);
+            Assert.NotNull(summary.EdgeNetworks);
+            Assert.True(summary.EdgeNetworks!.Count >= 2);
+            Assert.Contains(summary.Labels, label => label.Equals("interior-edge-network", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("estimated-edge-network", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BuildExportDeformationCage_UsesExplicitBoundaryLoopsForDenseWindowIslands()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
