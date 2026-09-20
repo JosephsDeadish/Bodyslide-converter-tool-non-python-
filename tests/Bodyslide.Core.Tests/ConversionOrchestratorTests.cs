@@ -18991,7 +18991,7 @@ public sealed class OutputCompletenessTests
         var targetIslands = new[] { 1 };
         var islandMatches = new[] { 2, 0 };
 
-        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones, sourceIslands, targetIslands, islandMatches]);
+        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones, sourceIslands, targetIslands, islandMatches, null, null]);
         var influences = Assert.IsAssignableFrom<System.Collections.IEnumerable>(result);
         var firstInfluenceList = Assert.Single(influences.Cast<object>());
         var rankedInfluences = ((System.Collections.IEnumerable)firstInfluenceList).Cast<object>().ToArray();
