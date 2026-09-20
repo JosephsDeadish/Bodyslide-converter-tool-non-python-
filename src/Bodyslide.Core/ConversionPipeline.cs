@@ -8691,8 +8691,23 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             return [];
         }
 
+        ComputeIslandComponentAssignments(vertices, radius, out var sizes);
+        return sizes;
+    }
+
+    private static int[] ComputeIslandComponentAssignments(
+        IReadOnlyList<MeshVertex> vertices,
+        float radius,
+        out int[] orderedSizes)
+    {
+        orderedSizes = [];
+        if (vertices.Count == 0 || radius <= 0.0001f)
+        {
+            return [];
+        }
+
         var visited = new bool[vertices.Count];
-        var sizes = new List<int>();
+        var components = new List<List<int>>();
         var radiusSquared = radius * radius;
         for (var start = 0; start < vertices.Count; start++)
         {
@@ -8702,13 +8717,13 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             }
 
             var queue = new Queue<int>();
+            var component = new List<int>();
             queue.Enqueue(start);
             visited[start] = true;
-            var size = 0;
             while (queue.Count > 0)
             {
                 var currentIndex = queue.Dequeue();
-                size++;
+                component.Add(currentIndex);
                 var current = vertices[currentIndex];
                 for (var candidateIndex = 0; candidateIndex < vertices.Count; candidateIndex++)
                 {
@@ -8732,12 +8747,27 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 }
             }
 
-            sizes.Add(size);
+            components.Add(component);
         }
 
-        return sizes
-            .OrderByDescending(static size => size)
+        var ordered = components
+            .Select(static (component, originalIndex) => new { component, originalIndex })
+            .OrderByDescending(static entry => entry.component.Count)
+            .ThenBy(static entry => entry.originalIndex)
             .ToArray();
+        var assignments = new int[vertices.Count];
+        for (var islandId = 0; islandId < ordered.Length; islandId++)
+        {
+            foreach (var vertexIndex in ordered[islandId].component)
+            {
+                assignments[vertexIndex] = islandId;
+            }
+        }
+
+        orderedSizes = ordered
+            .Select(static entry => entry.component.Count)
+            .ToArray();
+        return assignments;
     }
 
     private sealed record GeometryPartStats(
@@ -8749,6 +8779,8 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         float SpanZ,
         double AverageRadius,
         double Density);
+
+    private sealed record TransferIslandSummary(int IslandId, int VertexCount, MeshVertex Centroid);
 }
 
 internal sealed class BasicCageGenerationService : ICageGenerationService
@@ -20129,6 +20161,11 @@ internal sealed class LocalExportService(
             int SourceIndex,
             float Weight);
 
+        private sealed record TransferIslandSummary(
+            int IslandId,
+            int VertexCount,
+            MeshVertex Centroid);
+
         private sealed record MorphTransferContext(
             IReadOnlyList<MeshVertex> SourceVertices,
             IReadOnlyList<MeshVertex> TargetVertices,
@@ -20138,6 +20175,9 @@ internal sealed class LocalExportService(
             IReadOnlyList<IReadOnlyList<int>> TargetNeighborIndexes,
             int[] SourceTransferZones,
             int[] TargetTransferZones,
+            int[] SourceTransferIslands,
+            int[] TargetTransferIslands,
+            int[] TargetIslandToSourceIslandMap,
             float[] TargetTransferAmbiguity,
             float SourceGlobalNeighborDistance,
             float TargetGlobalNeighborDistance,
@@ -20165,18 +20205,28 @@ internal sealed class LocalExportService(
             var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
             var sourceTransferZones = BuildMorphTransferZoneMap(normalizedSourceVertices);
             var targetTransferZones = BuildMorphTransferZoneMap(normalizedTargetVertices);
+            var sourceTransferIslands = BuildMorphTransferIslandMap(normalizedSourceVertices);
+            var targetTransferIslands = BuildMorphTransferIslandMap(normalizedTargetVertices);
+            var targetIslandToSourceIslandMap = BuildMorphTransferIslandMatches(
+                normalizedSourceVertices,
+                normalizedTargetVertices,
+                sourceTransferIslands,
+                targetTransferIslands);
             var influenceMap = BuildMorphTransferInfluenceMap(
                 normalizedSourceVertices,
                 normalizedTargetVertices,
                 sourceTransferZones,
-                targetTransferZones);
+                targetTransferZones,
+                sourceTransferIslands,
+                targetTransferIslands,
+                targetIslandToSourceIslandMap);
             var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
                 ? influenceMap
                     .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
                     .ToArray()
                 : BuildNearestSurfaceMap(sourceVertices, targetVertices);
-            var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(normalizedSourceVertices, sourceTransferZones);
-            var neighborIndexes = BuildMorphTransferNeighborIndexes(normalizedTargetVertices, targetTransferZones);
+            var sourceNeighborIndexes = BuildMorphTransferNeighborIndexes(normalizedSourceVertices, sourceTransferZones, sourceTransferIslands);
+            var neighborIndexes = BuildMorphTransferNeighborIndexes(normalizedTargetVertices, targetTransferZones, targetTransferIslands);
             var transferAmbiguity = influenceMap
                 .Select(ComputeMorphTransferAmbiguity)
                 .ToArray();
@@ -20193,6 +20243,9 @@ internal sealed class LocalExportService(
                 neighborIndexes,
                 sourceTransferZones,
                 targetTransferZones,
+                sourceTransferIslands,
+                targetTransferIslands,
+                targetIslandToSourceIslandMap,
                 transferAmbiguity,
                 sourceGlobalNeighborDistance,
                 targetGlobalNeighborDistance,
@@ -20508,12 +20561,17 @@ internal sealed class LocalExportService(
             IReadOnlyList<MeshVertex> normalizedSourceVertices,
             IReadOnlyList<MeshVertex> normalizedTargetVertices,
             IReadOnlyList<int> sourceTransferZones,
-            IReadOnlyList<int> targetTransferZones)
+            IReadOnlyList<int> targetTransferZones,
+            IReadOnlyList<int> sourceTransferIslands,
+            IReadOnlyList<int> targetTransferIslands,
+            IReadOnlyList<int> targetIslandToSourceIslandMap)
         {
             if (normalizedSourceVertices.Count == 0 ||
                 normalizedTargetVertices.Count == 0 ||
                 sourceTransferZones.Count != normalizedSourceVertices.Count ||
-                targetTransferZones.Count != normalizedTargetVertices.Count)
+                targetTransferZones.Count != normalizedTargetVertices.Count ||
+                sourceTransferIslands.Count != normalizedSourceVertices.Count ||
+                targetTransferIslands.Count != normalizedTargetVertices.Count)
             {
                 return [];
             }
@@ -20530,6 +20588,10 @@ internal sealed class LocalExportService(
             {
                 var targetVertex = normalizedTargetVertices[targetIndex];
                 var targetZone = targetTransferZones[targetIndex];
+                var targetIsland = targetTransferIslands[targetIndex];
+                var preferredSourceIsland = targetIsland >= 0 && targetIsland < targetIslandToSourceIslandMap.Count
+                    ? targetIslandToSourceIslandMap[targetIsland]
+                    : -1;
                 var insertionIndex = Array.BinarySearch(sortedSourceHeights, targetVertex.Z);
                 if (insertionIndex < 0)
                 {
@@ -20539,6 +20601,7 @@ internal sealed class LocalExportService(
                 var start = Math.Max(0, insertionIndex - candidateWindowRadius);
                 var end = Math.Min(sourceByHeight.Length - 1, insertionIndex + candidateWindowRadius);
                 var bestCandidates = new List<(int SourceIndex, float DistanceSquared)>(capacity: 4);
+                var fallbackCandidates = new List<(int SourceIndex, float DistanceSquared)>(capacity: 4);
 
                 for (var candidateIndex = start; candidateIndex <= end; candidateIndex++)
                 {
@@ -20548,7 +20611,24 @@ internal sealed class LocalExportService(
                     var dz = targetVertex.Z - candidate.Vertex.Z;
                     var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
                     var zonePenalty = ComputeMorphTransferZonePenalty(sourceTransferZones[candidate.Index], targetZone);
-                    InsertMorphTransferCandidate(bestCandidates, candidate.Index, distanceSquared * zonePenalty);
+                    var islandPenalty = ComputeMorphTransferIslandPenalty(
+                        sourceTransferIslands[candidate.Index],
+                        targetIsland,
+                        preferredSourceIsland);
+                    var score = distanceSquared * zonePenalty * islandPenalty;
+                    if (preferredSourceIsland >= 0 && sourceTransferIslands[candidate.Index] == preferredSourceIsland)
+                    {
+                        InsertMorphTransferCandidate(bestCandidates, candidate.Index, score);
+                    }
+                    else
+                    {
+                        InsertMorphTransferCandidate(fallbackCandidates, candidate.Index, score);
+                    }
+                }
+
+                if (bestCandidates.Count == 0)
+                {
+                    bestCandidates = fallbackCandidates;
                 }
 
                 if (bestCandidates.Count == 0)
@@ -20608,9 +20688,12 @@ internal sealed class LocalExportService(
 
         private static IReadOnlyList<IReadOnlyList<int>> BuildMorphTransferNeighborIndexes(
             IReadOnlyList<MeshVertex> normalizedTargetVertices,
-            IReadOnlyList<int> transferZones)
+            IReadOnlyList<int> transferZones,
+            IReadOnlyList<int> transferIslands)
         {
-            if (normalizedTargetVertices.Count == 0 || transferZones.Count != normalizedTargetVertices.Count)
+            if (normalizedTargetVertices.Count == 0 ||
+                transferZones.Count != normalizedTargetVertices.Count ||
+                transferIslands.Count != normalizedTargetVertices.Count)
             {
                 return [];
             }
@@ -20627,6 +20710,7 @@ internal sealed class LocalExportService(
             {
                 var targetVertex = normalizedTargetVertices[targetIndex];
                 var targetZone = transferZones[targetIndex];
+                var targetIsland = transferIslands[targetIndex];
                 var insertionIndex = Array.BinarySearch(sortedTargetHeights, targetVertex.Z);
                 if (insertionIndex < 0)
                 {
@@ -20636,6 +20720,7 @@ internal sealed class LocalExportService(
                 var start = Math.Max(0, insertionIndex - candidateWindowRadius);
                 var end = Math.Min(targetByHeight.Length - 1, insertionIndex + candidateWindowRadius);
                 var bestNeighbors = new List<(int TargetIndex, float DistanceSquared)>(capacity: 4);
+                var fallbackNeighbors = new List<(int TargetIndex, float DistanceSquared)>(capacity: 4);
                 for (var candidateIndex = start; candidateIndex <= end; candidateIndex++)
                 {
                     var candidate = targetByHeight[candidateIndex];
@@ -20649,7 +20734,20 @@ internal sealed class LocalExportService(
                     var dz = targetVertex.Z - candidate.Vertex.Z;
                     var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
                     var zonePenalty = ComputeMorphTransferZonePenalty(transferZones[candidate.Index], targetZone);
-                    InsertMorphTransferNeighbor(bestNeighbors, candidate.Index, distanceSquared * zonePenalty);
+                    var score = distanceSquared * zonePenalty;
+                    if (transferIslands[candidate.Index] == targetIsland)
+                    {
+                        InsertMorphTransferNeighbor(bestNeighbors, candidate.Index, score);
+                    }
+                    else
+                    {
+                        InsertMorphTransferNeighbor(fallbackNeighbors, candidate.Index, score * 1.35f);
+                    }
+                }
+
+                if (bestNeighbors.Count == 0)
+                {
+                    bestNeighbors = fallbackNeighbors;
                 }
 
                 neighbors[targetIndex] = bestNeighbors.Select(static candidate => candidate.TargetIndex).ToArray();
@@ -20700,6 +20798,246 @@ internal sealed class LocalExportService(
 
             var competingWeight = Math.Max(0f, totalWeight - dominantWeight);
             return Math.Clamp(((1f - dominantWeight) * 0.65f) + (MathF.Min(competingWeight, 1f) * 0.35f), 0f, 1f);
+        }
+
+        private static int[] BuildMorphTransferIslandMap(IReadOnlyList<MeshVertex> normalizedVertices)
+        {
+            if (normalizedVertices.Count == 0)
+            {
+                return [];
+            }
+
+            var radius = ComputeMorphTransferIslandConnectionRadius(normalizedVertices);
+            if (radius <= 0.0001f)
+            {
+                return Enumerable.Repeat(0, normalizedVertices.Count).ToArray();
+            }
+
+            var assignments = ComputeMorphTransferIslandAssignments(normalizedVertices, radius);
+            var islandSizes = assignments
+                .GroupBy(static islandId => islandId)
+                .Select(static group => group.Count())
+                .OrderByDescending(static size => size)
+                .ToArray();
+            if (islandSizes.Length < 2)
+            {
+                return Enumerable.Repeat(0, normalizedVertices.Count).ToArray();
+            }
+
+            var largestCoverage = islandSizes[0] / (double)Math.Max(1, normalizedVertices.Count);
+            var smallestMeaningfulSize = Math.Max(8, normalizedVertices.Count / 40);
+            var meaningfulIslandCount = islandSizes.Count(size => size >= smallestMeaningfulSize);
+            if (largestCoverage >= 0.90d || meaningfulIslandCount < 2)
+            {
+                return Enumerable.Repeat(0, normalizedVertices.Count).ToArray();
+            }
+
+            return assignments;
+        }
+
+        private static int[] BuildMorphTransferIslandMatches(
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<MeshVertex> normalizedTargetVertices,
+            IReadOnlyList<int> sourceTransferIslands,
+            IReadOnlyList<int> targetTransferIslands)
+        {
+            if (normalizedSourceVertices.Count == 0 ||
+                normalizedTargetVertices.Count == 0 ||
+                sourceTransferIslands.Count != normalizedSourceVertices.Count ||
+                targetTransferIslands.Count != normalizedTargetVertices.Count)
+            {
+                return [];
+            }
+
+            var sourceIslands = SummarizeTransferIslands(normalizedSourceVertices, sourceTransferIslands);
+            var targetIslands = SummarizeTransferIslands(normalizedTargetVertices, targetTransferIslands);
+            if (sourceIslands.Count == 0 || targetIslands.Count == 0)
+            {
+                return [];
+            }
+
+            var matches = Enumerable.Repeat(-1, targetIslands.Max(static island => island.IslandId) + 1).ToArray();
+            foreach (var targetIsland in targetIslands)
+            {
+                var bestSource = sourceIslands
+                    .Select(sourceIsland => (IslandId: sourceIsland.IslandId, Score: ComputeTransferIslandMatchScore(sourceIsland, targetIsland)))
+                    .OrderBy(static candidate => candidate.Score)
+                    .FirstOrDefault();
+                matches[targetIsland.IslandId] = bestSource.IslandId;
+            }
+
+            return matches;
+        }
+
+        private static IReadOnlyList<TransferIslandSummary> SummarizeTransferIslands(
+            IReadOnlyList<MeshVertex> normalizedVertices,
+            IReadOnlyList<int> transferIslands)
+        {
+            var summaries = transferIslands
+                .Select(static (islandId, index) => (IslandId: islandId, Index: index))
+                .GroupBy(static entry => entry.IslandId)
+                .Select(group =>
+                {
+                    var count = 0;
+                    var totalX = 0f;
+                    var totalY = 0f;
+                    var totalZ = 0f;
+                    foreach (var (_, index) in group)
+                    {
+                        var vertex = normalizedVertices[index];
+                        totalX += vertex.X;
+                        totalY += vertex.Y;
+                        totalZ += vertex.Z;
+                        count++;
+                    }
+
+                    count = Math.Max(1, count);
+                    return new TransferIslandSummary(
+                        group.Key,
+                        count,
+                        new MeshVertex(totalX / count, totalY / count, totalZ / count));
+                })
+                .OrderBy(static summary => summary.IslandId)
+                .ToArray();
+            return summaries;
+        }
+
+        private static float ComputeTransferIslandMatchScore(TransferIslandSummary sourceIsland, TransferIslandSummary targetIsland)
+        {
+            var dx = sourceIsland.Centroid.X - targetIsland.Centroid.X;
+            var dy = sourceIsland.Centroid.Y - targetIsland.Centroid.Y;
+            var dz = sourceIsland.Centroid.Z - targetIsland.Centroid.Z;
+            var distance = MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+            var sizeRatio = sourceIsland.VertexCount <= 0 || targetIsland.VertexCount <= 0
+                ? 1f
+                : MathF.Max(
+                    sourceIsland.VertexCount / (float)targetIsland.VertexCount,
+                    targetIsland.VertexCount / (float)sourceIsland.VertexCount);
+            return distance + ((sizeRatio - 1f) * 0.08f);
+        }
+
+        private static float ComputeMorphTransferIslandPenalty(int sourceIsland, int targetIsland, int preferredSourceIsland)
+        {
+            if (preferredSourceIsland >= 0)
+            {
+                return sourceIsland == preferredSourceIsland ? 1f : 1.90f;
+            }
+
+            return sourceIsland == targetIsland ? 1f : 1.35f;
+        }
+
+        private static float ComputeMorphTransferIslandConnectionRadius(IReadOnlyList<MeshVertex> vertices)
+        {
+            if (vertices.Count < 2)
+            {
+                return 0f;
+            }
+
+            var nearestDistances = new List<float>(vertices.Count);
+            for (var i = 0; i < vertices.Count; i++)
+            {
+                var nearest = float.MaxValue;
+                var current = vertices[i];
+                for (var j = 0; j < vertices.Count; j++)
+                {
+                    if (i == j)
+                    {
+                        continue;
+                    }
+
+                    var candidate = vertices[j];
+                    var dx = current.X - candidate.X;
+                    var dy = current.Y - candidate.Y;
+                    var dz = current.Z - candidate.Z;
+                    var distance = MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+                    if (distance < nearest)
+                    {
+                        nearest = distance;
+                    }
+                }
+
+                if (nearest < float.MaxValue)
+                {
+                    nearestDistances.Add(nearest);
+                }
+            }
+
+            if (nearestDistances.Count == 0)
+            {
+                return 0f;
+            }
+
+            nearestDistances.Sort();
+            var median = nearestDistances[nearestDistances.Count / 2];
+            return Math.Clamp(median * 2.6f, 0.02f, 0.18f);
+        }
+
+        private static int[] ComputeMorphTransferIslandAssignments(IReadOnlyList<MeshVertex> vertices, float radius)
+        {
+            if (vertices.Count == 0 || radius <= 0.0001f)
+            {
+                return [];
+            }
+
+            var visited = new bool[vertices.Count];
+            var components = new List<List<int>>();
+            var radiusSquared = radius * radius;
+            for (var start = 0; start < vertices.Count; start++)
+            {
+                if (visited[start])
+                {
+                    continue;
+                }
+
+                var queue = new Queue<int>();
+                var component = new List<int>();
+                queue.Enqueue(start);
+                visited[start] = true;
+                while (queue.Count > 0)
+                {
+                    var currentIndex = queue.Dequeue();
+                    component.Add(currentIndex);
+                    var current = vertices[currentIndex];
+                    for (var candidateIndex = 0; candidateIndex < vertices.Count; candidateIndex++)
+                    {
+                        if (visited[candidateIndex] || candidateIndex == currentIndex)
+                        {
+                            continue;
+                        }
+
+                        var candidate = vertices[candidateIndex];
+                        var dx = current.X - candidate.X;
+                        var dy = current.Y - candidate.Y;
+                        var dz = current.Z - candidate.Z;
+                        var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                        if (distanceSquared > radiusSquared)
+                        {
+                            continue;
+                        }
+
+                        visited[candidateIndex] = true;
+                        queue.Enqueue(candidateIndex);
+                    }
+                }
+
+                components.Add(component);
+            }
+
+            var ordered = components
+                .Select(static (component, originalIndex) => new { component, originalIndex })
+                .OrderByDescending(static entry => entry.component.Count)
+                .ThenBy(static entry => entry.originalIndex)
+                .ToArray();
+            var assignments = new int[vertices.Count];
+            for (var islandId = 0; islandId < ordered.Length; islandId++)
+            {
+                foreach (var vertexIndex in ordered[islandId].component)
+                {
+                    assignments[vertexIndex] = islandId;
+                }
+            }
+
+            return assignments;
         }
 
         private static int[] BuildMorphTransferZoneMap(IReadOnlyList<MeshVertex> normalizedVertices)
@@ -21246,6 +21584,9 @@ internal sealed class LocalExportService(
                 var targetZone = targetIndex < morphTransferContext.TargetTransferZones.Length
                     ? morphTransferContext.TargetTransferZones[targetIndex]
                     : -1;
+                var targetIsland = targetIndex < morphTransferContext.TargetTransferIslands.Length
+                    ? morphTransferContext.TargetTransferIslands[targetIndex]
+                    : -1;
                 var sampleCount = 0;
                 var averageX = 0f;
                 var averageY = 0f;
@@ -21253,6 +21594,13 @@ internal sealed class LocalExportService(
                 foreach (var neighborIndex in neighbors)
                 {
                     if (neighborIndex < 0 || neighborIndex >= retargetedDeltas.Count)
+                    {
+                        continue;
+                    }
+
+                    if (targetIsland >= 0 &&
+                        neighborIndex < morphTransferContext.TargetTransferIslands.Length &&
+                        morphTransferContext.TargetTransferIslands[neighborIndex] != targetIsland)
                     {
                         continue;
                     }

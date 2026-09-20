@@ -17734,7 +17734,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 13);
+            .Single(ctor => ctor.GetParameters().Length == 16);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17757,6 +17757,9 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 1 },
             new[] { 0f, 0f, 0f, 0f },
             1f,
             1f,
@@ -17818,7 +17821,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 13);
+            .Single(ctor => ctor.GetParameters().Length == 16);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17841,6 +17844,9 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
+            new[] { 0, 0, 0, 1 },
+            new[] { 0, 0, 0, 1 },
+            new[] { 0, 1 },
             new[] { 0f, 0f, 0f, 0f },
             0.50f,
             0.54f,
@@ -17899,7 +17905,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 13);
+            .Single(ctor => ctor.GetParameters().Length == 16);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -17910,6 +17916,9 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
             new[] { 17, 22, 27 },
             new[] { 17, 22, 27 },
+            new[] { 0, 0, 0 },
+            new[] { 0, 0, 0 },
+            new[] { 0 },
             new[] { 0f, 0.80f, 0f },
             1f,
             1f,
@@ -17934,7 +17943,7 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public void BuildMorphTransferInfluenceMap_PrefersMatchingLocalZones()
+    public void BuildMorphTransferInfluenceMap_PrefersMatchingTransferIslands()
     {
         var method = typeof(LocalExportService).GetMethod("BuildMorphTransferInfluenceMap", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
@@ -17953,8 +17962,11 @@ public sealed class OutputCompletenessTests
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var sourceZones = new[] { Zone(0, 1, 0, 2), Zone(0, 1, 1, 2), Zone(0, 1, 2, 2) };
         var targetZones = new[] { Zone(0, 1, 0, 2) };
+        var sourceIslands = new[] { 0, 1, 2 };
+        var targetIslands = new[] { 1 };
+        var islandMatches = new[] { 2, 0 };
 
-        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones]);
+        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones, sourceIslands, targetIslands, islandMatches]);
         var influences = Assert.IsAssignableFrom<System.Collections.IEnumerable>(result);
         var firstInfluenceList = Assert.Single(influences.Cast<object>());
         var rankedInfluences = ((System.Collections.IEnumerable)firstInfluenceList).Cast<object>().ToArray();
@@ -17965,7 +17977,7 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public void StabilizeRetargetedMorphPayload_PrefersCompatibleZonesBeforeCrossBoundaryNeighbors()
+    public void StabilizeRetargetedMorphPayload_PrefersMatchingIslandBeforeCrossBoundaryNeighbors()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
         var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
@@ -17998,7 +18010,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 13);
+            .Single(ctor => ctor.GetParameters().Length == 16);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -18007,8 +18019,11 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
-            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 2, 2) },
-            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 2, 2) },
+            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
+            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
+            new[] { 0, 0, 1 },
+            new[] { 0, 0, 1 },
+            new[] { 0, 1 },
             new[] { 0f, 0.80f, 0f },
             1f,
             1f,
@@ -18064,7 +18079,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 13);
+            .Single(ctor => ctor.GetParameters().Length == 16);
         object CreateContext(IReadOnlyList<string> partHints) => contextCtor.Invoke(
         [
             new[]
@@ -18087,6 +18102,9 @@ public sealed class OutputCompletenessTests
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 1 },
             new[] { 0.22f, 0.26f, 0.18f, 0.14f },
             1f,
             1f,
