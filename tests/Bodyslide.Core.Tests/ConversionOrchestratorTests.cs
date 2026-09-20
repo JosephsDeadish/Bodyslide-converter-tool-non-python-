@@ -6147,6 +6147,145 @@ public sealed class NifOutputAndSourceOverrideTests
         }
     }
 
+    [Fact]
+    public async Task BuildExportDeformationCage_DerivesPerIslandControlsFromExplicitTopology()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "island_cage_regions_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        for (var column = 0; column < 6; column++)
+        {
+            vertices.Add((-0.22f + (column * 0.03f), 0.00f, 0.82f + (column * 0.02f)));
+            vertices.Add((-0.22f + (column * 0.03f), 0.03f, 0.86f + (column * 0.02f)));
+        }
+
+        for (var column = 0; column < 6; column++)
+        {
+            vertices.Add((0.52f + (column * 0.03f), 0.00f, 0.82f + (column * 0.02f)));
+            vertices.Add((0.52f + (column * 0.03f), 0.03f, 0.86f + (column * 0.02f)));
+        }
+
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        for (ushort column = 0; column < 5; column++)
+        {
+            var top = (ushort)(column * 2);
+            var bottom = (ushort)(top + 1);
+            var nextTop = (ushort)(top + 2);
+            var nextBottom = (ushort)(top + 3);
+            triangles.Add((top, bottom, nextTop));
+            triangles.Add((bottom, nextBottom, nextTop));
+        }
+
+        for (ushort column = 0; column < 5; column++)
+        {
+            var baseIndex = (ushort)(12 + (column * 2));
+            var top = baseIndex;
+            var bottom = (ushort)(baseIndex + 1);
+            var nextTop = (ushort)(baseIndex + 2);
+            var nextBottom = (ushort)(baseIndex + 3);
+            triangles.Add((top, bottom, nextTop));
+            triangles.Add((bottom, nextBottom, nextTop));
+        }
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+        try
+        {
+            var method = typeof(LocalExportService).GetMethod("BuildExportDeformationCage", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var cage = new DeformationCage(
+                "test-cage",
+                new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = new(0.88f, 0.18f, 0.12f, 0.40f, 0.50f, 1.00f, 0.75f, 0.20f, 0.08f, 0.00f),
+                    ["arms"] = new(0.88f, 0.18f, 0.95f, 0.16f, 0.50f, 1.00f, 0.95f, 0.10f, 0.02f, 0.00f)
+                });
+
+            var result = Assert.IsType<DeformationCage>(method!.Invoke(null, [new[] { inputFile }, cage]));
+
+            Assert.NotNull(result.IslandControls);
+            Assert.True(result.IslandControls!.Count >= 2);
+            Assert.Contains(result.IslandControls, control => control.MeshKey.Equals("island_cage_regions", StringComparison.OrdinalIgnoreCase) &&
+                                                           control.CageRegions.Contains("chest", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(result.IslandControls, control => control.MeshKey.Equals("island_cage_regions", StringComparison.OrdinalIgnoreCase) &&
+                                                           control.CageRegions.Contains("arms", StringComparer.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExportCageProjection_PerIslandCageObjectsReduceUnrelatedIslandScaling()
+    {
+        var buildTopologyMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveFrameMethod = typeof(LocalExportService).GetMethod("ResolveTopologyProjectionFrame", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveIslandMethod = typeof(LocalExportService).GetMethod("ResolveIslandCageControl", BindingFlags.NonPublic | BindingFlags.Static);
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildTopologyMethod);
+        Assert.NotNull(resolveFrameMethod);
+        Assert.NotNull(resolveIslandMethod);
+        Assert.NotNull(scaleMethod);
+
+        var rawVertices = new (float X, float Y, float Z)[]
+        {
+            (-0.18f, 0.00f, 0.82f), (-0.14f, 0.00f, 0.86f), (-0.10f, 0.00f, 0.90f), (-0.06f, 0.00f, 0.94f),
+            (-0.18f, 0.03f, 0.84f), (-0.14f, 0.03f, 0.88f), (-0.10f, 0.03f, 0.92f), (-0.06f, 0.03f, 0.96f),
+            (0.52f, 0.00f, 0.82f), (0.56f, 0.00f, 0.86f), (0.60f, 0.00f, 0.90f), (0.64f, 0.00f, 0.94f),
+            (0.52f, 0.03f, 0.84f), (0.56f, 0.03f, 0.88f), (0.60f, 0.03f, 0.92f), (0.64f, 0.03f, 0.96f)
+        };
+        var topologySummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: rawVertices.Length,
+            ComponentIds: [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: rawVertices.Length,
+            BoundaryVertexFlags: Enumerable.Repeat(true, rawVertices.Length).ToArray());
+        var topologyContext = buildTopologyMethod!.Invoke(null, [rawVertices, topologySummary]);
+        Assert.NotNull(topologyContext);
+
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = new(0.70f, 0.24f, 0.12f, 0.38f, 0.50f, 1.00f, 0.82f, 0.18f, 0.08f, 0.00f),
+            ["arms"] = new(0.70f, 0.24f, 0.95f, 0.14f, 0.50f, 1.00f, 0.95f, 0.08f, 0.02f, 0.08f)
+        };
+        var regionalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.52,
+            ["arms"] = 1.00
+        };
+        var baselineCage = new DeformationCage("test-cage", cageRegions);
+        var islandAwareCage = new DeformationCage(
+            "test-cage",
+            cageRegions,
+            [
+                new CageIslandControl("island_projection_bias", 0, ["chest"]),
+                new CageIslandControl("island_projection_bias", 1, ["arms"], RigidityBias: 0.10f, BoundaryDamping: 0.12f)
+            ]);
+
+        var frameArgs = new object[] { topologyContext, 10, 0.23f, 0.015f, 0.82f, 0.14f, 0.41f, 0.015f, 0f, 0f, 0f, 0f, 0f, 0f, 0f };
+        resolveFrameMethod!.Invoke(null, frameArgs);
+        var frameCenterX = (float)frameArgs[8];
+        var frameCenterY = (float)frameArgs[9];
+        var frameMinZ = (float)frameArgs[10];
+        var frameZRange = (float)frameArgs[11];
+        var frameHalfRangeX = (float)frameArgs[12];
+        var frameHalfRangeY = (float)frameArgs[13];
+        var normalizedHeight = (rawVertices[10].Z - frameMinZ) / frameZRange;
+        var lateralPosition = MathF.Min(1f, MathF.Abs(rawVertices[10].X - frameCenterX) / frameHalfRangeX);
+        var depthPosition = MathF.Min(1f, MathF.Abs(rawVertices[10].Y - frameCenterY) / frameHalfRangeY);
+
+        var baselineControl = resolveIslandMethod!.Invoke(null, [baselineCage, "/tmp/island_projection_bias_0.nif", topologyContext, 10]);
+        var islandControl = Assert.IsType<CageIslandControl>(resolveIslandMethod.Invoke(null, [islandAwareCage, "/tmp/island_projection_bias_0.nif", topologyContext, 10]));
+        var baselineScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, baselineCage, baselineControl])!;
+        var islandScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, islandAwareCage, islandControl])!;
+
+        Assert.Contains("arms", islandControl.CageRegions, StringComparer.OrdinalIgnoreCase);
+        Assert.True(islandScales.WidthScale < baselineScales.WidthScale - 0.10d, $"Expected per-island cage object to reduce unrelated chest-driven width scaling on the second island. baseline={baselineScales.WidthScale:F4}, island={islandScales.WidthScale:F4}");
+    }
+
     // ── --source override ─────────────────────────────────────────────────────
 
     [Fact]
