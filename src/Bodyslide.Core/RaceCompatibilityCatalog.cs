@@ -150,14 +150,20 @@ internal static class RaceCompatibilityCatalog
             throw new InvalidOperationException("Race compatibility metadata contained a body rule without a body name.");
         }
 
-        if (!BodyTypeCatalog.TryResolve(dto.Body.Trim(), out var canonicalBodyInfo))
+        var requestedBody = dto.Body.Trim();
+        var canonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(requestedBody, out var metadataCanonicalBody)
+            ? metadataCanonicalBody
+            : BodyTypeCatalog.TryResolve(requestedBody, out var canonicalBodyInfo)
+                ? canonicalBodyInfo.Name
+                : null;
+        if (string.IsNullOrWhiteSpace(canonicalBody))
         {
             throw new InvalidOperationException(
-                $"Race compatibility metadata contained an unknown body rule '{dto.Body.Trim()}'.");
+                $"Race compatibility metadata contained an unknown body rule '{requestedBody}'.");
         }
 
         return new RaceCompatibilityBodyRule(
-            canonicalBodyInfo.Name,
+            canonicalBody,
             NormalizeStringList(dto.CompatibleGroups),
             NormalizeStringList(dto.WarningGroups),
             string.IsNullOrWhiteSpace(dto.WarningMessage) ? null : dto.WarningMessage.Trim());
