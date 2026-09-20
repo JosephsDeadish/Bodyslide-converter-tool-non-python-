@@ -3293,6 +3293,42 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ResolveSharedTopologyTransformContext_PreservesEstimatedSnapshotState()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "estimated_snapshot_topology_0.nif");
+        var vertices = new (float X, float Y, float Z)[]
+        {
+            (-20f, -2f, 0f), (-16f, -1f, 2f), (-12f, -2f, 4f), (-8f, -1f, 6f), (-4f, -2f, 8f), (0f, -1f, 10f),
+            (-20f, 2f, 0f), (-16f, 1f, 2f), (-12f, 2f, 4f), (-8f, 1f, 6f), (-4f, 2f, 8f), (0f, 1f, 10f),
+            (90f, -1f, 28f), (92f, -1f, 34f), (94f, -1f, 40f), (96f, -1f, 46f), (98f, -1f, 52f), (100f, -1f, 58f),
+            (90f, 1f, 28f), (92f, 1f, 34f), (94f, 1f, 40f), (96f, 1f, 46f), (98f, 1f, 52f), (100f, 1f, 58f)
+        };
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(meshPath, vertices);
+
+        try
+        {
+            var method = typeof(LocalExportService).GetMethod("ResolveSharedTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+
+            var sourceBytes = await File.ReadAllBytesAsync(meshPath);
+            var context = method!.Invoke(null, [sourceBytes, meshPath, vertices]);
+            Assert.NotNull(context);
+
+            var boundaryWeights = Assert.IsType<float[]>(context!.GetType().GetProperty("BoundaryVertexWeights", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(context));
+            var edgeNetworks = Assert.IsAssignableFrom<System.Collections.IDictionary>(context.GetType().GetProperty("EdgeNetworks", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(context));
+
+            Assert.True(boundaryWeights.All(weight => MathF.Abs(weight) <= 0.0001f), "Expected estimated shared snapshots to preserve non-explicit topology state instead of rebuilding explicit boundary weights.");
+            Assert.True(edgeNetworks.Count >= 2, "Expected estimated shared snapshots to keep multi-island edge networks available to transform consumers.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BuildTopologyTransformContext_PropagatesAuthoredLoopPathWeightsToNearbyInteriorVertices()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -18006,10 +18006,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
-        var topologyContext = BuildTopologyTransformContext(
-            rawVertices,
-            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var topologyContext = ResolveSharedTopologyTransformContext(sourceBytes, sourcePath, rawVertices);
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         // Run animation-driven solver to get per-region push-out corrections
@@ -18164,10 +18161,7 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
-        var topologyContext = BuildTopologyTransformContext(
-            rawVertices,
-            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var topologyContext = ResolveSharedTopologyTransformContext(sourceBytes, sourcePath, rawVertices);
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -18308,6 +18302,27 @@ internal sealed class LocalExportService(
         return GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
     }
 
+    private static TopologyTransformContext? ResolveSharedTopologyTransformContext(
+        byte[] sourceBytes,
+        string? sourcePath,
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices)
+    {
+        var sharedSnapshot = ResolveSharedTopologySnapshotForTransform(sourceBytes, sourcePath);
+        if (sharedSnapshot is not null &&
+            sharedSnapshot.Vertices.Count == rawVertices.Count)
+        {
+            var sharedContext = BuildTopologyTransformContextFromSnapshot(sharedSnapshot);
+            if (sharedContext is not null)
+            {
+                return sharedContext;
+            }
+        }
+
+        return BuildTopologyTransformContext(
+            rawVertices,
+            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+    }
+
     private static bool TryApplyHalfFloatVertexBlockTransform(
         byte[] transformed,
         int vertexDataOffset,
@@ -18357,9 +18372,15 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = BuildTopologyTransformContext(
-            rawVertices,
-            sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed));
+        var topologyContext = sharedSnapshot is not null &&
+                              sharedSnapshot.Vertices.Count == rawVertices.Length
+            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot) ??
+              BuildTopologyTransformContext(
+                  rawVertices,
+                  sharedSnapshot.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed))
+            : BuildTopologyTransformContext(
+                rawVertices,
+                sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed));
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
