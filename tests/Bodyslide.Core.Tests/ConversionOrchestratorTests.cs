@@ -2533,6 +2533,77 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BuildTopologyTransformContext_PropagatesAuthoredLoopPathWeightsToNearbyInteriorVertices()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "dense_window_loop_proximity_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        const int ringCount = 5;
+        const int segments = 12;
+        for (var ringIndex = 0; ringIndex < ringCount; ringIndex++)
+        {
+            var radius = 1.35f - (ringIndex * 0.22f);
+            for (var segment = 0; segment < segments; segment++)
+            {
+                var angle = (MathF.PI * 2f * segment) / segments;
+                vertices.Add((MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0.55f + (ringIndex * 0.015f)));
+            }
+        }
+
+        for (ushort ringIndex = 0; ringIndex < ringCount - 1; ringIndex++)
+        {
+            for (ushort segment = 0; segment < segments; segment++)
+            {
+                var nextSegment = (ushort)((segment + 1) % segments);
+                var a = (ushort)((ringIndex * segments) + segment);
+                var b = (ushort)((ringIndex * segments) + nextSegment);
+                var c = (ushort)(((ringIndex + 1) * segments) + segment);
+                var d = (ushort)(((ringIndex + 1) * segments) + nextSegment);
+                triangles.Add((a, c, b));
+                triangles.Add((b, c, d));
+            }
+        }
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(meshPath, vertices, triangles);
+
+        try
+        {
+            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshPath);
+            Assert.NotNull(topologySummary);
+
+            var buildContextMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildContextMethod);
+
+            var context = buildContextMethod!.Invoke(null,
+            [
+                vertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                topologySummary
+            ]);
+            Assert.NotNull(context);
+
+            var weights = Assert.IsType<float[]>(context!.GetType().GetProperty("BoundaryVertexWeights", BindingFlags.Public | BindingFlags.Instance)!.GetValue(context));
+            Assert.Equal(vertices.Count, weights.Length);
+
+            var outerBoundaryIndex = 0;
+            var nearOuterInteriorIndex = 12;
+            var nearInnerInteriorIndex = 36;
+            var innerBoundaryIndex = 48;
+
+            Assert.True(weights[nearOuterInteriorIndex] > 0f, $"Expected authored loop path influence to reach nearby outer-interior vertices, got {weights[nearOuterInteriorIndex]}.");
+            Assert.True(weights[nearInnerInteriorIndex] > weights[nearOuterInteriorIndex], $"Expected inner hole-path influence to dominate nearby interior vertices, got outer-near={weights[nearOuterInteriorIndex]} inner-near={weights[nearInnerInteriorIndex]}.");
+            Assert.True(weights[nearInnerInteriorIndex] < weights[innerBoundaryIndex], $"Expected interior path influence to remain below direct authored boundary weighting, got interior={weights[nearInnerInteriorIndex]} boundary={weights[innerBoundaryIndex]}.");
+            Assert.True(weights[outerBoundaryIndex] <= weights[nearOuterInteriorIndex], $"Expected proximity weighting to be at least as strong as raw outer-loop boundary weighting, got outer-boundary={weights[outerBoundaryIndex]} near-outer={weights[nearOuterInteriorIndex]}.");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -17321,7 +17321,7 @@ internal sealed class LocalExportService(
                 : EstimateBoundaryVertexFlags(
                     rawVertices.Select(static vertex => new MeshVertex(vertex.X, vertex.Y, vertex.Z)).ToArray(),
                     topologySummary.ComponentIds);
-            boundaryVertexWeights = BuildBoundaryVertexWeights(rawVertices, topologySummary);
+            boundaryVertexWeights = BuildBoundaryVertexWeights(rawVertices, componentIds, topologySummary);
             boundaryLoopCount = topologySummary.BoundaryLoopCount;
         }
         else
@@ -17405,10 +17405,12 @@ internal sealed class LocalExportService(
 
     private static float[] BuildBoundaryVertexWeights(
         IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> componentIds,
         NifGeometrySignatureReader.MeshTopologySummary topologySummary)
     {
         var weights = new float[rawVertices.Count];
-        if (topologySummary.BoundaryLoops is not { Count: > 0 })
+        if (topologySummary.BoundaryLoops is not { Count: > 0 } ||
+            componentIds.Count != rawVertices.Count)
         {
             return weights;
         }
@@ -17433,7 +17435,8 @@ internal sealed class LocalExportService(
             var outerLoop = componentLoops[0].Loop;
             foreach (var entry in componentLoops)
             {
-                var extraWeight = ReferenceEquals(entry.Loop, outerLoop)
+                var isOuterLoop = ReferenceEquals(entry.Loop, outerLoop);
+                var extraWeight = isOuterLoop
                     ? 0f
                     : entry.Loop.VertexIndexes.Count >= 6 ? 0.12f : 0.08f;
                 foreach (var vertexIndex in entry.Loop.VertexIndexes)
@@ -17443,10 +17446,68 @@ internal sealed class LocalExportService(
                         weights[vertexIndex] = Math.Max(weights[vertexIndex], extraWeight);
                     }
                 }
+
+                var proximityWeight = isOuterLoop
+                    ? 0.05f
+                    : entry.Loop.VertexIndexes.Count >= 6 ? 0.16f : 0.11f;
+                ApplyBoundaryLoopPathInfluence(
+                    weights,
+                    rawVertices,
+                    componentIds,
+                    entry.Loop,
+                    entry.Area,
+                    proximityWeight);
             }
         }
 
         return weights;
+    }
+
+    private static void ApplyBoundaryLoopPathInfluence(
+        float[] weights,
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> componentIds,
+        NifGeometrySignatureReader.BoundaryLoopSequence loop,
+        float projectedArea,
+        float maxWeight)
+    {
+        if (loop.VertexIndexes.Count < 2 || maxWeight <= 0f)
+        {
+            return;
+        }
+
+        var influenceRadius = ComputeBoundaryLoopInfluenceRadius(rawVertices, loop.VertexIndexes, projectedArea);
+        if (influenceRadius <= 0.0001f)
+        {
+            return;
+        }
+
+        var componentId = loop.ComponentId;
+        var loopVertexSet = loop.VertexIndexes
+            .Where(index => index >= 0 && index < rawVertices.Count)
+            .ToHashSet();
+        for (var vertexIndex = 0; vertexIndex < rawVertices.Count; vertexIndex++)
+        {
+            if (vertexIndex >= componentIds.Count ||
+                componentIds[vertexIndex] != componentId ||
+                loopVertexSet.Contains(vertexIndex))
+            {
+                continue;
+            }
+
+            var distance = ComputeBoundaryLoopProjectedDistance(rawVertices, loop.VertexIndexes, rawVertices[vertexIndex]);
+            if (distance >= influenceRadius)
+            {
+                continue;
+            }
+
+            var falloff = 1f - Math.Clamp(distance / influenceRadius, 0f, 1f);
+            var candidateWeight = maxWeight * falloff;
+            if (candidateWeight > weights[vertexIndex])
+            {
+                weights[vertexIndex] = candidateWeight;
+            }
+        }
     }
 
     private static float ComputeBoundaryLoopProjectedArea(
@@ -17475,6 +17536,101 @@ internal sealed class LocalExportService(
         }
 
         return (float)Math.Abs(signedArea * 0.5d);
+    }
+
+    private static float ComputeBoundaryLoopInfluenceRadius(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> orderedVertexIndexes,
+        float projectedArea)
+    {
+        if (orderedVertexIndexes.Count < 2)
+        {
+            return 0f;
+        }
+
+        var totalLength = 0f;
+        var segmentCount = 0;
+        for (var index = 0; index < orderedVertexIndexes.Count; index++)
+        {
+            var startIndex = orderedVertexIndexes[index];
+            var endIndex = orderedVertexIndexes[(index + 1) % orderedVertexIndexes.Count];
+            if (startIndex < 0 || startIndex >= rawVertices.Count ||
+                endIndex < 0 || endIndex >= rawVertices.Count)
+            {
+                continue;
+            }
+
+            totalLength += ComputeProjectedDistance(rawVertices[startIndex], rawVertices[endIndex]);
+            segmentCount++;
+        }
+
+        var averageEdgeLength = segmentCount == 0 ? 0f : totalLength / segmentCount;
+        var areaRadius = projectedArea <= 0.000001f
+            ? 0f
+            : MathF.Sqrt(projectedArea / MathF.PI);
+        return MathF.Max(averageEdgeLength * 1.35f, areaRadius * 0.45f);
+    }
+
+    private static float ComputeBoundaryLoopProjectedDistance(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> orderedVertexIndexes,
+        (float X, float Y, float Z) vertex)
+    {
+        if (orderedVertexIndexes.Count < 2)
+        {
+            return float.MaxValue;
+        }
+
+        var bestDistance = float.MaxValue;
+        for (var index = 0; index < orderedVertexIndexes.Count; index++)
+        {
+            var startIndex = orderedVertexIndexes[index];
+            var endIndex = orderedVertexIndexes[(index + 1) % orderedVertexIndexes.Count];
+            if (startIndex < 0 || startIndex >= rawVertices.Count ||
+                endIndex < 0 || endIndex >= rawVertices.Count)
+            {
+                continue;
+            }
+
+            var distance = ComputeProjectedDistanceToSegment(vertex, rawVertices[startIndex], rawVertices[endIndex]);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+            }
+        }
+
+        return bestDistance;
+    }
+
+    private static float ComputeProjectedDistanceToSegment(
+        (float X, float Y, float Z) point,
+        (float X, float Y, float Z) start,
+        (float X, float Y, float Z) end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var lengthSquared = (dx * dx) + (dy * dy);
+        if (lengthSquared <= 0.0000001f)
+        {
+            return ComputeProjectedDistance(point, start);
+        }
+
+        var t = (((point.X - start.X) * dx) + ((point.Y - start.Y) * dy)) / lengthSquared;
+        t = Math.Clamp(t, 0f, 1f);
+        var projectedX = start.X + (dx * t);
+        var projectedY = start.Y + (dy * t);
+        var offsetX = point.X - projectedX;
+        var offsetY = point.Y - projectedY;
+        return MathF.Sqrt((offsetX * offsetX) + (offsetY * offsetY));
+    }
+
+    private static float ComputeProjectedDistance(
+        (float X, float Y, float Z) left,
+        (float X, float Y, float Z) right)
+    {
+        var dx = left.X - right.X;
+        var dy = left.Y - right.Y;
+        return MathF.Sqrt((dx * dx) + (dy * dy));
     }
 
     private static void ResolveTopologyProjectionFrame(
