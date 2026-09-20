@@ -2603,7 +2603,7 @@ public sealed class ConversionOrchestratorTests
         try
         {
             var service = new LocalExportService();
-            var request = new ConversionRequest(inputFile, "Vanilla", OutputDirectory: outputDirectory);
+            var request = new ConversionRequest(inputFile, "CustomMystery", OutputDirectory: outputDirectory);
             var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
             var analysis = new MeshAnalysis("cloth", false, 1);
             var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
@@ -2611,7 +2611,7 @@ public sealed class ConversionOrchestratorTests
             var physics = new PhysicsConfig("smp+cbpc", CbpcConfigXml: "<CBPC/>", SmpConfigXml: "<system name=\"test\"><bone name=\"NPC L Breast\" /></system>");
             var clipping = new ClippingReport(false, [], []);
             var correction = new CorrectionResult(false, "not-required");
-            var bodySlideProject = new BodySlideProject("TestProject", "Vanilla", ["Body"], "<BodySlideProject/>");
+            var bodySlideProject = new BodySlideProject("TestProject", "CustomMystery", ["Body"], "<BodySlideProject/>");
             var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
             var textureSummary = new TextureSummary(0, [], [], []);
             var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
