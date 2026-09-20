@@ -10439,6 +10439,14 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         }
 
         var tuned = new Dictionary<string, double>(field, StringComparer.OrdinalIgnoreCase);
+        var topologyLabels = analysis.TopologyIslandSummaries?.Values
+            .SelectMany(static summary => summary.Labels)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? [];
+        var totalNonManifoldEdges = analysis.TopologyIslandSummaries?.Values.Sum(static summary => summary.NonManifoldEdgeCount) ?? 0;
+        var hasExplicitBoundaryTracking = topologyLabels.Contains("explicit-boundary-tracking");
+        var hasWindowBoundaryRisk = topologyLabels.Contains("window-boundary-risk");
+        var hasInteriorEdgeNetwork = topologyLabels.Contains("interior-edge-network");
 
         if (analysis.HasSplitMeshes)
         {
@@ -10527,6 +10535,15 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 tuned,
                 maxGap: 0.14d,
                 blendStrength: 0.84d,
+                constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
+        }
+
+        if (hasExplicitBoundaryTracking || hasWindowBoundaryRisk || hasInteriorEdgeNetwork)
+        {
+            ApplySeamContinuity(
+                tuned,
+                maxGap: hasWindowBoundaryRisk ? 0.08d : 0.10d,
+                blendStrength: totalNonManifoldEdges > 0 ? 0.94d : 0.90d,
                 constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
         }
 
@@ -10658,6 +10675,16 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         }
 
         var severityFloor = analysis.PhysicsEnabled ? 0.28d : 0.24d;
+        var topologyLabels = analysis.TopologyIslandSummaries?.Values
+            .SelectMany(static summary => summary.Labels)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? [];
+        var maxIslandCount = analysis.TopologyIslandSummaries?.Values
+            .Select(static summary => summary.IslandCount)
+            .DefaultIfEmpty(0)
+            .Max() ?? 0;
+        var interiorEdgeCount = analysis.TopologyIslandSummaries?.Values.Sum(static summary => summary.InteriorEdgeCount) ?? 0;
+        var nonManifoldEdgeCount = analysis.TopologyIslandSummaries?.Values.Sum(static summary => summary.NonManifoldEdgeCount) ?? 0;
         if (hasCustomRigFramework)
         {
             severityFloor = Math.Max(severityFloor, 0.38d);
@@ -10676,6 +10703,26 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         if (analysis.HasRigidSubMeshes)
         {
             severityFloor += 0.03d;
+        }
+
+        if (topologyLabels.Contains("explicit-boundary-tracking"))
+        {
+            severityFloor += 0.03d;
+        }
+
+        if (topologyLabels.Contains("window-boundary-risk") && interiorEdgeCount > 0)
+        {
+            severityFloor += 0.03d;
+        }
+
+        if (maxIslandCount >= 3)
+        {
+            severityFloor += Math.Min(0.06d, (maxIslandCount - 2) * 0.03d);
+        }
+
+        if (nonManifoldEdgeCount > 0)
+        {
+            severityFloor += Math.Min(0.06d, nonManifoldEdgeCount * 0.02d);
         }
 
         return new PhysicsRigStabilizationHints(
@@ -20086,14 +20133,104 @@ internal sealed class LocalExportService(
             .Take(4)
             .ToList()
             ?? [];
+        var strongestRegionalDrift = extremeRegionalDrift.Count == 0
+            ? 0d
+            : extremeRegionalDrift.Max(static pair => Math.Abs(pair.Value - 1d));
         if (extremeRegionalDrift.Count >= 2 &&
-            (clippingDetected || voxelPenetrationsFound || highRiskPoseCount > 0))
+            (clippingDetected || voxelPenetrationsFound || highRiskPoseCount > 0 || strongestRegionalDrift >= 0.24d))
         {
             topologyRisk = true;
             warnings.Add($"regional-drift:{string.Join(",", extremeRegionalDrift.Select(static pair => $"{NormalizeTopologyWarningToken(pair.Key)}={pair.Value:0.00}"))}");
         }
 
+        var sourceTopology = TryReadBestTopologySummary(sourceMeshFiles, sourceSignature.VertexCount);
+        var convertedTopology = TryReadBestTopologySummary(convertedMeshFiles, convertedSignature.VertexCount);
+        var (topologyEdgeRisk, topologyEdgeWarnings) = AssessTopologyEdgeMismatch(sourceTopology, convertedTopology);
+        if (topologyEdgeRisk)
+        {
+            topologyRisk = true;
+        }
+        warnings.AddRange(topologyEdgeWarnings);
+
         return (topologyRisk, vertexDeltaRatio, uvCoverageDeltaRatio, uvAspectRatioDelta, warnings);
+    }
+
+    private static (bool TopologyRisk, IReadOnlyList<string> Warnings) AssessTopologyEdgeMismatch(
+        NifGeometrySignatureReader.MeshTopologySummary? sourceTopology,
+        NifGeometrySignatureReader.MeshTopologySummary? convertedTopology)
+    {
+        var warnings = new List<string>();
+        if (sourceTopology is not { VertexCount: > 0 } ||
+            convertedTopology is not { VertexCount: > 0 } ||
+            sourceTopology.ComponentIds.Length != sourceTopology.VertexCount ||
+            convertedTopology.ComponentIds.Length != convertedTopology.VertexCount)
+        {
+            return (false, warnings);
+        }
+
+        var topologyRisk = false;
+        if (sourceTopology.BoundaryLoopCount > 0 && convertedTopology.BoundaryLoopCount == 0)
+        {
+            topologyRisk = true;
+            warnings.Add($"boundary-loop-loss:{sourceTopology.BoundaryLoopCount}->0");
+        }
+        else if (sourceTopology.BoundaryLoopCount > 0)
+        {
+            var loopDeltaRatio = Math.Abs(convertedTopology.BoundaryLoopCount - sourceTopology.BoundaryLoopCount) / (double)Math.Max(1, sourceTopology.BoundaryLoopCount);
+            if (loopDeltaRatio >= 0.50d)
+            {
+                topologyRisk = true;
+                warnings.Add($"boundary-loop-drift:{sourceTopology.BoundaryLoopCount}->{convertedTopology.BoundaryLoopCount}");
+            }
+        }
+
+        var sourceBoundaryCoverage = sourceTopology.VertexCount <= 0
+            ? 0d
+            : sourceTopology.BoundaryVertexCount / (double)sourceTopology.VertexCount;
+        var convertedBoundaryCoverage = convertedTopology.VertexCount <= 0
+            ? 0d
+            : convertedTopology.BoundaryVertexCount / (double)convertedTopology.VertexCount;
+        var boundaryCoverageDelta = Math.Abs(convertedBoundaryCoverage - sourceBoundaryCoverage);
+        if (boundaryCoverageDelta >= 0.25d)
+        {
+            topologyRisk = true;
+            warnings.Add($"boundary-coverage-drift:{boundaryCoverageDelta:P0}");
+        }
+
+        var sourceInteriorEdges = sourceTopology.ComponentEdgeNetworks?.Sum(static network => network.InteriorEdgeCount) ?? 0;
+        var convertedInteriorEdges = convertedTopology.ComponentEdgeNetworks?.Sum(static network => network.InteriorEdgeCount) ?? 0;
+        if (sourceInteriorEdges > 0)
+        {
+            var interiorEdgeDeltaRatio = Math.Abs(convertedInteriorEdges - sourceInteriorEdges) / (double)Math.Max(1, sourceInteriorEdges);
+            if (interiorEdgeDeltaRatio >= 0.50d)
+            {
+                topologyRisk = true;
+                warnings.Add($"interior-edge-drift:{sourceInteriorEdges}->{convertedInteriorEdges}");
+            }
+        }
+
+        var sourceNonManifoldEdges = sourceTopology.ComponentEdgeNetworks?.Sum(static network => network.NonManifoldEdgeCount) ?? 0;
+        var convertedNonManifoldEdges = convertedTopology.ComponentEdgeNetworks?.Sum(static network => network.NonManifoldEdgeCount) ?? 0;
+        if (convertedNonManifoldEdges > sourceNonManifoldEdges)
+        {
+            topologyRisk = true;
+            warnings.Add($"introduced-non-manifold-edges:{sourceNonManifoldEdges}->{convertedNonManifoldEdges}");
+        }
+
+        return (topologyRisk, warnings);
+    }
+
+    private static NifGeometrySignatureReader.MeshTopologySummary? TryReadBestTopologySummary(
+        IReadOnlyList<string> meshFiles,
+        int preferredVertexCount)
+    {
+        return meshFiles
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(NifGeometrySignatureReader.TryReadTopologySummary)
+            .Where(static summary => summary is { VertexCount: > 0 } && summary.ComponentIds.Length == summary.VertexCount)
+            .OrderByDescending(summary => summary!.VertexCount == preferredVertexCount)
+            .ThenByDescending(summary => summary!.VertexCount)
+            .FirstOrDefault();
     }
 
     private static string NormalizeTopologyWarningToken(string value)

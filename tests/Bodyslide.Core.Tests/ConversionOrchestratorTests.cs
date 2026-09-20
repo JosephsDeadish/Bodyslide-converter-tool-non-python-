@@ -2760,6 +2760,84 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyMeshFeatureTuning_UsesExplicitBoundaryTrackingToTightenSeams()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyMeshFeatureTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.30d,
+            ["breasts"] = 1.36d,
+            ["waist"] = 0.72d,
+            ["belly"] = 0.74d,
+            ["pelvis"] = 0.78d,
+            ["shoulders"] = 1.12d,
+            ["arms"] = 0.82d
+        };
+        var baseline = new MeshAnalysis("cloth", false, 1, HasOpenStructurePieces: true);
+        var boundaryAware = new MeshAnalysis(
+            "cloth",
+            false,
+            1,
+            HasOpenStructurePieces: true,
+            TopologyIslandSummaries: new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openwork_0.nif"] = new(
+                    3,
+                    0.58d,
+                    ["window-boundary-risk", "explicit-boundary-tracking", "interior-edge-network"],
+                    InteriorEdgeCount: 12,
+                    NonManifoldEdgeCount: 1)
+            });
+
+        var baselineResult = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, baseline]));
+        var boundaryAwareResult = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [field, boundaryAware]));
+
+        var baselineGap = Math.Abs(baselineResult["chest"] - baselineResult["waist"]);
+        var boundaryAwareGap = Math.Abs(boundaryAwareResult["chest"] - boundaryAwareResult["waist"]);
+        Assert.True(boundaryAwareGap < baselineGap, $"Expected explicit boundary tracking to tighten cross-window seams more than baseline open-structure tuning. baseline={baselineGap:F4} tuned={boundaryAwareGap:F4}");
+    }
+
+    [Fact]
+    public void InspectPhysicsRigStabilizationHints_UsesEdgeNetworkRiskToRaiseSeverityFloor()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("InspectPhysicsRigStabilizationHints", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var armor = new ImportedArmor(
+            "armor.nif",
+            ["armor.nif"],
+            [],
+            ["npc_smp.xml"],
+            []);
+        var baseline = new MeshAnalysis("cloth", true, 1);
+        var risky = new MeshAnalysis(
+            "cloth",
+            true,
+            1,
+            HasOpenStructurePieces: true,
+            TopologyIslandSummaries: new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openwork_0.nif"] = new(
+                    4,
+                    0.46d,
+                    ["window-boundary-risk", "explicit-boundary-tracking", "interior-edge-network"],
+                    InteriorEdgeCount: 14,
+                    NonManifoldEdgeCount: 2)
+            });
+
+        var baselineHints = method!.Invoke(null, [armor, baseline])!;
+        var riskyHints = method.Invoke(null, [armor, risky])!;
+        var severityProperty = baselineHints.GetType().GetProperty("SeverityFloor", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(severityProperty);
+
+        var baselineSeverity = Assert.IsType<double>(severityProperty!.GetValue(baselineHints));
+        var riskySeverity = Assert.IsType<double>(severityProperty.GetValue(riskyHints));
+        Assert.True(riskySeverity > baselineSeverity, $"Expected explicit edge-network risk to raise the stabilization severity floor. baseline={baselineSeverity:F3} risky={riskySeverity:F3}");
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -6148,6 +6226,69 @@ public sealed class NifOutputAndSourceOverrideTests
             Assert.Contains("regional-drift:", qualityJson, StringComparison.Ordinal);
             Assert.Contains("breasts", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("chest", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AssessTopologyEdgeMismatch_FlagsBoundaryLoopLossAndIntroducedNonManifoldEdges()
+    {
+        var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var sourceFile = Path.Combine(workingDirectory, "source_openwork_0.nif");
+        var convertedFile = Path.Combine(workingDirectory, "converted_nonmanifold_0.nif");
+
+        var sourceVertices = new (float X, float Y, float Z)[]
+        {
+            ( 1.20f,  0.00f, 0.40f), ( 0.60f,  1.04f, 0.40f), (-0.60f,  1.04f, 0.40f),
+            (-1.20f,  0.00f, 0.40f), (-0.60f, -1.04f, 0.40f), ( 0.60f, -1.04f, 0.40f),
+            ( 0.45f,  0.00f, 0.40f), ( 0.225f,  0.39f, 0.40f), (-0.225f,  0.39f, 0.40f),
+            (-0.45f,  0.00f, 0.40f), (-0.225f, -0.39f, 0.40f), ( 0.225f, -0.39f, 0.40f)
+        };
+        var sourceTriangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 7), (0, 7, 6),
+            (1, 2, 8), (1, 8, 7),
+            (2, 3, 9), (2, 9, 8),
+            (3, 4,10), (3,10, 9),
+            (4, 5,11), (4,11,10),
+            (5, 0, 6), (5, 6,11)
+        };
+        var convertedVertices = new (float X, float Y, float Z)[]
+        {
+            (0f, 0f, 0f), (1f, 0f, 0f), (0.2f, 0.9f, 0f), (0.2f, -0.8f, 0f), (0.8f, 0.65f, 0.35f)
+        };
+        var convertedTriangles = new (ushort A, ushort B, ushort C)[]
+        {
+            (0, 1, 2),
+            (1, 0, 3),
+            (0, 1, 4),
+            (0, 2, 4)
+        };
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(sourceFile, sourceVertices, sourceTriangles);
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(convertedFile, convertedVertices, convertedTriangles);
+
+        try
+        {
+            var sourceSummary = NifGeometrySignatureReader.TryReadTopologySummary(sourceFile);
+            var convertedSummary = NifGeometrySignatureReader.TryReadTopologySummary(convertedFile);
+            Assert.NotNull(sourceSummary);
+            Assert.NotNull(convertedSummary);
+
+            var assessment = method!.Invoke(null, [sourceSummary, convertedSummary])!;
+            var topologyMismatchRisk = Assert.IsType<bool>(assessment.GetType().GetField("Item1")!.GetValue(assessment));
+            var qualityWarnings = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetField("Item2")!.GetValue(assessment));
+
+            Assert.True(topologyMismatchRisk, $"Expected topology mismatch risk but got warnings: {string.Join(" | ", qualityWarnings)}");
+            Assert.Contains(qualityWarnings, warning => warning.StartsWith("boundary-loop-loss:", StringComparison.OrdinalIgnoreCase) || warning.StartsWith("boundary-loop-drift:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(qualityWarnings, warning => warning.StartsWith("introduced-non-manifold-edges:", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
