@@ -2558,6 +2558,42 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task LocalExportService_SynthesizesTopologySummaryForHeuristicSnapshots()
+    {
+        var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshot", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "heuristic_snapshot_summary_0.nif");
+        await SyntheticNifTestData.WriteInterleavedFloatStyleAsync(meshPath,
+        [
+            (-20f, -2f, 0f), (-16f, -1f, 2f), (-12f, -2f, 4f), (-8f, -1f, 6f), (-4f, -2f, 8f), (0f, -1f, 10f),
+            (-20f, 2f, 0f), (-16f, 1f, 2f), (-12f, 2f, 4f), (-8f, 1f, 6f), (-4f, 2f, 8f), (0f, 1f, 10f),
+            (90f, -1f, 28f), (92f, -1f, 34f), (94f, -1f, 40f), (96f, -1f, 46f), (98f, -1f, 52f), (100f, -1f, 58f),
+            (90f, 1f, 28f), (92f, 1f, 34f), (94f, 1f, 40f), (96f, 1f, 46f), (98f, 1f, 52f), (100f, 1f, 58f)
+        ]);
+
+        try
+        {
+            var snapshot = method!.Invoke(null, [meshPath]);
+            Assert.NotNull(snapshot);
+
+            var topologySummary = snapshot!.GetType().GetProperty("TopologySummary")!.GetValue(snapshot);
+            Assert.NotNull(topologySummary);
+            Assert.Equal(24, Assert.IsType<int>(topologySummary!.GetType().GetProperty("VertexCount")!.GetValue(topologySummary)));
+
+            var componentEdgeNetworks = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+                topologySummary.GetType().GetProperty("ComponentEdgeNetworks")!.GetValue(topologySummary)!);
+            Assert.True(componentEdgeNetworks.Cast<object>().Count() >= 2);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicMeshAnalysisService_UsesSharedTopologySnapshotsForExplicitTopologyLabels()
     {
         var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshot", BindingFlags.NonPublic | BindingFlags.Static);

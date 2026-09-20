@@ -9168,82 +9168,21 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 continue;
             }
 
-            List<int> islandSizes;
-            var vertexCount = snapshot.Vertices.Count;
-            var boundaryLoopCount = 0;
-            IReadOnlyList<bool> boundaryFlags = [];
-            IReadOnlyList<TopologyIslandEdgeNetworkSummary>? edgeNetworks = null;
-            var hasExplicitEdgeNetwork = false;
             var topologySummary = snapshot.TopologySummary;
-            if (snapshot.HasExplicitTopology &&
-                topologySummary is { VertexCount: > 0 } &&
-                snapshot.ComponentIds.Length == topologySummary.VertexCount)
+            if (topologySummary is null)
             {
-                vertexCount = topologySummary.VertexCount;
-                islandSizes = snapshot.ComponentIds
-                    .GroupBy(static componentId => componentId)
-                    .Select(static group => group.Count())
-                    .OrderByDescending(static count => count)
-                    .ToList();
-                if (islandSizes.Count == 0)
-                {
-                    continue;
-                }
-
-                boundaryLoopCount = topologySummary.BoundaryLoopCount;
-                boundaryFlags = snapshot.BoundaryVertexFlags;
-                edgeNetworks = topologySummary.ComponentEdgeNetworks is { Count: > 0 } explicitEdgeNetworks
-                    ? explicitEdgeNetworks.OrderBy(static network => network.ComponentId).ToArray()
-                    : snapshot.EdgeNetworks.Count > 0
-                        ? SummarizeTransferIslandEdgeNetworks(snapshot.EdgeNetworks)
-                        : null;
-                hasExplicitEdgeNetwork = topologySummary.ComponentEdgeNetworks is { Count: > 0 };
+                continue;
             }
-            else
+
+            var vertexCount = topologySummary.VertexCount;
+            var islandSizes = topologySummary.ComponentIds
+                .GroupBy(static componentId => componentId)
+                .Select(static group => group.Count())
+                .OrderByDescending(static count => count)
+                .ToList();
+            if (vertexCount <= 0 || islandSizes.Count == 0)
             {
-                var vertices = snapshot.Vertices;
-                if (vertices.Count < 12)
-                {
-                    continue;
-                }
-
-                var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
-                if (sampledVertices.Count < 12)
-                {
-                    continue;
-                }
-
-                var normalizedVertices = NormalizeTopologyVertices(sampledVertices);
-                if (normalizedVertices.Count < 12)
-                {
-                    continue;
-                }
-
-                var radius = ComputeIslandConnectionRadius(normalizedVertices);
-                if (radius <= 0.0001f)
-                {
-                    continue;
-                }
-
-                islandSizes = ComputeIslandComponentSizes(normalizedVertices, radius).ToList();
-                if (islandSizes.Count == 0)
-                {
-                    continue;
-                }
-
-                var synthesizedComponentIds = ComputeIslandAssignments(normalizedVertices, radius);
-                if (synthesizedComponentIds.Length == normalizedVertices.Count)
-                {
-                    boundaryFlags = BuildEstimatedBoundaryVertexFlags(normalizedVertices, synthesizedComponentIds);
-                    var synthesizedEdgeNetworks = BuildEstimatedTopologyEdgeNetworks(
-                        normalizedVertices,
-                        synthesizedComponentIds,
-                        boundaryFlags);
-                    if (synthesizedEdgeNetworks.Count > 0)
-                    {
-                        edgeNetworks = SummarizeTransferIslandEdgeNetworks(synthesizedEdgeNetworks);
-                    }
-                }
+                continue;
             }
 
             var meshName = Path.GetFileName(meshFile) ?? meshFile;
@@ -9253,10 +9192,10 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             var summary = BuildTopologyIslandSummary(
                 vertexCount,
                 islandSizes,
-                boundaryLoopCount,
-                boundaryFlags,
-                edgeNetworks,
-                hasExplicitEdgeNetwork,
+                topologySummary.BoundaryLoopCount,
+                topologySummary.BoundaryVertexFlags,
+                topologySummary.ComponentEdgeNetworks,
+                snapshot.HasExplicitTopology && topologySummary.ComponentEdgeNetworks is { Count: > 0 },
                 meshGeometryLabels);
             if (summary is not null)
             {
@@ -9358,7 +9297,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             nonManifoldEdgeCount);
     }
 
-    private static int[] ComputeIslandAssignments(IReadOnlyList<MeshVertex> vertices, float radius)
+    internal static int[] ComputeIslandAssignments(IReadOnlyList<MeshVertex> vertices, float radius)
     {
         if (vertices.Count == 0 || radius <= 0.0001f)
         {
@@ -9640,7 +9579,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         return Math.Clamp(1f - (anomalyCount / (float)Math.Max(1, vertexIndexes.Count)), 0.15f, 1f);
     }
 
-    private static IReadOnlyList<TopologyIslandEdgeNetworkSummary> SummarizeTransferIslandEdgeNetworks(
+    internal static IReadOnlyList<TopologyIslandEdgeNetworkSummary> SummarizeTransferIslandEdgeNetworks(
         IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
     {
         if (edgeNetworks.Count == 0)
@@ -9674,7 +9613,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             hasManifoldRisk);
     }
 
-    private static IReadOnlyList<MeshVertex> SampleTopologyVertices(IReadOnlyList<MeshVertex> vertices, int maxSamples)
+    internal static IReadOnlyList<MeshVertex> SampleTopologyVertices(IReadOnlyList<MeshVertex> vertices, int maxSamples)
     {
         if (vertices.Count <= maxSamples)
         {
@@ -9711,7 +9650,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             .ToArray();
     }
 
-    private static float ComputeIslandConnectionRadius(IReadOnlyList<MeshVertex> vertices)
+    internal static float ComputeIslandConnectionRadius(IReadOnlyList<MeshVertex> vertices)
     {
         if (vertices.Count < 2)
         {
@@ -17257,7 +17196,7 @@ internal sealed class LocalExportService(
                                   topologySummary.ComponentIds.Length == vertices.Count;
         var componentIds = hasExplicitTopology
             ? topologySummary!.ComponentIds
-            : BuildMorphTransferIslandMap(normalizedVertices);
+            : BuildSnapshotTopologyIslandMap(normalizedVertices);
         var boundaryFlags = topologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitBoundaryFlags &&
                             explicitBoundaryFlags.Length == vertices.Count
             ? explicitBoundaryFlags
@@ -17267,16 +17206,89 @@ internal sealed class LocalExportService(
             componentIds,
             boundaryFlags,
             hasExplicitTopology ? topologySummary : null);
+        var effectiveTopologySummary = hasExplicitTopology
+            ? topologySummary
+            : BuildSyntheticMeshTopologySummary(vertices.Count, componentIds, boundaryFlags, edgeNetworks);
 
         return new MeshTransferTopologySnapshot(
             cacheKey,
             vertices,
             normalizedVertices,
-            topologySummary,
+            effectiveTopologySummary,
             componentIds,
             boundaryFlags,
             edgeNetworks,
             hasExplicitTopology);
+    }
+
+    private static NifGeometrySignatureReader.MeshTopologySummary? BuildSyntheticMeshTopologySummary(
+        int vertexCount,
+        int[] componentIds,
+        bool[] boundaryVertexFlags,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+    {
+        if (vertexCount <= 0 || componentIds.Length != vertexCount)
+        {
+            return null;
+        }
+
+        var componentGroups = componentIds
+            .Select(static (componentId, vertexIndex) => (componentId, vertexIndex))
+            .GroupBy(static entry => entry.componentId)
+            .OrderBy(static group => group.Key)
+            .ToArray();
+        var componentBoundaryVertexCounts = componentGroups
+            .Select(group => group.Count(entry =>
+                entry.vertexIndex >= 0 &&
+                entry.vertexIndex < boundaryVertexFlags.Length &&
+                boundaryVertexFlags[entry.vertexIndex]))
+            .ToArray();
+        var componentBoundaryLoopCounts = new int[componentGroups.Length];
+        var boundaryVertexCount = boundaryVertexFlags.Count(static flag => flag);
+        var edgeNetworkSummaries = edgeNetworks.Count > 0
+            ? BasicMeshAnalysisService.SummarizeTransferIslandEdgeNetworks(edgeNetworks)
+            : [];
+
+        return new NifGeometrySignatureReader.MeshTopologySummary(
+            vertexCount,
+            componentIds,
+            BoundaryLoopCount: 0,
+            BoundaryVertexCount: boundaryVertexCount,
+            boundaryVertexFlags,
+            componentBoundaryLoopCounts,
+            componentBoundaryVertexCounts,
+            BoundaryLoops: null,
+            ComponentEdgeNetworks: edgeNetworkSummaries);
+    }
+
+    private static int[] BuildSnapshotTopologyIslandMap(IReadOnlyList<MeshVertex> normalizedVertices)
+    {
+        if (normalizedVertices.Count < 12)
+        {
+            return BuildMorphTransferIslandMap(normalizedVertices);
+        }
+
+        var sampledVertices = BasicMeshAnalysisService.SampleTopologyVertices(normalizedVertices, maxSamples: 1024);
+        if (sampledVertices.Count < 12)
+        {
+            return BuildMorphTransferIslandMap(normalizedVertices);
+        }
+
+        var radius = BasicMeshAnalysisService.ComputeIslandConnectionRadius(sampledVertices);
+        if (radius <= 0.0001f)
+        {
+            return BuildMorphTransferIslandMap(normalizedVertices);
+        }
+
+        var assignments = BasicMeshAnalysisService.ComputeIslandAssignments(normalizedVertices, radius);
+        var islandSizes = assignments
+            .GroupBy(static islandId => islandId)
+            .Select(static group => group.Count())
+            .OrderByDescending(static size => size)
+            .ToArray();
+        return islandSizes.Length >= 2
+            ? assignments
+            : BuildMorphTransferIslandMap(normalizedVertices);
     }
 
     internal static DeformationCage? BuildExportDeformationCage(
