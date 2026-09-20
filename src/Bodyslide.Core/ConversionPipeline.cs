@@ -73,7 +73,8 @@ public sealed record MeshAnalysis(
     bool HasRigidSubMeshes = false,
     bool IsFootwear = false,
     bool HasLayeredPanels = false,
-    bool HasOpenStructurePieces = false);
+    bool HasOpenStructurePieces = false,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? GeometryPartLabels = null);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -5471,6 +5472,19 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"mesh-features:{string.Join('+', meshFeatures)}");
             }
 
+            if (analysis.GeometryPartLabels is { Count: > 0 })
+            {
+                var geometryParts = analysis.GeometryPartLabels.Values
+                    .SelectMany(static labels => labels)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (geometryParts.Count > 0)
+                {
+                    steps.Add($"mesh-geometry-parts:{string.Join('+', geometryParts)}");
+                }
+            }
+
             ReportStage("Binding armor regions", 7);
             var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
@@ -8308,6 +8322,8 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             ? "physics-enabled"
             : meshType;
 
+        var geometryPartLabels = DeriveGeometryPartLabels(armor.MeshFiles);
+
         // Classify headgear into a sub-type so partition rebuilding can assign the
         // correct Skyrim BSDismemberSkinInstance skin-partition IDs.
         string? headgearSubType = null;
@@ -8328,15 +8344,25 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         var isFootwear = fileNames.Any(name => FootwearKeywords.Any(name.Contains)) ||
             partitionSlots.Contains(37) ||
             partitionSlots.Contains(38);
-        var hasLayeredPanels = fileNames.Any(name => LayeredPanelKeywords.Any(name.Contains));
-        var hasOpenStructurePieces = fileNames.Any(name => OpenStructureKeywords.Any(name.Contains));
+        var derivedGeometryLabels = geometryPartLabels.Values
+            .SelectMany(static labels => labels)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var hasLayeredPanels = fileNames.Any(name => LayeredPanelKeywords.Any(name.Contains)) ||
+            derivedGeometryLabels.Contains("lower-drape", StringComparer.OrdinalIgnoreCase) ||
+            derivedGeometryLabels.Contains("outer-layer", StringComparer.OrdinalIgnoreCase);
+        var hasOpenStructurePieces = fileNames.Any(name => OpenStructureKeywords.Any(name.Contains)) ||
+            derivedGeometryLabels.Contains("open-window", StringComparer.OrdinalIgnoreCase) ||
+            derivedGeometryLabels.Contains("cage-frame", StringComparer.OrdinalIgnoreCase);
         var hasAccessoryPieces = fileNames.Any(name => AccessoryKeywords.Any(name.Contains)) ||
             hasStrapLikePieces ||
             hasLayeredPanels ||
             isFootwear ||
             hasSplitMeshes;
         var hasRigidSubMeshes = finalMeshType == "plate" ||
-            fileNames.Any(name => RigidPieceKeywords.Any(name.Contains));
+            fileNames.Any(name => RigidPieceKeywords.Any(name.Contains)) ||
+            derivedGeometryLabels.Contains("shoulder-shell", StringComparer.OrdinalIgnoreCase) ||
+            derivedGeometryLabels.Contains("outer-layer", StringComparer.OrdinalIgnoreCase);
 
         return Task.FromResult(new MeshAnalysis(
             finalMeshType,
@@ -8349,8 +8375,124 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             HasRigidSubMeshes: hasRigidSubMeshes,
             IsFootwear: isFootwear,
             HasLayeredPanels: hasLayeredPanels,
-            HasOpenStructurePieces: hasOpenStructurePieces));
+            HasOpenStructurePieces: hasOpenStructurePieces,
+            GeometryPartLabels: geometryPartLabels));
     }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> DeriveGeometryPartLabels(IReadOnlyList<string> meshFiles)
+    {
+        if (meshFiles.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var stats = new List<GeometryPartStats>();
+        foreach (var meshFile in meshFiles)
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
+            if (vertices is null || vertices.Count < 4)
+            {
+                continue;
+            }
+
+            var minX = vertices.Min(static vertex => vertex.X);
+            var maxX = vertices.Max(static vertex => vertex.X);
+            var minY = vertices.Min(static vertex => vertex.Y);
+            var maxY = vertices.Max(static vertex => vertex.Y);
+            var minZ = vertices.Min(static vertex => vertex.Z);
+            var maxZ = vertices.Max(static vertex => vertex.Z);
+            var avgRadius = vertices
+                .Select(static vertex => MathF.Sqrt((vertex.X * vertex.X) + (vertex.Y * vertex.Y)))
+                .DefaultIfEmpty(0f)
+                .Average();
+            var spanX = MathF.Max(0.0001f, maxX - minX);
+            var spanY = MathF.Max(0.0001f, maxY - minY);
+            var spanZ = MathF.Max(0.0001f, maxZ - minZ);
+            var density = vertices.Count / (double)(spanX * spanY * spanZ);
+
+            stats.Add(new GeometryPartStats(
+                meshFile,
+                minZ,
+                maxZ,
+                spanX,
+                spanY,
+                spanZ,
+                avgRadius,
+                density));
+        }
+
+        if (stats.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var globalMinZ = stats.Min(static stat => stat.MinZ);
+        var globalMaxZ = stats.Max(static stat => stat.MaxZ);
+        var globalHeight = MathF.Max(0.0001f, globalMaxZ - globalMinZ);
+        var medianRadius = stats
+            .Select(static stat => stat.AverageRadius)
+            .OrderBy(static value => value)
+            .ElementAt(stats.Count / 2);
+        var medianDensity = stats
+            .Select(static stat => stat.Density)
+            .OrderBy(static value => value)
+            .ElementAt(stats.Count / 2);
+
+        var labelsByMesh = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stat in stats)
+        {
+            var labels = new List<string>();
+            var centerZ = ((stat.MinZ + stat.MaxZ) * 0.5f - globalMinZ) / globalHeight;
+            var heightRatio = stat.SpanZ / globalHeight;
+            var widthRatio = stat.SpanX / MathF.Max(0.0001f, stat.SpanY);
+            var radialRatio = medianRadius <= 0.0001f ? 1f : stat.AverageRadius / medianRadius;
+            var densityRatio = medianDensity <= 0.000001d ? 1d : stat.Density / medianDensity;
+
+            if (centerZ <= 0.42f && heightRatio >= 0.28f && widthRatio >= 0.90f)
+            {
+                labels.Add("lower-drape");
+            }
+
+            if (radialRatio >= 1.10f && heightRatio >= 0.18f)
+            {
+                labels.Add("outer-layer");
+            }
+
+            if (centerZ >= 0.58f && heightRatio <= 0.28f && radialRatio >= 1.04f)
+            {
+                labels.Add("shoulder-shell");
+            }
+
+            if (densityRatio <= 0.35d && stat.SpanX >= 0.12f && stat.SpanZ >= 0.12f)
+            {
+                labels.Add("open-window");
+            }
+
+            if (densityRatio <= 0.18d && radialRatio >= 0.95f)
+            {
+                labels.Add("cage-frame");
+            }
+
+            if (labels.Count > 0)
+            {
+                labelsByMesh[Path.GetFileName(stat.MeshPath) ?? stat.MeshPath] = labels
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+        }
+
+        return labelsByMesh;
+    }
+
+    private sealed record GeometryPartStats(
+        string MeshPath,
+        float MinZ,
+        float MaxZ,
+        float SpanX,
+        float SpanY,
+        float SpanZ,
+        double AverageRadius,
+        double Density);
 }
 
 internal sealed class BasicCageGenerationService : ICageGenerationService

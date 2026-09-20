@@ -2238,6 +2238,53 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DerivesGeometryPartLabelsFromNeutralMeshes()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var drapePath = Path.Combine(dir, "part_a_0.nif");
+        var innerPath = Path.Combine(dir, "part_mid_0.nif");
+        var cagePath = Path.Combine(dir, "part_b_1.nif");
+        await SyntheticNifTestData.WriteAsync(drapePath,
+        [
+            (-18f, -2f, 0f), (-9f, -2f, 0f), (0f, -2f, 0f), (9f, -2f, 0f), (18f, -2f, 0f),
+            (-18f, 2f, 7f), (-9f, 2f, 7f), (0f, 2f, 7f), (9f, 2f, 7f), (18f, 2f, 7f),
+            (-16f, -2f, 18f), (-8f, -2f, 18f), (0f, -2f, 18f), (8f, -2f, 18f), (16f, -2f, 18f),
+            (-14f, 2f, 28f), (-7f, 2f, 28f), (0f, 2f, 28f), (7f, 2f, 28f), (14f, 2f, 28f)
+        ]);
+        await SyntheticNifTestData.WriteAsync(innerPath,
+        [
+            (-5f, -3f, 34f), (5f, -3f, 34f), (-5f, 3f, 34f), (5f, 3f, 34f),
+            (-4f, -2f, 62f), (4f, -2f, 62f), (-4f, 2f, 62f), (4f, 2f, 62f)
+        ]);
+        await SyntheticNifTestData.WriteAsync(cagePath,
+        [
+            (-24f, -6f, 42f), (24f, -6f, 42f), (-24f, 6f, 42f), (24f, 6f, 42f),
+            (-24f, -6f, 88f), (24f, -6f, 88f), (-24f, 6f, 88f), (24f, 6f, 88f)
+        ]);
+
+        try
+        {
+            var armor = new ImportedArmor(drapePath, [drapePath, innerPath, cagePath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.True(result.HasSplitMeshes);
+            Assert.True(result.HasLayeredPanels);
+            Assert.True(result.HasOpenStructurePieces);
+            Assert.True(result.HasRigidSubMeshes);
+            Assert.NotNull(result.GeometryPartLabels);
+            Assert.Contains(result.GeometryPartLabels!, pair => pair.Value.Contains("lower-drape", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(result.GeometryPartLabels!, pair => pair.Value.Contains("open-window", StringComparer.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2572,6 +2619,84 @@ public sealed class ConversionOrchestratorTests
         finally
         {
             File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_UsesGeometryDerivedPartLabelsForNeutralSplitPieces()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var drapePath = Path.Combine(dir, "part_a_0.nif");
+        var innerPath = Path.Combine(dir, "part_mid_0.nif");
+        var cagePath = Path.Combine(dir, "part_b_1.nif");
+        await SyntheticNifTestData.WriteAsync(drapePath,
+        [
+            (-18f, -2f, 0f), (-9f, -2f, 0f), (0f, -2f, 0f), (9f, -2f, 0f), (18f, -2f, 0f),
+            (-18f, 2f, 7f), (-9f, 2f, 7f), (0f, 2f, 7f), (9f, 2f, 7f), (18f, 2f, 7f),
+            (-16f, -2f, 18f), (-8f, -2f, 18f), (0f, -2f, 18f), (8f, -2f, 18f), (16f, -2f, 18f),
+            (-14f, 2f, 28f), (-7f, 2f, 28f), (0f, 2f, 28f), (7f, 2f, 28f), (14f, 2f, 28f)
+        ]);
+        await SyntheticNifTestData.WriteAsync(innerPath,
+        [
+            (-5f, -3f, 34f), (5f, -3f, 34f), (-5f, 3f, 34f), (5f, 3f, 34f),
+            (-4f, -2f, 62f), (4f, -2f, 62f), (-4f, 2f, 62f), (4f, 2f, 62f)
+        ]);
+        await SyntheticNifTestData.WriteAsync(cagePath,
+        [
+            (-24f, -6f, 42f), (24f, -6f, 42f), (-24f, 6f, 42f), (24f, 6f, 42f),
+            (-24f, -6f, 88f), (24f, -6f, 88f), (-24f, 6f, 88f), (24f, 6f, 88f)
+        ]);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.0, ["breasts"] = 1.0, ["waist"] = 1.0, ["belly"] = 1.0,
+                        ["pelvis"] = 1.0, ["butt"] = 1.0, ["thighs"] = 1.0, ["shoulders"] = 1.0, ["arms"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.44, ["breasts"] = 1.74, ["waist"] = 0.76, ["belly"] = 0.82,
+                        ["pelvis"] = 1.28, ["butt"] = 1.32, ["thighs"] = 1.22, ["shoulders"] = 1.24, ["arms"] = 1.18,
+                    }),
+            };
+
+            var armor = new ImportedArmor(drapePath, [drapePath, innerPath, cagePath], [], [], [], CustomBodyProfiles: profiles);
+            var meshAnalyzer = new BasicMeshAnalysisService();
+            var service = new StrategyMeshConversionService();
+            var cage = new DeformationCage("smooth-adaptive-cage");
+
+            var baselineAnalysis = new MeshAnalysis("mixed", false, 3);
+            var geometryAnalysis = await meshAnalyzer.AnalyzeAsync(armor, CancellationToken.None);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var geometryTuned = await service.ConvertAsync(armor, geometryAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            Assert.True(geometryAnalysis.HasLayeredPanels);
+            Assert.True(geometryAnalysis.HasOpenStructurePieces);
+            Assert.True(geometryTuned.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
+            Assert.True(geometryTuned.RegionalMorphing["pelvis"] < baseline.RegionalMorphing["pelvis"]);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
         }
     }
 
