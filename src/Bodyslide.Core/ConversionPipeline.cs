@@ -3316,6 +3316,7 @@ internal static class NifGeometrySignatureReader
         var metadata = ExtractMetadata(bytes);
         NifBlockGraph? graph = null;
         NifBlockGraphParser.TryParse(bytes, out graph);
+        var geometryFamilyMessages = ExtractUnsupportedGeometryFamilyMessages(bytes, graph);
         var graphVariantMessages = ExtractGraphVariantMessages(bytes, graph);
         var result = TryReadWithMode(bytes);
         var heelAnalysis = AnalyzeHeelProfile(path, metadata, result.Signature);
@@ -3328,7 +3329,7 @@ internal static class NifGeometrySignatureReader
                     : [],
                 metadata,
                 heelAnalysis,
-                graphVariantMessages);
+                [.. geometryFamilyMessages, .. graphVariantMessages]);
             return new NifSupportReport(
                 path,
                 status,
@@ -3340,7 +3341,6 @@ internal static class NifGeometrySignatureReader
                 metadata.BoneNames.Count,
                 heelAnalysis);
         }
-        var unsupportedMessages = new List<string>();
         var unsupportedMessages = new List<string>();
         if (DirectSseHalfFloatShapeTokens.Any(token => bytes.AsSpan().IndexOf(token) >= 0))
         {
@@ -3356,7 +3356,7 @@ internal static class NifGeometrySignatureReader
             }
         }
 
-        unsupportedMessages.AddRange(ExtractUnsupportedGeometryFamilyMessages(bytes, graph));
+        unsupportedMessages.AddRange(geometryFamilyMessages);
         unsupportedMessages.AddRange(graphVariantMessages);
 
         if (unsupportedMessages.Count == 0)

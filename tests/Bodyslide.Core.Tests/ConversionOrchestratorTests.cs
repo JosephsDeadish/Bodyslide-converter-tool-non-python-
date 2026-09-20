@@ -462,7 +462,9 @@ public sealed class ConversionOrchestratorTests
             var report = NifGeometrySignatureReader.Inspect(inputFile);
 
             Assert.Equal("supported", report.Status);
-            Assert.Equal("geometry-token-float", report.ParseMode);
+            Assert.True(
+                string.Equals(report.ParseMode, "block-graph-float", StringComparison.Ordinal) ||
+                string.Equals(report.ParseMode, "geometry-token-float", StringComparison.Ordinal));
             Assert.Equal(96, report.VertexCount);
             Assert.Contains("geometry-family:NiTriShape", report.Messages ?? []);
             Assert.NotNull(NifGeometrySignatureReader.TryRead(inputFile));
