@@ -3633,6 +3633,54 @@ public sealed class ConversionOrchestratorTests
         Assert.Equal(4, pathsRewritten);
     }
 
+    [Fact]
+    public void BinaryPluginRewriteService_RewriteArmaSubrecords_ArmoWithOnlyMod2_GeneratesMissingMod3AndModl()
+    {
+        var inputData = BuildMeshSubrecordData(
+            ("MOD2", "meshes/armor/test/world_0.nif"));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/test/world_0.nif"] = "meshes/slidesmith/3ba/world_0.nif"
+        };
+
+        var (rewrittenData, pathsRewritten) = BinaryPluginRewriteService.RewriteArmaSubrecords(
+            inputData,
+            0,
+            inputData.Length,
+            rewriteMap,
+            "ARMO");
+
+        var paths = ReadMeshSubrecordPaths(rewrittenData);
+        Assert.Equal("meshes/slidesmith/3ba/world_0.nif", paths["MOD2"]);
+        Assert.Equal("meshes/slidesmith/3ba/world_0.nif", paths["MOD3"]);
+        Assert.Equal("meshes/slidesmith/3ba/world_0.nif", paths["MODL"]);
+        Assert.Equal(3, pathsRewritten);
+    }
+
+    [Fact]
+    public void PatchPluginWriter_RewriteArmaData_ArmoWithOnlyMod3_GeneratesMissingMod2AndModl()
+    {
+        var inputData = BuildMeshSubrecordData(
+            ("MOD3", "meshes/armor/test/world_1.nif"));
+
+        var rewriteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["meshes/armor/test/world_1.nif"] = "meshes/slidesmith/3ba/world_1.nif"
+        };
+
+        var (rewrittenData, pathsRewritten) = PatchPluginWriter.RewriteArmaData(
+            inputData,
+            rewriteMap,
+            "ARMO");
+
+        var paths = ReadMeshSubrecordPaths(rewrittenData);
+        Assert.Equal("meshes/slidesmith/3ba/world_1.nif", paths["MOD2"]);
+        Assert.Equal("meshes/slidesmith/3ba/world_1.nif", paths["MOD3"]);
+        Assert.Equal("meshes/slidesmith/3ba/world_1.nif", paths["MODL"]);
+        Assert.Equal(3, pathsRewritten);
+    }
+
     // -------------------------------------------------------------------------
     // Gap 9 — DDS auxiliary texture stub generation
     // -------------------------------------------------------------------------

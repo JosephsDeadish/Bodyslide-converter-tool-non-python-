@@ -11302,8 +11302,9 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
         bool sawMod3 = false;
         bool sawMod4 = false;
         bool sawMod5 = false;
-        string? generatedModlPath = null;
-        string? generatedWorldModelPath = null;
+        string? rewrittenModlPath = null;
+        string? rewrittenMod2Path = null;
+        string? rewrittenMod3Path = null;
         string? generatedFirstPersonMod4Path = null;
         string? generatedFirstPersonMod5Path = null;
 
@@ -11368,19 +11369,19 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
                     WriteSubrecordWithExtendedSize(ms, subType, newBytes);
                     rewritten++;
 
-                    if (isArmo &&
-                        generatedWorldModelPath is null &&
-                        string.Equals(subType, "MODL", StringComparison.Ordinal))
+                    if (isArmo && string.Equals(subType, "MODL", StringComparison.Ordinal))
                     {
-                        generatedWorldModelPath = newPath;
+                        rewrittenModlPath ??= newPath;
                     }
 
-                    if (isArmo &&
-                        generatedModlPath is null &&
-                        (string.Equals(subType, "MOD2", StringComparison.Ordinal) ||
-                         string.Equals(subType, "MOD3", StringComparison.Ordinal)))
+                    if (isArmo && string.Equals(subType, "MOD2", StringComparison.Ordinal))
                     {
-                        generatedModlPath = newPath;
+                        rewrittenMod2Path ??= newPath;
+                    }
+
+                    if (isArmo && string.Equals(subType, "MOD3", StringComparison.Ordinal))
+                    {
+                        rewrittenMod3Path ??= newPath;
                     }
 
                     if (isArma && string.Equals(subType, "MOD2", StringComparison.Ordinal))
@@ -11438,25 +11439,30 @@ internal sealed class BinaryPluginRewriteService : IPluginRewriteService
             ms.Write(bytes, pos, end - pos);
         }
 
-        if (isArmo && !sawModl && !string.IsNullOrWhiteSpace(generatedModlPath))
+        if (isArmo)
         {
-            var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
-            WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
-            rewritten++;
-        }
+            var modlFallbackPath = rewrittenMod2Path ?? rewrittenMod3Path;
+            var mod2FallbackPath = rewrittenMod2Path ?? rewrittenMod3Path ?? rewrittenModlPath;
+            var mod3FallbackPath = rewrittenMod3Path ?? rewrittenMod2Path ?? rewrittenModlPath;
 
-        if (isArmo && !string.IsNullOrWhiteSpace(generatedWorldModelPath))
-        {
-            var worldModelBytes = System.Text.Encoding.ASCII.GetBytes(generatedWorldModelPath + '\0');
-            if (!sawMod2)
+            if (!sawModl && !string.IsNullOrWhiteSpace(modlFallbackPath))
             {
-                WriteSubrecordWithExtendedSize(ms, "MOD2", worldModelBytes);
+                var modlBytes = System.Text.Encoding.ASCII.GetBytes(modlFallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
                 rewritten++;
             }
 
-            if (!sawMod3)
+            if (!sawMod2 && !string.IsNullOrWhiteSpace(mod2FallbackPath))
             {
-                WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                var mod2Bytes = System.Text.Encoding.ASCII.GetBytes(mod2FallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD2", mod2Bytes);
+                rewritten++;
+            }
+
+            if (!sawMod3 && !string.IsNullOrWhiteSpace(mod3FallbackPath))
+            {
+                var mod3Bytes = System.Text.Encoding.ASCII.GetBytes(mod3FallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD3", mod3Bytes);
                 rewritten++;
             }
         }
@@ -12454,8 +12460,9 @@ internal static class PatchPluginWriter
         bool sawMod3 = false;
         bool sawMod4 = false;
         bool sawMod5 = false;
-        string? generatedModlPath = null;
-        string? generatedWorldModelPath = null;
+        string? rewrittenModlPath = null;
+        string? rewrittenMod2Path = null;
+        string? rewrittenMod3Path = null;
         string? generatedFirstPersonMod4Path = null;
         string? generatedFirstPersonMod5Path = null;
 
@@ -12518,19 +12525,19 @@ internal static class PatchPluginWriter
                     WriteSubrecordWithExtendedSize(ms, subTag, newBytes);
                     rewritten++;
 
-                    if (isArmo &&
-                        generatedWorldModelPath is null &&
-                        string.Equals(subTag, "MODL", StringComparison.Ordinal))
+                    if (isArmo && string.Equals(subTag, "MODL", StringComparison.Ordinal))
                     {
-                        generatedWorldModelPath = newPath;
+                        rewrittenModlPath ??= newPath;
                     }
 
-                    if (isArmo &&
-                        generatedModlPath is null &&
-                        (string.Equals(subTag, "MOD2", StringComparison.Ordinal) ||
-                         string.Equals(subTag, "MOD3", StringComparison.Ordinal)))
+                    if (isArmo && string.Equals(subTag, "MOD2", StringComparison.Ordinal))
                     {
-                        generatedModlPath = newPath;
+                        rewrittenMod2Path ??= newPath;
+                    }
+
+                    if (isArmo && string.Equals(subTag, "MOD3", StringComparison.Ordinal))
+                    {
+                        rewrittenMod3Path ??= newPath;
                     }
 
                     if (isArma && string.Equals(subTag, "MOD2", StringComparison.Ordinal))
@@ -12587,25 +12594,30 @@ internal static class PatchPluginWriter
             ms.Write(dataBytes, pos, end - pos);
         }
 
-        if (isArmo && !sawModl && !string.IsNullOrWhiteSpace(generatedModlPath))
+        if (isArmo)
         {
-            var modlBytes = System.Text.Encoding.ASCII.GetBytes(generatedModlPath + '\0');
-            WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
-            rewritten++;
-        }
+            var modlFallbackPath = rewrittenMod2Path ?? rewrittenMod3Path;
+            var mod2FallbackPath = rewrittenMod2Path ?? rewrittenMod3Path ?? rewrittenModlPath;
+            var mod3FallbackPath = rewrittenMod3Path ?? rewrittenMod2Path ?? rewrittenModlPath;
 
-        if (isArmo && !string.IsNullOrWhiteSpace(generatedWorldModelPath))
-        {
-            var worldModelBytes = System.Text.Encoding.ASCII.GetBytes(generatedWorldModelPath + '\0');
-            if (!sawMod2)
+            if (!sawModl && !string.IsNullOrWhiteSpace(modlFallbackPath))
             {
-                WriteSubrecordWithExtendedSize(ms, "MOD2", worldModelBytes);
+                var modlBytes = System.Text.Encoding.ASCII.GetBytes(modlFallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MODL", modlBytes);
                 rewritten++;
             }
 
-            if (!sawMod3)
+            if (!sawMod2 && !string.IsNullOrWhiteSpace(mod2FallbackPath))
             {
-                WriteSubrecordWithExtendedSize(ms, "MOD3", worldModelBytes);
+                var mod2Bytes = System.Text.Encoding.ASCII.GetBytes(mod2FallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD2", mod2Bytes);
+                rewritten++;
+            }
+
+            if (!sawMod3 && !string.IsNullOrWhiteSpace(mod3FallbackPath))
+            {
+                var mod3Bytes = System.Text.Encoding.ASCII.GetBytes(mod3FallbackPath + '\0');
+                WriteSubrecordWithExtendedSize(ms, "MOD3", mod3Bytes);
                 rewritten++;
             }
         }
