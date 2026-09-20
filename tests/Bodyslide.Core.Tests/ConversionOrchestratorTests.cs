@@ -2402,6 +2402,16 @@ public sealed class ConversionOrchestratorTests
             Assert.NotNull(summary.BoundaryLoops);
             Assert.Equal(2, summary.BoundaryLoops!.Count);
             Assert.All(summary.BoundaryLoops, loop => Assert.Equal(6, loop.VertexIndexes.Count));
+            Assert.All(summary.BoundaryLoops, loop => Assert.Equal(loop.VertexIndexes.Count, loop.OrderedEdges.Count));
+            Assert.All(summary.BoundaryLoops, loop =>
+            {
+                for (var edgeIndex = 0; edgeIndex < loop.OrderedEdges.Count; edgeIndex++)
+                {
+                    var edge = loop.OrderedEdges[edgeIndex];
+                    var nextEdge = loop.OrderedEdges[(edgeIndex + 1) % loop.OrderedEdges.Count];
+                    Assert.Equal(edge.To, nextEdge.From);
+                }
+            });
             Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([0, 1, 2, 3, 4, 5]));
             Assert.Contains(summary.BoundaryLoops, loop => loop.VertexIndexes.SequenceEqual([6, 7, 8, 9, 10, 11]));
             Assert.True(summary.BoundaryVertexFlags.All(static flag => flag), "Expected the synthetic openwork ring to mark every vertex as part of an explicit boundary loop.");
@@ -2469,12 +2479,95 @@ public sealed class ConversionOrchestratorTests
             var control = Assert.Single(result.IslandControls!);
             Assert.Contains("window-frame-island", control.SemanticLabels ?? [], StringComparer.OrdinalIgnoreCase);
             Assert.True(control.BoundaryDamping >= 0.12f, $"Expected explicit dual-loop topology to strengthen boundary damping, got {control.BoundaryDamping}.");
+            Assert.NotNull(control.BoundaryLoops);
+            Assert.Equal(2, control.BoundaryLoops!.Count);
+            Assert.Contains(control.BoundaryLoops, loop => loop.IsHole);
+            Assert.All(control.BoundaryLoops, loop => Assert.True(loop.InfluenceRadius > 0f));
 
             var topologyReport = topologyReportMethod!.Invoke(null, [new[] { inputFile }, result, null]);
             Assert.NotNull(topologyReport);
             var islands = (IReadOnlyList<CageIslandMembershipSummary>)topologyReport!.GetType().GetProperty("Islands")!.GetValue(topologyReport)!;
             var island = Assert.Single(islands);
             Assert.True(island.BoundaryLoopCount >= 2);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "dense_window_loop_controls_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        const int ringCount = 5;
+        const int segments = 12;
+        for (var ringIndex = 0; ringIndex < ringCount; ringIndex++)
+        {
+            var radius = 1.35f - (ringIndex * 0.22f);
+            for (var segment = 0; segment < segments; segment++)
+            {
+                var angle = (MathF.PI * 2f * segment) / segments;
+                vertices.Add((MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0.55f + (ringIndex * 0.015f)));
+            }
+        }
+
+        for (ushort ringIndex = 0; ringIndex < ringCount - 1; ringIndex++)
+        {
+            for (ushort segment = 0; segment < segments; segment++)
+            {
+                var nextSegment = (ushort)((segment + 1) % segments);
+                var a = (ushort)((ringIndex * segments) + segment);
+                var b = (ushort)((ringIndex * segments) + nextSegment);
+                var c = (ushort)(((ringIndex + 1) * segments) + segment);
+                var d = (ushort)(((ringIndex + 1) * segments) + nextSegment);
+                triangles.Add((a, c, b));
+                triangles.Add((b, c, d));
+            }
+        }
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+        try
+        {
+            var buildCageMethod = typeof(LocalExportService).GetMethod("BuildExportDeformationCage", BindingFlags.NonPublic | BindingFlags.Static);
+            var buildTopologyMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+            var resolveIslandMethod = typeof(LocalExportService).GetMethod("ResolveIslandCageControl", BindingFlags.NonPublic | BindingFlags.Static);
+            var resolveLoopMethod = typeof(LocalExportService).GetMethod("ResolveBoundaryLoopCageControl", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildCageMethod);
+            Assert.NotNull(buildTopologyMethod);
+            Assert.NotNull(resolveIslandMethod);
+            Assert.NotNull(resolveLoopMethod);
+
+            var cage = new DeformationCage(
+                "test-cage",
+                new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = new(0.72f, 0.26f, 0.50f, 0.96f, 0.50f, 0.96f, 0.72f, 0.18f, 0.08f, 0.02f),
+                    ["waist"] = new(0.56f, 0.22f, 0.50f, 0.90f, 0.50f, 0.90f, 0.62f, 0.16f, 0.06f, 0.00f)
+                });
+
+            var result = Assert.IsType<DeformationCage>(buildCageMethod!.Invoke(null, [new[] { inputFile }, cage]));
+            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(inputFile);
+            Assert.NotNull(topologySummary);
+            var topologyContext = buildTopologyMethod!.Invoke(null,
+            [
+                vertices.Select(static vertex => (vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                topologySummary
+            ]);
+            Assert.NotNull(topologyContext);
+
+            var islandControl = resolveIslandMethod!.Invoke(null, [result, inputFile, topologyContext, 48]);
+            Assert.NotNull(islandControl);
+
+            var loopControl = resolveLoopMethod!.Invoke(null, [islandControl, topologyContext, 48]);
+            Assert.NotNull(loopControl);
+            Assert.True((bool)(loopControl!.GetType().GetProperty("IsHole")!.GetValue(loopControl) ?? false));
         }
         finally
         {
@@ -6553,8 +6646,8 @@ public sealed class NifOutputAndSourceOverrideTests
 
         var baselineControl = resolveIslandMethod!.Invoke(null, [baselineCage, "/tmp/island_projection_bias_0.nif", topologyContext, 10]);
         var islandControl = Assert.IsType<CageIslandControl>(resolveIslandMethod.Invoke(null, [islandAwareCage, "/tmp/island_projection_bias_0.nif", topologyContext, 10]));
-        var baselineScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, baselineCage, baselineControl])!;
-        var islandScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, islandAwareCage, islandControl])!;
+        var baselineScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, baselineCage, baselineControl, null])!;
+        var islandScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod.Invoke(null, [normalizedHeight, lateralPosition, depthPosition, regionalMorphing, islandAwareCage, islandControl, null])!;
 
         Assert.Contains("arms", islandControl.CageRegions, StringComparer.OrdinalIgnoreCase);
         Assert.True(islandScales.WidthScale < baselineScales.WidthScale - 0.10d, $"Expected per-island cage object to reduce unrelated chest-driven width scaling on the second island. baseline={baselineScales.WidthScale:F4}, island={islandScales.WidthScale:F4}");

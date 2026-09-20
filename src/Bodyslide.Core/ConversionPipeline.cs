@@ -100,7 +100,15 @@ public sealed record CageIslandControl(
     IReadOnlyList<string>? SemanticLabels = null,
     float WidthScaleBias = 1.0f,
     float DepthScaleBias = 1.0f,
-    float HeightScaleBias = 1.0f);
+    float HeightScaleBias = 1.0f,
+    IReadOnlyList<CageIslandBoundaryLoopControl>? BoundaryLoops = null);
+public sealed record CageIslandBoundaryLoopControl(
+    int LoopIndex,
+    IReadOnlyList<string> CageRegions,
+    bool IsHole = false,
+    float InfluenceRadius = 0.0f,
+    float RigidityBias = 0.0f,
+    float BoundaryDamping = 0.0f);
 public sealed record DeformationCage(
     string Mode,
     IReadOnlyDictionary<string, CageRegion>? Regions = null,
@@ -2416,7 +2424,9 @@ internal static class NifGeometrySignatureReader
 
     internal sealed record BoundaryLoopSequence(
         int ComponentId,
-        IReadOnlyList<int> VertexIndexes);
+        int LoopIndex,
+        IReadOnlyList<int> VertexIndexes,
+        IReadOnlyList<(int From, int To)> OrderedEdges);
 
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
@@ -3544,6 +3554,7 @@ internal static class NifGeometrySignatureReader
 
         var visited = new HashSet<int>();
         var boundaryLoops = new List<BoundaryLoopSequence>();
+        var boundaryLoopEntries = new List<(int ComponentId, IReadOnlyList<int> VertexIndexes, IReadOnlyList<(int From, int To)> OrderedEdges)>();
         var loopCount = 0;
         foreach (var vertex in boundaryAdjacency.Keys)
         {
@@ -3595,11 +3606,30 @@ internal static class NifGeometrySignatureReader
                     componentBoundaryLoopCounts[dominantComponentId]++;
                 }
 
-                var orderedLoop = OrderBoundaryLoopVertices(boundaryAdjacency, loopVertices);
+                var (orderedLoop, orderedEdges) = OrderBoundaryLoopVertices(boundaryAdjacency, loopVertices);
                 if (orderedLoop.Count > 0)
                 {
-                    boundaryLoops.Add(new BoundaryLoopSequence(dominantComponentId, orderedLoop));
+                    boundaryLoopEntries.Add((
+                        dominantComponentId,
+                        orderedLoop,
+                        orderedEdges));
                 }
+            }
+        }
+
+        foreach (var componentGroup in boundaryLoopEntries
+                     .GroupBy(static entry => entry.ComponentId)
+                     .OrderBy(static group => group.Key))
+        {
+            var loopIndex = 0;
+            foreach (var entry in componentGroup
+                         .OrderBy(static entry => entry.VertexIndexes.FirstOrDefault()))
+            {
+                boundaryLoops.Add(new BoundaryLoopSequence(
+                    entry.ComponentId,
+                    loopIndex++,
+                    entry.VertexIndexes,
+                    entry.OrderedEdges));
             }
         }
 
@@ -3612,18 +3642,19 @@ internal static class NifGeometrySignatureReader
         }
     }
 
-    private static IReadOnlyList<int> OrderBoundaryLoopVertices(
+    private static (IReadOnlyList<int> VertexIndexes, IReadOnlyList<(int From, int To)> OrderedEdges) OrderBoundaryLoopVertices(
         IReadOnlyDictionary<int, HashSet<int>> boundaryAdjacency,
         IReadOnlyList<int> loopVertices)
     {
         if (loopVertices.Count == 0)
         {
-            return [];
+            return ([], []);
         }
 
         var loopSet = loopVertices.ToHashSet();
         var start = loopVertices.Min();
         var ordered = new List<int>(loopSet.Count);
+        var orderedEdges = new List<(int From, int To)>(loopSet.Count);
         var usedEdges = new HashSet<(int Left, int Right)>();
         var visitedVertices = new HashSet<int>();
         var current = start;
@@ -3657,6 +3688,7 @@ internal static class NifGeometrySignatureReader
             }
 
             usedEdges.Add(NormalizeBoundaryEdge(current, next));
+            orderedEdges.Add((current, next));
             previous = current;
             current = next;
             if (current == start)
@@ -3667,13 +3699,30 @@ internal static class NifGeometrySignatureReader
 
         if (ordered.Count == loopSet.Count)
         {
-            return ordered;
+            if (orderedEdges.Count == ordered.Count - 1 && ordered.Count > 1)
+            {
+                orderedEdges.Add((ordered[^1], ordered[0]));
+            }
+
+            return (ordered, orderedEdges);
         }
 
-        return loopVertices
+        var fallbackVertices = loopVertices
             .Distinct()
             .OrderBy(static index => index)
             .ToArray();
+        var fallbackEdges = new List<(int From, int To)>(Math.Max(0, fallbackVertices.Length));
+        for (var index = 0; index < fallbackVertices.Length; index++)
+        {
+            if (fallbackVertices.Length < 2)
+            {
+                break;
+            }
+
+            fallbackEdges.Add((fallbackVertices[index], fallbackVertices[(index + 1) % fallbackVertices.Length]));
+        }
+
+        return (fallbackVertices, fallbackEdges);
     }
 
     private static (int Left, int Right) NormalizeBoundaryEdge(int left, int right) =>
@@ -9293,11 +9342,13 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         float HalfRangeX,
         float HalfRangeY);
     private sealed record TopologyTransformContext(
+        IReadOnlyList<(float X, float Y, float Z)> RawVertices,
         IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
         int[] ComponentIds,
         bool[] BoundaryVertexFlags,
         float[] BoundaryVertexWeights,
-        float BoundaryPreservationWeight);
+        float BoundaryPreservationWeight,
+        IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? BoundaryLoops);
 }
 
 internal sealed class BasicCageGenerationService : ICageGenerationService
@@ -16469,11 +16520,13 @@ internal sealed class LocalExportService(
         float HalfRangeX,
         float HalfRangeY);
     private sealed record TopologyTransformContext(
+        IReadOnlyList<(float X, float Y, float Z)> RawVertices,
         IReadOnlyDictionary<int, TopologyTransformRegion> Regions,
         int[] ComponentIds,
         bool[] BoundaryVertexFlags,
         float[] BoundaryVertexWeights,
-        float BoundaryPreservationWeight);
+        float BoundaryPreservationWeight,
+        IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? BoundaryLoops);
 
     private static readonly IReadOnlyDictionary<string, float> ShrinkwrapBaseRadius =
         new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
@@ -16529,6 +16582,9 @@ internal sealed class LocalExportService(
                 continue;
             }
 
+            var rawVertices = vertices
+                .Select(static vertex => (vertex.X, vertex.Y, vertex.Z))
+                .ToArray();
             var normalizedVertices = NormalizeVerticesForTransfer(vertices);
             var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
             var hasExplicitTopology = topologySummary is { VertexCount: > 0 } &&
@@ -16570,6 +16626,11 @@ internal sealed class LocalExportService(
                         : 0);
                 var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
                 var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
+                var boundaryLoopControls = BuildIslandBoundaryLoopControls(
+                    rawVertices,
+                    topologySummary?.BoundaryLoops,
+                    group.Key,
+                    effectiveRegions);
                 if (effectiveRegions.Count == 0)
                 {
                     continue;
@@ -16602,7 +16663,8 @@ internal sealed class LocalExportService(
                     SemanticLabels: semanticProfile.Labels,
                     WidthScaleBias: semanticProfile.WidthScaleBias,
                     DepthScaleBias: semanticProfile.DepthScaleBias,
-                    HeightScaleBias: semanticProfile.HeightScaleBias));
+                    HeightScaleBias: semanticProfile.HeightScaleBias,
+                    BoundaryLoops: boundaryLoopControls));
             }
         }
 
@@ -16817,6 +16879,50 @@ internal sealed class LocalExportService(
         return ordered.Count > 0 ? ordered : dominantRegions;
     }
 
+    private static IReadOnlyList<CageIslandBoundaryLoopControl>? BuildIslandBoundaryLoopControls(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? boundaryLoops,
+        int islandId,
+        IReadOnlyList<string> effectiveRegions)
+    {
+        if (boundaryLoops is not { Count: > 0 } || effectiveRegions.Count == 0)
+        {
+            return null;
+        }
+
+        var componentLoops = boundaryLoops
+            .Where(loop => loop.ComponentId == islandId && loop.VertexIndexes.Count >= 3)
+            .Select(loop => new
+            {
+                Loop = loop,
+                Area = ComputeBoundaryLoopProjectedArea(rawVertices, loop.VertexIndexes)
+            })
+            .OrderByDescending(static entry => entry.Area)
+            .ThenBy(static entry => entry.Loop.LoopIndex)
+            .ToArray();
+        if (componentLoops.Length == 0)
+        {
+            return null;
+        }
+
+        var controls = new List<CageIslandBoundaryLoopControl>(componentLoops.Length);
+        for (var index = 0; index < componentLoops.Length; index++)
+        {
+            var entry = componentLoops[index];
+            var isHole = index > 0;
+            var influenceRadius = ComputeBoundaryLoopInfluenceRadius(rawVertices, entry.Loop.VertexIndexes, entry.Area);
+            controls.Add(new CageIslandBoundaryLoopControl(
+                entry.Loop.LoopIndex,
+                effectiveRegions,
+                IsHole: isHole,
+                InfluenceRadius: influenceRadius,
+                RigidityBias: isHole ? 0.05f : 0.02f,
+                BoundaryDamping: isHole ? 0.10f : 0.05f));
+        }
+
+        return controls;
+    }
+
     private static byte[] TryApplyNifVertexTransform(
         byte[] sourceBytes,
         string? sourcePath,
@@ -16909,6 +17015,7 @@ internal sealed class LocalExportService(
                 out var frameHalfRangeY,
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, index);
+            var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, index);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -16918,10 +17025,11 @@ internal sealed class LocalExportService(
                 depthPosition,
                 regionalMorphing,
                 effectiveCage,
-                islandControl);
+                islandControl,
+                boundaryLoopControl);
             if (boundaryPreservationWeight > 0f)
             {
-                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
+                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f) + (boundaryLoopControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
                 widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
                 depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
                 heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
@@ -17059,6 +17167,7 @@ internal sealed class LocalExportService(
                 out var frameHalfRangeY,
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, index);
+            var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, index);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -17068,10 +17177,11 @@ internal sealed class LocalExportService(
                 depthPosition,
                 regionalMorphing,
                 effectiveCage,
-                islandControl);
+                islandControl,
+                boundaryLoopControl);
             if (boundaryPreservationWeight > 0f)
             {
-                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
+                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f) + (boundaryLoopControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
                 widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
                 depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
                 heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
@@ -17233,6 +17343,7 @@ internal sealed class LocalExportService(
                 out var frameHalfRangeY,
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, i);
+            var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, i);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -17242,10 +17353,11 @@ internal sealed class LocalExportService(
                 depthPosition,
                 regionalMorphing,
                 effectiveCage,
-                islandControl);
+                islandControl,
+                boundaryLoopControl);
             if (boundaryPreservationWeight > 0f)
             {
-                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
+                boundaryPreservationWeight = Math.Clamp(boundaryPreservationWeight + (islandControl?.BoundaryDamping ?? 0f) + (boundaryLoopControl?.BoundaryDamping ?? 0f), 0f, 0.72f);
                 widthScale = 1d + ((widthScale - 1d) * (1f - boundaryPreservationWeight));
                 depthScale = 1d + ((depthScale - 1d) * (1f - boundaryPreservationWeight));
                 heightScale = 1d + ((heightScale - 1d) * (1f - (boundaryPreservationWeight * 0.65f)));
@@ -17396,11 +17508,13 @@ internal sealed class LocalExportService(
             0f,
             0.48f);
         return new TopologyTransformContext(
+            rawVertices,
             regions,
             componentIds,
             boundaryVertexFlags,
             boundaryVertexWeights,
-            boundaryPreservationWeight);
+            boundaryPreservationWeight,
+            hasExplicitTopology ? topologySummary!.BoundaryLoops : null);
     }
 
     private static float[] BuildBoundaryVertexWeights(
@@ -17695,7 +17809,8 @@ internal sealed class LocalExportService(
         float depthPosition,
         IReadOnlyDictionary<string, double> regionalMorphing,
         DeformationCage deformationCage,
-        CageIslandControl? islandControl = null)
+        CageIslandControl? islandControl = null,
+        CageIslandBoundaryLoopControl? boundaryLoopControl = null)
     {
         var regions = deformationCage.Regions;
         if (regions is null || regions.Count == 0)
@@ -17703,13 +17818,16 @@ internal sealed class LocalExportService(
             return ComputeLegacyTransformScales(regionalMorphing, normalizedHeight);
         }
 
-        IEnumerable<KeyValuePair<string, CageRegion>> activeRegions = islandControl?.CageRegions is { Count: > 0 }
-            ? islandControl.CageRegions
+        var preferredRegionNames = boundaryLoopControl?.CageRegions is { Count: > 0 }
+            ? boundaryLoopControl.CageRegions
+            : islandControl?.CageRegions;
+        IEnumerable<KeyValuePair<string, CageRegion>> activeRegions = preferredRegionNames is { Count: > 0 }
+            ? preferredRegionNames
                 .Where(regionName => regions.ContainsKey(regionName))
                 .Select(regionName => new KeyValuePair<string, CageRegion>(regionName, regions[regionName]))
                 .ToArray()
             : regions;
-        if (islandControl?.CageRegions is { Count: > 0 } && !activeRegions.Any())
+        if (preferredRegionNames is { Count: > 0 } && !activeRegions.Any())
         {
             activeRegions = regions;
         }
@@ -17738,7 +17856,7 @@ internal sealed class LocalExportService(
             var morph = regionalMorphing.TryGetValue(region, out var factor) && double.IsFinite(factor) && factor > 0.01d
                 ? factor
                 : 1.0d;
-            var effectiveRigidity = Math.Clamp(control.Rigidity + (islandControl?.RigidityBias ?? 0f), 0f, 0.95f);
+            var effectiveRigidity = Math.Clamp(control.Rigidity + (islandControl?.RigidityBias ?? 0f) + (boundaryLoopControl?.RigidityBias ?? 0f), 0f, 0.95f);
             var deformStrength = 1d - effectiveRigidity;
             widthTotal += (1d + ((morph - 1d) * control.WidthInfluence * deformStrength)) * weight;
             depthTotal += (1d + ((morph - 1d) * control.DepthInfluence * deformStrength)) * weight;
@@ -17786,6 +17904,66 @@ internal sealed class LocalExportService(
         return islandControls.FirstOrDefault(control =>
             control.IslandId == islandId &&
             control.MeshKey.Equals(meshKey, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static CageIslandBoundaryLoopControl? ResolveBoundaryLoopCageControl(
+        CageIslandControl? islandControl,
+        TopologyTransformContext? topologyContext,
+        int vertexIndex)
+    {
+        if (islandControl?.BoundaryLoops is not { Count: > 0 } boundaryLoopControls ||
+            topologyContext?.BoundaryLoops is not { Count: > 0 } boundaryLoops ||
+            vertexIndex < 0 ||
+            vertexIndex >= topologyContext.ComponentIds.Length ||
+            vertexIndex >= topologyContext.RawVertices.Count)
+        {
+            return null;
+        }
+
+        var islandId = topologyContext.ComponentIds[vertexIndex];
+        var vertex = topologyContext.RawVertices[vertexIndex];
+        CageIslandBoundaryLoopControl? bestControl = null;
+        var bestRatio = float.MaxValue;
+
+        foreach (var loopControl in boundaryLoopControls)
+        {
+            var loop = boundaryLoops.FirstOrDefault(candidate =>
+                candidate.ComponentId == islandId &&
+                candidate.LoopIndex == loopControl.LoopIndex &&
+                candidate.VertexIndexes.Count >= 2);
+            if (loop is null)
+            {
+                continue;
+            }
+
+            var influenceRadius = loopControl.InfluenceRadius > 0f
+                ? loopControl.InfluenceRadius
+                : ComputeBoundaryLoopInfluenceRadius(
+                    topologyContext.RawVertices,
+                    loop.VertexIndexes,
+                    ComputeBoundaryLoopProjectedArea(topologyContext.RawVertices, loop.VertexIndexes));
+            if (influenceRadius <= 0.0001f)
+            {
+                continue;
+            }
+
+            var distance = ComputeBoundaryLoopProjectedDistance(topologyContext.RawVertices, loop.VertexIndexes, vertex);
+            var ratio = distance / influenceRadius;
+            if (ratio > 1f)
+            {
+                continue;
+            }
+
+            if (bestControl is null ||
+                ratio < bestRatio - 0.0001f ||
+                (MathF.Abs(ratio - bestRatio) <= 0.0001f && loopControl.IsHole && !bestControl.IsHole))
+            {
+                bestControl = loopControl;
+                bestRatio = ratio;
+            }
+        }
+
+        return bestControl;
     }
 
     private static float ComputeCageAxisWeight(float value, float center, float falloff)
