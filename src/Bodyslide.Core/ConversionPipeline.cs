@@ -10128,6 +10128,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
+        var effectiveCage = LocalExportService.BuildExportDeformationCage(armor.MeshFiles, cage) ?? cage;
         var strategy = analysis.MeshType switch
         {
             "headgear"
@@ -10154,7 +10155,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 strategy,
                 analysis.MeshCount,
                 new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase),
-                cage));
+                effectiveCage));
         }
 
         // Compute a relative source→target delta when sourceBody is provided.
@@ -10194,7 +10195,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var stabilizedMorphing = stabilizationAssessment.IsExtreme || physicsRigHints.StrengthenStabilization
             ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, stabilizationAssessment, physicsRigHints.StrengthenStabilization)
             : featureAdjustedMorphing;
-        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, stabilizedMorphing, cage));
+        var islandAwareMorphing = ApplyIslandAwareCageTuning(stabilizedMorphing, effectiveCage);
+        return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, islandAwareMorphing, effectiveCage));
     }
 
     /// <summary>
@@ -10213,6 +10215,82 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static IReadOnlyDictionary<string, double> ApplyRigidityConstraints(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 0.45), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, double> ApplyIslandAwareCageTuning(
+        IReadOnlyDictionary<string, double> field,
+        DeformationCage? deformationCage)
+    {
+        if (field.Count == 0 || deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return field;
+        }
+
+        var regionDamping = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var islandControl in islandControls)
+        {
+            if (islandControl.CageRegions.Count == 0)
+            {
+                continue;
+            }
+
+            var damping = 1d;
+            if (islandControl.SemanticLabels is { Count: > 0 } labels)
+            {
+                if (labels.Contains("window-frame-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.84d);
+                }
+
+                if (labels.Contains("bridge-strap-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.82d);
+                }
+
+                if (labels.Contains("outer-shell-island", StringComparer.OrdinalIgnoreCase) ||
+                    labels.Contains("outer-flank-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.88d);
+                }
+
+                if (labels.Contains("upper-lateral-island", StringComparer.OrdinalIgnoreCase) ||
+                    labels.Contains("lower-lateral-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.91d);
+                }
+            }
+
+            damping = Math.Min(damping, 1d - Math.Min(0.10d, islandControl.BoundaryDamping * 0.60d));
+            damping = Math.Min(damping, 1d - Math.Min(0.08d, islandControl.RigidityBias * 0.50d));
+            damping = Math.Min(
+                damping,
+                (islandControl.WidthScaleBias + islandControl.DepthScaleBias + islandControl.HeightScaleBias) / 3d);
+            damping = Math.Clamp(damping, 0.78d, 1d);
+
+            foreach (var region in islandControl.CageRegions)
+            {
+                if (!field.ContainsKey(region))
+                {
+                    continue;
+                }
+
+                regionDamping[region] = regionDamping.TryGetValue(region, out var existing)
+                    ? Math.Min(existing, damping)
+                    : damping;
+            }
+        }
+
+        if (regionDamping.Count == 0)
+        {
+            return field;
+        }
+
+        return field.ToDictionary(
+            pair => pair.Key,
+            pair => regionDamping.TryGetValue(pair.Key, out var damping)
+                ? 1d + ((pair.Value - 1d) * damping)
+                : pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
 
     private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
         field.ToDictionary(pair => pair.Key, pair => 1 + ((pair.Value - 1) * 1.15), StringComparer.OrdinalIgnoreCase);

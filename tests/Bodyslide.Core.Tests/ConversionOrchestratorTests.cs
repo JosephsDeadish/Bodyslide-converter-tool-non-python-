@@ -3048,6 +3048,49 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_UsesIslandControlsToDampenMappedRegions()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.32d,
+            ["breasts"] = 1.28d,
+            ["waist"] = 0.76d,
+            ["belly"] = 0.80d,
+            ["thighs"] = 1.18d,
+            ["arms"] = 1.05d
+        };
+        var baselineCage = BasicCageGenerationService.CreatePresetCage("mixed");
+        var islandAwareCage = baselineCage with
+        {
+            IslandControls =
+            [
+                new CageIslandControl(
+                    "armor",
+                    0,
+                    ["chest", "breasts", "waist", "belly"],
+                    RigidityBias: 0.08f,
+                    BoundaryDamping: 0.10f,
+                    SemanticLabels: ["window-frame-island"],
+                    WidthScaleBias: 0.78f,
+                    DepthScaleBias: 0.84f,
+                    HeightScaleBias: 0.88f)
+            ]
+        };
+
+        var baseline = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, baselineCage]));
+        var tuned = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [field, islandAwareCage]));
+
+        Assert.Equal(field["arms"], baseline["arms"], 6);
+        Assert.True(tuned["chest"] < baseline["chest"]);
+        Assert.True(tuned["breasts"] < baseline["breasts"]);
+        Assert.True(Math.Abs(tuned["waist"] - 1d) < Math.Abs(baseline["waist"] - 1d));
+        Assert.True(Math.Abs(tuned["belly"] - 1d) < Math.Abs(baseline["belly"] - 1d));
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -3910,6 +3953,96 @@ public sealed class ConversionOrchestratorTests
             Assert.True(geometryAnalysis.HasOpenStructurePieces);
             Assert.True(geometryTuned.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
             Assert.True(geometryTuned.RegionalMorphing["pelvis"] < baseline.RegionalMorphing["pelvis"]);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_EnrichesCageAndAppliesIslandAwareTuningEarlierInConversion()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var plainPath = Path.Combine(dir, "plain_0.nif");
+        var topologyPath = Path.Combine(dir, "window_island_0.nif");
+        await File.WriteAllBytesAsync(plainPath, []);
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        const int ringCount = 5;
+        const int segments = 12;
+        for (var ringIndex = 0; ringIndex < ringCount; ringIndex++)
+        {
+            var radius = 1.35f - (ringIndex * 0.22f);
+            for (var segment = 0; segment < segments; segment++)
+            {
+                var angle = (MathF.PI * 2f * segment) / segments;
+                vertices.Add((MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0.55f + (ringIndex * 0.015f)));
+            }
+        }
+
+        for (ushort ringIndex = 0; ringIndex < ringCount - 1; ringIndex++)
+        {
+            for (ushort segment = 0; segment < segments; segment++)
+            {
+                var nextSegment = (ushort)((segment + 1) % segments);
+                var a = (ushort)((ringIndex * segments) + segment);
+                var b = (ushort)((ringIndex * segments) + nextSegment);
+                var c = (ushort)(((ringIndex + 1) * segments) + segment);
+                var d = (ushort)(((ringIndex + 1) * segments) + nextSegment);
+                triangles.Add((a, c, b));
+                triangles.Add((b, c, d));
+            }
+        }
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(topologyPath, vertices, triangles);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.0, ["breasts"] = 1.0, ["waist"] = 1.0, ["belly"] = 1.0,
+                        ["pelvis"] = 1.0, ["butt"] = 1.0, ["thighs"] = 1.0, ["shoulders"] = 1.0, ["arms"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.40, ["breasts"] = 1.54, ["waist"] = 0.74, ["belly"] = 0.80,
+                        ["pelvis"] = 1.20, ["butt"] = 1.18, ["thighs"] = 1.16, ["shoulders"] = 1.12, ["arms"] = 1.10,
+                    }),
+            };
+
+            var service = new StrategyMeshConversionService();
+            var analysis = new MeshAnalysis("mixed", false, 1);
+            var cage = BasicCageGenerationService.CreatePresetCage("mixed");
+            var plainArmor = new ImportedArmor(plainPath, [plainPath], [], [], [], CustomBodyProfiles: profiles);
+            var topologyArmor = new ImportedArmor(topologyPath, [topologyPath], [], [], [], CustomBodyProfiles: profiles);
+
+            var baseline = await service.ConvertAsync(plainArmor, analysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var islandAware = await service.ConvertAsync(topologyArmor, analysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            Assert.NotNull(islandAware.DeformationCage?.IslandControls);
+            Assert.NotEmpty(islandAware.DeformationCage!.IslandControls!);
+            Assert.True(islandAware.RegionalMorphing["chest"] < baseline.RegionalMorphing["chest"]);
+            Assert.True(islandAware.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
+            Assert.True(Math.Abs(islandAware.RegionalMorphing["waist"] - 1d) < Math.Abs(baseline.RegionalMorphing["waist"] - 1d));
         }
         finally
         {
