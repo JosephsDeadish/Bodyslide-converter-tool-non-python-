@@ -74,7 +74,12 @@ public sealed record MeshAnalysis(
     bool IsFootwear = false,
     bool HasLayeredPanels = false,
     bool HasOpenStructurePieces = false,
-    IReadOnlyDictionary<string, IReadOnlyList<string>>? GeometryPartLabels = null);
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? GeometryPartLabels = null,
+    IReadOnlyDictionary<string, TopologyIslandSummary>? TopologyIslandSummaries = null);
+public sealed record TopologyIslandSummary(
+    int IslandCount,
+    double LargestIslandCoverage,
+    IReadOnlyList<string> Labels);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -5485,6 +5490,19 @@ public sealed class ConversionOrchestrator(
                 }
             }
 
+            if (analysis.TopologyIslandSummaries is { Count: > 0 })
+            {
+                var topologyLabels = analysis.TopologyIslandSummaries.Values
+                    .SelectMany(static summary => summary.Labels)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var totalIslands = analysis.TopologyIslandSummaries.Values.Sum(static summary => summary.IslandCount);
+                steps.Add(topologyLabels.Count > 0
+                    ? $"mesh-topology:islands={totalIslands},labels={string.Join('+', topologyLabels)}"
+                    : $"mesh-topology:islands={totalIslands}");
+            }
+
             ReportStage("Binding armor regions", 7);
             var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
@@ -8323,6 +8341,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             : meshType;
 
         var geometryPartLabels = DeriveGeometryPartLabels(armor.MeshFiles);
+        var topologyIslandSummaries = DeriveTopologyIslandSummaries(armor.MeshFiles, geometryPartLabels);
 
         // Classify headgear into a sub-type so partition rebuilding can assign the
         // correct Skyrim BSDismemberSkinInstance skin-partition IDs.
@@ -8339,7 +8358,12 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
                 headgearSubType = HeadgearSubTypes.Circlet;
         }
 
-        var hasSplitMeshes = armor.MeshFiles.Count > 1;
+        var derivedTopologyLabels = topologyIslandSummaries.Values
+            .SelectMany(static summary => summary.Labels)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var hasSplitMeshes = armor.MeshFiles.Count > 1 ||
+            derivedTopologyLabels.Contains("independent-islands", StringComparer.OrdinalIgnoreCase);
         var hasStrapLikePieces = fileNames.Any(name => StrapKeywords.Any(name.Contains));
         var isFootwear = fileNames.Any(name => FootwearKeywords.Any(name.Contains)) ||
             partitionSlots.Contains(37) ||
@@ -8353,7 +8377,8 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             derivedGeometryLabels.Contains("outer-layer", StringComparer.OrdinalIgnoreCase);
         var hasOpenStructurePieces = fileNames.Any(name => OpenStructureKeywords.Any(name.Contains)) ||
             derivedGeometryLabels.Contains("open-window", StringComparer.OrdinalIgnoreCase) ||
-            derivedGeometryLabels.Contains("cage-frame", StringComparer.OrdinalIgnoreCase);
+            derivedGeometryLabels.Contains("cage-frame", StringComparer.OrdinalIgnoreCase) ||
+            derivedTopologyLabels.Contains("window-boundary-risk", StringComparer.OrdinalIgnoreCase);
         var hasAccessoryPieces = fileNames.Any(name => AccessoryKeywords.Any(name.Contains)) ||
             hasStrapLikePieces ||
             hasLayeredPanels ||
@@ -8376,7 +8401,8 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             IsFootwear: isFootwear,
             HasLayeredPanels: hasLayeredPanels,
             HasOpenStructurePieces: hasOpenStructurePieces,
-            GeometryPartLabels: geometryPartLabels));
+            GeometryPartLabels: geometryPartLabels,
+            TopologyIslandSummaries: topologyIslandSummaries));
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> DeriveGeometryPartLabels(IReadOnlyList<string> meshFiles)
@@ -8482,6 +8508,236 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         }
 
         return labelsByMesh;
+    }
+
+    private static IReadOnlyDictionary<string, TopologyIslandSummary> DeriveTopologyIslandSummaries(
+        IReadOnlyList<string> meshFiles,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> geometryPartLabels)
+    {
+        var summaries = new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase);
+        foreach (var meshFile in meshFiles)
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
+            if (vertices is null || vertices.Count < 12)
+            {
+                continue;
+            }
+
+            var sampledVertices = SampleTopologyVertices(vertices, maxSamples: 1024);
+            if (sampledVertices.Count < 12)
+            {
+                continue;
+            }
+
+            var normalizedVertices = NormalizeTopologyVertices(sampledVertices);
+            if (normalizedVertices.Count < 12)
+            {
+                continue;
+            }
+
+            var radius = ComputeIslandConnectionRadius(normalizedVertices);
+            if (radius <= 0.0001f)
+            {
+                continue;
+            }
+
+            var islandSizes = ComputeIslandComponentSizes(normalizedVertices, radius);
+            if (islandSizes.Count == 0)
+            {
+                continue;
+            }
+
+            var totalVertices = islandSizes.Sum();
+            var largestIsland = islandSizes.Max();
+            var largestIslandCoverage = totalVertices <= 0 ? 1d : largestIsland / (double)totalVertices;
+            var smallestMeaningfulIsland = islandSizes
+                .Where(size => size >= Math.Max(4, totalVertices / 40))
+                .DefaultIfEmpty(largestIsland)
+                .Min();
+            var smallestMeaningfulCoverage = totalVertices <= 0 ? 1d : smallestMeaningfulIsland / (double)totalVertices;
+            var labels = new List<string>();
+            if (islandSizes.Count >= 2)
+            {
+                labels.Add("independent-islands");
+            }
+
+            if (islandSizes.Count >= 2 && largestIslandCoverage <= 0.78d)
+            {
+                labels.Add("split-cage-candidate");
+            }
+
+            if (smallestMeaningfulCoverage <= 0.12d && islandSizes.Count >= 2)
+            {
+                labels.Add("thin-strap-islands");
+            }
+
+            var meshName = Path.GetFileName(meshFile) ?? meshFile;
+            var meshGeometryLabels = geometryPartLabels.TryGetValue(meshName, out var meshLabels)
+                ? meshLabels
+                : [];
+            if (islandSizes.Count >= 2 &&
+                meshGeometryLabels.Any(label => label.Equals("open-window", StringComparison.OrdinalIgnoreCase) ||
+                                                label.Equals("cage-frame", StringComparison.OrdinalIgnoreCase)))
+            {
+                labels.Add("window-boundary-risk");
+            }
+
+            if (islandSizes.Count >= 3 &&
+                meshGeometryLabels.Any(label => label.Equals("outer-layer", StringComparison.OrdinalIgnoreCase) ||
+                                                label.Equals("lower-drape", StringComparison.OrdinalIgnoreCase)))
+            {
+                labels.Add("layered-island-stack");
+            }
+
+            summaries[meshName] = new TopologyIslandSummary(
+                islandSizes.Count,
+                largestIslandCoverage,
+                labels
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToArray());
+        }
+
+        return summaries;
+    }
+
+    private static IReadOnlyList<MeshVertex> SampleTopologyVertices(IReadOnlyList<MeshVertex> vertices, int maxSamples)
+    {
+        if (vertices.Count <= maxSamples)
+        {
+            return vertices;
+        }
+
+        var sampled = new MeshVertex[maxSamples];
+        for (var index = 0; index < maxSamples; index++)
+        {
+            var sourceIndex = (int)Math.Round(index * (vertices.Count - 1d) / Math.Max(1, maxSamples - 1));
+            sampled[index] = vertices[sourceIndex];
+        }
+
+        return sampled;
+    }
+
+    private static IReadOnlyList<MeshVertex> NormalizeTopologyVertices(IReadOnlyList<MeshVertex> vertices)
+    {
+        var minX = vertices.Min(static vertex => vertex.X);
+        var maxX = vertices.Max(static vertex => vertex.X);
+        var minY = vertices.Min(static vertex => vertex.Y);
+        var maxY = vertices.Max(static vertex => vertex.Y);
+        var minZ = vertices.Min(static vertex => vertex.Z);
+        var maxZ = vertices.Max(static vertex => vertex.Z);
+        var width = MathF.Max(0.0001f, maxX - minX);
+        var depth = MathF.Max(0.0001f, maxY - minY);
+        var height = MathF.Max(0.0001f, maxZ - minZ);
+
+        return vertices
+            .Select(vertex => new MeshVertex(
+                (vertex.X - minX) / width,
+                (vertex.Y - minY) / depth,
+                (vertex.Z - minZ) / height))
+            .ToArray();
+    }
+
+    private static float ComputeIslandConnectionRadius(IReadOnlyList<MeshVertex> vertices)
+    {
+        if (vertices.Count < 2)
+        {
+            return 0f;
+        }
+
+        var nearestDistances = new List<float>(vertices.Count);
+        for (var i = 0; i < vertices.Count; i++)
+        {
+            var nearest = float.MaxValue;
+            var current = vertices[i];
+            for (var j = 0; j < vertices.Count; j++)
+            {
+                if (i == j)
+                {
+                    continue;
+                }
+
+                var candidate = vertices[j];
+                var dx = current.X - candidate.X;
+                var dy = current.Y - candidate.Y;
+                var dz = current.Z - candidate.Z;
+                var distance = MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+                if (distance < nearest)
+                {
+                    nearest = distance;
+                }
+            }
+
+            if (nearest < float.MaxValue)
+            {
+                nearestDistances.Add(nearest);
+            }
+        }
+
+        if (nearestDistances.Count == 0)
+        {
+            return 0f;
+        }
+
+        nearestDistances.Sort();
+        var median = nearestDistances[nearestDistances.Count / 2];
+        return Math.Clamp(median * 2.6f, 0.02f, 0.18f);
+    }
+
+    private static IReadOnlyList<int> ComputeIslandComponentSizes(IReadOnlyList<MeshVertex> vertices, float radius)
+    {
+        if (vertices.Count == 0 || radius <= 0.0001f)
+        {
+            return [];
+        }
+
+        var visited = new bool[vertices.Count];
+        var sizes = new List<int>();
+        var radiusSquared = radius * radius;
+        for (var start = 0; start < vertices.Count; start++)
+        {
+            if (visited[start])
+            {
+                continue;
+            }
+
+            var queue = new Queue<int>();
+            queue.Enqueue(start);
+            visited[start] = true;
+            var size = 0;
+            while (queue.Count > 0)
+            {
+                var currentIndex = queue.Dequeue();
+                size++;
+                var current = vertices[currentIndex];
+                for (var candidateIndex = 0; candidateIndex < vertices.Count; candidateIndex++)
+                {
+                    if (visited[candidateIndex] || candidateIndex == currentIndex)
+                    {
+                        continue;
+                    }
+
+                    var candidate = vertices[candidateIndex];
+                    var dx = current.X - candidate.X;
+                    var dy = current.Y - candidate.Y;
+                    var dz = current.Z - candidate.Z;
+                    var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                    if (distanceSquared > radiusSquared)
+                    {
+                        continue;
+                    }
+
+                    visited[candidateIndex] = true;
+                    queue.Enqueue(candidateIndex);
+                }
+            }
+
+            sizes.Add(size);
+        }
+
+        return sizes
+            .OrderByDescending(static size => size)
+            .ToArray();
     }
 
     private sealed record GeometryPartStats(
@@ -20183,6 +20439,17 @@ internal sealed class LocalExportService(
                 }
             }
 
+            if (analysis.TopologyIslandSummaries is { Count: > 0 })
+            {
+                foreach (var label in analysis.TopologyIslandSummaries.Values.SelectMany(static summary => summary.Labels))
+                {
+                    if (!string.IsNullOrWhiteSpace(label))
+                    {
+                        hints.Add(label);
+                    }
+                }
+            }
+
             return hints
                 .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -20597,6 +20864,34 @@ internal sealed class LocalExportService(
                 normalizedHeight is >= 0.18f and <= 0.88f)
             {
                 damping = MathF.Min(damping, centerBias >= 0.18f ? 0.72f : 0.80f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "independent-islands") && ambiguity >= 0.10f)
+            {
+                damping = MathF.Min(damping, 0.86f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "split-cage-candidate"))
+            {
+                damping = MathF.Min(damping, normalizedHeight is >= 0.10f and <= 0.92f ? 0.78f : 0.84f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "thin-strap-islands") &&
+                normalizedHeight is >= 0.12f and <= 0.90f)
+            {
+                damping = MathF.Min(damping, 0.74f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "window-boundary-risk") &&
+                normalizedHeight is >= 0.18f and <= 0.88f)
+            {
+                damping = MathF.Min(damping, centerBias >= 0.18f ? 0.70f : 0.78f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "layered-island-stack") &&
+                normalizedHeight <= 0.72f)
+            {
+                damping = MathF.Min(damping, outerBias >= 0.26f ? 0.76f : 0.82f);
             }
 
             if ((HasMorphTransferPartHint(morphTransferContext, "rigid-shell") ||

@@ -2285,6 +2285,41 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DerivesTopologyIslandHintsFromSingleMeshGeometry()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "neutral_single_mesh_0.nif");
+        await SyntheticNifTestData.WriteAsync(meshPath,
+        [
+            (-20f, -2f, 0f), (-12f, -2f, 4f), (-4f, -2f, 8f), (4f, -2f, 12f), (12f, -2f, 16f), (20f, -2f, 20f),
+            (-20f, 2f, 0f), (-12f, 2f, 4f), (-4f, 2f, 8f), (4f, 2f, 12f), (12f, 2f, 16f), (20f, 2f, 20f),
+            (90f, -1f, 28f), (92f, -1f, 36f), (94f, -1f, 44f), (96f, -1f, 52f),
+            (90f, 1f, 28f), (92f, 1f, 36f), (94f, 1f, 44f), (96f, 1f, 52f)
+        ]);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.True(result.HasSplitMeshes);
+            Assert.NotNull(result.TopologyIslandSummaries);
+            Assert.True(result.TopologyIslandSummaries!.Count > 0);
+            var summary = result.TopologyIslandSummaries.Values.Single();
+            Assert.True(summary.IslandCount >= 2);
+            Assert.Contains(summary.Labels, label => label.Equals("independent-islands", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(summary.Labels, label => label.Equals("split-cage-candidate", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -7268,6 +7303,49 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_ReadsLegacyFrtri002MorphNamesAndDeltaPayloads()
+        {
+            var bytes = BuildTriPayloadFrtri002(
+                vertexCount: 2,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0.5f, 0.25f, 0.125f)]),
+                ("HideCape_1", [(0f, 0f, 0f), (0.25f, -0.25f, 0.5f)]));
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(2, payload!.VertexCount);
+            Assert.Equal(2, payload.Morphs.Count);
+            Assert.Equal("BreastLift", payload.Morphs[0].Name);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+            Assert.Equal(0.5f, payload.Morphs[1].Deltas[1].Z, 3);
+        }
+
+        [Fact]
+        public void TriMorphReader_ReadsPirtMorphNamesAndSparseDeltaPayloads()
+        {
+            var bytes = BuildPirtPayload(
+                "ArmorShape",
+                vertexCount: 3,
+                ("BreastLift", [(0.125f, 0f, -0.25f), (0f, 0f, 0f), (0.5f, 0.25f, 0.125f)]),
+                ("HideCape_1", [(0f, 0f, 0f), (0.25f, -0.25f, 0.5f), (0f, 0f, 0f)]));
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(3, payload!.VertexCount);
+            Assert.Equal(2, payload.Morphs.Count);
+            Assert.Equal("BreastLift", payload.Morphs[0].Name);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[2].Z, 3);
+            Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+            Assert.Equal(-0.25f, payload.Morphs[1].Deltas[1].Y, 3);
+        }
+
+        [Fact]
         public void TriMorphReader_WithTrailingBytes_IsRejected()
         {
             byte[] bytes = [.. BuildTriPayload(
@@ -7435,6 +7513,80 @@ public sealed class BsdSliderDataTests
 
         return ms.ToArray();
     }
+
+    private static byte[] BuildTriPayloadFrtri002(int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI002"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (x, y, z) in morph.Deltas)
+            {
+                writer.Write(x);
+                writer.Write(y);
+                writer.Write(z);
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildPirtPayload(string shapeName, int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("PIRT"));
+        writer.Write((ushort)1);
+        var shapeNameBytes = System.Text.Encoding.UTF8.GetBytes(shapeName);
+        writer.Write((byte)shapeNameBytes.Length);
+        writer.Write(shapeNameBytes);
+        writer.Write((ushort)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var morphNameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((byte)morphNameBytes.Length);
+            writer.Write(morphNameBytes);
+
+            var deltaRows = Enumerable.Range(0, Math.Min(vertexCount, morph.Deltas.Count))
+                .Where(index =>
+                {
+                    var (x, y, z) = morph.Deltas[index];
+                    return Math.Abs(x) > 0.00001f || Math.Abs(y) > 0.00001f || Math.Abs(z) > 0.00001f;
+                })
+                .Select(index => (Index: index, Delta: morph.Deltas[index]))
+                .ToList();
+
+            var maxAbs = deltaRows.Count == 0
+                ? 0f
+                : deltaRows.Max(static row => Math.Max(Math.Abs(row.Delta.X), Math.Max(Math.Abs(row.Delta.Y), Math.Abs(row.Delta.Z))));
+            var multiplier = maxAbs <= 0.000001f ? 1f : maxAbs / 32767f;
+            writer.Write(multiplier);
+            writer.Write((ushort)deltaRows.Count);
+            foreach (var row in deltaRows)
+            {
+                writer.Write((ushort)row.Index);
+                writer.Write((short)Math.Round(row.Delta.X / multiplier));
+                writer.Write((short)Math.Round(row.Delta.Y / multiplier));
+                writer.Write((short)Math.Round(row.Delta.Z / multiplier));
+            }
+        }
+
+        return ms.ToArray();
+    }
+
 }
 
 public sealed class BodySignatureVertexCountTests
@@ -19038,6 +19190,31 @@ public sealed class VanillaBodyOspSliderTests
     }
 
     [Fact]
+    public async Task GenerateAsync_UsesPirtTriPayloadNames()
+    {
+        var service = new BodySlideOspProjectService();
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "traveler_outfit_0.nif");
+        var triPath = Path.Combine(tmpDir, "traveler_outfit_runtime.tri");
+        await File.WriteAllBytesAsync(nifPath, new byte[64]);
+        await File.WriteAllBytesAsync(triPath, BuildPirtPayload(
+            "TravelerShape",
+            3,
+            ("TravelerLift", [(0.125f, 0.25f, 0.375f), (0f, 0f, 0f), (0f, 0f, 0f)]),
+            ("TravelerHideCape_1", [(0f, 0f, 0f), (0f, 0f, 0f), (0f, 0f, 0f)])));
+
+        var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath]);
+        var converted = new ConvertedMesh("cloth", "cage", 1,
+            new Dictionary<string, double> { ["chest"] = 1.05 });
+
+        var project = await service.GenerateAsync(armor, converted, "CBBE", CancellationToken.None);
+
+        Assert.Contains("TravelerLift", project.Sliders);
+        Assert.Contains("TravelerHideCape", project.ZapSliders ?? []);
+    }
+
+    [Fact]
     public async Task GenerateAsync_PrioritizesStrongerPayloadSlidersAheadOfWeakerOnes()
     {
         var service = new BodySlideOspProjectService();
@@ -19137,6 +19314,50 @@ public sealed class VanillaBodyOspSliderTests
                 writer.Write((short)Math.Round(x * 2048f));
                 writer.Write((short)Math.Round(y * 2048f));
                 writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildPirtPayload(string shapeName, int vertexCount, params (string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("PIRT"));
+        writer.Write((ushort)1);
+        var shapeNameBytes = System.Text.Encoding.UTF8.GetBytes(shapeName);
+        writer.Write((byte)shapeNameBytes.Length);
+        writer.Write(shapeNameBytes);
+        writer.Write((ushort)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var morphNameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((byte)morphNameBytes.Length);
+            writer.Write(morphNameBytes);
+
+            var deltaRows = Enumerable.Range(0, Math.Min(vertexCount, morph.Deltas.Count))
+                .Where(index =>
+                {
+                    var (x, y, z) = morph.Deltas[index];
+                    return Math.Abs(x) > 0.00001f || Math.Abs(y) > 0.00001f || Math.Abs(z) > 0.00001f;
+                })
+                .Select(index => (Index: index, Delta: morph.Deltas[index]))
+                .ToList();
+
+            var maxAbs = deltaRows.Count == 0
+                ? 0f
+                : deltaRows.Max(static row => Math.Max(Math.Abs(row.Delta.X), Math.Max(Math.Abs(row.Delta.Y), Math.Abs(row.Delta.Z))));
+            var multiplier = maxAbs <= 0.000001f ? 1f : maxAbs / 32767f;
+            writer.Write(multiplier);
+            writer.Write((ushort)deltaRows.Count);
+            foreach (var row in deltaRows)
+            {
+                writer.Write((ushort)row.Index);
+                writer.Write((short)Math.Round(row.Delta.X / multiplier));
+                writer.Write((short)Math.Round(row.Delta.Y / multiplier));
+                writer.Write((short)Math.Round(row.Delta.Z / multiplier));
             }
         }
 

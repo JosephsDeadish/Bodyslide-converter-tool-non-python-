@@ -135,7 +135,9 @@ internal static class BsdMorphReader
 
 internal static class TriMorphReader
 {
-    private static ReadOnlySpan<byte> Magic => "FRTRI003"u8;
+    private static ReadOnlySpan<byte> LegacyFaceGenMagic => "FRTRI002"u8;
+    private static ReadOnlySpan<byte> FaceGenMagic => "FRTRI003"u8;
+    private static ReadOnlySpan<byte> BodyTriMagic => "PIRT"u8;
     private const float DequantizeScale = 1f / 2048f;
 
     public static bool TryRead(string filePath, out TriMorphPayload? payload)
@@ -163,12 +165,37 @@ internal static class TriMorphReader
     public static bool TryRead(ReadOnlySpan<byte> bytes, out TriMorphPayload? payload)
     {
         payload = null;
-        if (bytes.Length < 16 || !bytes[..8].SequenceEqual(Magic))
+        if (bytes.Length >= FaceGenMagic.Length && bytes[..FaceGenMagic.Length].SequenceEqual(FaceGenMagic))
+        {
+            return TryReadFaceGenTri(bytes, FaceGenMagic, usesQuantizedInt16: true, out payload);
+        }
+
+        if (bytes.Length >= LegacyFaceGenMagic.Length && bytes[..LegacyFaceGenMagic.Length].SequenceEqual(LegacyFaceGenMagic))
+        {
+            return TryReadFaceGenTri(bytes, LegacyFaceGenMagic, usesQuantizedInt16: false, out payload);
+        }
+
+        if (bytes.Length >= BodyTriMagic.Length && bytes[..BodyTriMagic.Length].SequenceEqual(BodyTriMagic))
+        {
+            return TryReadBodyTri(bytes, out payload);
+        }
+
+        return false;
+    }
+
+    private static bool TryReadFaceGenTri(
+        ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> magic,
+        bool usesQuantizedInt16,
+        out TriMorphPayload? payload)
+    {
+        payload = null;
+        if (bytes.Length < 16 || !bytes[..magic.Length].SequenceEqual(magic))
         {
             return false;
         }
 
-        var offset = 8;
+        var offset = magic.Length;
         var vertexCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
         var morphCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
         if (vertexCount <= 0 || vertexCount > 250_000 || morphCount <= 0 || morphCount > 10_000)
@@ -211,7 +238,7 @@ internal static class TriMorphReader
                 return false;
             }
 
-            var expectedBytes = checked(deltaCount * 6);
+            var expectedBytes = checked(deltaCount * (usesQuantizedInt16 ? 6 : 12));
             if (offset + expectedBytes > bytes.Length)
             {
                 return false;
@@ -220,9 +247,22 @@ internal static class TriMorphReader
             var deltas = new (float X, float Y, float Z)[deltaCount];
             for (var j = 0; j < deltaCount; j++)
             {
-                var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
-                var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
-                var z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                float x;
+                float y;
+                float z;
+                if (usesQuantizedInt16)
+                {
+                    x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                    y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                    z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * DequantizeScale; offset += 2;
+                }
+                else
+                {
+                    x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+                    y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+                    z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
+                }
+
                 deltas[j] = (x, y, z);
             }
 
@@ -235,6 +275,137 @@ internal static class TriMorphReader
         }
 
         payload = new TriMorphPayload(vertexCount, morphs);
+        return true;
+    }
+
+    private static bool TryReadBodyTri(ReadOnlySpan<byte> bytes, out TriMorphPayload? payload)
+    {
+        payload = null;
+        if (bytes.Length < 6 || !bytes[..BodyTriMagic.Length].SequenceEqual(BodyTriMagic))
+        {
+            return false;
+        }
+
+        var shapeCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[4..6]);
+        if (shapeCount <= 0 || shapeCount > 10_000)
+        {
+            return false;
+        }
+
+        var offset = 6;
+        List<TriMorphEntry>? firstShapeMorphs = null;
+        var firstShapeVertexCount = 0;
+
+        for (var shapeIndex = 0; shapeIndex < shapeCount; shapeIndex++)
+        {
+            if (offset + 3 > bytes.Length)
+            {
+                return false;
+            }
+
+            var shapeNameLength = bytes[offset++];
+            if (shapeNameLength == 0 || offset + shapeNameLength + 2 > bytes.Length)
+            {
+                return false;
+            }
+
+            offset += shapeNameLength;
+            var morphCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+            offset += 2;
+            if (morphCount < 0 || morphCount > 65_535)
+            {
+                return false;
+            }
+
+            var shapeMorphs = shapeIndex == 0 ? new List<(string Name, List<(int Index, float X, float Y, float Z)> Sparse)>(morphCount) : null;
+            var shapeVertexCount = 0;
+            for (var morphIndex = 0; morphIndex < morphCount; morphIndex++)
+            {
+                if (offset + 7 > bytes.Length)
+                {
+                    return false;
+                }
+
+                var morphNameLength = bytes[offset++];
+                if (offset + morphNameLength + 6 > bytes.Length)
+                {
+                    return false;
+                }
+
+                var morphName = Encoding.UTF8.GetString(bytes[offset..(offset + morphNameLength)]);
+                offset += morphNameLength;
+                var multiplier = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
+                offset += 4;
+                var deltaCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+                offset += 2;
+                if (deltaCount < 0 || deltaCount > 65_535)
+                {
+                    return false;
+                }
+
+                var expectedBytes = checked(deltaCount * 8);
+                if (offset + expectedBytes > bytes.Length)
+                {
+                    return false;
+                }
+
+                if (shapeMorphs is null)
+                {
+                    offset += expectedBytes;
+                    continue;
+                }
+
+                var sparse = new List<(int Index, float X, float Y, float Z)>(deltaCount);
+                for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
+                {
+                    var vertexIndex = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+                    offset += 2;
+                    var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
+                    var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
+                    var z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
+                    sparse.Add((vertexIndex, x, y, z));
+                    shapeVertexCount = Math.Max(shapeVertexCount, vertexIndex + 1);
+                }
+
+                var deltas = new (float X, float Y, float Z)[shapeVertexCount];
+                foreach (var (index, x, y, z) in sparse)
+                {
+                    if (index >= 0 && index < deltas.Length)
+                    {
+                        deltas[index] = (x, y, z);
+                    }
+                }
+
+                shapeMorphs.Add((morphName, sparse));
+            }
+
+            if (shapeIndex == 0)
+            {
+                firstShapeMorphs = shapeMorphs?
+                    .Select(morph =>
+                    {
+                        var deltas = new (float X, float Y, float Z)[shapeVertexCount];
+                        foreach (var (index, x, y, z) in morph.Sparse)
+                        {
+                            if (index >= 0 && index < deltas.Length)
+                            {
+                                deltas[index] = (x, y, z);
+                            }
+                        }
+
+                        return new TriMorphEntry(morph.Name, deltas);
+                    })
+                    .ToList() ?? [];
+                firstShapeVertexCount = shapeVertexCount;
+            }
+        }
+
+        if (firstShapeMorphs is null || firstShapeMorphs.Count == 0)
+        {
+            return false;
+        }
+
+        payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs);
         return true;
     }
 }
