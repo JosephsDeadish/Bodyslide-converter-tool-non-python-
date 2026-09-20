@@ -138,7 +138,10 @@ internal static class PhysicsRepairCatalog
 
     private static string NormalizeToken(string value)
     {
-        Span<char> buffer = stackalloc char[value.Length];
+        const int MaxStackTokenLength = 256;
+        Span<char> buffer = value.Length <= MaxStackTokenLength
+            ? stackalloc char[value.Length]
+            : new char[value.Length];
         var length = 0;
         foreach (var ch in value)
         {

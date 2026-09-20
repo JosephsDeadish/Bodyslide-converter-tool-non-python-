@@ -206,6 +206,11 @@ internal static class TriMorphReader
                 return false;
             }
 
+            if (deltaCount != vertexCount)
+            {
+                return false;
+            }
+
             var expectedBytes = checked(deltaCount * 6);
             if (offset + expectedBytes > bytes.Length)
             {

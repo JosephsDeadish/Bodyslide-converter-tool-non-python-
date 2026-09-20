@@ -1136,7 +1136,12 @@ public sealed class MainForm : Form
                 new JsonSerializerOptions { WriteIndented = true });
             tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
             File.WriteAllText(tempPath, json);
-            File.Move(tempPath, settingsPath, overwrite: true);
+            if (File.Exists(settingsPath))
+            {
+                File.Delete(settingsPath);
+            }
+
+            File.Move(tempPath, settingsPath);
         }
         catch (Exception ex)
         {
@@ -4255,15 +4260,13 @@ public sealed class MainForm : Form
         }
 
         if (normalized.StartsWith("plugin-", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase))
+            normalized.Equals("race-compatibility-warning", StringComparison.OrdinalIgnoreCase) ||
+            normalized is "missing-plugin-patch-report" or "missing-xedit-script" or "missing-root-plugin")
         {
             return "Plugin review";
         }
 
-        if (normalized.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
-            normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase) ||
-            normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase))
+        if (IsPackagingReviewGuidanceCode(normalized))
         {
             return "Packaging review";
         }
@@ -4473,6 +4476,21 @@ public sealed class MainForm : Form
         code.Equals("missing-preview-workbench", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-preview-html", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-preview-svg", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPackagingReviewGuidanceCode(string code) =>
+        code.StartsWith("zip-", StringComparison.OrdinalIgnoreCase) ||
+        code.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("invalid-output-zip", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-readme", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-dependency-map", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-conversion-quality-report", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-staged-cbpc-config", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-staged-smp-config", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-staged-mesh-output", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-fomod-module-config", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-root-support-file", StringComparison.OrdinalIgnoreCase);
 
     private static string? ResolveExistingGuidancePath(string outputDirectory, string relativePath)
     {

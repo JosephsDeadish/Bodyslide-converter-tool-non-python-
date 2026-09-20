@@ -14365,7 +14365,7 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
-            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs);
+            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis);
 
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
@@ -19883,11 +19883,13 @@ internal sealed class LocalExportService(
             float[] TargetTransferAmbiguity,
             float SourceGlobalNeighborDistance,
             float TargetGlobalNeighborDistance,
-            bool ExtremeTopologyAdaptationRisk);
+            bool ExtremeTopologyAdaptationRisk,
+            IReadOnlyList<string> PartHints);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
-            IReadOnlyList<string> writtenNifs)
+            IReadOnlyList<string> writtenNifs,
+            MeshAnalysis? analysis)
         {
             var sourceVertices = sourceMeshFiles
                 .Select(NifGeometrySignatureReader.TryReadFullVertices)
@@ -19916,6 +19918,7 @@ internal sealed class LocalExportService(
                 .ToArray();
             var sourceGlobalNeighborDistance = ComputeGlobalNeighborDistance(normalizedSourceVertices, sourceNeighborIndexes);
             var targetGlobalNeighborDistance = ComputeGlobalNeighborDistance(normalizedTargetVertices, neighborIndexes);
+            var partHints = GetMorphTransferPartHints(analysis);
 
             var context = new MorphTransferContext(
                 sourceVertices,
@@ -19927,7 +19930,8 @@ internal sealed class LocalExportService(
                 transferAmbiguity,
                 sourceGlobalNeighborDistance,
                 targetGlobalNeighborDistance,
-                false);
+                false,
+                partHints);
             return context with
             {
                 ExtremeTopologyAdaptationRisk = HasExtremeTopologyAdaptation(normalizedSourceVertices, normalizedTargetVertices, context)
@@ -20113,6 +20117,12 @@ internal sealed class LocalExportService(
                 var combinedScale = (structureScale == 1f && sourceSpan <= 0.0001f)
                     ? effectiveLocalScale
                     : Math.Clamp((structureScale * 0.65f) + (effectiveLocalScale * 0.35f), 0.68f, 1.42f);
+                var partAwareDamping = ComputePartAwareTopologyDamping(
+                    normalizedTargetVertices,
+                    morphTransferContext,
+                    targetIndex,
+                    ambiguity);
+                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping);
                 if (MathF.Abs(combinedScale - 1f) < 0.10f)
                 {
                     continue;
@@ -20127,6 +20137,55 @@ internal sealed class LocalExportService(
             }
 
             return adapted;
+        }
+
+        private static IReadOnlyList<string> GetMorphTransferPartHints(MeshAnalysis? analysis)
+        {
+            if (analysis is null)
+            {
+                return [];
+            }
+
+            var hints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (analysis.HasSplitMeshes)
+            {
+                hints.Add("split-mesh");
+            }
+
+            if (analysis.HasStrapLikePieces)
+            {
+                hints.Add("strap-like");
+            }
+
+            if (analysis.HasLayeredPanels)
+            {
+                hints.Add("layered-panel");
+            }
+
+            if (analysis.HasOpenStructurePieces)
+            {
+                hints.Add("open-structure");
+            }
+
+            if (analysis.HasRigidSubMeshes)
+            {
+                hints.Add("rigid-shell");
+            }
+
+            if (analysis.GeometryPartLabels is { Count: > 0 })
+            {
+                foreach (var label in analysis.GeometryPartLabels.Values.SelectMany(static values => values))
+                {
+                    if (!string.IsNullOrWhiteSpace(label))
+                    {
+                        hints.Add(label);
+                    }
+                }
+            }
+
+            return hints
+                .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         private static int[] BuildNearestSurfaceMap(
@@ -20491,6 +20550,75 @@ internal sealed class LocalExportService(
             return severeRatio >= 0.08d || extremeRatio >= 0.22d;
         }
 
+        private static float ComputePartAwareTopologyDamping(
+            IReadOnlyList<MeshVertex> normalizedTargetVertices,
+            MorphTransferContext morphTransferContext,
+            int targetIndex,
+            float ambiguity)
+        {
+            if (morphTransferContext.PartHints.Count == 0 ||
+                (!morphTransferContext.ExtremeTopologyAdaptationRisk &&
+                 morphTransferContext.SourceVertices.Count == morphTransferContext.TargetVertices.Count) ||
+                targetIndex < 0 ||
+                targetIndex >= normalizedTargetVertices.Count)
+            {
+                return 1f;
+            }
+
+            var vertex = normalizedTargetVertices[targetIndex];
+            var normalizedHeight = Math.Clamp(vertex.Z, 0f, 1f);
+            var lateralDistance = MathF.Abs(vertex.X - 0.5f) * 2f;
+            var depthDistance = MathF.Abs(vertex.Y - 0.5f) * 2f;
+            var outerBias = Math.Clamp(MathF.Max(lateralDistance, depthDistance), 0f, 1f);
+            var centerBias = 1f - Math.Clamp((lateralDistance + depthDistance) * 0.5f, 0f, 1f);
+            var damping = 1f;
+
+            if (HasMorphTransferPartHint(morphTransferContext, "split-mesh") && ambiguity >= 0.10f)
+            {
+                damping = MathF.Min(damping, 0.90f);
+            }
+
+            if (HasMorphTransferPartHint(morphTransferContext, "strap-like") &&
+                normalizedHeight is >= 0.12f and <= 0.94f)
+            {
+                damping = MathF.Min(damping, 0.82f);
+            }
+
+            if ((HasMorphTransferPartHint(morphTransferContext, "layered-panel") ||
+                 HasMorphTransferPartHint(morphTransferContext, "lower-drape")) &&
+                normalizedHeight <= 0.55f)
+            {
+                damping = MathF.Min(damping, centerBias >= 0.22f ? 0.74f : 0.80f);
+            }
+
+            if ((HasMorphTransferPartHint(morphTransferContext, "open-structure") ||
+                 HasMorphTransferPartHint(morphTransferContext, "open-window") ||
+                 HasMorphTransferPartHint(morphTransferContext, "cage-frame")) &&
+                normalizedHeight is >= 0.18f and <= 0.88f)
+            {
+                damping = MathF.Min(damping, centerBias >= 0.18f ? 0.72f : 0.80f);
+            }
+
+            if ((HasMorphTransferPartHint(morphTransferContext, "rigid-shell") ||
+                 HasMorphTransferPartHint(morphTransferContext, "outer-layer") ||
+                 HasMorphTransferPartHint(morphTransferContext, "shoulder-shell")) &&
+                normalizedHeight >= 0.52f &&
+                outerBias >= 0.42f)
+            {
+                damping = MathF.Min(damping, normalizedHeight >= 0.76f ? 0.74f : 0.82f);
+            }
+
+            if (damping < 1f && morphTransferContext.ExtremeTopologyAdaptationRisk)
+            {
+                damping = MathF.Min(damping, 0.88f - (MathF.Min(ambiguity, 0.45f) * 0.10f));
+            }
+
+            return Math.Clamp(damping, 0.60f, 1f);
+        }
+
+        private static bool HasMorphTransferPartHint(MorphTransferContext morphTransferContext, string hint) =>
+            morphTransferContext.PartHints.Contains(hint, StringComparer.OrdinalIgnoreCase);
+
         private static float ComputeWeightedSourceNeighborDistance(
             IReadOnlyList<MeshVertex> normalizedSourceVertices,
             MorphTransferContext morphTransferContext,
@@ -20701,6 +20829,7 @@ internal sealed class LocalExportService(
             }
 
             var stabilized = retargetedDeltas.ToArray();
+            var normalizedTargetVertices = NormalizeVerticesForTransfer(morphTransferContext.TargetVertices);
             for (var targetIndex = 0; targetIndex < stabilized.Length; targetIndex++)
             {
                 var ambiguity = morphTransferContext.TargetTransferAmbiguity[targetIndex];
@@ -20765,7 +20894,15 @@ internal sealed class LocalExportService(
                 averageZ /= sampleCount;
 
                 var current = retargetedDeltas[targetIndex];
-                var blendStrength = Math.Clamp(0.12f + (ambiguity * 0.48f), 0.12f, 0.60f);
+                var partAwareDamping = ComputePartAwareTopologyDamping(
+                    normalizedTargetVertices,
+                    morphTransferContext,
+                    targetIndex,
+                    ambiguity);
+                var blendStrength = Math.Clamp(
+                    0.12f + (ambiguity * 0.48f) + ((1f - partAwareDamping) * 0.35f),
+                    0.12f,
+                    0.72f);
                 stabilized[targetIndex] = (
                     Lerp(current.X, averageX, blendStrength),
                     Lerp(current.Y, averageY, blendStrength),

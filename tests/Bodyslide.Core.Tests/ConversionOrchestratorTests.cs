@@ -7288,6 +7288,16 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_WithSparseDeltaCount_IsRejected()
+        {
+            var bytes = BuildTriPayload(
+                vertexCount: 2,
+                ("BreastLift", [(0.125f, 0f, -0.25f)]));
+
+            Assert.False(TriMorphReader.TryRead(bytes, out _));
+        }
+
+        [Fact]
         public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
         {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -9141,6 +9151,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("wing", aquaticWingGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("GillFrillSwing", out var aquaticManeGroup));
         Assert.Equal("mane", aquaticManeGroup);
+        var longTailToken = $"{new string('X', 384)}TailChain";
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
+        Assert.Equal("tail", longTokenGroup);
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingFinger01.L", "TailBarbTip"]));
         Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Antenna.L", "Mandible.R"]));
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFin.L", "Whisker.R"]));
@@ -17438,7 +17451,8 @@ public sealed class OutputCompletenessTests
             var context = createContext!.Invoke(null, new object[]
             {
                 new[] { sourcePath },
-                new[] { targetPath }
+                new[] { targetPath },
+                new MeshAnalysis("mixed", false, 1)
             });
             Assert.NotNull(context);
 
@@ -17502,7 +17516,8 @@ public sealed class OutputCompletenessTests
             var context = createContext!.Invoke(null, new object[]
             {
                 new[] { sourcePath },
-                new[] { targetPath }
+                new[] { targetPath },
+                new MeshAnalysis("mixed", false, 1)
             });
             Assert.NotNull(context);
 
@@ -17560,7 +17575,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 10);
+            .Single(ctor => ctor.GetParameters().Length == 11);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17584,7 +17599,8 @@ public sealed class OutputCompletenessTests
             new[] { 0f, 0f, 0f, 0f },
             1f,
             1f,
-            false
+            false,
+            Array.Empty<string>()
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17641,7 +17657,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 10);
+            .Single(ctor => ctor.GetParameters().Length == 11);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -17665,7 +17681,8 @@ public sealed class OutputCompletenessTests
             new[] { 0f, 0f, 0f, 0f },
             0.50f,
             0.54f,
-            false
+            false,
+            Array.Empty<string>()
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17719,7 +17736,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 10);
+            .Single(ctor => ctor.GetParameters().Length == 11);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -17731,7 +17748,8 @@ public sealed class OutputCompletenessTests
             new[] { 0f, 0.80f, 0f },
             1f,
             1f,
-            false
+            false,
+            Array.Empty<string>()
         ]);
 
         var retargeted = new (float X, float Y, float Z)[]
@@ -17748,6 +17766,89 @@ public sealed class OutputCompletenessTests
         Assert.Equal(0f, result[2].X, 3);
         Assert.True(result[1].X > 0f);
         Assert.True(result[1].X < retargeted[1].X, "Expected ambiguous retargeted morph delta to be stabilized below the original spike.");
+    }
+
+    [Fact]
+    public void AdaptRetargetedMorphPayload_DampsRiskyPartHintsDuringExtremeTopologyReuse()
+    {
+        var adaptMethod = typeof(LocalExportService).GetMethod("AdaptRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        Assert.NotNull(adaptMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
+
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 11);
+        object CreateContext(IReadOnlyList<string> partHints) => contextCtor.Invoke(
+        [
+            new[]
+            {
+                new MeshVertex(-1f, 0f, 0f),
+                new MeshVertex(1f, 0f, 0f),
+                new MeshVertex(-1f, 0f, 1f),
+                new MeshVertex(1f, 0f, 1f)
+            },
+            new[]
+            {
+                new MeshVertex(-0.5f, 0f, 0f),
+                new MeshVertex(0.5f, 0f, 0f),
+                new MeshVertex(-4f, 0f, 1f),
+                new MeshVertex(4f, 0f, 1f)
+            },
+            new[] { 0, 1, 2, 3 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            new[] { 0.22f, 0.26f, 0.18f, 0.14f },
+            1f,
+            1f,
+            true,
+            partHints
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f),
+            (1f, 0f, 0.25f)
+        };
+
+        var baseline = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            adaptMethod!.Invoke(null, [retargeted, CreateContext(Array.Empty<string>())]));
+        var hinted = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            adaptMethod.Invoke(null, [retargeted, CreateContext(new[] { "split-mesh", "strap-like", "lower-drape", "open-window" })]));
+
+        Assert.Equal(4, baseline.Count);
+        Assert.Equal(4, hinted.Count);
+        Assert.True(Math.Abs(hinted[0].X - 1f) < Math.Abs(baseline[0].X - 1f), "Expected risky lower-body part hints to keep reused lateral deltas closer to neutral for extreme topology reuse.");
+        Assert.True(Math.Abs(hinted[1].X - 1f) < Math.Abs(baseline[1].X - 1f), "Expected risky split/strap hints to damp lower-body topology adaptation.");
+        Assert.True(Math.Abs(hinted[0].Z - 0.25f) < Math.Abs(baseline[0].Z - 0.25f), "Expected risky part hints to reduce axial over-adaptation in lower drape/open regions.");
+        Assert.True(Math.Abs(hinted[1].Z - 0.25f) < Math.Abs(baseline[1].Z - 0.25f), "Expected risky split/strap hints to reduce axial over-adaptation.");
     }
 
     private static void AssertDeltasEqual(
