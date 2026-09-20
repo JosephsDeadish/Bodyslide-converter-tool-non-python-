@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.Globalization;
 using System.IO.Compression;
@@ -15516,6 +15517,19 @@ internal sealed class LocalExportService(
     IGroundMeshGeneratorService? groundMeshGen = null,
     IScratchPluginGeneratorService? scratchPluginGen = null) : IExportService
 {
+    private sealed record MeshTransferTopologySnapshot(
+        string CacheKey,
+        IReadOnlyList<MeshVertex> Vertices,
+        IReadOnlyList<MeshVertex> NormalizedVertices,
+        NifGeometrySignatureReader.MeshTopologySummary? TopologySummary,
+        int[] ComponentIds,
+        bool[] BoundaryVertexFlags,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> EdgeNetworks,
+        bool HasExplicitTopology);
+
+    private static readonly ConcurrentDictionary<string, MeshTransferTopologySnapshot> MeshTransferTopologySnapshotCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
         ConversionRequest request,
         ImportedArmor armor,
@@ -17076,6 +17090,94 @@ internal sealed class LocalExportService(
             ["arms"] = 0.055f,
         };
 
+    private static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshot(string meshFile)
+    {
+        if (string.IsNullOrWhiteSpace(meshFile) ||
+            !File.Exists(meshFile) ||
+            !Path.GetExtension(meshFile).Equals(".nif", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var cacheKey = BuildMeshTransferTopologyCacheKey(meshFile);
+        if (cacheKey is null)
+        {
+            return null;
+        }
+
+        return MeshTransferTopologySnapshotCache.GetOrAdd(
+            cacheKey,
+            static (_, path) => CreateMeshTransferTopologySnapshot(path),
+            meshFile);
+    }
+
+    private static string? BuildMeshTransferTopologyCacheKey(string meshFile)
+    {
+        try
+        {
+            var info = new FileInfo(meshFile);
+            return $"{Path.GetFullPath(meshFile)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static MeshTransferTopologySnapshot CreateMeshTransferTopologySnapshot(string meshFile)
+    {
+        var cacheKey = BuildMeshTransferTopologyCacheKey(meshFile) ?? Path.GetFullPath(meshFile);
+        var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
+        if (vertices is not { Count: > 0 })
+        {
+            return new MeshTransferTopologySnapshot(
+                cacheKey,
+                [],
+                [],
+                null,
+                [],
+                [],
+                new Dictionary<int, TransferIslandEdgeNetwork>(),
+                false);
+        }
+
+        var normalizedVertices = NormalizeVerticesForTransfer(vertices);
+        var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
+        var hasExplicitTopology = topologySummary is { VertexCount: > 0 } &&
+                                  topologySummary.VertexCount == vertices.Count &&
+                                  topologySummary.ComponentIds.Length == vertices.Count;
+        var componentIds = hasExplicitTopology
+            ? topologySummary!.ComponentIds
+            : BuildMorphTransferIslandMap(normalizedVertices);
+        var boundaryFlags = topologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitBoundaryFlags &&
+                            explicitBoundaryFlags.Length == vertices.Count
+            ? explicitBoundaryFlags
+            : EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+        var edgeNetworks = BuildTransferIslandEdgeNetworks(
+            normalizedVertices,
+            componentIds,
+            boundaryFlags,
+            hasExplicitTopology ? topologySummary : null);
+
+        return new MeshTransferTopologySnapshot(
+            cacheKey,
+            vertices,
+            normalizedVertices,
+            topologySummary,
+            componentIds,
+            boundaryFlags,
+            edgeNetworks,
+            hasExplicitTopology);
+    }
+
     internal static DeformationCage? BuildExportDeformationCage(
         IReadOnlyList<string> meshFiles,
         DeformationCage? deformationCage)
@@ -17095,74 +17197,43 @@ internal sealed class LocalExportService(
                      .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            IReadOnlyList<MeshVertex>? vertices;
-            try
-            {
-                vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
-            }
-            catch (IOException)
-            {
-                continue;
-            }
-            catch (UnauthorizedAccessException)
+            var snapshot = GetMeshTransferTopologySnapshot(meshFile);
+            if (snapshot is null || snapshot.Vertices.Count == 0)
             {
                 continue;
             }
 
-            if (vertices is null || vertices.Count == 0)
-            {
-                continue;
-            }
-
-            var rawVertices = vertices
+            var rawVertices = snapshot.Vertices
                 .Select(static vertex => (vertex.X, vertex.Y, vertex.Z))
                 .ToArray();
-            var normalizedVertices = NormalizeVerticesForTransfer(vertices);
-            var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
-            var hasExplicitTopology = topologySummary is { VertexCount: > 0 } &&
-                                      topologySummary.VertexCount == vertices.Count &&
-                                      topologySummary.ComponentIds.Length == vertices.Count;
-            var componentIds = hasExplicitTopology
-                ? topologySummary!.ComponentIds
-                : BuildMorphTransferIslandMap(normalizedVertices);
-            if (componentIds.Length != vertices.Count)
+            if (snapshot.ComponentIds.Length != snapshot.Vertices.Count)
             {
                 continue;
             }
 
-            var boundaryFlags = topologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitBoundaryFlags &&
-                                explicitBoundaryFlags.Length == vertices.Count
-                ? explicitBoundaryFlags
-                : EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
-            var edgeNetworks = BuildTransferIslandEdgeNetworks(
-                normalizedVertices,
-                componentIds,
-                boundaryFlags,
-                hasExplicitTopology ? topologySummary : null);
-
-            if (componentIds.Distinct().Take(2).Count() < 2 && !boundaryFlags.Any(static flag => flag))
+            if (snapshot.ComponentIds.Distinct().Take(2).Count() < 2 && !snapshot.BoundaryVertexFlags.Any(static flag => flag))
             {
                 continue;
             }
 
-            foreach (var group in componentIds
+            foreach (var group in snapshot.ComponentIds
                          .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
                          .GroupBy(static entry => entry.ComponentId)
                          .OrderBy(static group => group.Key))
             {
                 var indexes = group.Select(static entry => entry.Index).ToArray();
                 var semanticProfile = DeriveCageIslandSemanticProfile(
-                    normalizedVertices,
+                    snapshot.NormalizedVertices,
                     indexes,
-                    boundaryFlags,
-                    hasExplicitTopology,
-                    topologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
+                    snapshot.BoundaryVertexFlags,
+                    snapshot.HasExplicitTopology,
+                    snapshot.TopologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
                     group.Key >= 0 &&
                     group.Key < componentBoundaryLoopCounts.Length
                         ? componentBoundaryLoopCounts[group.Key]
                         : 0);
                 TopologyIslandEdgeNetworkSummary? edgeNetworkSummary = null;
-                if (edgeNetworks.TryGetValue(group.Key, out var edgeNetwork))
+                if (snapshot.EdgeNetworks.TryGetValue(group.Key, out var edgeNetwork))
                 {
                                     edgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
                                         ComponentId: edgeNetwork.IslandId,
@@ -17176,17 +17247,17 @@ internal sealed class LocalExportService(
                                         IsClosedManifold: edgeNetwork.BoundaryEdges.Count == 0 && edgeNetwork.NonManifoldEdgeCount == 0,
                                         HasManifoldRisk: edgeNetwork.NonManifoldEdgeCount > 0 || edgeNetwork.ManifoldScore < 0.82f);
                 }
-                var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
+                var dominantRegions = ResolveDominantCageRegions(snapshot.NormalizedVertices, indexes, deformationCage);
                 var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
                 var boundaryLoopControls = BuildIslandBoundaryLoopControls(
                     rawVertices,
-                    topologySummary?.BoundaryLoops,
+                    snapshot.TopologySummary?.BoundaryLoops,
                     group.Key,
                     effectiveRegions,
                     edgeNetworkSummary);
                 var authoredRegions = BuildIslandAuthoredRegions(
-                    normalizedVertices,
-                    topologySummary?.BoundaryLoops,
+                    snapshot.NormalizedVertices,
+                    snapshot.TopologySummary?.BoundaryLoops,
                     group.Key,
                     indexes,
                     effectiveRegions,
@@ -17198,20 +17269,20 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
-                var boundaryCount = topologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
+                var boundaryCount = snapshot.TopologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
                                     group.Key >= 0 &&
                                     group.Key < componentBoundaryVertexCounts.Length
                     ? componentBoundaryVertexCounts[group.Key]
-                    : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                    : indexes.Count(index => index >= 0 && index < snapshot.BoundaryVertexFlags.Length && snapshot.BoundaryVertexFlags[index]);
                 var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
                 var rigidityBias = Math.Clamp(
-                                    (hasExplicitTopology ? 0.04f : 0f) +
+                                    (snapshot.HasExplicitTopology ? 0.04f : 0f) +
                                     semanticProfile.RigidityBias +
                                     MathF.Min(0.12f, boundaryRatio * 0.22f),
                                     0f,
                     0.28f);
                 var boundaryDamping = Math.Clamp(
-                    (hasExplicitTopology ? 0.05f : 0.02f) +
+                    (snapshot.HasExplicitTopology ? 0.05f : 0.02f) +
                     semanticProfile.BoundaryDamping +
                     MathF.Min(0.18f, boundaryRatio * 0.45f),
                     0f,
@@ -20226,7 +20297,7 @@ internal sealed class LocalExportService(
     {
         return meshFiles
             .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(NifGeometrySignatureReader.TryReadTopologySummary)
+            .Select(path => GetMeshTransferTopologySnapshot(path)?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(path))
             .Where(static summary => summary is { VertexCount: > 0 } && summary.ComponentIds.Length == summary.VertexCount)
             .OrderByDescending(summary => summary!.VertexCount == preferredVertexCount)
             .ThenByDescending(summary => summary!.VertexCount)
@@ -22821,54 +22892,28 @@ internal sealed class LocalExportService(
             IReadOnlyList<string> writtenNifs,
             MeshAnalysis? analysis)
         {
-            var sourceVertices = sourceMeshFiles
-                .Select(NifGeometrySignatureReader.TryReadFullVertices)
-                .FirstOrDefault(vertices => vertices is { Count: > 0 });
-            var targetVertices = writtenNifs
-                .Select(NifGeometrySignatureReader.TryReadFullVertices)
-                .FirstOrDefault(vertices => vertices is { Count: > 0 });
+            var sourceSnapshot = sourceMeshFiles
+                .Select(GetMeshTransferTopologySnapshot)
+                .FirstOrDefault(static snapshot => snapshot is not null && snapshot.Vertices.Count > 0);
+            var targetSnapshot = writtenNifs
+                .Select(GetMeshTransferTopologySnapshot)
+                .FirstOrDefault(static snapshot => snapshot is not null && snapshot.Vertices.Count > 0);
 
-            if (sourceVertices is null || targetVertices is null || sourceVertices.Count == 0 || targetVertices.Count == 0)
+            if (sourceSnapshot is null || targetSnapshot is null)
             {
                 return null;
             }
 
-            var normalizedSourceVertices = NormalizeVerticesForTransfer(sourceVertices);
-            var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
+            var sourceVertices = sourceSnapshot.Vertices;
+            var targetVertices = targetSnapshot.Vertices;
+            var normalizedSourceVertices = sourceSnapshot.NormalizedVertices;
+            var normalizedTargetVertices = targetSnapshot.NormalizedVertices;
             var sourceTransferZones = BuildMorphTransferZoneMap(normalizedSourceVertices);
             var targetTransferZones = BuildMorphTransferZoneMap(normalizedTargetVertices);
-            var sourceTopologySummary = sourceMeshFiles
-                .Select(NifGeometrySignatureReader.TryReadTopologySummary)
-                .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
-                                           summary.ComponentIds.Length == sourceVertices.Count);
-            var sourceTransferIslands = sourceTopologySummary?
-                .ComponentIds
-                ?? BuildMorphTransferIslandMap(normalizedSourceVertices);
-            var targetTopologySummary = writtenNifs
-                .Select(NifGeometrySignatureReader.TryReadTopologySummary)
-                .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
-                                           summary.ComponentIds.Length == targetVertices.Count);
-            var targetTransferIslands = targetTopologySummary?
-                .ComponentIds
-                ?? BuildMorphTransferIslandMap(normalizedTargetVertices);
-            var sourceBoundaryFlags = sourceTopologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitSourceBoundaryFlags &&
-                                      explicitSourceBoundaryFlags.Length == sourceVertices.Count
-                ? explicitSourceBoundaryFlags
-                : EstimateBoundaryVertexFlags(normalizedSourceVertices, sourceTransferIslands);
-            var targetBoundaryFlags = targetTopologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitTargetBoundaryFlags &&
-                                      explicitTargetBoundaryFlags.Length == targetVertices.Count
-                ? explicitTargetBoundaryFlags
-                : EstimateBoundaryVertexFlags(normalizedTargetVertices, targetTransferIslands);
-            var sourceEdgeNetworks = BuildTransferIslandEdgeNetworks(
-                normalizedSourceVertices,
-                sourceTransferIslands,
-                sourceBoundaryFlags,
-                sourceTopologySummary);
-            var targetEdgeNetworks = BuildTransferIslandEdgeNetworks(
-                normalizedTargetVertices,
-                targetTransferIslands,
-                targetBoundaryFlags,
-                targetTopologySummary);
+            var sourceTransferIslands = sourceSnapshot.ComponentIds;
+            var targetTransferIslands = targetSnapshot.ComponentIds;
+            var sourceEdgeNetworks = sourceSnapshot.EdgeNetworks;
+            var targetEdgeNetworks = targetSnapshot.EdgeNetworks;
             var targetIslandToSourceIslandMap = BuildMorphTransferIslandMatches(
                 normalizedSourceVertices,
                 normalizedTargetVertices,

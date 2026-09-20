@@ -2466,6 +2466,65 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task LocalExportService_ReusesCachedTopologySnapshotsUntilMeshChanges()
+    {
+        var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshot", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "cached_edge_network_0.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteBsTriShapeStyleAsync(
+                meshPath,
+                [
+                    (0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f), (1f, 1f, 0f)
+                ],
+                [
+                    ((ushort)0, (ushort)1, (ushort)2),
+                    ((ushort)1, (ushort)3, (ushort)2)
+                ]);
+
+            var snapshot1 = method!.Invoke(null, [meshPath]);
+            var snapshot2 = method.Invoke(null, [meshPath]);
+
+            Assert.NotNull(snapshot1);
+            Assert.Same(snapshot1, snapshot2);
+
+            var edgeNetworks1 = snapshot1!.GetType().GetProperty("EdgeNetworks")!.GetValue(snapshot1);
+            var edgeNetworks2 = snapshot2!.GetType().GetProperty("EdgeNetworks")!.GetValue(snapshot2);
+            Assert.Same(edgeNetworks1, edgeNetworks2);
+
+            await SyntheticNifTestData.WriteBsTriShapeStyleAsync(
+                meshPath,
+                [
+                    (0f, 0f, 0f), (1f, 0f, 0f), (0f, 1f, 0f), (1f, 1f, 0f), (0.5f, 0.5f, 0.5f)
+                ],
+                [
+                    ((ushort)0, (ushort)1, (ushort)4),
+                    ((ushort)1, (ushort)3, (ushort)4),
+                    ((ushort)3, (ushort)2, (ushort)4),
+                    ((ushort)2, (ushort)0, (ushort)4)
+                ]);
+
+            File.SetLastWriteTimeUtc(meshPath, DateTime.UtcNow.AddSeconds(1));
+            var snapshot3 = method.Invoke(null, [meshPath]);
+
+            Assert.NotNull(snapshot3);
+            Assert.NotSame(snapshot1, snapshot3);
+            Assert.NotEqual(
+                snapshot1.GetType().GetProperty("CacheKey")!.GetValue(snapshot1),
+                snapshot3!.GetType().GetProperty("CacheKey")!.GetValue(snapshot3));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicMeshAnalysisService_DerivesEdgeNetworkLabelsFromExplicitNonManifoldTopology()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
