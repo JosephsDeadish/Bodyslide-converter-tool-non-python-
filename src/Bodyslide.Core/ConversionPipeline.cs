@@ -814,7 +814,8 @@ public sealed record CageIslandMembershipSummary(
     int BoundaryVertexCount,
     bool UsesExplicitTopology,
     IReadOnlyList<string> CageRegions,
-    IReadOnlyList<string>? SemanticLabels = null);
+    IReadOnlyList<string>? SemanticLabels = null,
+    int BoundaryLoopCount = 0);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -2408,7 +2409,9 @@ internal static class NifGeometrySignatureReader
         int[] ComponentIds,
         int BoundaryLoopCount,
         int BoundaryVertexCount,
-        bool[] BoundaryVertexFlags);
+        bool[] BoundaryVertexFlags,
+        int[]? ComponentBoundaryLoopCounts = null,
+        int[]? ComponentBoundaryVertexCounts = null);
 
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
@@ -3376,8 +3379,15 @@ internal static class NifGeometrySignatureReader
         }
 
         var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
-        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles);
-        return new MeshTopologySummary(bestVertexCount, componentIds, boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags);
+        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
+        return new MeshTopologySummary(
+            bestVertexCount,
+            componentIds,
+            boundaryLoopCount,
+            boundaryVertexCount,
+            boundaryVertexFlags,
+            componentBoundaryLoopCounts,
+            componentBoundaryVertexCounts);
     }
 
     private static int[] BuildTopologyComponentIds(int vertexCount, IReadOnlyList<ushort> triangles)
@@ -3449,7 +3459,10 @@ internal static class NifGeometrySignatureReader
         return normalized;
     }
 
-    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags) AnalyzeBoundaryEdges(int vertexCount, IReadOnlyList<ushort> triangles)
+    private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts) AnalyzeBoundaryEdges(
+        int vertexCount,
+        IReadOnlyList<ushort> triangles,
+        IReadOnlyList<int> componentIds)
     {
         var edgeCounts = new Dictionary<(int Left, int Right), int>();
         for (var index = 0; index + 2 < triangles.Count; index += 3)
@@ -3469,6 +3482,11 @@ internal static class NifGeometrySignatureReader
 
         var boundaryAdjacency = new Dictionary<int, HashSet<int>>();
         var boundaryVertexFlags = new bool[vertexCount];
+        var componentCount = componentIds.Count == vertexCount && componentIds.Count > 0
+            ? componentIds.Max() + 1
+            : 0;
+        var componentBoundaryLoopCounts = new int[Math.Max(0, componentCount)];
+        var componentBoundaryVertexCounts = new int[Math.Max(0, componentCount)];
         foreach (var (edge, count) in edgeCounts)
         {
             if (count != 1 || edge.Left == edge.Right)
@@ -3501,6 +3519,23 @@ internal static class NifGeometrySignatureReader
             }
         }
 
+        if (componentIds.Count == vertexCount)
+        {
+            for (var vertexIndex = 0; vertexIndex < boundaryVertexFlags.Length; vertexIndex++)
+            {
+                if (!boundaryVertexFlags[vertexIndex])
+                {
+                    continue;
+                }
+
+                var componentId = componentIds[vertexIndex];
+                if (componentId >= 0 && componentId < componentBoundaryVertexCounts.Length)
+                {
+                    componentBoundaryVertexCounts[componentId]++;
+                }
+            }
+        }
+
         var visited = new HashSet<int>();
         var loopCount = 0;
         foreach (var vertex in boundaryAdjacency.Keys)
@@ -3513,9 +3548,18 @@ internal static class NifGeometrySignatureReader
             loopCount++;
             var queue = new Queue<int>();
             queue.Enqueue(vertex);
+            var componentMembership = new Dictionary<int, int>();
             while (queue.Count > 0)
             {
                 var current = queue.Dequeue();
+                if (componentIds.Count == vertexCount)
+                {
+                    var componentId = componentIds[current];
+                    componentMembership[componentId] = componentMembership.TryGetValue(componentId, out var count)
+                        ? count + 1
+                        : 1;
+                }
+
                 if (!boundaryAdjacency.TryGetValue(current, out var neighbors))
                 {
                     continue;
@@ -3529,9 +3573,22 @@ internal static class NifGeometrySignatureReader
                     }
                 }
             }
+
+            if (componentMembership.Count > 0)
+            {
+                var dominantComponentId = componentMembership
+                    .OrderByDescending(static pair => pair.Value)
+                    .ThenBy(static pair => pair.Key)
+                    .First()
+                    .Key;
+                if (dominantComponentId >= 0 && dominantComponentId < componentBoundaryLoopCounts.Length)
+                {
+                    componentBoundaryLoopCounts[dominantComponentId]++;
+                }
+            }
         }
 
-        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags);
+        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts);
 
         void AddEdge(int left, int right)
         {
@@ -16418,7 +16475,12 @@ internal sealed class LocalExportService(
                     normalizedVertices,
                     indexes,
                     boundaryFlags,
-                    hasExplicitTopology);
+                    hasExplicitTopology,
+                    topologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
+                    group.Key >= 0 &&
+                    group.Key < componentBoundaryLoopCounts.Length
+                        ? componentBoundaryLoopCounts[group.Key]
+                        : 0);
                 var dominantRegions = ResolveDominantCageRegions(normalizedVertices, indexes, deformationCage);
                 var effectiveRegions = ResolveSemanticIslandCageRegions(dominantRegions, semanticProfile, deformationCage);
                 if (effectiveRegions.Count == 0)
@@ -16426,7 +16488,11 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
-                var boundaryCount = indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                var boundaryCount = topologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
+                                    group.Key >= 0 &&
+                                    group.Key < componentBoundaryVertexCounts.Length
+                    ? componentBoundaryVertexCounts[group.Key]
+                    : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
                 var boundaryRatio = indexes.Length == 0 ? 0f : boundaryCount / (float)indexes.Length;
                 var rigidityBias = Math.Clamp(
                     (hasExplicitTopology ? 0.04f : 0f) +
@@ -16480,7 +16546,8 @@ internal sealed class LocalExportService(
         IReadOnlyList<MeshVertex> normalizedVertices,
         IReadOnlyList<int> indexes,
         IReadOnlyList<bool> boundaryFlags,
-        bool hasExplicitTopology)
+        bool hasExplicitTopology,
+        int islandBoundaryLoopCount)
     {
         if (indexes.Count == 0)
         {
@@ -16537,11 +16604,13 @@ internal sealed class LocalExportService(
         var depthScaleBias = 1f;
         var heightScaleBias = 1f;
 
-        if ((hasExplicitTopology && boundaryRatio >= 0.42f) || boundaryRatio >= 0.58f)
+        if ((hasExplicitTopology && islandBoundaryLoopCount >= 2) ||
+            (hasExplicitTopology && boundaryRatio >= 0.42f) ||
+            boundaryRatio >= 0.58f)
         {
             labels.Add("window-frame-island");
-            rigidityBias += 0.06f;
-            boundaryDamping += 0.07f;
+            rigidityBias += islandBoundaryLoopCount >= 2 ? 0.08f : 0.06f;
+            boundaryDamping += islandBoundaryLoopCount >= 2 ? 0.09f : 0.07f;
             widthScaleBias = MathF.Min(widthScaleBias, 0.76f);
             depthScaleBias = MathF.Min(depthScaleBias, 0.82f);
             heightScaleBias = MathF.Min(heightScaleBias, 0.88f);
@@ -23114,7 +23183,7 @@ internal sealed class LocalExportService(
         var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
         var cageIslandItemsHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? string.Join(Environment.NewLine, payload.CageTopology.Islands.Take(8).Select(static island =>
-                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
+                $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, {island.BoundaryLoopCount} boundary loops, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
             : string.Empty;
         var cageTopologyHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? $$"""
@@ -23461,7 +23530,16 @@ internal sealed class LocalExportService(
                          .OrderBy(static group => group.Key))
             {
                 var indexes = group.Select(static entry => entry.Index).ToArray();
-                var boundaryVertexCount = indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                var boundaryVertexCount = topologySummary?.ComponentBoundaryVertexCounts is { Length: > 0 } componentBoundaryVertexCounts &&
+                                          group.Key >= 0 &&
+                                          group.Key < componentBoundaryVertexCounts.Length
+                    ? componentBoundaryVertexCounts[group.Key]
+                    : indexes.Count(index => index >= 0 && index < boundaryFlags.Length && boundaryFlags[index]);
+                var boundaryLoopCount = topologySummary?.ComponentBoundaryLoopCounts is { Length: > 0 } componentBoundaryLoopCounts &&
+                                        group.Key >= 0 &&
+                                        group.Key < componentBoundaryLoopCounts.Length
+                    ? componentBoundaryLoopCounts[group.Key]
+                    : 0;
                 var meshKey = GetMeshTopologyLookupKey(meshPath);
                 var islandControl = deformationCage?.IslandControls?
                     .FirstOrDefault(control => control.MeshKey.Equals(meshKey, StringComparison.OrdinalIgnoreCase) &&
@@ -23477,7 +23555,8 @@ internal sealed class LocalExportService(
                     BoundaryVertexCount: boundaryVertexCount,
                     UsesExplicitTopology: usesExplicitTopology,
                     CageRegions: cageRegions,
-                    SemanticLabels: semanticLabels));
+                    SemanticLabels: semanticLabels,
+                    BoundaryLoopCount: boundaryLoopCount));
             }
         }
 
