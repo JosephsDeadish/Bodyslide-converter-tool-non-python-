@@ -2663,6 +2663,122 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void BuildTransferIslandEdgeNetworks_EstimatesReusableNetworksWithoutExplicitTopology()
+    {
+        var method = typeof(LocalExportService).GetMethod("BuildTransferIslandEdgeNetworks", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var normalizedVertices = new[]
+        {
+            new MeshVertex(0.10f, 0.50f, 0.10f),
+            new MeshVertex(0.14f, 0.52f, 0.12f),
+            new MeshVertex(0.18f, 0.48f, 0.14f),
+            new MeshVertex(0.80f, 0.50f, 0.78f),
+            new MeshVertex(0.84f, 0.52f, 0.80f),
+            new MeshVertex(0.88f, 0.48f, 0.82f)
+        };
+        var transferIslands = new[] { 0, 0, 0, 1, 1, 1 };
+        var boundaryFlags = new[] { true, false, true, true, false, true };
+
+        var result = method!.Invoke(null, [normalizedVertices, transferIslands, boundaryFlags, null]);
+        var networks = Assert.IsAssignableFrom<System.Collections.IDictionary>(result);
+
+        Assert.Equal(2, networks.Count);
+        foreach (System.Collections.DictionaryEntry entry in networks)
+        {
+            var network = entry.Value!;
+            var vertexIndexes = Assert.IsAssignableFrom<System.Collections.IEnumerable>(network.GetType().GetProperty("VertexIndexes")!.GetValue(network));
+            var adjacency = Assert.IsAssignableFrom<System.Collections.IDictionary>(network.GetType().GetProperty("AdjacencyByVertex")!.GetValue(network));
+            var interiorEdges = Assert.IsAssignableFrom<System.Collections.IEnumerable>(network.GetType().GetProperty("InteriorEdges")!.GetValue(network));
+            Assert.Equal(3, vertexIndexes.Cast<object>().Count());
+            Assert.True(adjacency.Count > 0);
+            Assert.True(interiorEdges.Cast<object>().Any());
+            Assert.False((bool)(network.GetType().GetProperty("UsesExplicitTopology")!.GetValue(network) ?? true));
+        }
+    }
+
+    [Fact]
+    public void BuildMorphTransferIslandMatches_PrefersSimilarEstimatedEdgeNetworks()
+    {
+        var method = typeof(LocalExportService).GetMethod("BuildMorphTransferIslandMatches", BindingFlags.NonPublic | BindingFlags.Static);
+        var networkType = typeof(TransferIslandEdgeNetwork);
+        Assert.NotNull(method);
+        Assert.NotNull(networkType);
+
+        object CreateNetwork(
+            int islandId,
+            IReadOnlyList<int> vertexIndexes,
+            IReadOnlyList<int> boundaryVertexIndexes,
+            IReadOnlyList<(int, int)> boundaryEdges,
+            IReadOnlyList<(int, int)> interiorEdges,
+            IReadOnlyDictionary<int, IReadOnlyList<int>> adjacency,
+            int nonManifoldEdgeCount,
+            float manifoldScore,
+            bool usesExplicitTopology)
+        {
+            var ctor = networkType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                .Single(candidate => candidate.GetParameters().Length == 9);
+            return ctor.Invoke([islandId, vertexIndexes, boundaryVertexIndexes, boundaryEdges, interiorEdges, adjacency, nonManifoldEdgeCount, manifoldScore, usesExplicitTopology]);
+        }
+
+        var sourceVertices = new[]
+        {
+            new MeshVertex(0.25f, 0.50f, 0.50f),
+            new MeshVertex(0.35f, 0.50f, 0.50f),
+            new MeshVertex(0.10f, 0.50f, 0.50f),
+            new MeshVertex(0.50f, 0.50f, 0.50f)
+        };
+        var targetVertices = new[]
+        {
+            new MeshVertex(0.20f, 0.50f, 0.50f),
+            new MeshVertex(0.40f, 0.50f, 0.50f)
+        };
+        var sourceIslands = new[] { 0, 0, 1, 1 };
+        var targetIslands = new[] { 0, 0 };
+
+        var sourceNetworkDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), networkType!);
+        var targetNetworkDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), networkType!);
+        var sourceNetworks = (System.Collections.IDictionary)Activator.CreateInstance(sourceNetworkDictionaryType)!;
+        var targetNetworks = (System.Collections.IDictionary)Activator.CreateInstance(targetNetworkDictionaryType)!;
+
+        sourceNetworks[0] = CreateNetwork(
+            0,
+            new[] { 0, 1 },
+            new[] { 0, 1 },
+            new[] { (0, 1) },
+            Array.Empty<(int, int)>(),
+            new Dictionary<int, IReadOnlyList<int>> { [0] = [1], [1] = [0] },
+            0,
+            1f,
+            false);
+        sourceNetworks[1] = CreateNetwork(
+            1,
+            new[] { 2, 3 },
+            new[] { 2, 3 },
+            new[] { (2, 3) },
+            new[] { (2, 3) },
+            new Dictionary<int, IReadOnlyList<int>> { [2] = [3], [3] = [2] },
+            2,
+            0.35f,
+            false);
+        targetNetworks[0] = CreateNetwork(
+            0,
+            new[] { 0, 1 },
+            new[] { 0, 1 },
+            new[] { (0, 1) },
+            Array.Empty<(int, int)>(),
+            new Dictionary<int, IReadOnlyList<int>> { [0] = [1], [1] = [0] },
+            0,
+            1f,
+            false);
+
+        var result = Assert.IsType<int[]>(method!.Invoke(null, [sourceVertices, targetVertices, sourceIslands, targetIslands, sourceNetworks, targetNetworks]));
+
+        Assert.Single(result);
+        Assert.Equal(0, result[0]);
+    }
+
+    [Fact]
     public async Task BuildTopologyTransformContext_GivesInnerBoundaryLoopsStrongerPreservationWeight()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -18637,7 +18753,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 16);
+            .Single(ctor => ctor.GetParameters().Length == 18);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -18658,6 +18774,8 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            null,
+            null,
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
             new[] { 0, 0, 1, 1 },
@@ -18724,7 +18842,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 16);
+            .Single(ctor => ctor.GetParameters().Length == 18);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -18745,6 +18863,8 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
             new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
+            null,
+            null,
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
             new[] { 0, 0, 0, 1 },
@@ -18808,7 +18928,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 16);
+            .Single(ctor => ctor.GetParameters().Length == 18);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -18817,6 +18937,8 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            null,
+            null,
             new[] { 17, 22, 27 },
             new[] { 17, 22, 27 },
             new[] { 0, 0, 0 },
@@ -18982,7 +19104,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 16);
+            .Single(ctor => ctor.GetParameters().Length == 18);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -18991,6 +19113,8 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
             new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            null,
+            null,
             new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
             new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
             new[] { 0, 0, 1 },
@@ -19051,7 +19175,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 16);
+            .Single(ctor => ctor.GetParameters().Length == 18);
         object CreateContext(IReadOnlyList<string> partHints) => contextCtor.Invoke(
         [
             new[]
@@ -19072,6 +19196,8 @@ public sealed class OutputCompletenessTests
             influenceLists,
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
             new IReadOnlyList<int>[] { [1, 2], [0, 3], [0, 3], [1, 2] },
+            null,
+            null,
             new[] { 15, 20, 17, 22 },
             new[] { 15, 20, 17, 22 },
             new[] { 0, 0, 1, 1 },

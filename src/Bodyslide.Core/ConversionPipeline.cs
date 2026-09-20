@@ -93,6 +93,16 @@ public sealed record TopologyIslandEdgeNetworkSummary(
     int MaxVertexValence,
     bool IsClosedManifold,
     bool HasManifoldRisk);
+internal sealed record TransferIslandEdgeNetwork(
+    int IslandId,
+    IReadOnlyList<int> VertexIndexes,
+    IReadOnlyList<int> BoundaryVertexIndexes,
+    IReadOnlyList<(int Left, int Right)> BoundaryEdges,
+    IReadOnlyList<(int Left, int Right)> InteriorEdges,
+    IReadOnlyDictionary<int, IReadOnlyList<int>> AdjacencyByVertex,
+    int NonManifoldEdgeCount,
+    float ManifoldScore,
+    bool UsesExplicitTopology);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -9475,6 +9485,7 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         bool[] BoundaryVertexFlags,
         float[] BoundaryVertexWeights,
         float BoundaryPreservationWeight,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> EdgeNetworks,
         IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? BoundaryLoops);
 }
 
@@ -16653,6 +16664,7 @@ internal sealed class LocalExportService(
         bool[] BoundaryVertexFlags,
         float[] BoundaryVertexWeights,
         float BoundaryPreservationWeight,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> EdgeNetworks,
         IReadOnlyList<NifGeometrySignatureReader.BoundaryLoopSequence>? BoundaryLoops);
 
     private static readonly IReadOnlyDictionary<string, float> ShrinkwrapBaseRadius =
@@ -17726,6 +17738,9 @@ internal sealed class LocalExportService(
         IReadOnlyList<(float X, float Y, float Z)> rawVertices,
         NifGeometrySignatureReader.MeshTopologySummary? topologySummary)
     {
+        var normalizedRawVertices = NormalizeVerticesForTransfer(rawVertices
+            .Select(static vertex => new MeshVertex(vertex.X, vertex.Y, vertex.Z))
+            .ToArray());
         int[] componentIds;
         bool[] boundaryVertexFlags;
         float[] boundaryVertexWeights;
@@ -17739,17 +17754,14 @@ internal sealed class LocalExportService(
             boundaryVertexFlags = topologySummary.BoundaryVertexFlags.Length == rawVertices.Count
                 ? topologySummary.BoundaryVertexFlags
                 : EstimateBoundaryVertexFlags(
-                    rawVertices.Select(static vertex => new MeshVertex(vertex.X, vertex.Y, vertex.Z)).ToArray(),
+                    normalizedRawVertices,
                     topologySummary.ComponentIds);
             boundaryVertexWeights = BuildBoundaryVertexWeights(rawVertices, componentIds, topologySummary);
             boundaryLoopCount = topologySummary.BoundaryLoopCount;
         }
         else
         {
-            var normalizedVertices = NormalizeVerticesForTransfer(rawVertices
-                .Select(static vertex => new MeshVertex(vertex.X, vertex.Y, vertex.Z))
-                .ToArray());
-            componentIds = BuildMorphTransferIslandMap(normalizedVertices);
+            componentIds = BuildMorphTransferIslandMap(normalizedRawVertices);
             if (componentIds.Length != rawVertices.Count)
             {
                 return null;
@@ -17760,7 +17772,7 @@ internal sealed class LocalExportService(
                 return null;
             }
 
-            boundaryVertexFlags = EstimateBoundaryVertexFlags(normalizedVertices, componentIds);
+            boundaryVertexFlags = EstimateBoundaryVertexFlags(normalizedRawVertices, componentIds);
             boundaryVertexWeights = new float[rawVertices.Count];
         }
 
@@ -17768,6 +17780,11 @@ internal sealed class LocalExportService(
         var boundaryCoverage = rawVertices.Count <= 0
             ? 0f
             : boundaryVertexFlags.Count(static flag => flag) / (float)rawVertices.Count;
+        var edgeNetworks = BuildTransferIslandEdgeNetworks(
+            normalizedRawVertices,
+            componentIds,
+            boundaryVertexFlags,
+            hasExplicitTopology ? topologySummary : null);
         if (!hasMultipleComponents &&
             boundaryLoopCount <= 0 &&
             boundaryCoverage <= 0.001f)
@@ -17812,7 +17829,8 @@ internal sealed class LocalExportService(
         var boundaryPreservationWeight = Math.Clamp(
             0.14f +
             (Math.Min(3, boundaryLoopCount) * 0.08f) +
-            Math.Min(0.20f, boundaryCoverage * 0.45f),
+            Math.Min(0.20f, boundaryCoverage * 0.45f) +
+            ComputeTopologyEdgePreservationBias(edgeNetworks),
             0f,
             0.48f);
         return new TopologyTransformContext(
@@ -17822,7 +17840,38 @@ internal sealed class LocalExportService(
             boundaryVertexFlags,
             boundaryVertexWeights,
             boundaryPreservationWeight,
+            edgeNetworks,
             hasExplicitTopology ? topologySummary!.BoundaryLoops : null);
+    }
+
+    private static float ComputeTopologyEdgePreservationBias(IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+    {
+        if (edgeNetworks.Count == 0)
+        {
+            return 0f;
+        }
+
+        var maxBias = 0f;
+        foreach (var network in edgeNetworks.Values)
+        {
+            var boundaryRatio = network.VertexIndexes.Count == 0
+                ? 0f
+                : network.BoundaryVertexIndexes.Count / (float)network.VertexIndexes.Count;
+            var interiorRatio = network.VertexIndexes.Count == 0
+                ? 0f
+                : network.InteriorEdges.Count / (float)network.VertexIndexes.Count;
+            var candidate = MathF.Min(
+                0.08f,
+                (boundaryRatio * 0.04f) +
+                MathF.Min(0.03f, interiorRatio * 0.015f) +
+                ((1f - network.ManifoldScore) * 0.05f));
+            if (candidate > maxBias)
+            {
+                maxBias = candidate;
+            }
+        }
+
+        return maxBias;
     }
 
     private static float[] BuildBoundaryVertexWeights(
@@ -22117,6 +22166,8 @@ internal sealed class LocalExportService(
             IReadOnlyList<IReadOnlyList<MorphTransferInfluence>> TargetToSourceInfluences,
             IReadOnlyList<IReadOnlyList<int>> SourceNeighborIndexes,
             IReadOnlyList<IReadOnlyList<int>> TargetNeighborIndexes,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork> SourceEdgeNetworks,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork> TargetEdgeNetworks,
             int[] SourceTransferZones,
             int[] TargetTransferZones,
             int[] SourceTransferIslands,
@@ -22149,23 +22200,45 @@ internal sealed class LocalExportService(
             var normalizedTargetVertices = NormalizeVerticesForTransfer(targetVertices);
             var sourceTransferZones = BuildMorphTransferZoneMap(normalizedSourceVertices);
             var targetTransferZones = BuildMorphTransferZoneMap(normalizedTargetVertices);
-            var sourceTransferIslands = sourceMeshFiles
+            var sourceTopologySummary = sourceMeshFiles
                 .Select(NifGeometrySignatureReader.TryReadTopologySummary)
                 .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
-                                           summary.ComponentIds.Length == sourceVertices.Count)?
+                                           summary.ComponentIds.Length == sourceVertices.Count);
+            var sourceTransferIslands = sourceTopologySummary?
                 .ComponentIds
                 ?? BuildMorphTransferIslandMap(normalizedSourceVertices);
-            var targetTransferIslands = writtenNifs
+            var targetTopologySummary = writtenNifs
                 .Select(NifGeometrySignatureReader.TryReadTopologySummary)
                 .FirstOrDefault(summary => summary is { VertexCount: > 0 } &&
-                                           summary.ComponentIds.Length == targetVertices.Count)?
+                                           summary.ComponentIds.Length == targetVertices.Count);
+            var targetTransferIslands = targetTopologySummary?
                 .ComponentIds
                 ?? BuildMorphTransferIslandMap(normalizedTargetVertices);
+            var sourceBoundaryFlags = sourceTopologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitSourceBoundaryFlags &&
+                                      explicitSourceBoundaryFlags.Length == sourceVertices.Count
+                ? explicitSourceBoundaryFlags
+                : EstimateBoundaryVertexFlags(normalizedSourceVertices, sourceTransferIslands);
+            var targetBoundaryFlags = targetTopologySummary?.BoundaryVertexFlags is { Length: > 0 } explicitTargetBoundaryFlags &&
+                                      explicitTargetBoundaryFlags.Length == targetVertices.Count
+                ? explicitTargetBoundaryFlags
+                : EstimateBoundaryVertexFlags(normalizedTargetVertices, targetTransferIslands);
+            var sourceEdgeNetworks = BuildTransferIslandEdgeNetworks(
+                normalizedSourceVertices,
+                sourceTransferIslands,
+                sourceBoundaryFlags,
+                sourceTopologySummary);
+            var targetEdgeNetworks = BuildTransferIslandEdgeNetworks(
+                normalizedTargetVertices,
+                targetTransferIslands,
+                targetBoundaryFlags,
+                targetTopologySummary);
             var targetIslandToSourceIslandMap = BuildMorphTransferIslandMatches(
                 normalizedSourceVertices,
                 normalizedTargetVertices,
                 sourceTransferIslands,
-                targetTransferIslands);
+                targetTransferIslands,
+                sourceEdgeNetworks,
+                targetEdgeNetworks);
             var influenceMap = BuildMorphTransferInfluenceMap(
                 normalizedSourceVertices,
                 normalizedTargetVertices,
@@ -22173,7 +22246,9 @@ internal sealed class LocalExportService(
                 targetTransferZones,
                 sourceTransferIslands,
                 targetTransferIslands,
-                targetIslandToSourceIslandMap);
+                targetIslandToSourceIslandMap,
+                sourceEdgeNetworks,
+                targetEdgeNetworks);
             var nearestSurfaceMap = influenceMap.Count == targetVertices.Count
                 ? influenceMap
                     .Select(static influences => influences.Count > 0 ? influences[0].SourceIndex : 0)
@@ -22195,6 +22270,8 @@ internal sealed class LocalExportService(
                 influenceMap,
                 sourceNeighborIndexes,
                 neighborIndexes,
+                sourceEdgeNetworks,
+                targetEdgeNetworks,
                 sourceTransferZones,
                 targetTransferZones,
                 sourceTransferIslands,
@@ -22395,7 +22472,8 @@ internal sealed class LocalExportService(
                     morphTransferContext,
                     targetIndex,
                     ambiguity);
-                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping);
+                var edgeDrivenDamping = ComputeEdgeDrivenTopologyDamping(morphTransferContext, targetIndex);
+                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping * edgeDrivenDamping);
                 if (MathF.Abs(combinedScale - 1f) < 0.10f)
                 {
                     continue;
@@ -22518,7 +22596,9 @@ internal sealed class LocalExportService(
             IReadOnlyList<int> targetTransferZones,
             IReadOnlyList<int> sourceTransferIslands,
             IReadOnlyList<int> targetTransferIslands,
-            IReadOnlyList<int> targetIslandToSourceIslandMap)
+            IReadOnlyList<int> targetIslandToSourceIslandMap,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? sourceEdgeNetworks = null,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? targetEdgeNetworks = null)
         {
             if (normalizedSourceVertices.Count == 0 ||
                 normalizedTargetVertices.Count == 0 ||
@@ -22569,7 +22649,12 @@ internal sealed class LocalExportService(
                         sourceTransferIslands[candidate.Index],
                         targetIsland,
                         preferredSourceIsland);
-                    var score = distanceSquared * zonePenalty * islandPenalty;
+                    var edgePenalty = ComputeMorphTransferEdgePenalty(
+                        sourceTransferIslands[candidate.Index],
+                        targetIsland,
+                        sourceEdgeNetworks,
+                        targetEdgeNetworks);
+                    var score = distanceSquared * zonePenalty * islandPenalty * edgePenalty;
                     if (preferredSourceIsland >= 0 && sourceTransferIslands[candidate.Index] == preferredSourceIsland)
                     {
                         InsertMorphTransferCandidate(bestCandidates, candidate.Index, score);
@@ -22789,11 +22874,214 @@ internal sealed class LocalExportService(
             return assignments;
         }
 
+        private static IReadOnlyDictionary<int, TransferIslandEdgeNetwork> BuildTransferIslandEdgeNetworks(
+            IReadOnlyList<MeshVertex> normalizedVertices,
+            IReadOnlyList<int> transferIslands,
+            IReadOnlyList<bool>? boundaryVertexFlags,
+            NifGeometrySignatureReader.MeshTopologySummary? topologySummary = null)
+        {
+            if (normalizedVertices.Count == 0 || transferIslands.Count != normalizedVertices.Count)
+            {
+                return new Dictionary<int, TransferIslandEdgeNetwork>();
+            }
+
+            var effectiveBoundaryFlags = boundaryVertexFlags is { Count: > 0 } && boundaryVertexFlags.Count == normalizedVertices.Count
+                ? boundaryVertexFlags
+                : EstimateBoundaryVertexFlags(normalizedVertices, transferIslands);
+            var transferZones = BuildMorphTransferZoneMap(normalizedVertices);
+            var neighbors = BuildMorphTransferNeighborIndexes(normalizedVertices, transferZones, transferIslands);
+            var explicitBoundaryEdgesByIsland = topologySummary?.BoundaryLoops is { Count: > 0 }
+                ? topologySummary.BoundaryLoops
+                    .GroupBy(static loop => loop.ComponentId)
+                    .ToDictionary(
+                        static group => group.Key,
+                        group => group
+                            .SelectMany(static loop => loop.OrderedEdges)
+                            .Select(static edge => edge.From <= edge.To ? edge : (edge.To, edge.From))
+                            .Distinct()
+                            .ToHashSet())
+                : null;
+            var explicitNetworkByIsland = topologySummary?.ComponentEdgeNetworks is { Count: > 0 }
+                ? topologySummary.ComponentEdgeNetworks.ToDictionary(static network => network.ComponentId)
+                : null;
+
+            var edgesByIsland = new Dictionary<int, HashSet<(int Left, int Right)>>();
+            var adjacencyByIsland = new Dictionary<int, Dictionary<int, HashSet<int>>>();
+            for (var vertexIndex = 0; vertexIndex < normalizedVertices.Count; vertexIndex++)
+            {
+                if (vertexIndex >= neighbors.Count || vertexIndex >= transferIslands.Count)
+                {
+                    continue;
+                }
+
+                var islandId = transferIslands[vertexIndex];
+                if (islandId < 0)
+                {
+                    continue;
+                }
+
+                if (!edgesByIsland.TryGetValue(islandId, out var islandEdges))
+                {
+                    islandEdges = [];
+                    edgesByIsland[islandId] = islandEdges;
+                }
+
+                if (!adjacencyByIsland.TryGetValue(islandId, out var islandAdjacency))
+                {
+                    islandAdjacency = new Dictionary<int, HashSet<int>>();
+                    adjacencyByIsland[islandId] = islandAdjacency;
+                }
+
+                foreach (var neighborIndex in neighbors[vertexIndex])
+                {
+                    if (neighborIndex < 0 ||
+                        neighborIndex >= transferIslands.Count ||
+                        transferIslands[neighborIndex] != islandId ||
+                        neighborIndex == vertexIndex)
+                    {
+                        continue;
+                    }
+
+                    var edge = vertexIndex <= neighborIndex
+                        ? (vertexIndex, neighborIndex)
+                        : (neighborIndex, vertexIndex);
+                    if (!islandEdges.Add(edge))
+                    {
+                        continue;
+                    }
+
+                    if (!islandAdjacency.TryGetValue(edge.Item1, out var leftNeighbors))
+                    {
+                        leftNeighbors = [];
+                        islandAdjacency[edge.Item1] = leftNeighbors;
+                    }
+
+                    if (!islandAdjacency.TryGetValue(edge.Item2, out var rightNeighbors))
+                    {
+                        rightNeighbors = [];
+                        islandAdjacency[edge.Item2] = rightNeighbors;
+                    }
+
+                    leftNeighbors.Add(edge.Item2);
+                    rightNeighbors.Add(edge.Item1);
+                }
+            }
+
+            var networks = new Dictionary<int, TransferIslandEdgeNetwork>();
+            foreach (var group in transferIslands
+                         .Select(static (islandId, index) => (IslandId: islandId, Index: index))
+                         .GroupBy(static entry => entry.IslandId)
+                         .OrderBy(static group => group.Key))
+            {
+                if (group.Key < 0)
+                {
+                    continue;
+                }
+
+                var vertexIndexes = group.Select(static entry => entry.Index).ToArray();
+                var boundaryVertexIndexes = vertexIndexes
+                    .Where(index => index >= 0 &&
+                                    index < effectiveBoundaryFlags.Count &&
+                                    effectiveBoundaryFlags[index])
+                    .ToArray();
+                var islandEdges = edgesByIsland.TryGetValue(group.Key, out var edgeSet)
+                    ? edgeSet
+                    : [];
+                var explicitBoundaryEdges = explicitBoundaryEdgesByIsland is not null &&
+                                            explicitBoundaryEdgesByIsland.TryGetValue(group.Key, out var explicitEdges)
+                    ? explicitEdges
+                    : null;
+                var boundaryEdges = islandEdges
+                    .Where(edge => explicitBoundaryEdges?.Contains(edge) == true ||
+                                   (edge.Left < effectiveBoundaryFlags.Count &&
+                                    edge.Right < effectiveBoundaryFlags.Count &&
+                                    effectiveBoundaryFlags[edge.Left] &&
+                                    effectiveBoundaryFlags[edge.Right]))
+                    .OrderBy(static edge => edge.Left)
+                    .ThenBy(static edge => edge.Right)
+                    .ToArray();
+                var interiorEdges = islandEdges
+                    .Where(edge => !boundaryEdges.Contains(edge))
+                    .OrderBy(static edge => edge.Left)
+                    .ThenBy(static edge => edge.Right)
+                    .ToArray();
+                var adjacency = adjacencyByIsland.TryGetValue(group.Key, out var islandAdjacency)
+                    ? islandAdjacency.ToDictionary(
+                        static pair => pair.Key,
+                        static pair => (IReadOnlyList<int>)pair.Value.OrderBy(static index => index).ToArray())
+                    : new Dictionary<int, IReadOnlyList<int>>();
+                var explicitNetwork = explicitNetworkByIsland is not null &&
+                                      explicitNetworkByIsland.TryGetValue(group.Key, out var componentEdgeNetwork)
+                    ? componentEdgeNetwork
+                    : null;
+                var nonManifoldEdgeCount = explicitNetwork?.NonManifoldEdgeCount ?? 0;
+                var manifoldScore = ComputeTransferIslandManifoldScore(
+                    vertexIndexes,
+                    boundaryVertexIndexes,
+                    adjacency,
+                    nonManifoldEdgeCount);
+                networks[group.Key] = new TransferIslandEdgeNetwork(
+                    group.Key,
+                    vertexIndexes,
+                    boundaryVertexIndexes,
+                    boundaryEdges,
+                    interiorEdges,
+                    adjacency,
+                    nonManifoldEdgeCount,
+                    manifoldScore,
+                    explicitNetwork is not null);
+            }
+
+            return networks;
+        }
+
+        private static float ComputeTransferIslandManifoldScore(
+            IReadOnlyList<int> vertexIndexes,
+            IReadOnlyList<int> boundaryVertexIndexes,
+            IReadOnlyDictionary<int, IReadOnlyList<int>> adjacencyByVertex,
+            int explicitNonManifoldEdgeCount)
+        {
+            if (vertexIndexes.Count == 0)
+            {
+                return 1f;
+            }
+
+            var boundaryVertexSet = boundaryVertexIndexes.ToHashSet();
+            var anomalyCount = explicitNonManifoldEdgeCount * 2;
+            foreach (var vertexIndex in vertexIndexes)
+            {
+                var degree = adjacencyByVertex.TryGetValue(vertexIndex, out var neighbors)
+                    ? neighbors.Count
+                    : 0;
+                if (degree == 0)
+                {
+                    anomalyCount++;
+                    continue;
+                }
+
+                if (boundaryVertexSet.Contains(vertexIndex))
+                {
+                    if (degree > 4)
+                    {
+                        anomalyCount++;
+                    }
+                }
+                else if (degree is < 2 or > 8)
+                {
+                    anomalyCount++;
+                }
+            }
+
+            return Math.Clamp(1f - (anomalyCount / (float)Math.Max(1, vertexIndexes.Count)), 0.15f, 1f);
+        }
+
         private static int[] BuildMorphTransferIslandMatches(
             IReadOnlyList<MeshVertex> normalizedSourceVertices,
             IReadOnlyList<MeshVertex> normalizedTargetVertices,
             IReadOnlyList<int> sourceTransferIslands,
-            IReadOnlyList<int> targetTransferIslands)
+            IReadOnlyList<int> targetTransferIslands,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? sourceEdgeNetworks = null,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? targetEdgeNetworks = null)
         {
             if (normalizedSourceVertices.Count == 0 ||
                 normalizedTargetVertices.Count == 0 ||
@@ -22814,7 +23102,11 @@ internal sealed class LocalExportService(
             foreach (var targetIsland in targetIslands)
             {
                 var bestSource = sourceIslands
-                    .Select(sourceIsland => (IslandId: sourceIsland.IslandId, Score: ComputeTransferIslandMatchScore(sourceIsland, targetIsland)))
+                    .Select(sourceIsland => (IslandId: sourceIsland.IslandId, Score: ComputeTransferIslandMatchScore(
+                        sourceIsland,
+                        targetIsland,
+                        sourceEdgeNetworks is not null && sourceEdgeNetworks.TryGetValue(sourceIsland.IslandId, out var sourceEdgeNetwork) ? sourceEdgeNetwork : null,
+                        targetEdgeNetworks is not null && targetEdgeNetworks.TryGetValue(targetIsland.IslandId, out var targetEdgeNetwork) ? targetEdgeNetwork : null)))
                     .OrderBy(static candidate => candidate.Score)
                     .FirstOrDefault();
                 matches[targetIsland.IslandId] = bestSource.IslandId;
@@ -22856,7 +23148,11 @@ internal sealed class LocalExportService(
             return summaries;
         }
 
-        private static float ComputeTransferIslandMatchScore(TransferIslandSummary sourceIsland, TransferIslandSummary targetIsland)
+        private static float ComputeTransferIslandMatchScore(
+            TransferIslandSummary sourceIsland,
+            TransferIslandSummary targetIsland,
+            TransferIslandEdgeNetwork? sourceEdgeNetwork = null,
+            TransferIslandEdgeNetwork? targetEdgeNetwork = null)
         {
             var dx = sourceIsland.Centroid.X - targetIsland.Centroid.X;
             var dy = sourceIsland.Centroid.Y - targetIsland.Centroid.Y;
@@ -22867,7 +23163,38 @@ internal sealed class LocalExportService(
                 : MathF.Max(
                     sourceIsland.VertexCount / (float)targetIsland.VertexCount,
                     targetIsland.VertexCount / (float)sourceIsland.VertexCount);
-            return distance + ((sizeRatio - 1f) * 0.08f);
+            var edgePenalty = ComputeTransferIslandEdgePenalty(sourceEdgeNetwork, targetEdgeNetwork);
+            return distance + ((sizeRatio - 1f) * 0.08f) + edgePenalty;
+        }
+
+        private static float ComputeTransferIslandEdgePenalty(
+            TransferIslandEdgeNetwork? sourceEdgeNetwork,
+            TransferIslandEdgeNetwork? targetEdgeNetwork)
+        {
+            if (sourceEdgeNetwork is null || targetEdgeNetwork is null)
+            {
+                return 0f;
+            }
+
+            var sourceBoundaryRatio = sourceEdgeNetwork.VertexIndexes.Count == 0
+                ? 0f
+                : sourceEdgeNetwork.BoundaryVertexIndexes.Count / (float)sourceEdgeNetwork.VertexIndexes.Count;
+            var targetBoundaryRatio = targetEdgeNetwork.VertexIndexes.Count == 0
+                ? 0f
+                : targetEdgeNetwork.BoundaryVertexIndexes.Count / (float)targetEdgeNetwork.VertexIndexes.Count;
+            var sourceEdgeDensity = sourceEdgeNetwork.VertexIndexes.Count == 0
+                ? 0f
+                : (sourceEdgeNetwork.BoundaryEdges.Count + sourceEdgeNetwork.InteriorEdges.Count) / (float)sourceEdgeNetwork.VertexIndexes.Count;
+            var targetEdgeDensity = targetEdgeNetwork.VertexIndexes.Count == 0
+                ? 0f
+                : (targetEdgeNetwork.BoundaryEdges.Count + targetEdgeNetwork.InteriorEdges.Count) / (float)targetEdgeNetwork.VertexIndexes.Count;
+            var boundaryPenalty = MathF.Abs(sourceBoundaryRatio - targetBoundaryRatio) * 0.22f;
+            var edgeDensityPenalty = MathF.Min(0.16f, MathF.Abs(sourceEdgeDensity - targetEdgeDensity) * 0.08f);
+            var manifoldPenalty = MathF.Abs(sourceEdgeNetwork.ManifoldScore - targetEdgeNetwork.ManifoldScore) * 0.18f;
+            var nonManifoldPenalty = sourceEdgeNetwork.NonManifoldEdgeCount == targetEdgeNetwork.NonManifoldEdgeCount
+                ? 0f
+                : 0.06f;
+            return boundaryPenalty + edgeDensityPenalty + manifoldPenalty + nonManifoldPenalty;
         }
 
         private static float ComputeMorphTransferIslandPenalty(int sourceIsland, int targetIsland, int preferredSourceIsland)
@@ -22878,6 +23205,23 @@ internal sealed class LocalExportService(
             }
 
             return sourceIsland == targetIsland ? 1f : 1.35f;
+        }
+
+        private static float ComputeMorphTransferEdgePenalty(
+            int sourceIsland,
+            int targetIsland,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? sourceEdgeNetworks,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork>? targetEdgeNetworks)
+        {
+            if (sourceEdgeNetworks is null ||
+                targetEdgeNetworks is null ||
+                !sourceEdgeNetworks.TryGetValue(sourceIsland, out var sourceEdgeNetwork) ||
+                !targetEdgeNetworks.TryGetValue(targetIsland, out var targetEdgeNetwork))
+            {
+                return 1f;
+            }
+
+            return 1f + ComputeTransferIslandEdgePenalty(sourceEdgeNetwork, targetEdgeNetwork);
         }
 
         private static float ComputeMorphTransferIslandConnectionRadius(IReadOnlyList<MeshVertex> vertices)
@@ -23320,6 +23664,37 @@ internal sealed class LocalExportService(
 
         private static bool HasMorphTransferPartHint(MorphTransferContext morphTransferContext, string hint) =>
             morphTransferContext.PartHints.Contains(hint, StringComparer.OrdinalIgnoreCase);
+
+        private static float ComputeEdgeDrivenTopologyDamping(MorphTransferContext morphTransferContext, int targetIndex)
+        {
+            if (targetIndex < 0 ||
+                targetIndex >= morphTransferContext.TargetTransferIslands.Length ||
+                morphTransferContext.TargetEdgeNetworks is null ||
+                morphTransferContext.SourceEdgeNetworks is null ||
+                morphTransferContext.TargetEdgeNetworks.Count == 0 ||
+                morphTransferContext.SourceEdgeNetworks.Count == 0)
+            {
+                return 1f;
+            }
+
+            var targetIsland = morphTransferContext.TargetTransferIslands[targetIndex];
+            if (!morphTransferContext.TargetEdgeNetworks.TryGetValue(targetIsland, out var targetEdgeNetwork))
+            {
+                return 1f;
+            }
+
+            var preferredSourceIsland = targetIsland >= 0 && targetIsland < morphTransferContext.TargetIslandToSourceIslandMap.Length
+                ? morphTransferContext.TargetIslandToSourceIslandMap[targetIsland]
+                : -1;
+            if (preferredSourceIsland < 0 ||
+                !morphTransferContext.SourceEdgeNetworks.TryGetValue(preferredSourceIsland, out var sourceEdgeNetwork))
+            {
+                return 1f;
+            }
+
+            var edgePenalty = ComputeTransferIslandEdgePenalty(sourceEdgeNetwork, targetEdgeNetwork);
+            return Math.Clamp(1f - MathF.Min(0.30f, edgePenalty * 0.45f), 0.72f, 1f);
+        }
 
         private static float ComputeWeightedSourceNeighborDistance(
             IReadOnlyList<MeshVertex> normalizedSourceVertices,
