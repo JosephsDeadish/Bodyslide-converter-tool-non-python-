@@ -29,16 +29,22 @@ internal static class PhysicsRepairCatalog
         }
 
         var normalizedBone = NormalizeToken(boneName);
+        var bestTokenLength = -1;
         foreach (var group in Groups.Value.Values)
         {
-            if (group.Tokens.Any(token => normalizedBone.Contains(token, StringComparison.Ordinal)))
+            var matchingTokenLength = group.Tokens
+                .Where(token => normalizedBone.Contains(token, StringComparison.Ordinal))
+                .Select(static token => token.Length)
+                .DefaultIfEmpty(-1)
+                .Max();
+            if (matchingTokenLength > bestTokenLength)
             {
                 groupName = group.Name;
-                return true;
+                bestTokenLength = matchingTokenLength;
             }
         }
 
-        return false;
+        return bestTokenLength >= 0;
     }
 
     public static IReadOnlySet<string> DetectGroups(IEnumerable<string>? bones)
