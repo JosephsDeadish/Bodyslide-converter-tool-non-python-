@@ -2417,6 +2417,33 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicCageGenerationService_OpenWindowAndSplitTopology_TightenLocalCageRegions()
+    {
+        var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+        var tunedAnalysis = new MeshAnalysis(
+            "cloth",
+            false,
+            1,
+            HasSplitMeshes: true,
+            HasOpenStructurePieces: true,
+            TopologyIslandSummaries: new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["openwork_0.nif"] = new(3, 0.54d, ["independent-islands", "split-cage-candidate", "window-boundary-risk"])
+            });
+        var service = new BasicCageGenerationService();
+
+        var baseline = await service.BuildAsync(baselineAnalysis, "CBBE", CancellationToken.None);
+        var tuned = await service.BuildAsync(tunedAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.NotNull(baseline.Regions);
+        Assert.NotNull(tuned.Regions);
+        Assert.True(tuned.Regions!["chest"].Rigidity > baseline.Regions!["chest"].Rigidity);
+        Assert.True(tuned.Regions["chest"].WidthInfluence < baseline.Regions["chest"].WidthInfluence);
+        Assert.True(tuned.Regions["arms"].Rigidity > baseline.Regions["arms"].Rigidity);
+        Assert.True(tuned.Regions["arms"].LateralFalloff < baseline.Regions["arms"].LateralFalloff);
+    }
+
+    [Fact]
     public async Task StrategyMeshConversionService_ProducesEmptyRegionalMorphingForHeadgear()
     {
         var nifPath = Path.GetTempFileName();
@@ -5891,6 +5918,134 @@ public sealed class NifOutputAndSourceOverrideTests
             Assert.True(
                 armExpansion > chestExpansion + 0.05f,
                 $"Expected cage weighting to expand the outer arm shell more than the chest (arm={armExpansion:F4}, chest={chestExpansion:F4}).");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_OpenWindowAwareCage_PreservesBoundaryVerticesMoreThanBaselineCage()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputFile = Path.Combine(workingDirectory, "open_window_bias.nif");
+        var baselineOutputDirectory = Path.Combine(workingDirectory, "baseline-output");
+        var tunedOutputDirectory = Path.Combine(workingDirectory, "tuned-output");
+        Directory.CreateDirectory(workingDirectory);
+        Directory.CreateDirectory(baselineOutputDirectory);
+        Directory.CreateDirectory(tunedOutputDirectory);
+
+        var sourceVertices = new List<(float X, float Y, float Z)>
+        {
+            (-1.00f,  0.00f, 0.00f),
+            ( 1.00f,  0.00f, 0.00f),
+            ( 0.00f, -1.00f, 0.00f),
+            ( 0.00f,  1.00f, 0.00f),
+            ( 0.00f,  0.00f, 1.00f),
+            ( 0.10f,  0.00f, 0.80f), // chest/window-boundary-adjacent vertex
+            ( 0.18f,  0.35f, 0.74f), // breast/openwork-adjacent vertex
+            ( 0.82f,  0.00f, 0.92f)  // outer shoulder/arm shell vertex
+        };
+        await SyntheticNifTestData.WriteAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var service = new LocalExportService();
+            var armor = new ImportedArmor(inputFile, [inputFile], [], [], []);
+            var mesh = new ConvertedMesh(
+                "cloth",
+                "cage+surface-project",
+                1,
+                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = 1.36,
+                    ["breasts"] = 1.42,
+                    ["waist"] = 1.18,
+                    ["arms"] = 1.18
+                });
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "3BA", ["Chest"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult("XPMSSE", "3BA", [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)], []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+            var cageService = new BasicCageGenerationService();
+
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var tunedAnalysis = new MeshAnalysis(
+                "cloth",
+                false,
+                1,
+                HasSplitMeshes: true,
+                HasOpenStructurePieces: true,
+                TopologyIslandSummaries: new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["open_window_bias.nif"] = new(3, 0.58d, ["independent-islands", "split-cage-candidate", "window-boundary-risk"])
+                });
+
+            var baselineCage = await cageService.BuildAsync(baselineAnalysis, "3BA", CancellationToken.None);
+            var tunedCage = await cageService.BuildAsync(tunedAnalysis, "3BA", CancellationToken.None);
+
+            await service.ExportAsync(
+                new ConversionRequest(inputFile, "3BA", OutputDirectory: baselineOutputDirectory),
+                armor,
+                baselineAnalysis,
+                mesh with { DeformationCage = baselineCage },
+                morphs,
+                physics,
+                clipping,
+                correction,
+                bodySlideProject,
+                pluginAnalysis,
+                textureSummary,
+                poseSimulation,
+                ["step1"],
+                detectedBody,
+                skeletonMapping,
+                null,
+                voxelResult,
+                CancellationToken.None);
+
+            await service.ExportAsync(
+                new ConversionRequest(inputFile, "3BA", OutputDirectory: tunedOutputDirectory),
+                armor,
+                tunedAnalysis,
+                mesh with { DeformationCage = tunedCage },
+                morphs,
+                physics,
+                clipping,
+                correction,
+                bodySlideProject,
+                pluginAnalysis,
+                textureSummary,
+                poseSimulation,
+                ["step1"],
+                detectedBody,
+                skeletonMapping,
+                null,
+                voxelResult,
+                CancellationToken.None);
+
+            var baselineRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(baselineOutputDirectory, "meshes", "slidesmith", "3ba", "open_window_bias.nif")));
+            var tunedRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(Path.Combine(tunedOutputDirectory, "meshes", "slidesmith", "3ba", "open_window_bias.nif")));
+            var sourceRead = ReadEmbeddedVertices(await File.ReadAllBytesAsync(inputFile));
+
+            var baselineChestExpansion = MathF.Abs(baselineRead[5].X) - MathF.Abs(sourceRead[5].X);
+            var tunedChestExpansion = MathF.Abs(tunedRead[5].X) - MathF.Abs(sourceRead[5].X);
+            var baselineBreastExpansion = MathF.Abs(baselineRead[6].X) - MathF.Abs(sourceRead[6].X);
+            var tunedBreastExpansion = MathF.Abs(tunedRead[6].X) - MathF.Abs(sourceRead[6].X);
+            var baselineArmExpansion = MathF.Abs(baselineRead[7].X) - MathF.Abs(sourceRead[7].X);
+            var tunedArmExpansion = MathF.Abs(tunedRead[7].X) - MathF.Abs(sourceRead[7].X);
+
+            Assert.True(tunedChestExpansion < baselineChestExpansion, $"Expected open-window-aware cage to reduce chest/window-boundary expansion. baseline={baselineChestExpansion:F4}, tuned={tunedChestExpansion:F4}");
+            Assert.True(tunedBreastExpansion < baselineBreastExpansion, $"Expected open-window-aware cage to reduce breast/openwork expansion. baseline={baselineBreastExpansion:F4}, tuned={tunedBreastExpansion:F4}");
+            Assert.True(tunedArmExpansion <= baselineArmExpansion + 0.02f, $"Expected split/local cage tightening to avoid inflating outer arm shell more than baseline. baseline={baselineArmExpansion:F4}, tuned={tunedArmExpansion:F4}");
         }
         finally
         {

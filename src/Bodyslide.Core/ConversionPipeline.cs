@@ -8786,7 +8786,10 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
 internal sealed class BasicCageGenerationService : ICageGenerationService
 {
     public Task<DeformationCage> BuildAsync(MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
-        => Task.FromResult(CreatePresetCage(analysis.MeshType, analysis.HeadgearSubType));
+    {
+        var cage = CreatePresetCage(analysis.MeshType, analysis.HeadgearSubType);
+        return Task.FromResult(ApplyLocalControlAdjustments(cage, analysis));
+    }
 
     internal static DeformationCage CreatePresetCage(string meshType, string? headgearSubType = null)
     {
@@ -8862,6 +8865,65 @@ internal sealed class BasicCageGenerationService : ICageGenerationService
         };
 
         return new DeformationCage(mode, regions);
+    }
+
+    private static DeformationCage ApplyLocalControlAdjustments(DeformationCage cage, MeshAnalysis analysis)
+    {
+        if (cage.Regions is not { Count: > 0 } regions)
+        {
+            return cage;
+        }
+
+        var adjusted = new Dictionary<string, CageRegion>(regions, StringComparer.OrdinalIgnoreCase);
+        var topologyLabels = analysis.TopologyIslandSummaries?.Values
+            .SelectMany(static summary => summary.Labels)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            ?? [];
+        var hasWindowBoundaryRisk = topologyLabels.Contains("window-boundary-risk") || analysis.HasOpenStructurePieces;
+        var hasSplitCageRisk = topologyLabels.Contains("split-cage-candidate") || analysis.HasSplitMeshes;
+
+        if (hasWindowBoundaryRisk)
+        {
+            TightenLocalRegion(adjusted, "chest", rigidityBoost: 0.20f, widthScale: 0.72f, depthScale: 0.82f, heightFalloffScale: 0.72f, lateralFalloffScale: 0.78f);
+            TightenLocalRegion(adjusted, "breasts", rigidityBoost: 0.26f, widthScale: 0.64f, depthScale: 0.78f, heightFalloffScale: 0.68f, lateralFalloffScale: 0.62f);
+            TightenLocalRegion(adjusted, "waist", rigidityBoost: 0.16f, widthScale: 0.78f, depthScale: 0.84f, heightFalloffScale: 0.74f, lateralFalloffScale: 0.76f);
+            TightenLocalRegion(adjusted, "belly", rigidityBoost: 0.14f, widthScale: 0.80f, depthScale: 0.86f, heightFalloffScale: 0.76f, lateralFalloffScale: 0.80f);
+            TightenLocalRegion(adjusted, "pelvis", rigidityBoost: 0.12f, widthScale: 0.84f, depthScale: 0.90f, heightFalloffScale: 0.80f, lateralFalloffScale: 0.84f);
+        }
+
+        if (hasSplitCageRisk)
+        {
+            TightenLocalRegion(adjusted, "shoulders", rigidityBoost: 0.18f, widthScale: 0.78f, depthScale: 0.84f, heightFalloffScale: 0.72f, lateralFalloffScale: 0.70f);
+            TightenLocalRegion(adjusted, "arms", rigidityBoost: 0.22f, widthScale: 0.72f, depthScale: 0.80f, heightFalloffScale: 0.70f, lateralFalloffScale: 0.62f);
+            TightenLocalRegion(adjusted, "thighs", rigidityBoost: 0.10f, widthScale: 0.88f, depthScale: 0.92f, heightFalloffScale: 0.84f, lateralFalloffScale: 0.82f);
+            TightenLocalRegion(adjusted, "calves", rigidityBoost: 0.08f, widthScale: 0.90f, depthScale: 0.92f, heightFalloffScale: 0.86f, lateralFalloffScale: 0.84f);
+        }
+
+        return ReferenceEquals(adjusted, regions) ? cage : cage with { Regions = adjusted };
+    }
+
+    private static void TightenLocalRegion(
+        IDictionary<string, CageRegion> regions,
+        string regionName,
+        float rigidityBoost,
+        float widthScale,
+        float depthScale,
+        float heightFalloffScale,
+        float lateralFalloffScale)
+    {
+        if (!regions.TryGetValue(regionName, out var region))
+        {
+            return;
+        }
+
+        regions[regionName] = region with
+        {
+            WidthInfluence = MathF.Max(0.02f, region.WidthInfluence * widthScale),
+            DepthInfluence = MathF.Max(0.02f, region.DepthInfluence * depthScale),
+            HeightFalloff = MathF.Max(0.03f, region.HeightFalloff * heightFalloffScale),
+            LateralFalloff = MathF.Max(0.08f, region.LateralFalloff * lateralFalloffScale),
+            Rigidity = Math.Clamp(region.Rigidity + rigidityBoost, 0f, 0.92f)
+        };
     }
 }
 
