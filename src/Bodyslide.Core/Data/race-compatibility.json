@@ -31,9 +31,14 @@
     { "body": "Vanilla", "compatibleGroups": ["humanoid", "beast"], "warningGroups": [] },
     {
       "body": "Vanilla Beast",
-      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed", "canine", "lupine", "vulpine", "fox", "creature"],
-      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed", "canine", "lupine", "vulpine", "fox", "creature"],
+      "compatibleGroups": ["humanoid", "beast", "khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed", "canine", "lupine", "vulpine", "fox", "creature", "serpentine"],
+      "warningGroups": ["khajiit", "argonian", "feline", "digitigrade", "reptile", "tail", "goat", "horned", "hagraven", "spriggan", "winged", "avian", "equine", "hoofed", "canine", "lupine", "vulpine", "fox", "creature", "serpentine"],
       "warningMessage": "tail, paw/foot, hoof, wing, horn, and race-variant rigging should still be verified in-game."
+    },
+    {
+      "body": "Serpentine Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "serpentine", "reptile", "tail", "creature"],
+      "warningGroups": []
     },
     {
       "body": "Goat Humanoid",
@@ -73,15 +78,15 @@
     {
       "name": "Khajiit variant",
       "groups": ["beast", "khajiit", "feline", "digitigrade"],
-      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay", "cathayraht", "ohmes"],
-      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "feline", "digitigrade", "vampire", "child", "follower", "custom race"],
-      "meshPathHints": ["khajiit", "senche", "cathay", "ohmes", "feline", "digitigrade", "tail"]
+      "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay", "cathayraht", "ohmes", "ohmesraht", "dagi", "dagiraht"],
+      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "ohmes-raht", "dagi", "dagi-raht", "feline", "digitigrade", "vampire", "child", "follower", "custom race", "customrace"],
+      "meshPathHints": ["khajiit", "senche", "cathay", "ohmes", "dagi", "feline", "digitigrade", "tail"]
     },
     {
       "name": "Argonian variant",
       "groups": ["beast", "argonian", "reptile", "tail"],
       "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard", "draconid", "scaled"],
-      "pluginNameHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail", "vampire", "child", "follower", "custom race"],
+      "pluginNameHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail", "vampire", "child", "follower", "custom race", "customrace"],
       "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail"]
     },
     {
@@ -99,10 +104,17 @@
       "meshPathHints": ["creature", "monster", "feral", "beast", "claw", "fang", "tendril", "paw"]
     },
     {
+      "name": "Serpentine variant",
+      "groups": ["beast", "serpentine", "reptile", "tail", "creature"],
+      "editorIdHints": ["lamia", "naga", "nagakin", "snakefolk", "serpentfolk", "serpent", "serpentine", "cobra", "viper"],
+      "pluginNameHints": ["lamia", "naga", "nagakin", "snakefolk", "serpentfolk", "serpent", "serpentine", "cobra", "viper", "tail", "follower", "custom race", "customrace", "vampire", "child"],
+      "meshPathHints": ["lamia", "naga", "snake", "serpent", "serpentine", "cobra", "viper", "tail", "coil", "scale"]
+    },
+    {
       "name": "Goat variant",
       "groups": ["beast", "goat", "horned", "hoofed"],
       "editorIdHints": ["goat", "satyr", "faun", "ramhorn", "cloven", "caprine"],
-      "pluginNameHints": ["goat", "satyr", "faun", "caprine", "hoof", "horn", "follower", "custom race"],
+      "pluginNameHints": ["goat", "satyr", "faun", "caprine", "hoof", "horn", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["goat", "satyr", "faun", "caprine", "horn", "hoof", "cloven"]
     },
     {

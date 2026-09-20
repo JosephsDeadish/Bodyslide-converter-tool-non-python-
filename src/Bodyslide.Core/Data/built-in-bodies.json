@@ -1250,7 +1250,11 @@
       "Canine Humanoid",
       "Vulpine",
       "Foxfolk",
-      "Digitigrade Beast"
+      "Digitigrade Beast",
+      "Ohmes",
+      "Ohmes-Raht",
+      "Dagi",
+      "Dagi-Raht"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -1272,6 +1276,8 @@
       "saxhleel",
       "cathay",
       "senche",
+      "ohmes",
+      "dagi",
       "lykaios",
       "lupine",
       "canine",
@@ -1309,6 +1315,8 @@
       "saxhleel",
       "cathay",
       "senche",
+      "ohmes",
+      "dagi",
       "lykaios",
       "lupine",
       "canine",
@@ -1318,7 +1326,8 @@
       "fox",
       "feline",
       "reptile",
-      "digitigrade"
+      "digitigrade",
+      "serpentine"
     ],
     "textureTokens": [
       "femalebody",
@@ -1338,6 +1347,97 @@
     "heightToWidthRatioMax": 7.5,
     "depthToWidthRatioMin": 0.28,
     "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3"
+    ],
+    "skeletonFramework": "beast-humanoid"
+  },
+  {
+    "name": "Serpentine Humanoid",
+    "aliases": [
+      "Lamia",
+      "Naga",
+      "Nagakin",
+      "Snakefolk",
+      "Serpentfolk",
+      "Half-Serpent",
+      "Coilborn"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Serpentine beast-humanoid skeleton",
+    "notes": "Humanoid serpent target for lamia, naga, and snakefolk ecosystems with strong tail and lower-body scaling expectations. No built-in physics by default; tail coil weighting, hip-to-tail seam placement, and ground contact should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3"
+    ],
+    "referenceTokens": [
+      "lamia",
+      "naga",
+      "nagakin",
+      "snake",
+      "serpent",
+      "serpentine",
+      "tail",
+      "coil"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "TailBase",
+      "TailLength",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 0.92,
+      "pelvis": 1.06,
+      "legs": 0.95,
+      "shoulders": 1.01,
+      "breasts": 0.99,
+      "butt": 1.05,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 0.96,
+      "calves": 0.94
+    },
+    "detectionTokens": [
+      "lamia",
+      "naga",
+      "nagakin",
+      "snake",
+      "serpent",
+      "serpentine",
+      "tail",
+      "coil",
+      "cobra",
+      "viper"
+    ],
+    "textureTokens": [
+      "snake",
+      "serpent",
+      "scale",
+      "scales",
+      "tail",
+      "coil"
+    ],
+    "physicsTokens": [
+      "tail"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 3.9,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.95,
     "physicsBoneSignatures": [
       "NPC Tail",
       "Tail1",
