@@ -2525,6 +2525,39 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task LocalExportService_ReusesCachedByteTopologySnapshotsForTransformPaths()
+    {
+        var method = typeof(LocalExportService).GetMethod("GetMeshTransferTopologySnapshotFromBytes", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var meshPath = Path.Combine(dir, "cached_buffer_edge_network_0.nif");
+
+        try
+        {
+            await SyntheticNifTestData.WriteAsync(
+                meshPath,
+                [
+                    (0f, 0f, 0f), (1f, 0f, 0.1f), (0f, 1f, 0.2f), (1f, 1f, 0.3f), (0.5f, 0.5f, 0.4f)
+                ]);
+
+            var bytes = await File.ReadAllBytesAsync(meshPath);
+            var snapshot1 = method!.Invoke(null, [bytes, meshPath]);
+            var snapshot2 = method.Invoke(null, [bytes, meshPath]);
+
+            Assert.NotNull(snapshot1);
+            Assert.Same(snapshot1, snapshot2);
+            Assert.True(((System.Collections.IEnumerable)snapshot1.GetType().GetProperty("Vertices")!.GetValue(snapshot1)!).Cast<object>().Any());
+            Assert.NotNull(snapshot1.GetType().GetProperty("CacheKey")!.GetValue(snapshot1));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicMeshAnalysisService_DerivesEdgeNetworkLabelsFromExplicitNonManifoldTopology()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -19143,6 +19176,73 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"ExtremelyAdaptedVariantCount\": 1", qualityJson);
             Assert.Contains("\"Code\": \"retargeted-morph-reuse\"", qualityJson);
             Assert.Contains("\"Code\": \"extreme-topology-adaptation\"", qualityJson);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TryGetReusableMorphPayload_PrefersSyntheticFallbackForHardTopologyDivergence()
+    {
+        var createContext = typeof(LocalExportService).GetMethod("CreateMorphTransferContext", BindingFlags.NonPublic | BindingFlags.Static);
+        var tryReuse = typeof(LocalExportService).GetMethod("TryGetReusableMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createContext);
+        Assert.NotNull(tryReuse);
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var sourcePath = Path.Combine(tmpDir, "source_divergence_0.nif");
+            var targetPath = Path.Combine(tmpDir, "target_divergence_0.nif");
+
+            await SyntheticNifTestData.WriteAsync(sourcePath,
+            [
+                (-0.18f, -0.04f, 0.00f), (-0.10f, -0.04f, 0.08f), (-0.02f, -0.04f, 0.16f),
+                ( 0.06f, -0.04f, 0.24f), ( 0.14f, -0.04f, 0.32f), ( 0.22f, -0.04f, 0.40f),
+                (-0.18f,  0.04f, 0.00f), (-0.10f,  0.04f, 0.08f), (-0.02f,  0.04f, 0.16f),
+                ( 0.06f,  0.04f, 0.24f), ( 0.14f,  0.04f, 0.32f), ( 0.22f,  0.04f, 0.40f)
+            ]);
+            await SyntheticNifTestData.WriteAsync(targetPath,
+            [
+                (-0.95f, -0.02f, 0.04f), (-0.82f, -0.02f, 0.12f), (-0.69f, -0.02f, 0.20f), (-0.56f, -0.02f, 0.28f),
+                (-0.95f,  0.02f, 0.04f), (-0.82f,  0.02f, 0.12f), (-0.69f,  0.02f, 0.20f), (-0.56f,  0.02f, 0.28f),
+                ( 0.56f, -0.02f, 0.36f), ( 0.69f, -0.02f, 0.44f), ( 0.82f, -0.02f, 0.52f), ( 0.95f, -0.02f, 0.60f),
+                ( 0.56f,  0.02f, 0.36f), ( 0.69f,  0.02f, 0.44f), ( 0.82f,  0.02f, 0.52f), ( 0.95f,  0.02f, 0.60f),
+                ( 0.00f, -0.40f, 0.72f), ( 0.00f, -0.24f, 0.84f), ( 0.00f,  0.24f, 0.84f), ( 0.00f,  0.40f, 0.72f)
+            ]);
+
+            var context = createContext!.Invoke(null, new object[]
+            {
+                new[] { sourcePath },
+                new[] { targetPath },
+                new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasOpenStructurePieces: true)
+            });
+            Assert.NotNull(context);
+
+            var reusable = new Dictionary<string, SourceMorphPayloadVariants>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Belly"] = new(
+                    new SourceMorphPayload(
+                        "Belly",
+                        false,
+                        "tri",
+                        12,
+                        Enumerable.Range(0, 12)
+                            .Select(index => (X: 0.05f + (index * 0.01f), Y: 0f, Z: 0.02f))
+                            .ToArray()),
+                    null)
+            };
+
+            var args = new object?[] { reusable, "Belly", false, 20, context, null, null, null };
+            var reused = Assert.IsType<bool>(tryReuse!.Invoke(null, args));
+
+            Assert.False(reused);
+            Assert.False(Assert.IsType<bool>(args[6]));
+            Assert.True(Assert.IsType<bool>(args[7]));
         }
         finally
         {

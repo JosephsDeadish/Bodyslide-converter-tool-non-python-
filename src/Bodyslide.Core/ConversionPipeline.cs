@@ -15529,6 +15529,8 @@ internal sealed class LocalExportService(
 
     private static readonly ConcurrentDictionary<string, MeshTransferTopologySnapshot> MeshTransferTopologySnapshotCache =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, MeshTransferTopologySnapshot> MeshTransferTopologyBufferSnapshotCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<(string OutputDirectory, IReadOnlyList<string> OutputFiles)> ExportAsync(
         ConversionRequest request,
@@ -17111,6 +17113,20 @@ internal sealed class LocalExportService(
             meshFile);
     }
 
+    private static MeshTransferTopologySnapshot? GetMeshTransferTopologySnapshotFromBytes(byte[] bytes, string? sourceIdentity)
+    {
+        if (bytes.Length < 32)
+        {
+            return null;
+        }
+
+        var cacheKey = BuildMeshTransferTopologyByteCacheKey(bytes, sourceIdentity);
+        return MeshTransferTopologyBufferSnapshotCache.GetOrAdd(
+            cacheKey,
+            static (_, state) => CreateMeshTransferTopologySnapshot(state.Bytes, state.CacheKey),
+            (Bytes: bytes, CacheKey: cacheKey));
+    }
+
     private static string? BuildMeshTransferTopologyCacheKey(string meshFile)
     {
         try
@@ -17132,10 +17148,54 @@ internal sealed class LocalExportService(
         }
     }
 
+    private static string BuildMeshTransferTopologyByteCacheKey(byte[] bytes, string? sourceIdentity)
+    {
+        var normalizedIdentity = string.IsNullOrWhiteSpace(sourceIdentity)
+            ? "buffer"
+            : sourceIdentity.Trim();
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        return $"{normalizedIdentity}|{bytes.Length}|{hash}";
+    }
+
     private static MeshTransferTopologySnapshot CreateMeshTransferTopologySnapshot(string meshFile)
     {
         var cacheKey = BuildMeshTransferTopologyCacheKey(meshFile) ?? Path.GetFullPath(meshFile);
-        var vertices = NifGeometrySignatureReader.TryReadFullVertices(meshFile);
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(meshFile);
+        }
+        catch (IOException)
+        {
+            return new MeshTransferTopologySnapshot(
+                cacheKey,
+                [],
+                [],
+                null,
+                [],
+                [],
+                new Dictionary<int, TransferIslandEdgeNetwork>(),
+                false);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new MeshTransferTopologySnapshot(
+                cacheKey,
+                [],
+                [],
+                null,
+                [],
+                [],
+                new Dictionary<int, TransferIslandEdgeNetwork>(),
+                false);
+        }
+
+        return CreateMeshTransferTopologySnapshot(bytes, cacheKey);
+    }
+
+    private static MeshTransferTopologySnapshot CreateMeshTransferTopologySnapshot(byte[] bytes, string cacheKey)
+    {
+        var vertices = NifGeometrySignatureReader.TryReadFullVertices(bytes);
         if (vertices is not { Count: > 0 })
         {
             return new MeshTransferTopologySnapshot(
@@ -17150,7 +17210,7 @@ internal sealed class LocalExportService(
         }
 
         var normalizedVertices = NormalizeVerticesForTransfer(vertices);
-        var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(meshFile);
+        var topologySummary = NifGeometrySignatureReader.TryReadTopologySummary(bytes);
         var hasExplicitTopology = topologySummary is { VertexCount: > 0 } &&
                                   topologySummary.VertexCount == vertices.Count &&
                                   topologySummary.ComponentIds.Length == vertices.Count;
@@ -17882,7 +17942,10 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
+        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
+            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
+            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
 
         // Run animation-driven solver to get per-region push-out corrections
@@ -18037,7 +18100,10 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
+        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
+        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
+            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
+            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(sourceBytes));
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
@@ -18148,6 +18214,7 @@ internal sealed class LocalExportService(
 
         var transformed = sourceBytes.ToArray();
         var effectiveCage = deformationCage ?? BasicCageGenerationService.CreatePresetCage("mixed");
+        var sharedSnapshot = GetMeshTransferTopologySnapshotFromBytes(sourceBytes, sourcePath);
         var transformedAny = false;
         foreach (var block in blocks)
         {
@@ -18158,7 +18225,8 @@ internal sealed class LocalExportService(
                 block.VertexStride,
                 sourcePath,
                 regionalMorphing,
-                effectiveCage);
+                effectiveCage,
+                sharedSnapshot);
         }
 
         return transformedAny ? transformed : sourceBytes;
@@ -18171,7 +18239,8 @@ internal sealed class LocalExportService(
         int vertexStride,
         string? sourcePath,
         IReadOnlyDictionary<string, double> regionalMorphing,
-        DeformationCage effectiveCage)
+        DeformationCage effectiveCage,
+        MeshTransferTopologySnapshot? sharedSnapshot)
     {
         if (vertexCount <= 0 || vertexStride < 6)
         {
@@ -18212,7 +18281,9 @@ internal sealed class LocalExportService(
         var centerY = (minY + maxY) / 2f;
         var halfRangeX = Math.Max((maxX - minX) / 2f, 0.0001f);
         var halfRangeY = Math.Max((maxY - minY) / 2f, 0.0001f);
-        var topologyContext = BuildTopologyTransformContext(rawVertices, NifGeometrySignatureReader.TryReadTopologySummary(transformed));
+        var topologyContext = sharedSnapshot is not null && sharedSnapshot.Vertices.Count == rawVertices.Length
+            ? BuildTopologyTransformContextFromSnapshot(sharedSnapshot)
+            : BuildTopologyTransformContext(rawVertices, sharedSnapshot?.TopologySummary ?? NifGeometrySignatureReader.TryReadTopologySummary(transformed));
         var solverResult = AnimationDrivenGeometrySolver.Solve(rawVertices, regionalMorphing);
         var pushOut = solverResult.MaxPushOutPerRegion;
         var normScale = Math.Max(Math.Max(maxX - minX, maxY - minY), 0.0001f);
@@ -18355,15 +18426,77 @@ internal sealed class LocalExportService(
             boundaryVertexWeights = new float[rawVertices.Count];
         }
 
+        return CreateTopologyTransformContext(
+            rawVertices,
+            normalizedRawVertices,
+            topologySummary,
+            componentIds,
+            boundaryVertexFlags,
+            boundaryVertexWeights,
+            boundaryLoopCount,
+            hasExplicitTopology,
+            BuildTransferIslandEdgeNetworks(
+                normalizedRawVertices,
+                componentIds,
+                boundaryVertexFlags,
+                hasExplicitTopology ? topologySummary : null));
+    }
+
+    private static TopologyTransformContext? BuildTopologyTransformContextFromSnapshot(MeshTransferTopologySnapshot? snapshot)
+    {
+        if (snapshot is null || snapshot.Vertices.Count == 0)
+        {
+            return null;
+        }
+
+        if (snapshot.ComponentIds.Length != snapshot.Vertices.Count ||
+            snapshot.BoundaryVertexFlags.Length != snapshot.Vertices.Count)
+        {
+            return null;
+        }
+
+        var rawVertices = snapshot.Vertices
+            .Select(static vertex => (vertex.X, vertex.Y, vertex.Z))
+            .ToArray();
+        var boundaryVertexWeights = snapshot.HasExplicitTopology
+            ? BuildBoundaryVertexWeights(rawVertices, snapshot.ComponentIds, snapshot.TopologySummary!)
+            : new float[rawVertices.Length];
+        return CreateTopologyTransformContext(
+            rawVertices,
+            snapshot.NormalizedVertices,
+            snapshot.TopologySummary,
+            snapshot.ComponentIds,
+            snapshot.BoundaryVertexFlags,
+            boundaryVertexWeights,
+            snapshot.TopologySummary?.BoundaryLoopCount ?? 0,
+            snapshot.HasExplicitTopology,
+            snapshot.EdgeNetworks);
+    }
+
+    private static TopologyTransformContext? CreateTopologyTransformContext(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<MeshVertex> normalizedRawVertices,
+        NifGeometrySignatureReader.MeshTopologySummary? topologySummary,
+        int[] componentIds,
+        bool[] boundaryVertexFlags,
+        float[] boundaryVertexWeights,
+        int boundaryLoopCount,
+        bool hasExplicitTopology,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+    {
+        if (rawVertices.Count == 0 ||
+            normalizedRawVertices.Count != rawVertices.Count ||
+            componentIds.Length != rawVertices.Count ||
+            boundaryVertexFlags.Length != rawVertices.Count ||
+            boundaryVertexWeights.Length != rawVertices.Count)
+        {
+            return null;
+        }
+
         var hasMultipleComponents = componentIds.Distinct().Skip(1).Any();
         var boundaryCoverage = rawVertices.Count <= 0
             ? 0f
             : boundaryVertexFlags.Count(static flag => flag) / (float)rawVertices.Count;
-        var edgeNetworks = BuildTransferIslandEdgeNetworks(
-            normalizedRawVertices,
-            componentIds,
-            boundaryVertexFlags,
-            hasExplicitTopology ? topologySummary : null);
         if (!hasMultipleComponents &&
             boundaryLoopCount <= 0 &&
             boundaryCoverage <= 0.001f)
@@ -23034,6 +23167,13 @@ internal sealed class LocalExportService(
                 return false;
             }
 
+            usedExtremeAdaptation = IsExtremeTopologyAdaptation(candidate.VertexCount, vertexCount, morphTransferContext);
+            if (usedExtremeAdaptation &&
+                ShouldPreferSyntheticMorphFallbackForHardDivergence(candidate.VertexCount, vertexCount, morphTransferContext))
+            {
+                return false;
+            }
+
             payload = candidate with
             {
                 VertexCount = vertexCount,
@@ -23041,8 +23181,38 @@ internal sealed class LocalExportService(
                 Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount, morphTransferContext)
             };
             wasRetargeted = true;
-            usedExtremeAdaptation = IsExtremeTopologyAdaptation(candidate.VertexCount, vertexCount, morphTransferContext);
             return true;
+        }
+
+        private static bool ShouldPreferSyntheticMorphFallbackForHardDivergence(
+            int sourceVertexCount,
+            int targetVertexCount,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (sourceVertexCount <= 0 ||
+                targetVertexCount <= 0 ||
+                morphTransferContext?.DecisionCache is not { TargetDecisions.Count: > 0 } decisionCache)
+            {
+                return false;
+            }
+
+            var vertexDeltaRatio = Math.Abs(targetVertexCount - sourceVertexCount) / (double)Math.Max(1, sourceVertexCount);
+            if (vertexDeltaRatio < 0.50d && !morphTransferContext.ExtremeTopologyAdaptationRisk)
+            {
+                return false;
+            }
+
+            var severeDivergenceRatio = decisionCache.TargetDecisions.Count(static decision =>
+                    decision.StructuralDivergence >= 0.42f ||
+                    decision.PreferredSourceIsland < 0)
+                / (double)Math.Max(1, decisionCache.TargetDecisions.Count);
+            var boundarySensitiveDivergenceRatio = decisionCache.TargetDecisions.Count(static decision =>
+                    decision.BoundarySensitive &&
+                    decision.StructuralDivergence >= 0.30f)
+                / (double)Math.Max(1, decisionCache.TargetDecisions.Count);
+
+            return severeDivergenceRatio >= 0.08d ||
+                   boundarySensitiveDivergenceRatio >= 0.16d;
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
