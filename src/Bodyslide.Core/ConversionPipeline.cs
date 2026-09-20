@@ -71,7 +71,9 @@ public sealed record MeshAnalysis(
     bool HasAccessoryPieces = false,
     bool HasStrapLikePieces = false,
     bool HasRigidSubMeshes = false,
-    bool IsFootwear = false);
+    bool IsFootwear = false,
+    bool HasLayeredPanels = false,
+    bool HasOpenStructurePieces = false);
 public sealed record CageRegion(
     float HeightCenter,
     float HeightFalloff,
@@ -5454,6 +5456,16 @@ public sealed class ConversionOrchestrator(
                 meshFeatures.Add("footwear");
             }
 
+            if (analysis.HasLayeredPanels)
+            {
+                meshFeatures.Add("layered");
+            }
+
+            if (analysis.HasOpenStructurePieces)
+            {
+                meshFeatures.Add("open");
+            }
+
             if (meshFeatures.Count > 0)
             {
                 steps.Add($"mesh-features:{string.Join('+', meshFeatures)}");
@@ -8262,6 +8274,12 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
     private static readonly string[] RigidPieceKeywords =
         ["plate", "plates", "pauldron", "pauldrons", "buckle", "buckles", "clasp", "clasps", "guard", "guards", "greave", "greaves", "sabaton", "sabatons", "shield", "shields", "rigid"];
 
+    private static readonly string[] LayeredPanelKeywords =
+        ["cape", "cloak", "shawl", "mantle", "skirt", "panel", "panels", "tabard", "tasset", "tassets", "drape", "drapes", "loincloth", "apron", "tailcoat", "tails"];
+
+    private static readonly string[] OpenStructureKeywords =
+        ["open", "openwork", "cutout", "cutouts", "lattice", "cage", "mesh", "net", "netting", "filigree"];
+
     public Task<MeshAnalysis> AnalyzeAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var fileNames = armor.MeshFiles.Select(path => Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() ?? string.Empty).ToList();
@@ -8310,8 +8328,11 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
         var isFootwear = fileNames.Any(name => FootwearKeywords.Any(name.Contains)) ||
             partitionSlots.Contains(37) ||
             partitionSlots.Contains(38);
+        var hasLayeredPanels = fileNames.Any(name => LayeredPanelKeywords.Any(name.Contains));
+        var hasOpenStructurePieces = fileNames.Any(name => OpenStructureKeywords.Any(name.Contains));
         var hasAccessoryPieces = fileNames.Any(name => AccessoryKeywords.Any(name.Contains)) ||
             hasStrapLikePieces ||
+            hasLayeredPanels ||
             isFootwear ||
             hasSplitMeshes;
         var hasRigidSubMeshes = finalMeshType == "plate" ||
@@ -8326,7 +8347,9 @@ internal sealed class BasicMeshAnalysisService : IMeshAnalysisService
             HasAccessoryPieces: hasAccessoryPieces,
             HasStrapLikePieces: hasStrapLikePieces,
             HasRigidSubMeshes: hasRigidSubMeshes,
-            IsFootwear: isFootwear));
+            IsFootwear: isFootwear,
+            HasLayeredPanels: hasLayeredPanels,
+            HasOpenStructurePieces: hasOpenStructurePieces));
     }
 }
 
@@ -8478,6 +8501,34 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["thighs"] = 0.80d,
             ["calves"] = 0.76d,
             ["feet"] = 0.74d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> LayeredPanelRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.82d,
+            ["arms"] = 0.82d,
+            ["chest"] = 0.84d,
+            ["breasts"] = 0.80d,
+            ["waist"] = 0.82d,
+            ["belly"] = 0.84d,
+            ["pelvis"] = 0.84d,
+            ["butt"] = 0.86d,
+            ["thighs"] = 0.84d,
+        };
+
+    private static readonly IReadOnlyDictionary<string, double> OpenStructureRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["shoulders"] = 0.78d,
+            ["arms"] = 0.78d,
+            ["chest"] = 0.80d,
+            ["breasts"] = 0.76d,
+            ["waist"] = 0.78d,
+            ["belly"] = 0.80d,
+            ["pelvis"] = 0.80d,
+            ["butt"] = 0.82d,
+            ["thighs"] = 0.82d,
         };
 
     private static readonly IReadOnlyDictionary<string, double> ExtremeDifferenceRegionDamping =
@@ -8884,6 +8935,53 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 constrainedRegions: ["feet", "calves", "legs", "thighs"]);
         }
 
+        if (analysis.HasLayeredPanels)
+        {
+            ApplyDampingProfile(tuned, LayeredPanelRegionDamping);
+            ApplyClampProfile(
+                tuned,
+                new Dictionary<string, (double Minimum, double Maximum)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = (0.82d, 1.24d),
+                    ["breasts"] = (0.84d, 1.26d),
+                    ["waist"] = (0.84d, 1.22d),
+                    ["pelvis"] = (0.84d, 1.24d),
+                    ["butt"] = (0.84d, 1.24d),
+                    ["thighs"] = (0.82d, 1.24d),
+                    ["shoulders"] = (0.84d, 1.22d),
+                    ["arms"] = (0.84d, 1.22d),
+                });
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.16d,
+                blendStrength: 0.76d,
+                constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
+        }
+
+        if (analysis.HasOpenStructurePieces)
+        {
+            ApplyDampingProfile(tuned, OpenStructureRegionDamping);
+            ApplyClampProfile(
+                tuned,
+                new Dictionary<string, (double Minimum, double Maximum)>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = (0.88d, 1.18d),
+                    ["breasts"] = (0.90d, 1.20d),
+                    ["waist"] = (0.88d, 1.16d),
+                    ["belly"] = (0.88d, 1.16d),
+                    ["pelvis"] = (0.88d, 1.18d),
+                    ["butt"] = (0.88d, 1.18d),
+                    ["thighs"] = (0.88d, 1.18d),
+                    ["shoulders"] = (0.88d, 1.18d),
+                    ["arms"] = (0.88d, 1.18d),
+                });
+            ApplySeamContinuity(
+                tuned,
+                maxGap: 0.14d,
+                blendStrength: 0.84d,
+                constrainedRegions: ["chest", "breasts", "waist", "belly", "pelvis", "butt", "thighs", "shoulders", "arms"]);
+        }
+
         return tuned;
     }
 
@@ -9020,6 +9118,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         if (analysis.HasStrapLikePieces || analysis.HasSplitMeshes)
         {
             severityFloor += 0.04d;
+        }
+
+        if (analysis.HasLayeredPanels || analysis.HasOpenStructurePieces)
+        {
+            severityFloor += 0.05d;
         }
 
         if (analysis.HasRigidSubMeshes)

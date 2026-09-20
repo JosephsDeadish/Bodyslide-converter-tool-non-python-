@@ -2210,6 +2210,34 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicMeshAnalysisService_DetectsLayeredAndOpenStructureHints()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var panelPath = Path.Combine(dir, "ritual_tabard_skirt_panel_0.nif");
+        var latticePath = Path.Combine(dir, "ritual_openwork_lattice_cage_1.nif");
+        await File.WriteAllBytesAsync(panelPath, []);
+        await File.WriteAllBytesAsync(latticePath, []);
+
+        try
+        {
+            var armor = new ImportedArmor(panelPath, [panelPath, latticePath], [], [], []);
+            var service = new BasicMeshAnalysisService();
+
+            var result = await service.AnalyzeAsync(armor, CancellationToken.None);
+
+            Assert.True(result.HasSplitMeshes);
+            Assert.True(result.HasLayeredPanels);
+            Assert.True(result.HasOpenStructurePieces);
+            Assert.True(result.HasAccessoryPieces);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BasicTextureAnalysisService_IgnoresMaterialFilesInsideGeneratedConvertedTrees()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -2463,6 +2491,83 @@ public sealed class ConversionOrchestratorTests
             Assert.True(tuned.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
             Assert.True(tuned.RegionalMorphing["chest"] < baseline.RegionalMorphing["chest"]);
             Assert.True(Math.Abs(tuned.RegionalMorphing["waist"] - 1.0) < Math.Abs(baseline.RegionalMorphing["waist"] - 1.0));
+        }
+        finally
+        {
+            File.Delete(nifPath);
+        }
+    }
+
+    [Fact]
+    public async Task StrategyMeshConversionService_LayeredOpenPiecesDampenTorsoAndPanelMorphing()
+    {
+        var nifPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        await File.WriteAllBytesAsync(nifPath, []);
+
+        try
+        {
+            var profiles = new[]
+            {
+                new CustomBodyProfile(
+                    "SourceCustom",
+                    ["sourcecustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.0,
+                        ["breasts"] = 1.0,
+                        ["waist"] = 1.0,
+                        ["belly"] = 1.0,
+                        ["pelvis"] = 1.0,
+                        ["butt"] = 1.0,
+                        ["thighs"] = 1.0,
+                        ["shoulders"] = 1.0,
+                        ["arms"] = 1.0,
+                    }),
+                new CustomBodyProfile(
+                    "TargetCustom",
+                    ["targetcustom"],
+                    [],
+                    [],
+                    0,
+                    0,
+                    new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["chest"] = 1.46,
+                        ["breasts"] = 1.78,
+                        ["waist"] = 0.74,
+                        ["belly"] = 0.80,
+                        ["pelvis"] = 1.30,
+                        ["butt"] = 1.34,
+                        ["thighs"] = 1.24,
+                        ["shoulders"] = 1.26,
+                        ["arms"] = 1.20,
+                    }),
+            };
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [], CustomBodyProfiles: profiles);
+            var cage = new DeformationCage("smooth-adaptive-cage");
+            var service = new StrategyMeshConversionService();
+            var baselineAnalysis = new MeshAnalysis("cloth", false, 1);
+            var semanticAnalysis = new MeshAnalysis(
+                "cloth",
+                false,
+                2,
+                HasSplitMeshes: true,
+                HasAccessoryPieces: true,
+                HasLayeredPanels: true,
+                HasOpenStructurePieces: true);
+
+            var baseline = await service.ConvertAsync(armor, baselineAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+            var semantic = await service.ConvertAsync(armor, semanticAnalysis, cage, "TargetCustom", null, "SourceCustom", CancellationToken.None);
+
+            Assert.True(semantic.RegionalMorphing["breasts"] < baseline.RegionalMorphing["breasts"]);
+            Assert.True(semantic.RegionalMorphing["chest"] < baseline.RegionalMorphing["chest"]);
+            Assert.True(semantic.RegionalMorphing["pelvis"] < baseline.RegionalMorphing["pelvis"]);
+            Assert.True(semantic.RegionalMorphing["thighs"] < baseline.RegionalMorphing["thighs"]);
+            Assert.True(Math.Abs(semantic.RegionalMorphing["waist"] - 1.0) < Math.Abs(baseline.RegionalMorphing["waist"] - 1.0));
         }
         finally
         {
