@@ -11277,6 +11277,70 @@ public sealed class PluginPatchGuidanceTests
     }
 
     [Fact]
+    public async Task PluginPatches_ExpandTransitiveMasterChainsInGeneratedPatchAndInstallHints()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterRoot.esm"),
+            BuildSsePluginWithMasters(
+                [],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("RootAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x00000800u)));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterBridge.esp"),
+            BuildSsePluginWithMasters(["MasterRoot.esm"]));
+        await File.WriteAllBytesAsync(
+            Path.Combine(workingDirectory, "MasterChild.esp"),
+            BuildSsePluginWithMasters(
+                ["MasterBridge.esp"],
+                BuildSseRecord(
+                    "ARMA",
+                    BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("ChildAddon\0"))
+                        .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/iron/ironarmor_0.nif\0")))
+                        .ToArray(),
+                    formId: 0x01000801u)));
+        await File.WriteAllTextAsync(Path.Combine(workingDirectory, "ironarmor_0.nif"), "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(
+                new ConversionRequest(workingDirectory, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+
+            var patchPath = Path.Combine(outputDirectory, "MasterChild_SlidesmithPatch.esp");
+            Assert.True(File.Exists(patchPath));
+            var patchMasters = BinaryArmaParser.ExtractMasterFileNames(await File.ReadAllBytesAsync(patchPath));
+            Assert.Equal(["MasterRoot.esm", "MasterBridge.esp", "MasterChild.esp"], patchMasters);
+
+            using var patchReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json")));
+            var installHint = patchReport.RootElement
+                .GetProperty("PluginInstallHints")
+                .EnumerateArray()
+                .Single(element => string.Equals(element.GetProperty("SourcePlugin").GetString(), "MasterChild.esp", StringComparison.Ordinal));
+
+            Assert.Equal(
+                ["MasterRoot.esm", "MasterBridge.esp"],
+                installHint.GetProperty("InheritedMasters").EnumerateArray().Select(element => element.GetString() ?? string.Empty).ToArray());
+            Assert.Equal(
+                ["MasterRoot.esm", "MasterBridge.esp", "MasterChild.esp"],
+                installHint.GetProperty("RecommendedPluginLoadAfter").EnumerateArray().Select(element => element.GetString() ?? string.Empty).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PluginPatches_PreservesRelativePluginPathStyle_AndStagesUnderMeshesRoot()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

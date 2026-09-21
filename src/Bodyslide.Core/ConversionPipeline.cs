@@ -16493,6 +16493,15 @@ internal sealed class LocalExportService(
 
                 if (safeSourcePluginPaths.Count > 0)
                 {
+                    var sourcePluginPathLookup = safeSourcePluginPaths
+                        .Select(path => new
+                        {
+                            FileName = NormalizeResolvedPluginFileNameOrNull(Path.GetFileName(path)),
+                            Path = path
+                        })
+                        .Where(static entry => !string.IsNullOrWhiteSpace(entry.FileName))
+                        .ToDictionary(static entry => entry.FileName!, static entry => entry.Path, StringComparer.OrdinalIgnoreCase);
+
                     // Normalise the rewrite map (lowercase / forward-slash keys) for both
                     // the full-copy rewriter and the new minimal patch generator.
                     var normMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -16528,12 +16537,16 @@ internal sealed class LocalExportService(
                             var headerSize     = BinaryArmaParser.DetectHeaderSize(pluginBytes);
                             var pluginName     = Path.GetFileName(pluginPath) ?? pluginPath;
                             var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(pluginBytes);
+                            var expandedMasterFileNames = ExpandInheritedMasterFileNames(
+                                pluginName,
+                                masterFileNames,
+                                sourcePluginPathLookup);
                             var armaDescriptors = BinaryArmaParser.ExtractArmaRecords(pluginBytes, pluginName);
                             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(pluginBytes, pluginName);
 
                             var (patchBytes, included) = PatchPluginWriter.BuildPatchPlugin(
                                 pluginName, armaDescriptors, normMap, headerSize,
-                                inheritedMasterFileNames: masterFileNames,
+                                inheritedMasterFileNames: expandedMasterFileNames,
                                 armoDescriptors: armoDescriptors);
                             string? generatedPatchPlugin = null;
 
@@ -16547,12 +16560,12 @@ internal sealed class LocalExportService(
                                 patchVerificationPaths.Add(patchPath);
                                 generatedPatchPlugin = Path.GetFileName(patchPath);
                                 patchMasterValidationExpectations[patchPath] =
-                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, masterFileNames);
+                                    PatchPluginWriter.BuildOrderedMasterList(pluginName, expandedMasterFileNames);
                             }
 
                             pluginInstallHints.Add(BuildPluginInstallHint(
                                 pluginName,
-                                masterFileNames,
+                                expandedMasterFileNames,
                                 generatedPatchPlugin,
                                 manualReviewRequired: false));
                         }
@@ -24562,6 +24575,52 @@ internal sealed class LocalExportService(
             "Keep the SlideSmith output mod below the source armor mod so converted assets and generated plugins win conflicts cleanly.",
             manualReviewRequired,
             notes);
+    }
+
+    private static IReadOnlyList<string> ExpandInheritedMasterFileNames(
+        string sourcePluginFileName,
+        IReadOnlyList<string>? inheritedMasterFileNames,
+        IReadOnlyDictionary<string, string> sourcePluginPathLookup)
+    {
+        var orderedMasters = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sourcePlugin = NormalizeResolvedPluginFileNameOrNull(sourcePluginFileName);
+
+        void AddMasterClosure(string? masterFileName)
+        {
+            var normalizedMasterFileName = NormalizeResolvedPluginFileNameOrNull(masterFileName);
+            if (string.IsNullOrWhiteSpace(normalizedMasterFileName) ||
+                normalizedMasterFileName.Equals(sourcePlugin, StringComparison.OrdinalIgnoreCase) ||
+                !seen.Add(normalizedMasterFileName))
+            {
+                return;
+            }
+
+            if (sourcePluginPathLookup.TryGetValue(normalizedMasterFileName, out var masterPluginPath))
+            {
+                try
+                {
+                    var masterBytes = File.ReadAllBytes(masterPluginPath);
+                    foreach (var nestedMasterFileName in BinaryArmaParser.ExtractMasterFileNames(masterBytes))
+                    {
+                        AddMasterClosure(nestedMasterFileName);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    // Keep the declared master itself even if the nested chain cannot be expanded locally.
+                }
+            }
+
+            orderedMasters.Add(normalizedMasterFileName);
+        }
+
+        foreach (var inheritedMasterFileName in inheritedMasterFileNames ?? [])
+        {
+            AddMasterClosure(inheritedMasterFileName);
+        }
+
+        return orderedMasters;
     }
 
     private static string BuildFomodModuleConfigXml(
