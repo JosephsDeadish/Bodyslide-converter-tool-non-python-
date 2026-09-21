@@ -20058,6 +20058,93 @@ public sealed class LocalExportServiceGroundMeshTests
         }
     }
 
+    [Fact]
+    public async Task ExportAsync_WritesIslandRoutingSummaryIntoManifest()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "iron_0.nif");
+        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateUpperBodyArmorVertices());
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: new BasicGroundMeshGeneratorService());
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh(
+                "plate",
+                "direct-copy",
+                1,
+                new Dictionary<string, double>(),
+                new DeformationCage(
+                    "authored-islands",
+                    IslandControls:
+                    [
+                        new CageIslandControl(
+                            MeshKey: "iron",
+                            IslandId: 0,
+                            CageRegions: ["chest", "waist"],
+                            RigidityBias: 0.22f,
+                            BoundaryDamping: 0.31f,
+                            SemanticLabels: ["window-frame-island"],
+                            BoundaryLoops:
+                            [
+                                new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: false, BoundaryDamping: 0.18f),
+                                new CageIslandBoundaryLoopControl(1, ["waist"], IsHole: true, BoundaryDamping: 0.24f)
+                            ],
+                            EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(
+                                ComponentId: 0,
+                                BoundaryEdgeCount: 4,
+                                InteriorEdgeCount: 6,
+                                NonManifoldEdgeCount: 0,
+                                BoundaryVertexCount: 4,
+                                MaxVertexValence: 3,
+                                IsClosedManifold: false,
+                                HasManifoldRisk: false))
+                    ]));
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "CBBE", ["Belly"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult("XPMSSE", "CBBE", [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)], []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, ["step1"],
+                detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            var manifestPath = files.Single(path => path.EndsWith("conversion-manifest.json", StringComparison.OrdinalIgnoreCase));
+            var manifestJson = await File.ReadAllTextAsync(manifestPath);
+            using var manifest = System.Text.Json.JsonDocument.Parse(manifestJson);
+            Assert.True(manifest.RootElement.TryGetProperty("IslandRoutingExport", out var islandRouting));
+            Assert.Equal(System.Text.Json.JsonValueKind.Array, islandRouting.ValueKind);
+            var firstIsland = islandRouting.EnumerateArray().First();
+            Assert.Equal("iron", firstIsland.GetProperty("MeshKey").GetString());
+            Assert.Equal(0, firstIsland.GetProperty("IslandId").GetInt32());
+            Assert.Equal(2, firstIsland.GetProperty("BoundaryLoopIndices").GetArrayLength());
+            Assert.False(firstIsland.GetProperty("BoundaryLoopHoleFlags")[0].GetBoolean());
+            Assert.True(firstIsland.GetProperty("BoundaryLoopHoleFlags")[1].GetBoolean());
+            Assert.Equal(0.31f, firstIsland.GetProperty("BoundaryDamping").GetSingle());
+            Assert.Equal(0.22f, firstIsland.GetProperty("RigidityBias").GetSingle());
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static async Task<(string OutputDir, IReadOnlyList<string> Files)> RunExportAsync(

@@ -870,6 +870,19 @@ public sealed record CageIslandMembershipSummary(
     int NonManifoldEdgeCount = 0,
     bool HasManifoldRisk = false,
     bool UsesPropagatedEdgeNetwork = false);
+public sealed record ExportIslandRoutingSummary(
+    string MeshKey,
+    int IslandId,
+    int VertexCount,
+    int BoundaryVertexCount,
+    IReadOnlyList<string> CageRegions,
+    IReadOnlyList<string>? SemanticLabels = null,
+    IReadOnlyList<int>? BoundaryLoopIndices = null,
+    IReadOnlyList<bool>? BoundaryLoopHoleFlags = null,
+    float BoundaryDamping = 0.0f,
+    float RigidityBias = 0.0f,
+    int InteriorEdgeCount = 0,
+    int NonManifoldEdgeCount = 0);
 
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
@@ -16118,6 +16131,7 @@ internal sealed class LocalExportService(
             },
             Analysis = analysis,
             Converted = mesh,
+            IslandRoutingExport = BuildIslandRoutingExportSummary(armor.MeshFiles, mesh.DeformationCage),
             Morphs = morphs,
             Physics = physics,
             Clipping = clipping,
@@ -28299,6 +28313,66 @@ internal sealed class LocalExportService(
                 InteriorEdgeCount: totalInteriorEdges,
                 NonManifoldEdgeCount: totalNonManifoldEdges,
                 Islands: islandSummaries);
+    }
+
+    private static IReadOnlyList<ExportIslandRoutingSummary>? BuildIslandRoutingExportSummary(
+        IReadOnlyList<string> meshPaths,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return null;
+        }
+
+        var snapshotsByMeshKey = meshPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            .Select(path => new
+            {
+                MeshKey = GetMeshTopologyLookupKey(path),
+                Snapshot = GetMeshTransferTopologySnapshot(path)
+            })
+            .Where(entry => entry.Snapshot is not null && entry.Snapshot.Vertices.Count > 0 && entry.Snapshot.ComponentIds.Length == entry.Snapshot.Vertices.Count)
+            .GroupBy(static entry => entry.MeshKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().Snapshot!, StringComparer.OrdinalIgnoreCase);
+
+        var summaries = new List<ExportIslandRoutingSummary>(islandControls.Count);
+        foreach (var control in islandControls
+                     .OrderBy(static control => control.MeshKey, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(static control => control.IslandId))
+        {
+            var vertexCount = 0;
+            var boundaryVertexCount = 0;
+            if (snapshotsByMeshKey.TryGetValue(control.MeshKey, out var snapshot))
+            {
+                vertexCount = snapshot.ComponentIds.Count(componentId => componentId == control.IslandId);
+                if (vertexCount > 0)
+                {
+                    boundaryVertexCount = snapshot.ComponentIds
+                        .Select(static (componentId, index) => (componentId, index))
+                        .Count(entry =>
+                            entry.componentId == control.IslandId &&
+                            entry.index >= 0 &&
+                            entry.index < snapshot.BoundaryVertexFlags.Length &&
+                            snapshot.BoundaryVertexFlags[entry.index]);
+                }
+            }
+
+            summaries.Add(new ExportIslandRoutingSummary(
+                MeshKey: control.MeshKey,
+                IslandId: control.IslandId,
+                VertexCount: vertexCount,
+                BoundaryVertexCount: boundaryVertexCount,
+                CageRegions: control.CageRegions,
+                SemanticLabels: control.SemanticLabels,
+                BoundaryLoopIndices: control.BoundaryLoops?.Select(static loop => loop.LoopIndex).ToArray() ?? [],
+                BoundaryLoopHoleFlags: control.BoundaryLoops?.Select(static loop => loop.IsHole).ToArray() ?? [],
+                BoundaryDamping: control.BoundaryDamping,
+                RigidityBias: control.RigidityBias,
+                InteriorEdgeCount: control.EdgeNetworkSummary?.InteriorEdgeCount ?? 0,
+                NonManifoldEdgeCount: control.EdgeNetworkSummary?.NonManifoldEdgeCount ?? 0));
+        }
+
+        return summaries.Count == 0 ? null : summaries;
     }
 
     private static string GetMeshTopologyLookupKey(string path)
