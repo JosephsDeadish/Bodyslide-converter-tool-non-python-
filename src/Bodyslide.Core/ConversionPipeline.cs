@@ -290,6 +290,22 @@ public sealed record InGameValidationScenario(
     IReadOnlyList<string> SuggestedAnimations,
     IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts);
+public sealed record RuntimeValidationExecutionStep(
+    string Phase,
+    string Name,
+    string Priority,
+    string Objective,
+    IReadOnlyList<string> SuggestedAnimations,
+    IReadOnlyList<string> FocusRegions,
+    IReadOnlyList<string> RelatedArtifacts,
+    bool BlocksRelease);
+public sealed record RuntimeValidationExecutionPlan(
+    string TargetBody,
+    string ValidationGate,
+    bool ManualCleanupLikely,
+    bool RuntimeVerificationRequired,
+    IReadOnlyList<string> Caveats,
+    IReadOnlyList<RuntimeValidationExecutionStep> Steps);
 public sealed record InGameValidationReport(
     string TargetBody,
     string ValidationStatus,
@@ -18211,6 +18227,14 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(inGameValidationPath);
 
+        var runtimeValidationPlanPath = Path.Combine(outputDirectory, "runtime-validation-plan.json");
+        var runtimeValidationPlan = BuildRuntimeValidationExecutionPlan(inGameValidation);
+        await File.WriteAllTextAsync(
+            runtimeValidationPlanPath,
+            JsonSerializer.Serialize(runtimeValidationPlan, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(runtimeValidationPlanPath);
+
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
             if (File.Exists(zipPath))
@@ -18275,6 +18299,17 @@ internal sealed class LocalExportService(
         {
             outputFiles.Add(qualityPath);
         }
+
+        var desktopWorkflowAutomationPath = Path.Combine(outputDirectory, "desktop-workflow-automation.json");
+        var preferredPreviewPath = File.Exists(previewWorkbenchPath)
+            ? previewWorkbenchPath
+            : File.Exists(previewPath) ? previewPath : null;
+        var desktopWorkflowSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, preferredPreviewPath);
+        await File.WriteAllTextAsync(
+            desktopWorkflowAutomationPath,
+            JsonSerializer.Serialize(desktopWorkflowSnapshot, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(desktopWorkflowAutomationPath);
 
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
@@ -26855,7 +26890,9 @@ internal sealed class LocalExportService(
             "README.txt",
             "dependency-map.json",
             "conversion-quality.json",
+            "desktop-workflow-automation.json",
             "in-game-validation.json",
+            "runtime-validation-plan.json",
             "skeleton-compatibility.json",
             "pose-simulation-report.json",
             "world-physics.json",
@@ -26884,7 +26921,9 @@ internal sealed class LocalExportService(
          fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase) ||
@@ -27014,6 +27053,99 @@ internal sealed class LocalExportService(
            scenarioMatrix,
            checklist);
     }
+
+    private static RuntimeValidationExecutionPlan BuildRuntimeValidationExecutionPlan(InGameValidationReport report)
+    {
+        var steps = new List<RuntimeValidationExecutionStep>
+        {
+            new(
+                "desktop-preflight",
+                "Desktop review preflight",
+                report.ValidationGate.Equals("PASS", StringComparison.OrdinalIgnoreCase) ? "Info" : "Action",
+                $"Open preview-workbench.html, conversion-quality.json, and desktop-workflow-automation.json for {report.TargetBody} before starting live runtime checks.",
+                ["preview compare"],
+                report.CoreBodyRegions.Count > 0 ? report.CoreBodyRegions : report.SensitiveRegions,
+                ["desktop-workflow-automation.json", "preview-workbench.html", "conversion-quality.json"],
+                BlocksRelease: false)
+        };
+
+        if (report.ManualCleanupLikely)
+        {
+            steps.Add(new RuntimeValidationExecutionStep(
+                "workbench-cleanup",
+                "Manual cleanup workbench pass",
+                "High",
+                $"Topology correspondence and body-fit heuristics still indicate manual cleanup risk for {report.TargetBody}. Review the flagged focus regions before trusting the runtime result.",
+                ["Outfit Studio vertex cleanup", "preview compare"],
+                report.TopologyCorrespondence?.FocusRegions?.Count > 0
+                    ? report.TopologyCorrespondence.FocusRegions
+                    : report.SensitiveRegions.Count > 0 ? report.SensitiveRegions : report.CoreBodyRegions,
+                ["conversion-quality.json", "preview-workbench.html", "skeleton-compatibility.json"],
+                BlocksRelease: true));
+        }
+
+        foreach (var scenario in report.ScenarioMatrix)
+        {
+            steps.Add(new RuntimeValidationExecutionStep(
+                DetermineRuntimeExecutionPhase(scenario),
+                scenario.Name,
+                scenario.Priority,
+                scenario.Trigger,
+                scenario.SuggestedAnimations,
+                scenario.FocusRegions,
+                scenario.RelatedArtifacts,
+                BlocksRelease: ShouldBlockReleaseForScenario(scenario, report)));
+        }
+
+        steps.Add(new RuntimeValidationExecutionStep(
+            "release-gate",
+            "Release gate review",
+            report.RuntimeVerificationRequired || report.ManualCleanupLikely ? "High" : "Info",
+            report.RuntimeVerificationRequired || report.ManualCleanupLikely
+                ? $"Do not treat {report.TargetBody} as install-ready until the blocking runtime-validation steps have been completed and re-checked."
+                : $"The current validation gate for {report.TargetBody} is {report.ValidationGate}; confirm the output remains stable after one final live pass.",
+            ["final smoke test"],
+            report.SensitiveRegions.Count > 0 ? report.SensitiveRegions : report.CoreBodyRegions,
+            ["runtime-validation-plan.json", "in-game-validation.json", "desktop-workflow-automation.json"],
+            BlocksRelease: report.RuntimeVerificationRequired || report.ManualCleanupLikely));
+
+        return new RuntimeValidationExecutionPlan(
+            report.TargetBody,
+            report.ValidationGate,
+            report.ManualCleanupLikely,
+            report.RuntimeVerificationRequired,
+            report.Caveats,
+            steps);
+    }
+
+    private static string DetermineRuntimeExecutionPhase(InGameValidationScenario scenario)
+    {
+        if (scenario.Name.Contains("cleanup", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Name.Contains("workbench", StringComparison.OrdinalIgnoreCase))
+        {
+            return "workbench-review";
+        }
+
+        if (scenario.Name.Contains("physics", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Name.Contains("ground", StringComparison.OrdinalIgnoreCase))
+        {
+            return "live-runtime";
+        }
+
+        if (scenario.Name.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Name.Contains("skeleton", StringComparison.OrdinalIgnoreCase))
+        {
+            return "preflight-review";
+        }
+
+        return "live-runtime";
+    }
+
+    private static bool ShouldBlockReleaseForScenario(InGameValidationScenario scenario, InGameValidationReport report) =>
+        scenario.Priority.Equals("High", StringComparison.OrdinalIgnoreCase) ||
+        scenario.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase) ||
+        report.RuntimeVerificationRequired && scenario.Name.Contains("runtime", StringComparison.OrdinalIgnoreCase) ||
+        report.ManualCleanupLikely && scenario.Name.Contains("cleanup", StringComparison.OrdinalIgnoreCase);
 
     private static TopologyCorrespondenceReport BuildTopologyCorrespondenceReport(
         bool topologyMismatchRisk,

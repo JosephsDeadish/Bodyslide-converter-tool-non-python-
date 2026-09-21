@@ -15224,6 +15224,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Preview", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Runtime scenarios", StringComparison.OrdinalIgnoreCase));
             Assert.True(snapshot.ValidationState.PreviewAvailable);
             Assert.Contains("Preview", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Next actions", snapshot.ValidationState.GuidanceTabTitle, StringComparison.OrdinalIgnoreCase);
@@ -15362,6 +15364,8 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Source skeleton evidence", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("semantic-overlap", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Skeleton review", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
             Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
             Assert.Contains("REVIEW REQUIRED", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
         }
@@ -15434,6 +15438,8 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Topology focus regions", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("tail", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Topology review", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
             Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
         }
         finally
@@ -16758,6 +16764,18 @@ public sealed class RealisticModPackFixtureTests
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
             Assert.Contains("Alien Hybrid", inGameJson, StringComparison.Ordinal);
+            Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
+
+            var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
+            Assert.Contains("\"BlocksRelease\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Custom skeleton remap sweep", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("desktop-preflight", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("release-gate", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+
+            var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
+            Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
+            Assert.Contains("Preview", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
             Assert.Contains("data-testid=\"preview-workbench-root\"", previewHtml, StringComparison.Ordinal);

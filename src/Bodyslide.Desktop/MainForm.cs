@@ -3197,6 +3197,21 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "High-priority scenarios", CountScenarioPriorities(root, "High", "Action"), filePath);
                     AddReportMetric(reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
+                case "runtime-validation-plan.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    AddReportMetric(reportName, "Execution phases", DistinctNestedArrayValues(root, "Steps", "Phase"), filePath);
+                    AddReportMetric(reportName, "Runtime steps", CountNestedArray(root, "Steps"), filePath);
+                    AddReportMetric(reportName, "Blocking runtime steps", CountObjectsWithBool(root, "Steps", "BlocksRelease", expected: true), filePath);
+                    AddReportMetric(reportName, "Runtime execution highlights", TryReadExecutionHighlights(root), filePath);
+                    break;
+                case "desktop-workflow-automation.json":
+                    AddReportMetric(reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
+                    AddReportMetric(reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
+                    AddReportMetric(reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
+                    AddReportMetric(reportName, "Blocking GUI steps", CountObjectsWithBool(root, "SuggestedGuiFlow", "Blocking", expected: true), filePath);
+                    AddReportMetric(reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
+                    break;
                 case "race-compatibility.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Plugins", CountNestedArray(root, "ScannedPlugins"), filePath);
@@ -4601,6 +4616,85 @@ public sealed class MainForm : Form
                        priorities.Contains(priority, StringComparer.OrdinalIgnoreCase);
             })
             .ToString();
+    }
+
+    private static string? TryReadExecutionHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static step =>
+            {
+               var phase = TryReadString(step, "Phase");
+               var name = TryReadString(step, "Name");
+               return string.IsNullOrWhiteSpace(name)
+                   ? null
+                   : string.IsNullOrWhiteSpace(phase) ? name : $"{phase}: {name}";
+            })
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
+
+        return items.Length == 0 ? null : string.Join("; ", items);
+    }
+
+    private static string? TryReadGuiFlowHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "SuggestedGuiFlow", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static step =>
+            {
+               var area = TryReadString(step, "Area");
+               var action = TryReadString(step, "Action");
+               return string.IsNullOrWhiteSpace(action)
+                   ? null
+                   : string.IsNullOrWhiteSpace(area) ? action : $"{area}: {action}";
+            })
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
+
+        return items.Length == 0 ? null : string.Join("; ", items);
+    }
+
+    private static string CountObjectsWithBool(JsonElement element, string arrayPropertyName, string boolPropertyName, bool expected)
+    {
+        if (!TryGetProperty(element, arrayPropertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return "0";
+        }
+
+        return value
+            .EnumerateArray()
+            .Count(item => TryReadBoolValue(item, boolPropertyName) == expected)
+            .ToString();
+    }
+
+    private static string DistinctNestedArrayValues(JsonElement element, string arrayPropertyName, string nestedPropertyName)
+    {
+        if (!TryGetProperty(element, arrayPropertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return "None";
+        }
+
+        var values = value
+            .EnumerateArray()
+            .Select(item => TryReadString(item, nestedPropertyName))
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return values.Length == 0 ? "None" : JoinReportValues(values);
     }
 
     private static string CountElements(JsonElement element) => element.ValueKind switch

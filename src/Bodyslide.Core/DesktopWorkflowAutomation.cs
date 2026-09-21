@@ -5,6 +5,7 @@ namespace Bodyslide.Core;
 internal sealed record DesktopWorkflowSummaryRow(string Property, string Value);
 internal sealed record DesktopWorkflowReportMetric(string ReportName, string Property, string Value, string FilePath);
 internal sealed record DesktopWorkflowArtifact(string Name, string DisplayPath, string FullPath);
+internal sealed record DesktopWorkflowAutomationStep(string Area, string Action, string ExpectedSignal, string? ArtifactPath, bool Blocking);
 internal sealed record DesktopWorkflowValidationState(
     string PreviewTabTitle,
     string GuidanceTabTitle,
@@ -16,6 +17,7 @@ internal sealed record DesktopWorkflowAutomationSnapshot(
     IReadOnlyList<DesktopWorkflowSummaryRow> SummaryRows,
     IReadOnlyList<DesktopWorkflowReportMetric> ReportMetrics,
     IReadOnlyList<DesktopWorkflowArtifact> Artifacts,
+    IReadOnlyList<DesktopWorkflowAutomationStep> SuggestedGuiFlow,
     DesktopWorkflowValidationState ValidationState);
 
 internal static class DesktopWorkflowAutomation
@@ -35,7 +37,7 @@ internal static class DesktopWorkflowAutomation
             results.SelectMany(result => result.OutputFiles).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray(),
             FindCommonDirectory(outputDirectories));
         var validationState = BuildValidationState(outputDirectories, previewPath, reportMetrics);
-        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, validationState);
+        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, BuildSuggestedGuiFlow(reportMetrics, validationState), validationState);
     }
 
     public static DesktopWorkflowAutomationSnapshot BuildFromOutputDirectory(
@@ -45,7 +47,7 @@ internal static class DesktopWorkflowAutomation
         if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
         {
             var emptyValidationState = BuildValidationState([], previewPath, []);
-            return new DesktopWorkflowAutomationSnapshot([], [], [], emptyValidationState);
+            return new DesktopWorkflowAutomationSnapshot([], [], [], [], emptyValidationState);
         }
 
         var files = Directory
@@ -58,6 +60,7 @@ internal static class DesktopWorkflowAutomation
             [],
             reportMetrics,
             BuildArtifacts(files, outputDirectory),
+            BuildSuggestedGuiFlow(reportMetrics, validationState),
             validationState);
     }
 
@@ -287,6 +290,20 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "High-priority scenarios", CountScenarioPriorities(root, "High", "Action"), filePath);
                     Add(metrics, reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
+                case "runtime-validation-plan.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Execution phases", TryReadExecutionPhases(root), filePath);
+                    Add(metrics, reportName, "Blocking runtime steps", CountBlockingExecutionSteps(root), filePath);
+                    Add(metrics, reportName, "Runtime execution highlights", TryReadExecutionHighlights(root), filePath);
+                    break;
+                case "desktop-workflow-automation.json":
+                    Add(metrics, reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
+                    Add(metrics, reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
+                    Add(metrics, reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
+                    Add(metrics, reportName, "Blocking GUI steps", CountBlockingGuiSteps(root), filePath);
+                    Add(metrics, reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
+                    break;
                 case "pose-simulation-report.json":
                     Add(metrics, reportName, "Tested poses", CountNestedArray(root, "TestedPoses"), filePath);
                     Add(metrics, reportName, "At-risk poses", TryReadIntValue(root, "TotalPosesAtRisk"), filePath);
@@ -413,6 +430,87 @@ internal static class DesktopWorkflowAutomation
         });
     }
 
+    private static string? TryReadExecutionPhases(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            ", ",
+            value.EnumerateArray()
+                .Select(static step => TryReadString(step, "Phase"))
+                .Where(static phase => !string.IsNullOrWhiteSpace(phase))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static int CountBlockingExecutionSteps(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        return value.EnumerateArray().Count(static step =>
+            TryReadBoolValue(step, "BlocksRelease") is true);
+    }
+
+    private static string? TryReadExecutionHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "; ",
+            value.EnumerateArray()
+                .Select(static step =>
+                {
+                    var name = TryReadString(step, "Name");
+                    var phase = TryReadString(step, "Phase");
+                    return string.IsNullOrWhiteSpace(name)
+                        ? null
+                        : string.IsNullOrWhiteSpace(phase) ? name : $"{phase}: {name}";
+                })
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+                .Take(4)!);
+    }
+
+    private static int CountBlockingGuiSteps(JsonElement element)
+    {
+        if (!TryGetProperty(element, "SuggestedGuiFlow", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        return value.EnumerateArray().Count(static step =>
+            TryReadBoolValue(step, "Blocking") is true);
+    }
+
+    private static string? TryReadGuiFlowHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "SuggestedGuiFlow", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "; ",
+            value.EnumerateArray()
+                .Select(static step =>
+                {
+                    var area = TryReadString(step, "Area");
+                    var action = TryReadString(step, "Action");
+                    return string.IsNullOrWhiteSpace(action)
+                        ? null
+                        : string.IsNullOrWhiteSpace(area) ? action : $"{area}: {action}";
+                })
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+                .Take(4)!);
+    }
+
     private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
             ? value.GetBoolean()
@@ -420,6 +518,77 @@ internal static class DesktopWorkflowAutomation
 
     private static string? FormatBool(bool? value) =>
         value is null ? null : value.Value ? "Yes" : "No";
+
+    private static IReadOnlyList<DesktopWorkflowAutomationStep> BuildSuggestedGuiFlow(
+        IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
+        DesktopWorkflowValidationState validationState)
+    {
+        var steps = new List<DesktopWorkflowAutomationStep>
+        {
+            new(
+                "Preview",
+                "Open the Preview tab after conversion or after loading a previous output folder.",
+                validationState.PreviewTabTitle,
+                FindMetricFile(reportMetrics, "Validation gate") ?? FindMetricFile(reportMetrics, "Preview tab"),
+                Blocking: false),
+            new(
+                "Guidance",
+                "Open the Next actions tab and verify the summary matches the generated review state.",
+                validationState.GuidanceTabTitle,
+                FindMetricFile(reportMetrics, "Validation gate") ?? FindMetricFile(reportMetrics, "Guidance tab"),
+                Blocking: string.Equals(validationState.EffectiveStatus, "needs-review", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(validationState.EffectiveStatus, "high-risk", StringComparison.OrdinalIgnoreCase))
+        };
+
+        var topologyMetric = FindMetric(reportMetrics, "Heuristic-heavy topology", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                             ?? FindMetric(reportMetrics, "Topology correspondence", static value => !value.Equals("aligned", StringComparison.OrdinalIgnoreCase));
+        if (topologyMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Topology review",
+                "Open the topology correspondence artifacts and compare the preview against the converted mesh for manual cleanup risk.",
+                $"{topologyMetric.Property}: {topologyMetric.Value}",
+                topologyMetric.FilePath,
+                Blocking: true));
+        }
+
+        var sparseMetric = FindMetric(reportMetrics, "Sparse source inference", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                           ?? FindMetric(reportMetrics, "Source skeleton reliability", static value => value.Equals("provisional", StringComparison.OrdinalIgnoreCase) || value.Equals("review", StringComparison.OrdinalIgnoreCase));
+        if (sparseMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Skeleton review",
+                "Open the skeleton compatibility report and confirm the inferred custom rig before trusting automatic remaps.",
+                $"{sparseMetric.Property}: {sparseMetric.Value}",
+                sparseMetric.FilePath,
+                Blocking: true));
+        }
+
+        var runtimeMetric = FindMetric(reportMetrics, "Runtime verification required", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                            ?? FindMetric(reportMetrics, "Scenario highlights");
+        if (runtimeMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Runtime scenarios",
+                "Review the exported runtime-validation plan and in-game scenario highlights before release.",
+                $"{runtimeMetric.Property}: {runtimeMetric.Value}",
+                FindMetricFile(reportMetrics, "Runtime execution highlights") ?? runtimeMetric.FilePath,
+                Blocking: true));
+        }
+
+        return steps;
+    }
+
+    private static DesktopWorkflowReportMetric? FindMetric(
+        IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
+        string property,
+        Func<string, bool>? predicate = null) =>
+        reportMetrics.FirstOrDefault(metric =>
+            metric.Property.Equals(property, StringComparison.OrdinalIgnoreCase) &&
+            (predicate is null || predicate(metric.Value)));
+
+    private static string? FindMetricFile(IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics, string property) =>
+        FindMetric(reportMetrics, property)?.FilePath;
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
     {
