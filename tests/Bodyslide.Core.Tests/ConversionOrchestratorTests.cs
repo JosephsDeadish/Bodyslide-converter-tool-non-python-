@@ -16553,6 +16553,99 @@ public sealed class BinaryPluginRewriteServiceTests
         }
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_AmbiguousEspWithGrandchildFeOverride_PropagatesEspfeEvidenceAcrossMasterChain()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            byte[] BuildRecord(string tag, byte[] data, uint formId = 0u)
+            {
+                var header = new byte[24 + data.Length];
+                System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]).CopyTo(header, 0);
+                BitConverter.TryWriteBytes(header.AsSpan(4), (uint)data.Length);
+                BitConverter.TryWriteBytes(header.AsSpan(12), formId);
+                data.CopyTo(header, 24);
+                return header;
+            }
+
+            byte[] BuildPluginWithMastersForContext(IReadOnlyList<string> masters, params byte[][] records)
+            {
+                using var ms = new MemoryStream();
+                ms.Write(BuildSubrecord("HEDR", new byte[12]));
+                ms.Write(BuildSubrecord("CNAM", [0x00]));
+                foreach (var master in masters)
+                {
+                    ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+                    ms.Write(BuildSubrecord("DATA", new byte[8]));
+                }
+
+                var plugin = new List<byte>(BuildRecord("TES4", ms.ToArray()));
+                plugin.AddRange(records.SelectMany(static record => record));
+                return [.. plugin];
+            }
+
+            byte[] BuildLightFlagPluginWithArma(uint tes4Flags, uint armaFormId, string editorId)
+            {
+                using var ms = new MemoryStream();
+                ms.Write(BuildSubrecord("HEDR", new byte[12]));
+                ms.Write(BuildSubrecord("CNAM", [0x00]));
+                var tes4 = BuildRecord("TES4", ms.ToArray());
+                WriteUInt32Le(tes4, 8, tes4Flags);
+                var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(editorId + "\0"));
+                var arma = BuildRecord("ARMA", armaData, armaFormId);
+                return [.. tes4, .. arma];
+            }
+
+            byte[] BuildArmaRecord(uint armaFormId, string editorId)
+            {
+                var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes(editorId + "\0"));
+                return BuildRecord("ARMA", armaData, armaFormId);
+            }
+
+            var rootPluginPath = Path.Combine(dir, "TransitiveLightRoot.esp");
+            var bridgePluginPath = Path.Combine(dir, "TransitiveLightBridge.esp");
+            var childPluginPath = Path.Combine(dir, "TransitiveLightGrandchild.esp");
+
+            await File.WriteAllBytesAsync(
+                rootPluginPath,
+                BuildLightFlagPluginWithArma(0x00000200u, 0x00000801u, "TransitiveRootArmor"));
+            await File.WriteAllBytesAsync(
+                bridgePluginPath,
+                BuildPluginWithMastersForContext(
+                    ["TransitiveLightRoot.esp"],
+                    BuildArmaRecord(0x01000801u, "TransitiveBridgeArmor")));
+            var bridgeBytes = await File.ReadAllBytesAsync(bridgePluginPath);
+            WriteUInt32Le(bridgeBytes, 8, 0x00000200u);
+            await File.WriteAllBytesAsync(bridgePluginPath, bridgeBytes);
+
+            var childArmaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TransitiveBridgeOverride\0"))
+                .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/contextual/transitive_0.nif\0")))
+                .ToArray();
+            var childArma = BuildRecord("ARMA", childArmaData, formId: 0xFE000801u);
+            await File.WriteAllBytesAsync(
+                childPluginPath,
+                BuildPluginWithMastersForContext(["TransitiveLightBridge.esp"], childArma));
+
+            var service = new BasicPluginAnalysisService();
+            var analysis = await service.AnalyzeAsync(
+                new ImportedArmor(dir, [], [], [], []),
+                "CBBE",
+                CancellationToken.None);
+
+            Assert.DoesNotContain("TransitiveLightRoot.esp", analysis.AmbiguousPlugins ?? []);
+            Assert.DoesNotContain("TransitiveLightBridge.esp", analysis.AmbiguousPlugins ?? []);
+            Assert.Contains(analysis.ScannedPlugins, plugin => plugin.Contains("TransitiveLightRoot.esp [ESPFE;", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(analysis.ScannedPlugins, plugin => plugin.Contains("TransitiveLightBridge.esp [ESPFE;", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
 
     [Fact]
@@ -19500,6 +19593,52 @@ public sealed class ConversionReadmeGeneratorTests
 
         Assert.Contains("33:Hands", result.Partitions, StringComparer.Ordinal);
         Assert.Contains("34:Forearms", result.Partitions, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_UsesUniqueIslandOwnershipToAugmentTailAndEarSlots()
+    {
+        var mesh = new WeightedMesh(
+            "cloth",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "smooth-adaptive-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "beast_appendage",
+                        IslandId: 0,
+                        CageRegions: ["tail"],
+                        SemanticLabels: ["serpent-tail-island"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["tail"])
+                        ]),
+                    new CageIslandControl(
+                        MeshKey: "beast_appendage",
+                        IslandId: 1,
+                        CageRegions: ["ears"],
+                        SemanticLabels: ["feline-ear-island"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["ears"])
+                        ]),
+                    new CageIslandControl(
+                        MeshKey: "beast_appendage",
+                        IslandId: 2,
+                        CageRegions: ["chest"],
+                        SemanticLabels: ["window-frame-island"])
+                ]));
+        var analysis = new MeshAnalysis("cloth", false, 1, HasSplitMeshes: true);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "Canine Humanoid", CancellationToken.None);
+
+        Assert.Contains("32:Body", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("40:Tail", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("43:Ears", result.Partitions, StringComparer.Ordinal);
     }
 
     [Fact]
