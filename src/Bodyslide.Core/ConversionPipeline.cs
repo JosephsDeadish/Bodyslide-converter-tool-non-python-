@@ -12340,8 +12340,9 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)
                 ?? [];
 
-            if (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
-                semanticSet.Contains("upper-lateral-island") || semanticSet.Contains("bridge-strap-island"))
+            if (!analysis.IsFootwear &&
+                (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
+                 semanticSet.Contains("upper-lateral-island") || semanticSet.Contains("bridge-strap-island")))
             {
                 slots.Add(33);
             }
@@ -12357,9 +12358,10 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 slots.Add(38);
             }
 
-            if (regionSet.Contains("chest") || regionSet.Contains("breasts") || regionSet.Contains("waist") ||
-                regionSet.Contains("belly") || regionSet.Contains("pelvis") || regionSet.Contains("butt") ||
-                semanticSet.Contains("core-panel-island") || semanticSet.Contains("window-frame-island"))
+            if (!analysis.IsFootwear &&
+                (regionSet.Contains("chest") || regionSet.Contains("breasts") || regionSet.Contains("waist") ||
+                 regionSet.Contains("belly") || regionSet.Contains("pelvis") || regionSet.Contains("butt") ||
+                 semanticSet.Contains("core-panel-island") || semanticSet.Contains("window-frame-island")))
             {
                 slots.Add(32);
             }
