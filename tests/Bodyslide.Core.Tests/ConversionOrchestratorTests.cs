@@ -15287,6 +15287,73 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesSparseSkeletonReviewSignals()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAlienSparseCustomPluginModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase));
+            Assert.True(snapshot.ValidationState.EffectiveStatus is "needs-review" or "high-risk");
+            Assert.True(snapshot.ValidationState.PreviewTabTitle.Contains("REVIEW REQUIRED", StringComparison.OrdinalIgnoreCase) ||
+                        snapshot.ValidationState.PreviewTabTitle.Contains("FAIL", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("review", snapshot.ValidationState.OutcomeSummary, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesSparseSkeletonMetricForReviewState()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "skeleton-compatibility.json"),
+                """
+                {
+                  "SourceSkeleton": "ube-extended",
+                  "TargetSkeleton": "3BA",
+                  "BoneMappings": [],
+                  "UnsupportedBones": [],
+                  "SourceSkeletonConfidence": 0.61,
+                  "SourceSkeletonEvidence": ["semantic-overlap:3", "token-matches:1"],
+                  "SourceSkeletonUsedSparseInference": true
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Sparse source inference", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Source skeleton evidence", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("semantic-overlap", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
+            Assert.Contains("REVIEW REQUIRED", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");

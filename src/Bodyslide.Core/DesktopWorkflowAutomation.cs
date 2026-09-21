@@ -190,8 +190,16 @@ internal static class DesktopWorkflowAutomation
         var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
         var summary = TryReadWorstValidationSummary(outputDirectories);
         var requiresReview = reportMetrics.Any(metric =>
-            metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase) &&
-            !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase));
+            (metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Sparse source inference", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Runtime verification required", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Unsupported bones", StringComparison.OrdinalIgnoreCase) &&
+             !string.IsNullOrWhiteSpace(metric.Value)));
         var effectiveStatus = summary?.Status
             ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
         return new DesktopWorkflowValidationState(
@@ -245,6 +253,9 @@ internal static class DesktopWorkflowAutomation
                     break;
                 case "skeleton-compatibility.json":
                     Add(metrics, reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
+                    Add(metrics, reportName, "Source skeleton confidence", TryReadString(root, "SourceSkeletonConfidence"), filePath);
+                    Add(metrics, reportName, "Source skeleton evidence", TryReadArray(root, "SourceSkeletonEvidence"), filePath);
+                    Add(metrics, reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
                     Add(metrics, reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     Add(metrics, reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     Add(metrics, reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
