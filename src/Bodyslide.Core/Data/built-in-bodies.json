@@ -752,7 +752,9 @@
       "NPC R Pec",
       "NPC Belly",
       "NPC L Lat",
-      "NPC R Lat"
+      "NPC R Lat",
+      "SAM Genitals",
+      "SAM Foreskin"
     ],
     "referenceTokens": [
       "himbo"
@@ -859,6 +861,7 @@
     "physicsBoneSignatures": [
       "SOS GenitalsBase",
       "SAM Genitals",
+      "SAM Foreskin",
       "NPC L Breast01"
     ],
     "skeletonFramework": "sam-light"
@@ -878,7 +881,9 @@
       "NPC L Pec",
       "NPC R Pec",
       "NPC Belly",
-      "SAM Genitals"
+      "SAM Genitals",
+      "SAM Foreskin",
+      "HDT Mouth"
     ],
     "referenceTokens": [
       "sam light",
@@ -924,6 +929,7 @@
     "depthToWidthRatioMax": 0.92,
     "physicsBoneSignatures": [
       "SAM Genitals",
+      "SAM Foreskin",
       "NPC L Pec",
       "NPC R Pec"
     ],
@@ -947,6 +953,7 @@
       "SOS GenitalsBase",
       "SOS Genitals01",
       "SOS Genitals02",
+      "SOS Foreskin",
       "SOS Shaft",
       "SOS Glans",
       "SOS Scrotum"
@@ -997,6 +1004,7 @@
       "SOS GenitalsBase",
       "SOS Genitals01",
       "SOS Genitals02",
+      "SOS Foreskin",
       "SOS Shaft",
       "SOS Glans",
       "SOS Scrotum"
@@ -1033,8 +1041,15 @@
       "ButtLower",
       "BellyLower",
       "Vagina",
+      "VaginaDeep",
+      "Labia.L",
+      "Labia.R",
       "Anus",
+      "AnusOuter",
       "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
       "HDT Throat"
     ],
     "referenceTokens": [
@@ -1097,8 +1112,15 @@
       "ButtLower",
       "BellyLower",
       "Vagina",
+      "VaginaDeep",
+      "Labia.L",
+      "Labia.R",
       "Anus",
+      "AnusOuter",
       "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
       "HDT Throat",
       "NPC L Breast01",
       "NPC R Breast01",
@@ -1127,10 +1149,14 @@
       "NPC R Pec",
       "NPC Belly",
       "TNG Genitals",
+      "TNG Foreskin",
       "TNG Shaft",
       "TNG Glans",
       "TNG Balls",
       "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
       "HDT Throat"
     ],
     "referenceTokens": [
@@ -1185,10 +1211,14 @@
     "depthToWidthRatioMax": 0.95,
     "physicsBoneSignatures": [
       "TNG Genitals",
+      "TNG Foreskin",
       "TNG Shaft",
       "TNG Glans",
       "TNG Balls",
       "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
       "HDT Throat",
       "NPC L Pec",
       "NPC R Pec"
@@ -1981,7 +2011,15 @@
       "PawFront.L",
       "PawFront.R",
       "PawRear.L",
-      "PawRear.R"
+      "PawRear.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueTip"
     ],
     "referenceTokens": [
       "cathay",
@@ -2004,7 +2042,9 @@
       "Thighs",
       "Calves",
       "TailBase",
-      "PawWidth"
+      "PawWidth",
+      "SheathLength",
+      "TongueTipLength"
     ],
     "transformationField": {
       "chest": 1.0,
@@ -2059,7 +2099,9 @@
       "PawFront.L",
       "PawFront.R",
       "PawRear.L",
-      "PawRear.R"
+      "PawRear.R",
+      "TailSheath",
+      "BeastVagina"
     ],
     "skeletonFramework": "digitigrade-beast"
   },
@@ -2091,7 +2133,15 @@
       "PawRear.L",
       "PawRear.R",
       "Hock.L",
-      "Hock.R"
+      "Hock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueTip"
     ],
     "referenceTokens": [
       "lykaios",
@@ -2113,7 +2163,9 @@
       "Thighs",
       "Calves",
       "TailBase",
-      "PawWidth"
+      "PawWidth",
+      "SheathLength",
+      "TongueTipLength"
     ],
     "transformationField": {
       "chest": 1.01,
@@ -2167,7 +2219,10 @@
       "PawFront.L",
       "PawFront.R",
       "Hock.L",
-      "Hock.R"
+      "Hock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastVagina"
     ],
     "skeletonFramework": "digitigrade-beast"
   },

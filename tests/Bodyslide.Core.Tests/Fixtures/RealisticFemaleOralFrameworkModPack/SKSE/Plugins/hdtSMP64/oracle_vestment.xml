@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="OracleVestmentPhysics">
+  <bone name="HDT Mouth" />
+  <bone name="HDT Jaw" />
+  <bone name="HDT Tongue" />
+  <bone name="HDT TongueTip" />
+  <bone name="HDT Throat" />
+  <bone name="Vagina" />
+  <bone name="VaginaDeep" />
+  <bone name="Labia.L" />
+  <bone name="Labia.R" />
+  <bone name="AnusOuter" />
+</system>

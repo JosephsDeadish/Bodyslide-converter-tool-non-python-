@@ -11003,7 +11003,19 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             label.Contains("spinefin", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
-            label.Contains("paw", StringComparison.OrdinalIgnoreCase));
+            label.Contains("paw", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("genital", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("shaft", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("glans", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("foreskin", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("sheath", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("scrot", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("vagina", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("anus", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("jaw", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("throat", StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlySet<string> GetAppendageFamilies(CageIslandControl islandControl)
@@ -11055,6 +11067,18 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         AddFamilyWhenContains(families, token, "mane", "mane");
         AddFamilyWhenContains(families, token, "ear", "ear");
         AddFamilyWhenContains(families, token, "paw", "paw");
+        AddFamilyWhenContains(families, token, "genital", "genitals");
+        AddFamilyWhenContains(families, token, "shaft", "genitals");
+        AddFamilyWhenContains(families, token, "glans", "genitals");
+        AddFamilyWhenContains(families, token, "foreskin", "genitals");
+        AddFamilyWhenContains(families, token, "sheath", "genitals");
+        AddFamilyWhenContains(families, token, "scrot", "genitals");
+        AddFamilyWhenContains(families, token, "vagina", "genitals");
+        AddFamilyWhenContains(families, token, "anus", "genitals");
+        AddFamilyWhenContains(families, token, "mouth", "mouth");
+        AddFamilyWhenContains(families, token, "jaw", "mouth");
+        AddFamilyWhenContains(families, token, "tongue", "mouth");
+        AddFamilyWhenContains(families, token, "throat", "mouth");
     }
 
     private static void AddFamilyWhenContains(ISet<string> families, string token, string match, string family)
@@ -11080,7 +11104,19 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         region.Contains("spinefin", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
-        region.Contains("paw", StringComparison.OrdinalIgnoreCase);
+        region.Contains("paw", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("genital", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("shaft", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("glans", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("foreskin", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("sheath", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("scrot", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("vagina", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("anus", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("jaw", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("throat", StringComparison.OrdinalIgnoreCase);
 
     private static double ComputeIslandTopologyDamping(CageIslandControl islandControl)
     {
