@@ -9999,6 +9999,19 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_WithEmptyPirtPayload_IsAccepted()
+        {
+            byte[] bytes = [0x50, 0x49, 0x52, 0x54, 0x00, 0x00];
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(0, payload!.VertexCount);
+            Assert.Empty(payload.Morphs);
+        }
+
+        [Fact]
         public void TriMorphReader_WithTrailingBytes_IsRejected()
         {
             byte[] bytes = [.. BuildTriPayload(

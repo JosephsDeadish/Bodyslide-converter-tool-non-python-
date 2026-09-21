@@ -284,9 +284,15 @@ internal static class TriMorphReader
         }
 
         var shapeCount = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[4..6]);
-        if (shapeCount <= 0 || shapeCount > 10_000)
+        if (shapeCount < 0 || shapeCount > 10_000)
         {
             return false;
+        }
+
+        if (shapeCount == 0)
+        {
+            payload = new TriMorphPayload(0, []);
+            return true;
         }
 
         var offset = 6;
@@ -397,7 +403,7 @@ internal static class TriMorphReader
             }
         }
 
-        if (firstShapeMorphs is null || firstShapeMorphs.Count == 0)
+        if (firstShapeMorphs is null)
         {
             return false;
         }
