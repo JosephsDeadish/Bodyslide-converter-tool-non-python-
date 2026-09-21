@@ -19277,7 +19277,15 @@ internal sealed class LocalExportService(
             }
 
             boundaryVertexFlags = EstimateBoundaryVertexFlags(normalizedRawVertices, componentIds);
-            boundaryVertexWeights = new float[rawVertices.Count];
+            boundaryVertexWeights = BuildEstimatedBoundaryVertexWeights(
+                rawVertices,
+                componentIds,
+                boundaryVertexFlags,
+                BuildTransferIslandEdgeNetworks(
+                    normalizedRawVertices,
+                    componentIds,
+                    boundaryVertexFlags,
+                    null));
         }
 
         return CreateTopologyTransformContext(
@@ -19314,7 +19322,11 @@ internal sealed class LocalExportService(
             .ToArray();
         var boundaryVertexWeights = snapshot.HasExplicitTopology
             ? BuildBoundaryVertexWeights(rawVertices, snapshot.ComponentIds, snapshot.TopologySummary!)
-            : new float[rawVertices.Length];
+            : BuildEstimatedBoundaryVertexWeights(
+                rawVertices,
+                snapshot.ComponentIds,
+                snapshot.BoundaryVertexFlags,
+                snapshot.EdgeNetworks);
         return CreateTopologyTransformContext(
             rawVertices,
             snapshot.NormalizedVertices,
@@ -19498,6 +19510,212 @@ internal sealed class LocalExportService(
         }
 
         return weights;
+    }
+
+    private static float[] BuildEstimatedBoundaryVertexWeights(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> componentIds,
+        IReadOnlyList<bool> boundaryVertexFlags,
+        IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+    {
+        var weights = new float[rawVertices.Count];
+        if (rawVertices.Count == 0 ||
+            componentIds.Count != rawVertices.Count ||
+            boundaryVertexFlags.Count != rawVertices.Count ||
+            edgeNetworks.Count == 0)
+        {
+            return weights;
+        }
+
+        foreach (var network in edgeNetworks.Values)
+        {
+            if (network.VertexIndexes.Count == 0 || network.BoundaryVertexIndexes.Count == 0)
+            {
+                continue;
+            }
+
+            var boundaryRatio = network.BoundaryVertexIndexes.Count / (float)Math.Max(1, network.VertexIndexes.Count);
+            var directWeight = Math.Clamp(
+                0.04f +
+                MathF.Min(0.06f, boundaryRatio * 0.12f) +
+                MathF.Min(0.03f, (1f - network.ManifoldScore) * 0.05f) +
+                (network.NonManifoldEdgeCount > 0 ? 0.03f : 0f),
+                0.04f,
+                0.16f);
+            foreach (var vertexIndex in network.BoundaryVertexIndexes)
+            {
+                if (vertexIndex >= 0 &&
+                    vertexIndex < weights.Length &&
+                    vertexIndex < boundaryVertexFlags.Count &&
+                    boundaryVertexFlags[vertexIndex])
+                {
+                    weights[vertexIndex] = Math.Max(weights[vertexIndex], directWeight);
+                }
+            }
+
+            var influenceWeight = Math.Clamp(
+                directWeight +
+                MathF.Min(0.04f, boundaryRatio * 0.10f) +
+                (network.BoundaryEdges.Count == 0 ? 0f : 0.02f),
+                0.05f,
+                0.18f);
+            ApplyEstimatedBoundaryInfluence(
+                weights,
+                rawVertices,
+                componentIds,
+                network,
+                influenceWeight);
+        }
+
+        return weights;
+    }
+
+    private static void ApplyEstimatedBoundaryInfluence(
+        float[] weights,
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        IReadOnlyList<int> componentIds,
+        TransferIslandEdgeNetwork network,
+        float maxWeight)
+    {
+        if (network.BoundaryVertexIndexes.Count == 0 || maxWeight <= 0f)
+        {
+            return;
+        }
+
+        var influenceRadius = ComputeEstimatedBoundaryInfluenceRadius(rawVertices, network);
+        if (influenceRadius <= 0.0001f)
+        {
+            return;
+        }
+
+        var boundaryVertexSet = network.BoundaryVertexIndexes
+            .Where(index => index >= 0 && index < rawVertices.Count)
+            .ToHashSet();
+        foreach (var vertexIndex in network.VertexIndexes)
+        {
+            if (vertexIndex < 0 ||
+                vertexIndex >= rawVertices.Count ||
+                vertexIndex >= componentIds.Count ||
+                componentIds[vertexIndex] != network.IslandId ||
+                boundaryVertexSet.Contains(vertexIndex))
+            {
+                continue;
+            }
+
+            var distance = ComputeEstimatedBoundaryDistance(rawVertices, network, rawVertices[vertexIndex]);
+            if (distance >= influenceRadius)
+            {
+                continue;
+            }
+
+            var falloff = 1f - Math.Clamp(distance / influenceRadius, 0f, 1f);
+            var candidateWeight = maxWeight * falloff;
+            if (candidateWeight > weights[vertexIndex])
+            {
+                weights[vertexIndex] = candidateWeight;
+            }
+        }
+    }
+
+    private static float ComputeEstimatedBoundaryInfluenceRadius(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        TransferIslandEdgeNetwork network)
+    {
+        if (network.BoundaryEdges.Count > 0)
+        {
+            var totalLength = 0f;
+            var edgeCount = 0;
+            foreach (var (left, right) in network.BoundaryEdges)
+            {
+                if (left < 0 || left >= rawVertices.Count || right < 0 || right >= rawVertices.Count)
+                {
+                    continue;
+                }
+
+                totalLength += ComputeProjectedDistance(rawVertices[left], rawVertices[right]);
+                edgeCount++;
+            }
+
+            if (edgeCount > 0)
+            {
+                return MathF.Max(0.025f, (totalLength / edgeCount) * 1.35f);
+            }
+        }
+
+        if (network.BoundaryVertexIndexes.Count < 2)
+        {
+            return 0f;
+        }
+
+        var totalNearest = 0f;
+        var sampleCount = 0;
+        foreach (var vertexIndex in network.BoundaryVertexIndexes)
+        {
+            if (vertexIndex < 0 || vertexIndex >= rawVertices.Count)
+            {
+                continue;
+            }
+
+            var nearest = float.MaxValue;
+            var current = rawVertices[vertexIndex];
+            foreach (var candidateIndex in network.BoundaryVertexIndexes)
+            {
+                if (candidateIndex == vertexIndex || candidateIndex < 0 || candidateIndex >= rawVertices.Count)
+                {
+                    continue;
+                }
+
+                nearest = MathF.Min(nearest, ComputeProjectedDistance(current, rawVertices[candidateIndex]));
+            }
+
+            if (nearest < float.MaxValue)
+            {
+                totalNearest += nearest;
+                sampleCount++;
+            }
+        }
+
+        return sampleCount == 0
+            ? 0f
+            : MathF.Max(0.025f, (totalNearest / sampleCount) * 1.20f);
+    }
+
+    private static float ComputeEstimatedBoundaryDistance(
+        IReadOnlyList<(float X, float Y, float Z)> rawVertices,
+        TransferIslandEdgeNetwork network,
+        (float X, float Y, float Z) vertex)
+    {
+        if (network.BoundaryEdges.Count > 0)
+        {
+            var best = float.MaxValue;
+            foreach (var (left, right) in network.BoundaryEdges)
+            {
+                if (left < 0 || left >= rawVertices.Count || right < 0 || right >= rawVertices.Count)
+                {
+                    continue;
+                }
+
+                best = MathF.Min(best, ComputeProjectedDistanceToSegment(vertex, rawVertices[left], rawVertices[right]));
+            }
+
+            if (best < float.MaxValue)
+            {
+                return best;
+            }
+        }
+
+        var nearest = float.MaxValue;
+        foreach (var boundaryVertexIndex in network.BoundaryVertexIndexes)
+        {
+            if (boundaryVertexIndex < 0 || boundaryVertexIndex >= rawVertices.Count)
+            {
+                continue;
+            }
+
+            nearest = MathF.Min(nearest, ComputeProjectedDistance(vertex, rawVertices[boundaryVertexIndex]));
+        }
+
+        return nearest == float.MaxValue ? 0f : nearest;
     }
 
     private static void ApplyBoundaryLoopPathInfluence(

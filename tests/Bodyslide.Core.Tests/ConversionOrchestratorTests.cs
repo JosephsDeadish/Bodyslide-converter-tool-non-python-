@@ -3643,7 +3643,7 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
-    public async Task ResolveSharedTopologyTransformContext_PreservesEstimatedSnapshotState()
+    public async Task ResolveSharedTopologyTransformContext_DerivesEstimatedBoundaryWeightsForSyntheticSnapshots()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -3669,7 +3669,7 @@ public sealed class ConversionOrchestratorTests
             var boundaryWeights = Assert.IsType<float[]>(context!.GetType().GetProperty("BoundaryVertexWeights", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(context));
             var edgeNetworks = Assert.IsAssignableFrom<System.Collections.IDictionary>(context.GetType().GetProperty("EdgeNetworks", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(context));
 
-            Assert.True(boundaryWeights.All(weight => MathF.Abs(weight) <= 0.0001f), "Expected estimated shared snapshots to preserve non-explicit topology state instead of rebuilding explicit boundary weights.");
+            Assert.True(boundaryWeights.Any(weight => weight > 0.04f), "Expected estimated shared snapshots to derive synthetic boundary weights from reusable island edge networks.");
             Assert.True(edgeNetworks.Count >= 2, "Expected estimated shared snapshots to keep multi-island edge networks available to transform consumers.");
         }
         finally
@@ -9577,6 +9577,26 @@ public sealed class BsdSliderDataTests
         Assert.Equal(2, payload.Morphs[0].SparseDeltas[1].Index);
         Assert.Equal(-0.75f, payload.Morphs[0].SparseDeltas[1].Z, 3);
         Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+    }
+
+    [Fact]
+    public void OsdMorphReader_ReadsHigherVersionOutfitStudioPayloadsWithEmptyMorphEntries()
+    {
+        var bytes = BuildOutfitStudioOsdPayload(
+            version: 3,
+            ("PayloadWaist", [(0, 0.125f, -0.25f, 0.375f), (2, 0.5f, 0.625f, -0.75f)]),
+            ("UnusedMorph", []),
+            ("HideCape_1", [(1, 0.25f, 0f, 0.5f)]));
+
+        var ok = OsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal(3, payload!.InferredVertexCount);
+        Assert.Equal(3, payload.Morphs.Count);
+        Assert.Equal("UnusedMorph", payload.Morphs[1].Name);
+        Assert.Empty(payload.Morphs[1].SparseDeltas);
+        Assert.Equal("HideCape_1", payload.Morphs[2].Name);
     }
 
     [Fact]
