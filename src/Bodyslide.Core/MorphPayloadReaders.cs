@@ -444,7 +444,8 @@ internal static class TriMorphReader
 
 internal static class OsdMorphReader
 {
-    private static ReadOnlySpan<byte> Magic => [0x4f, 0x53, 0x44, 0x01];
+    private static ReadOnlySpan<byte> OutfitStudioMagic => [0x4f, 0x53, 0x44, 0x00];
+    private static ReadOnlySpan<byte> LegacyMagic => [0x4f, 0x53, 0x44, 0x01];
 
     public static bool TryRead(string filePath, out OsdMorphPayload? payload)
     {
@@ -471,14 +472,32 @@ internal static class OsdMorphReader
     public static bool TryRead(ReadOnlySpan<byte> bytes, out OsdMorphPayload? payload)
     {
         payload = null;
-        if (bytes.Length < 8 || !bytes[..Magic.Length].SequenceEqual(Magic))
+        if (bytes.Length >= 12 && bytes[..OutfitStudioMagic.Length].SequenceEqual(OutfitStudioMagic))
+        {
+            return TryReadPayload(bytes, headerSize: 12, morphCount: BinaryPrimitives.ReadInt32LittleEndian(bytes[8..12]), out payload);
+        }
+
+        if (bytes.Length >= 8 && bytes[..LegacyMagic.Length].SequenceEqual(LegacyMagic))
+        {
+            return TryReadPayload(bytes, headerSize: 8, morphCount: BinaryPrimitives.ReadInt32LittleEndian(bytes[4..8]), out payload);
+        }
+
+        return false;
+    }
+
+    private static bool TryReadPayload(
+        ReadOnlySpan<byte> bytes,
+        int headerSize,
+        int morphCount,
+        out OsdMorphPayload? payload)
+    {
+        payload = null;
+        if (bytes.Length < headerSize)
         {
             return false;
         }
 
-        var offset = Magic.Length;
-        var morphCount = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]);
-        offset += 4;
+        var offset = headerSize;
         if (morphCount <= 0 || morphCount > 65_535)
         {
             return false;

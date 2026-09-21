@@ -9559,6 +9559,39 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void OsdMorphReader_ReadsOutfitStudioStylePayloadHeaderAndDeltas()
+    {
+        var bytes = BuildOutfitStudioOsdPayload(
+            version: 1,
+            ("PayloadWaist", [(0, 0.125f, -0.25f, 0.375f), (2, 0.5f, 0.625f, -0.75f)]),
+            ("HideCape_1", [(1, 0.25f, 0f, 0.5f)]));
+
+        var ok = OsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal(3, payload!.InferredVertexCount);
+        Assert.Equal(2, payload.Morphs.Count);
+        Assert.Equal("PayloadWaist", payload.Morphs[0].Name);
+        Assert.Equal(2, payload.Morphs[0].SparseDeltas.Count);
+        Assert.Equal(2, payload.Morphs[0].SparseDeltas[1].Index);
+        Assert.Equal(-0.75f, payload.Morphs[0].SparseDeltas[1].Z, 3);
+        Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+    }
+
+    [Fact]
+    public void OsdMorphReader_WithTruncatedOutfitStudioPayload_IsRejected()
+    {
+        var bytes = BuildOutfitStudioOsdPayload(
+            version: 1,
+            ("PayloadWaist", [(0, 0.125f, -0.25f, 0.375f)]));
+
+        Array.Resize(ref bytes, bytes.Length - 3);
+
+        Assert.False(OsdMorphReader.TryRead(bytes, out _));
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithOnlySliderFiles_StillMarksReferenceAssetsMissing()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -9779,6 +9812,74 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithOspAndOutfitStudioOsd_DoesNotMarkMorphPayloadsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+        var osdPath = Path.Combine(shapeDataDirectory, "TravelerProject.osd");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        await SyntheticNifTestData.WriteAsync(meshPath,
+        [
+            (0f, 0f, 0f),
+            (2f, 0f, 0f),
+            (4f, 0f, 0f)
+        ]);
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(osdPath, BuildOutfitStudioOsdPayload(
+            version: 1,
+            ("TravelerWaist", [(0, 0.125f, 0f, 0f), (2, 0.25f, 0.05f, -0.025f)]),
+            ("TravelerWaist_1", [(1, 0.375f, 0f, 0.125f)])));
+        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("TravelerWaist", resolved.Sliders);
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.True(resolved.SourceAssetSupport!.HasOsp);
+            Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+            Assert.False(resolved.SourceAssetSupport.HasTriPayloads);
+            Assert.False(resolved.SourceAssetSupport.HasBsdPayloads);
+            Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+            Assert.NotNull(resolved.ReusableMorphPayloads);
+            Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerWaist", out var osdPayloads));
+            Assert.NotNull(osdPayloads.LowWeight);
+            Assert.NotNull(osdPayloads.HighWeight);
+            Assert.Equal("osd", osdPayloads.LowWeight!.PayloadKind);
+            Assert.Equal(3, osdPayloads.LowWeight.VertexCount);
+            Assert.Equal(0.125f, osdPayloads.LowWeight.Deltas[0].X, 3);
+            Assert.Equal(0f, osdPayloads.LowWeight.Deltas[1].X, 3);
+            Assert.Equal(0.375f, osdPayloads.HighWeight!.Deltas[1].X, 3);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -9914,6 +10015,31 @@ public sealed class BsdSliderDataTests
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
         writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x01 });
+        writer.Write(morphs.Length);
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((byte)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((ushort)morph.Deltas.Count);
+            foreach (var (index, x, y, z) in morph.Deltas)
+            {
+                writer.Write((ushort)index);
+                writer.Write(x);
+                writer.Write(y);
+                writer.Write(z);
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildOutfitStudioOsdPayload(uint version, params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x00 });
+        writer.Write(version);
         writer.Write(morphs.Length);
         foreach (var morph in morphs)
         {

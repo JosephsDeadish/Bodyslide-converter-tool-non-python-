@@ -1861,10 +1861,9 @@ public sealed class MainForm : Form
         _lastOutputDirectory = selectedFolder;
 
         var batchReportCandidate = Path.Combine(selectedFolder, "batch-report.json");
-        if (File.Exists(batchReportCandidate))
-        {
-            _lastBatchReportPath = batchReportCandidate;
-        }
+        _lastBatchReportPath = File.Exists(batchReportCandidate)
+            ? batchReportCandidate
+            : null;
 
         UpdatePathActionStates();
         _ = await LoadPreviewInAppAsync(previewPath);
