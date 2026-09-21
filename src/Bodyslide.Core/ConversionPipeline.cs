@@ -6310,11 +6310,15 @@ public sealed class ConversionOrchestrator(
             // use the corrected morphing data rather than the pre-correction values.
             if (correction.Applied && correction.CorrectedMorphing is { Count: > 0 } correctedMorphing)
             {
+                var routedCorrectedMorphing = StrategyMeshConversionService.ApplyIncrementalIslandAwareCageTuning(
+                    converted.RegionalMorphing,
+                    correctedMorphing,
+                    converted.DeformationCage);
                 converted = new ConvertedMesh(
                     converted.MeshType,
                     $"{converted.Strategy}+auto-corrected",
                     converted.MeshCount,
-                    correctedMorphing,
+                    routedCorrectedMorphing,
                     converted.DeformationCage);
                 steps.Add($"correction-applied:regions={clipping.Regions.Count}");
             }
@@ -6341,11 +6345,15 @@ public sealed class ConversionOrchestrator(
                     voxelMorphing[region] = Math.Round(Math.Min(current + normalizedPush, 1.60), 6);
                 }
 
+                var routedVoxelMorphing = StrategyMeshConversionService.ApplyIncrementalIslandAwareCageTuning(
+                    converted.RegionalMorphing,
+                    voxelMorphing,
+                    converted.DeformationCage);
                 converted = new ConvertedMesh(
                     converted.MeshType,
                     converted.Strategy,
                     converted.MeshCount,
-                    voxelMorphing,
+                    routedVoxelMorphing,
                     converted.DeformationCage);
                 steps.Add($"voxel-push-applied:regions={voxelResult.AffectedRegions.Count}");
             }
@@ -10220,9 +10228,67 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         IReadOnlyDictionary<string, double> field,
         DeformationCage? deformationCage)
     {
-        if (field.Count == 0 || deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        var regionDamping = BuildIslandAwareRegionDamping(field.Keys, deformationCage);
+        if (field.Count == 0 || regionDamping.Count == 0)
         {
             return field;
+        }
+
+        return field.ToDictionary(
+            pair => pair.Key,
+            pair => regionDamping.TryGetValue(pair.Key, out var damping)
+                ? 1d + ((pair.Value - 1d) * damping)
+                : pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal static IReadOnlyDictionary<string, double> ApplyIncrementalIslandAwareCageTuning(
+        IReadOnlyDictionary<string, double> previousField,
+        IReadOnlyDictionary<string, double> updatedField,
+        DeformationCage? deformationCage)
+    {
+        if (updatedField.Count == 0)
+        {
+            return updatedField;
+        }
+
+        var regionDamping = BuildIslandAwareRegionDamping(updatedField.Keys, deformationCage);
+        if (regionDamping.Count == 0)
+        {
+            return updatedField;
+        }
+
+        return updatedField.ToDictionary(
+            pair => pair.Key,
+            pair =>
+            {
+                if (!regionDamping.TryGetValue(pair.Key, out var damping))
+                {
+                    return pair.Value;
+                }
+
+                var previous = previousField.GetValueOrDefault(pair.Key, 1d);
+                return Math.Round(previous + ((pair.Value - previous) * damping), 6);
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildIslandAwareRegionDamping(
+        IEnumerable<string> regions,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var targetRegions = regions
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (targetRegions.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         }
 
         var regionDamping = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -10269,7 +10335,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
             foreach (var region in islandControl.CageRegions)
             {
-                if (!field.ContainsKey(region))
+                if (!targetRegions.Contains(region))
                 {
                     continue;
                 }
@@ -10280,17 +10346,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             }
         }
 
-        if (regionDamping.Count == 0)
-        {
-            return field;
-        }
-
-        return field.ToDictionary(
-            pair => pair.Key,
-            pair => regionDamping.TryGetValue(pair.Key, out var damping)
-                ? 1d + ((pair.Value - 1d) * damping)
-                : pair.Value,
-            StringComparer.OrdinalIgnoreCase);
+        return regionDamping;
     }
 
     private static double ComputeIslandTopologyDamping(CageIslandControl islandControl)
