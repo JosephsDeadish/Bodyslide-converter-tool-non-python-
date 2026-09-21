@@ -160,6 +160,7 @@ internal static class BodySlideSourceProjectSupport
         var hasOsp = false;
         var hasTriPayloads = false;
         var hasBsdPayloads = false;
+        var hasOsdPayloads = false;
         var discovery = EnumerateAssociatedBodySlideFiles(armor);
 
         foreach (var filePath in discovery.Files)
@@ -186,6 +187,10 @@ internal static class BodySlideSourceProjectSupport
                         sliders.Add(candidate);
                     }
                 }
+            }
+            else if (extension.Equals(".osd", StringComparison.OrdinalIgnoreCase))
+            {
+                hasOsdPayloads = true;
             }
             else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
                      TriMorphReader.TryRead(filePath, out var triPayload) &&
@@ -224,6 +229,7 @@ internal static class BodySlideSourceProjectSupport
             hasOsp,
             hasTriPayloads,
             hasBsdPayloads,
+            hasOsdPayloads,
             discovery.HasReferenceAssets);
     }
 
@@ -245,8 +251,10 @@ internal static class BodySlideSourceProjectSupport
         var explicitFiles = armor.BodyReferenceFiles
             .Where(static path =>
                 path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase) ||
                 path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase));
+                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) ||
+                IsLikelyBodySlideSupportXml(path));
         var discoveredFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var hasReferenceAssets = false;
 
@@ -274,8 +282,10 @@ internal static class BodySlideSourceProjectSupport
                         hasReferenceAssets = true;
                     }
                     else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                             extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
                              extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
-                             extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
+                             extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                             IsLikelyBodySlideSupportXml(linkedAsset))
                     {
                         discoveredFiles.Add(linkedAsset);
                     }
@@ -392,8 +402,11 @@ internal static class BodySlideSourceProjectSupport
 
     private static IEnumerable<string> EnumerateSupportedFiles(string root) =>
         Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(root, "*.osd", SearchOption.TopDirectoryOnly))
             .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.TopDirectoryOnly))
-            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly));
+            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.xml", SearchOption.TopDirectoryOnly)
+                .Where(IsLikelyBodySlideSupportXml));
 
     private static IEnumerable<string> EnumerateOspFiles(string root, SearchOption searchOption)
     {
@@ -522,6 +535,7 @@ internal static class BodySlideSourceProjectSupport
                          {
                              var extension = Path.GetExtension(path);
                              return extension.Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
+                                    extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
                                     extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
                                     extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
                          }))
@@ -628,8 +642,50 @@ internal static class BodySlideSourceProjectSupport
 
         var extension = Path.GetExtension(value);
         return extension.Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
                extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsLikelyBodySlideSupportXml(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            !Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedPath = path.Replace('\\', '/');
+        if (normalizedPath.Contains("/SliderGroups/", StringComparison.OrdinalIgnoreCase) ||
+            normalizedPath.Contains("/BodySlide/SliderGroups/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            if (stream.Length <= 0 || stream.Length > 256 * 1024)
+            {
+                return false;
+            }
+
+            var buffer = new byte[Math.Min((int)stream.Length, 4096)];
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read <= 0)
+            {
+                return false;
+            }
+
+            var snippet = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+            return snippet.Contains("<SliderGroups", StringComparison.OrdinalIgnoreCase) ||
+                   snippet.Contains("<SliderSetInfo", StringComparison.OrdinalIgnoreCase) ||
+                   snippet.Contains("<SliderSet", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static string? FindBodySlideRoot(string? startDirectory)
@@ -681,11 +737,12 @@ internal static class BodySlideSourceProjectSupport
                 CollapseCandidates(zapSliders),
                 HasOsp: true,
                 HasTriPayloads: false,
-                HasBsdPayloads: false);
+                HasBsdPayloads: false,
+                HasOsdPayloads: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
-            return new BodySlideSourceSupport([], [], HasOsp: true, HasTriPayloads: false, HasBsdPayloads: false);
+            return new BodySlideSourceSupport([], [], HasOsp: true, HasTriPayloads: false, HasBsdPayloads: false, HasOsdPayloads: false);
         }
     }
 
@@ -1049,6 +1106,7 @@ internal static class BodySlideSourceProjectSupport
         bool HasOsp,
         bool HasTriPayloads,
         bool HasBsdPayloads,
+        bool HasOsdPayloads,
         bool HasReferenceAssets = false)
     {
         public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
@@ -1067,7 +1125,7 @@ internal static class BodySlideSourceProjectSupport
                 missingAssets.Add("osp");
             }
 
-            if (!HasTriPayloads && !HasBsdPayloads)
+            if (!HasTriPayloads && !HasBsdPayloads && !HasOsdPayloads)
             {
                 missingAssets.Add("morph-payloads");
             }
@@ -1087,7 +1145,8 @@ internal static class BodySlideSourceProjectSupport
                 ReusableMorphPayloads.Count,
                 fallbackInference?.BodyName,
                 fallbackInference?.Signals,
-                fallbackInference?.DeformationProfile);
+                fallbackInference?.DeformationProfile,
+                HasOsdPayloads);
         }
     }
 

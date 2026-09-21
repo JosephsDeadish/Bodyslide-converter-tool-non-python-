@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Xml.Linq;
 using SharpCompress.Common;
 using SharpCompress.Writers.SevenZip;
 
@@ -9692,6 +9693,57 @@ public sealed class BsdSliderDataTests
             }
 
             return ms.ToArray();
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithOspAndOsd_DoesNotMarkMorphPayloadsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+        var osdPath = Path.Combine(shapeDataDirectory, "TravelerProject.osd");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        await File.WriteAllTextAsync(meshPath, "mesh");
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        await File.WriteAllBytesAsync(osdPath, [0x4f, 0x53, 0x44, 0x01]);
+        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("TravelerWaist", resolved.Sliders);
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.True(resolved.SourceAssetSupport!.HasOsp);
+            Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+            Assert.False(resolved.SourceAssetSupport.HasTriPayloads);
+            Assert.False(resolved.SourceAssetSupport.HasBsdPayloads);
+            Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
         }
     }
 
@@ -22690,6 +22742,40 @@ public sealed class VanillaBodyOspSliderTests
     }
 
     [Fact]
+    public void BuildOspXml_EscapesAttributeValuesAndRemainsParseable()
+    {
+        var method = typeof(BodySlideOspProjectService).GetMethod("BuildOspXml", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var xml = Assert.IsType<string>(method!.Invoke(null,
+        [
+            new[] { "Waist" },
+            Array.Empty<string>(),
+            new[] { new BodySlideMeshTarget("Traveler", @"CalienteTools\BodySlide\ShapeData\Traveler", @"CalienteTools\BodySlide\ShapeData\Traveler\traveler.nif", @"meshes\armor\", "traveler_0.nif") },
+            "f&\"<emale"
+        ]));
+
+        var document = XDocument.Parse(xml);
+        var outputFile = document.Descendants("OutputFile").Single();
+        Assert.Equal("f&\"<emale", outputFile.Attribute("gender")?.Value);
+    }
+
+    [Fact]
+    public async Task BuildAsync_EscapesSmpXmlAttributeValuesAndRemainsParseable()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh("mixed", "default", false, TargetPhysicsBones: ["NPC L Pec & \"<Bone>"]);
+        var config = await service.BuildAsync(mesh, "Custom&Body", "smp", CancellationToken.None);
+
+        var xml = Assert.IsType<string>(config.SmpConfigXml);
+        var document = XDocument.Parse(xml);
+        var root = document.Root;
+        Assert.NotNull(root);
+        Assert.Equal("Custom&BodyArmorPhysics", root!.Attribute("name")?.Value);
+        Assert.Equal("NPC L Pec & \"<Bone>", document.Descendants("bone").Single().Attribute("name")?.Value);
+    }
+
+    [Fact]
     public async Task GenerateAsync_InfersZapSlidersFromMeshNames()
     {
         var service = new BodySlideOspProjectService();
@@ -23052,6 +23138,50 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Contains(sourceMesh, armor.MeshFiles, StringComparer.OrdinalIgnoreCase);
             Assert.DoesNotContain(armor.MeshFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(armor.TextureFiles, path => path.StartsWith(generatedDir, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImportAsync_ClassifiesBodySlideXmlAndOsdAsBodyReferenceSupport()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDir = Path.Combine(tmpDir, "meshes", "armor");
+        var sliderGroupsDir = Path.Combine(tmpDir, "CalienteTools", "BodySlide", "SliderGroups");
+        var shapeDataDir = Path.Combine(tmpDir, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDir);
+        Directory.CreateDirectory(sliderGroupsDir);
+        Directory.CreateDirectory(shapeDataDir);
+
+        var meshPath = Path.Combine(meshDir, "traveler_armor_0.nif");
+        var sliderGroupPath = Path.Combine(sliderGroupsDir, "traveler-groups.xml");
+        var osdPath = Path.Combine(shapeDataDir, "TravelerProject.osd");
+        var physicsXmlPath = Path.Combine(tmpDir, "cbpc-config.xml");
+
+        await File.WriteAllBytesAsync(meshPath, new byte[64]);
+        await File.WriteAllTextAsync(
+            sliderGroupPath,
+            """
+            <SliderGroups>
+              <Group name="Traveler">
+                <Member name="TravelerProject" />
+              </Group>
+            </SliderGroups>
+            """);
+        await File.WriteAllBytesAsync(osdPath, [0x4f, 0x53, 0x44, 0x01]);
+        await File.WriteAllTextAsync(physicsXmlPath, "<cbpc />");
+
+        try
+        {
+            var armor = await new LocalArmorImportService().ImportAsync(tmpDir, CancellationToken.None);
+
+            Assert.Contains(sliderGroupPath, armor.BodyReferenceFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(osdPath, armor.BodyReferenceFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(physicsXmlPath, armor.PhysicsFiles, StringComparer.OrdinalIgnoreCase);
+            Assert.DoesNotContain(sliderGroupPath, armor.PhysicsFiles, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {

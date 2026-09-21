@@ -185,7 +185,8 @@ public sealed record SourceAssetSupportMetrics(
     int ReusablePayloadSliderCount = 0,
     string? InferredSourceBody = null,
     IReadOnlyList<string>? InferenceSignals = null,
-    string? InferredDeformationProfile = null);
+    string? InferredDeformationProfile = null,
+    bool HasOsdPayloads = false);
 public sealed record MorphPayloadReuseSummary(
     int RequestedVariantCount,
     int ReusedVariantCount,
@@ -8151,8 +8152,13 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
         var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
-        var physicsFiles = EnumerateFiles(supportScanRoot, [".xml", ".hkx"], excludedDirectories);
-        var bodyReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".osp", ".nif"], excludedDirectories)
+        var xmlFiles = EnumerateFiles(supportScanRoot, [".xml"], excludedDirectories);
+        var physicsFiles = xmlFiles
+            .Where(path => !BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(path))
+            .Concat(EnumerateFiles(supportScanRoot, [".hkx"], excludedDirectories))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var inferredReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".nif"], excludedDirectories)
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -8160,7 +8166,12 @@ internal sealed class LocalArmorImportService : IArmorImportService
                     (fileName.Contains("body", StringComparison.OrdinalIgnoreCase) ||
                     fileName.Contains("reference", StringComparison.OrdinalIgnoreCase) ||
                     fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase));
-            })
+            });
+        var bodySlideSupportFiles = EnumerateEmbeddedBodySlideSupportFiles(supportScanRoot)
+            .Where(static path => !string.IsNullOrWhiteSpace(path));
+        var bodyReferenceFiles = inferredReferenceFiles
+            .Concat(bodySlideSupportFiles)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
             EnumerateFiles(supportScanRoot, [".json"], excludedDirectories)
@@ -8176,6 +8187,37 @@ internal sealed class LocalArmorImportService : IArmorImportService
             temporaryWorkspace,
             DetectWeightVariantPairs(meshFiles),
             customBodyProfiles));
+    }
+
+    private static IReadOnlyList<string> EnumerateEmbeddedBodySlideSupportFiles(string supportScanRoot)
+    {
+        if (!Directory.Exists(supportScanRoot))
+        {
+            return [];
+        }
+
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bodySlideRoot in new[]
+                 {
+                     Path.Combine(supportScanRoot, "CalienteTools", "BodySlide"),
+                     Path.Combine(supportScanRoot, "BodySlide")
+                 }.Where(Directory.Exists))
+        {
+            foreach (var file in Directory.EnumerateFiles(bodySlideRoot, "*.*", SearchOption.AllDirectories))
+            {
+                var extension = Path.GetExtension(file);
+                if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                    extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                    BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(file))
+                {
+                    discovered.Add(Path.GetFullPath(file));
+                }
+            }
+        }
+
+        return discovered
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     /// <summary>
@@ -11877,7 +11919,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         var sb = new System.Text.StringBuilder();
         var emittedBones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
-        sb.AppendLine($"<system name=\"{targetBody}ArmorPhysics\">");
+        sb.AppendLine($"<system name=\"{SecurityElement.Escape(targetBody)}ArmorPhysics\">");
         var requestedBones = EnumerateRequestedPhysicsBones(isMale, targetPhysicsBones).ToList();
         if (targetPhysicsBones is { Count: > 0 })
         {
@@ -11912,7 +11954,7 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         void AppendBone(string boneName, double mass, double stiffness, double damping, double angleLimit, double restitution)
         {
             emittedBones.Add(boneName);
-            sb.AppendLine($"  <bone name=\"{boneName}\" mass=\"{F(mass * tuning.MassMultiplier)}\" stiffness=\"{F(stiffness * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}\">");
+            sb.AppendLine($"  <bone name=\"{SecurityElement.Escape(boneName)}\" mass=\"{F(mass * tuning.MassMultiplier)}\" stiffness=\"{F(stiffness * tuning.StiffnessMultiplier)}\" damping=\"{F(Math.Clamp(damping * tuning.DampingMultiplier, 0.35, 0.95))}\">");
             sb.AppendLine($"    <angularLimit min=\"{F(-angleLimit * tuning.OffsetMultiplier)}\" max=\"{F(angleLimit * tuning.OffsetMultiplier)}\" restitution=\"{F(Math.Clamp(restitution * tuning.RestitutionMultiplier, 0.05, 0.35))}\" />");
             sb.AppendLine("  </bone>");
         }
@@ -12918,10 +12960,10 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             sb.AppendLine($"        <SetFolder>{Escape(target.SetFolder)}</SetFolder>");
             sb.AppendLine($"        <SourceFile>{Escape(target.SourceFile)}</SourceFile>");
             sb.AppendLine($"        <OutputPath>{Escape(target.OutputPath)}</OutputPath>");
-            sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\">{Escape(target.OutputFile0)}</OutputFile>");
+            sb.AppendLine($"        <OutputFile gender=\"{Escape(gender)}\" use=\"true\">{Escape(target.OutputFile0)}</OutputFile>");
             if (!string.IsNullOrWhiteSpace(target.OutputFile1))
             {
-                sb.AppendLine($"        <OutputFile gender=\"{gender}\" use=\"true\" morphfile=\"1\">{Escape(target.OutputFile1)}</OutputFile>");
+                sb.AppendLine($"        <OutputFile gender=\"{Escape(gender)}\" use=\"true\" morphfile=\"1\">{Escape(target.OutputFile1)}</OutputFile>");
             }
 
             foreach (var slider in sliders)
