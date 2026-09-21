@@ -3381,7 +3381,7 @@ public sealed class MainForm : Form
     {
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(filePath));
+            using var document = OpenJsonDocument(filePath);
             var root = document.RootElement;
             var fileName = Path.GetFileName(filePath);
 
@@ -3628,7 +3628,7 @@ public sealed class MainForm : Form
     {
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             return TryReadValidationSummary(document.RootElement);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -3653,7 +3653,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var totalCount = TryReadIntValue(root, "TotalCount") ?? 0;
             var successCount = TryReadIntValue(root, "SuccessCount") ?? 0;
@@ -3721,7 +3721,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(qualityPath));
+            using var document = OpenJsonDocument(qualityPath);
             var root = document.RootElement;
             var targetBody = TryReadString(root, "TargetBody") ?? "target body";
             var validationSummary = TryReadValidationSummary(root);
@@ -3789,7 +3789,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var sourceSkeleton = TryReadString(root, "SourceSkeleton") ?? "unknown";
             var targetSkeleton = TryReadString(root, "TargetSkeleton") ?? "unknown";
@@ -3929,7 +3929,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var missingNormals = ReadArrayValues(root, "MissingNormals");
             if (missingNormals.Count == 0)
@@ -3970,7 +3970,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var sourceBodies = ReadDistinctArrayPropertyValues(root, "DetectedSourceBody");
             var sourceSkeletons = ReadDistinctArrayPropertyValues(root, "SourceSkeleton");
@@ -4027,7 +4027,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var status = TryReadString(root, "PackReadinessStatus");
             var needsReviewCount = TryReadIntValue(root, "NeedsReviewCount") ?? 0;
@@ -4094,7 +4094,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(patchPath));
+            using var document = OpenJsonDocument(patchPath);
             var root = document.RootElement;
             var patchSteps = TryReadArrayCount(root, "ProposedPatchSteps");
             var rewriteMappings = TryReadArrayCount(root, "RewriteMappings");
@@ -4189,7 +4189,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+            using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var mode = TryReadString(root, "Mode");
             var groundMeshAvailable = FormatBool(TryReadBoolValue(root, "GroundMeshAvailable"));
@@ -4470,6 +4470,12 @@ public sealed class MainForm : Form
         }
 
         return null;
+    }
+
+    private static JsonDocument OpenJsonDocument(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return JsonDocument.Parse(stream);
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>
