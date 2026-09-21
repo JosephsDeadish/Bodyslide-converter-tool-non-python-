@@ -13349,7 +13349,7 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("sam-light", SkeletonFrameworkCatalog.DetectFramework(["samfskin_ctrl", "sam_genitalswing"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdtTongue_ctrl", "hdtThroat_ctrl"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdt_jawlower_ctrl", "hdt_tonguemid_ctrl"]));
-        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["beastknot_ctrl", "fetlock_ctrl", "tailsheath_ctrl"]));
+        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["maneroot_ctrl", "forelock_ctrl"]));
     }
 }
 

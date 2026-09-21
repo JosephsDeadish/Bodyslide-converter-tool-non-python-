@@ -2,7 +2,7 @@
   {
     "label": "sam-light",
     "bonePrefixes": ["SAM ", "SOS "],
-    "boneTokens": ["Genitals", "Schlong", "Scrotum", "Foreskin"],
+    "boneTokens": ["Genitals", "Schlong", "Scrotum", "Foreskin", "Fskin"],
     "distinctiveSignatures": ["SAM Genitals", "SAM Foreskin", "SOS GenitalsBase", "SOS Scrotum"],
     "minimumSignatureMatches": 2
   },
