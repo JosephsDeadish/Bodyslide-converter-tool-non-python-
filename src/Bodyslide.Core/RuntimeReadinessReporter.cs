@@ -110,8 +110,11 @@ public static class RuntimeReadinessReporter
 
         foreach (var body in BuiltInBodyMetadataCatalog.All.OrderBy(static body => body.Name, StringComparer.OrdinalIgnoreCase))
         {
+            var requiredBones = BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile)
+                ? profile.RequiredPhysicsBones
+                : Array.Empty<string>();
             foreach (var bone in body.AvailablePhysicsBones
-                         .Concat(body.RequiredPhysicsBones ?? [])
+                         .Concat(requiredBones)
                          .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 if (SkeletonMappingCatalog.TryResolveSupportedBone(bone, body.SkeletonFramework, out _))
