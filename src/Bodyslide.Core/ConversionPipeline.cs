@@ -19911,8 +19911,13 @@ internal sealed class LocalExportService(
             damping = Math.Min(damping, 1d - Math.Min(0.18d, boundaryLoopCount * 0.05d));
         }
 
-        var targetsHoleBoundary = boundaryLoopControl?.IsHole == true ||
-                                  islandControl.BoundaryLoops?.Any(static loop => loop.IsHole) == true;
+        var targetsHoleBoundary = boundaryLoopControl?.IsHole == true;
+        var hasHoleTopology = islandControl.BoundaryLoops?.Any(static loop => loop.IsHole) == true;
+        if (hasHoleTopology)
+        {
+            damping = Math.Min(damping, targetsHoleBoundary ? 0.42d : 0.82d);
+        }
+
         if (targetsHoleBoundary)
         {
             damping = Math.Min(damping, 0.42d);
@@ -19923,7 +19928,7 @@ internal sealed class LocalExportService(
         {
             if (edgeSummary.HasManifoldRisk)
             {
-                damping = Math.Min(damping, targetsHoleBoundary ? 0d : 0.34d);
+                damping = Math.Min(damping, targetsHoleBoundary ? 0.34d : 0.70d);
             }
             else if (edgeSummary.InteriorEdgeCount > 0 && edgeSummary.BoundaryVertexCount > 0)
             {
@@ -19932,7 +19937,9 @@ internal sealed class LocalExportService(
         }
 
         if (maxDeviation >= 0.28d &&
-            (targetsHoleBoundary || (edgeSummary?.HasManifoldRisk == true && boundaryLoopCount >= 2)))
+            targetsHoleBoundary &&
+            edgeSummary?.HasManifoldRisk == true &&
+            boundaryLoopCount >= 2)
         {
             return 0d;
         }
