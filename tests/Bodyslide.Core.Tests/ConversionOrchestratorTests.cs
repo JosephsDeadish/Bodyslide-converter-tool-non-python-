@@ -4866,6 +4866,85 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public async Task ExportAsync_SkeletonCompatibilityReport_UsesCustomTargetPhysicsCoverage()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(32));
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "MyFollower", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(
+                inputFile,
+                [inputFile],
+                [],
+                [],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        Name: "MyFollower",
+                        DetectionTokens: ["myfollower"],
+                        TextureTokens: [],
+                        PhysicsTokens: [],
+                        VertexCountMin: 0,
+                        VertexCountMax: 0,
+                        TransformationField: new Dictionary<string, double>(),
+                        SliderNames: ["Body"],
+                        PhysicsBones: ["NPC L Pec", "NPC R Pec"],
+                        PhysicsProfile: "smp",
+                        ReferenceTokens: ["myfollowerbody"],
+                        SkeletonFramework: "tng-extended-physics")
+                ]);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp", SmpConfigXml: "<system name=\"test\"><bone name=\"NPC L Pec\" /></system>");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "MyFollower", ["Body"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "xpmsse-physics",
+                "tng-extended-physics",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+            var steps = new[] { "physics:smp" };
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, steps,
+                detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
+            var compatibility = document.RootElement.GetProperty("PhysicsCompatibility");
+            Assert.True(compatibility.GetProperty("TargetBodySupportsPhysics").GetBoolean());
+            Assert.Contains(
+                compatibility.GetProperty("ExpectedBones").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "NPC L Pec", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                "does not advertise built-in physics-capable bones",
+                compatibility.GetProperty("Summary").GetString(),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("HorseFollowerArmorAddon", "meshes/armor/horse/hoof_boots_0.nif", "Equine variant")]
     [InlineData("AvianWingedFollowerAddon", "meshes/armor/avian/feather_wrap_0.nif", "Avian variant")]
@@ -21715,6 +21794,118 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public async Task ExportAsync_UnknownTargetBody_SurfacesTargetBodySupportIssue()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CustomMystery", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "CustomMystery", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "CustomMystery", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"unknown-target-body-support\"", qualityJson);
+            Assert.Contains("without target-specific metadata", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_IncompleteCustomTargetProfile_SurfacesCoverageIssue()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "MyFollower", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(
+                nifPath,
+                [nifPath],
+                [],
+                [],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        Name: "MyFollower",
+                        DetectionTokens: ["myfollower"],
+                        TextureTokens: [],
+                        PhysicsTokens: [],
+                        VertexCountMin: 0,
+                        VertexCountMax: 0,
+                        TransformationField: new Dictionary<string, double>())
+                ]);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("none");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("TestProject", "MyFollower", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "MyFollower", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"incomplete-target-body-support\"", qualityJson);
+            Assert.Contains("referenceTokens", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("sliderNames", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("skeletonFoundation/skeletonFramework", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_SourcePayloadVertexMismatch_SurfacesSyntheticFallback()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -24742,6 +24933,7 @@ public sealed class CustomBodyProfileSupportTests
             """
             {
               "name": "MyFollower",
+              "aliases": ["Follower Alias", "MFollower"],
               "detectionTokens": ["myfollower", "customshape"],
               "referenceTokens": ["myfollowerbody", "myfollowertri"],
               "sliderNames": ["Waist", "Hips", "Bust"],
@@ -24749,6 +24941,12 @@ public sealed class CustomBodyProfileSupportTests
               "physicsProfile": "smp",
               "gender": "male",
               "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
+              "skeletonFoundation": "TNG Extended",
+              "skeletonFramework": "tng-extended",
+              "heightToWidthRatioMin": 3.6,
+              "heightToWidthRatioMax": 6.8,
+              "depthToWidthRatioMin": 0.28,
+              "depthToWidthRatioMax": 0.74,
               "transformationField": {
                 "chest": 1.14,
                 "waist": 0.95,
@@ -24769,6 +24967,13 @@ public sealed class CustomBodyProfileSupportTests
             Assert.Equal(3, profile.SliderNames?.Count);
             Assert.Contains("myfollowerbody", profile.ReferenceTokens ?? []);
             Assert.Contains("HideCape", profile.ZapSliderNames ?? []);
+            Assert.Contains("Follower Alias", profile.Aliases ?? []);
+            Assert.Equal("TNG Extended", profile.SkeletonFoundation);
+            Assert.Equal("tng-extended", profile.SkeletonFramework);
+            Assert.Equal(3.6, profile.HeightToWidthRatioMin);
+            Assert.Equal(6.8, profile.HeightToWidthRatioMax);
+            Assert.Equal(0.28, profile.DepthToWidthRatioMin);
+            Assert.Equal(0.74, profile.DepthToWidthRatioMax);
             Assert.Equal(1.14, profile.TransformationField["chest"]);
         }
         finally
@@ -24905,6 +25110,53 @@ public sealed class CustomBodyProfileSupportTests
 
             Assert.True(File.Exists(Path.Combine(outputDir, "smp-config.xml")));
             Assert.False(File.Exists(Path.Combine(outputDir, "cbpc-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_CustomBodyProfileAlias_ResolvesToCanonicalTargetBody()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDir = Path.Combine(tmpDir, "output");
+        Directory.CreateDirectory(tmpDir);
+        var inputFile = Path.Combine(tmpDir, "myfollower_armor_0.nif");
+        await File.WriteAllBytesAsync(inputFile, new byte[64]);
+        await File.WriteAllTextAsync(
+            Path.Combine(tmpDir, "myfollower.slidesmith-body.json"),
+            """
+            {
+              "name": "MyFollower",
+              "aliases": ["Follower Alias"],
+              "detectionTokens": ["myfollower"],
+              "referenceTokens": ["myfollowertri"],
+              "sliderNames": ["Waist", "Hips", "Bust"],
+              "physicsProfile": "smp",
+              "gender": "male",
+              "physicsBones": ["NPC L Pec", "NPC R Pec", "NPC Belly"],
+              "bodyOutputPath": "meshes\\actors\\character\\character assets male\\",
+              "skeletonFramework": "tng-extended-physics",
+              "transformationField": {
+                "chest": 1.16,
+                "waist": 0.94,
+                "pelvis": 1.07
+              }
+            }
+            """);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "Follower Alias", outputDir));
+
+            Assert.True(result.Success);
+            Assert.Contains(result.Steps, s => s.Equals("target-body-alias:Follower Alias→MyFollower", StringComparison.Ordinal));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDir, "conversion-quality.json"));
+            Assert.Contains("\"TargetBody\": \"MyFollower\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {

@@ -411,6 +411,10 @@ internal static class ConversionValidationGuidance
                 "Open conversion-quality.json and preview-workbench.html, confirm the detected/source body is correct, then re-run with an explicit source-body override or better reference assets if the armor was matched to the wrong body family.",
             "bodyslide-incompatible" =>
                 "Open conversion-quality.json, verify the target body has compatible BodySlide slider support for this outfit, and re-run with slider export disabled or with matching BodySlide OSP/TRI/BSD/reference assets before release.",
+            "unknown-target-body-support" =>
+                "Add a *.slidesmith-body.json profile for the target body with referenceTokens, sliderNames, skeletonFoundation or skeletonFramework, and any required physicsBones, then re-run so detection, BodySlide export, and skeleton/physics validation use real target-body metadata.",
+            "incomplete-target-body-support" =>
+                "Expand the target body's *.slidesmith-body.json profile with the missing support metadata called out in conversion-quality.json, then re-run so BodySlide export, reference matching, and skeleton/physics validation stop falling back to generic assumptions.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "heuristic-nif-read" =>
@@ -563,6 +567,8 @@ internal static class ConversionValidationGuidance
                 ["conversion-quality.json", "preview-workbench.html"],
             "bodyslide-incompatible" =>
                 ["conversion-quality.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
+            "unknown-target-body-support" or "incomplete-target-body-support" =>
+                ["conversion-quality.json", "skeleton-compatibility.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
             "unsupported-nif-layout" or "heuristic-nif-read" =>
                 ["conversion-quality.json", "preview-workbench.html"],
             "incomplete-source-fallback" =>
@@ -1681,7 +1687,13 @@ public sealed record CustomBodyProfile(
     string Gender = "female",
     IReadOnlyList<string>? ReferenceTokens = null,
     IReadOnlyList<string>? ZapSliderNames = null,
-    string? SkeletonFoundation = null);
+    string? SkeletonFoundation = null,
+    IReadOnlyList<string>? Aliases = null,
+    string? SkeletonFramework = null,
+    double HeightToWidthRatioMin = 3.0,
+    double HeightToWidthRatioMax = 8.5,
+    double DepthToWidthRatioMin = 0.25,
+    double DepthToWidthRatioMax = 1.20);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -1734,6 +1746,18 @@ public static class BodyTypeCatalog
 
         gender = metadata.Gender;
         return true;
+    }
+
+    public static bool TryGetGender(ImportedArmor? armor, string? requestedName, out string gender)
+    {
+        gender = string.Empty;
+        if (CustomBodyProfileSupport.TryGetProfile(armor, requestedName ?? string.Empty, out var customProfile))
+        {
+            gender = customProfile.Gender;
+            return true;
+        }
+
+        return TryGetGender(requestedName, out gender);
     }
 
     public static bool IsMaleBody(string? requestedName) =>
@@ -2016,6 +2040,22 @@ public static class BodyTechnicalProfileCatalog
         BuiltInBodyMetadataCatalog.TryGet(bodyName, out var metadata)
             ? ReturnBuiltIn(metadata, out profile)
             : ReturnMissing(out profile);
+
+    public static bool TryGet(ImportedArmor? armor, string bodyName, out BodyTechnicalProfileInfo profile)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, bodyName, out var customProfile))
+        {
+            profile = new BodyTechnicalProfileInfo(
+                customProfile.Name,
+                customProfile.SkeletonFoundation ?? customProfile.SkeletonFramework ?? "XPMSSE",
+                customProfile.PhysicsBones ?? [],
+                $"Custom body profile '{customProfile.Name}'.",
+                string.IsNullOrWhiteSpace(customProfile.PhysicsProfile) ? "none" : customProfile.PhysicsProfile);
+            return true;
+        }
+
+        return TryGet(bodyName, out profile);
+    }
 
     private static bool ReturnBuiltIn(BuiltInBodyMetadata metadata, out BodyTechnicalProfileInfo profile)
     {
@@ -5473,6 +5513,11 @@ internal static class BodyTransformationFieldCatalog
 
 internal static class CustomBodyProfileSupport
 {
+    private const double DefaultHeightToWidthRatioMin = 3.0;
+    private const double DefaultHeightToWidthRatioMax = 8.5;
+    private const double DefaultDepthToWidthRatioMin = 0.25;
+    private const double DefaultDepthToWidthRatioMax = 1.20;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -5556,9 +5601,20 @@ internal static class CustomBodyProfileSupport
             return false;
         }
 
-        profile = profiles.FirstOrDefault(profile =>
-            string.Equals(profile.Name, bodyName, StringComparison.OrdinalIgnoreCase))!;
+        profile = profiles.FirstOrDefault(profile => MatchesName(profile, bodyName))!;
         return profile is not null;
+    }
+
+    public static bool TryResolveCanonicalName(ImportedArmor? armor, string? bodyName, out string canonicalName)
+    {
+        canonicalName = string.Empty;
+        if (!TryGetProfile(armor, bodyName ?? string.Empty, out var profile))
+        {
+            return false;
+        }
+
+        canonicalName = profile.Name;
+        return true;
     }
 
     public static IEnumerable<BodySignatureTemplate> GetSignatureTemplates(ImportedArmor? armor) =>
@@ -5569,10 +5625,10 @@ internal static class CustomBodyProfileSupport
             profile.PhysicsTokens,
             profile.VertexCountMin,
             profile.VertexCountMax,
-            3.0,
-            8.5,
-            0.25,
-            1.20,
+            profile.HeightToWidthRatioMin,
+            profile.HeightToWidthRatioMax,
+            profile.DepthToWidthRatioMin,
+            profile.DepthToWidthRatioMax,
             profile.ReferenceTokens)) ?? [];
 
     private static CustomBodyProfile? TryLoadProfile(string filePath)
@@ -5606,6 +5662,8 @@ internal static class CustomBodyProfileSupport
         var field = NormalizeTransformationField(dto.TransformationField);
         var gender = string.Equals(dto.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female";
         var physicsProfile = string.IsNullOrWhiteSpace(dto.PhysicsProfile) ? "none" : dto.PhysicsProfile.Trim();
+        var heightToWidthRatioMin = NormalizeRatio(dto.HeightToWidthRatioMin, DefaultHeightToWidthRatioMin);
+        var depthToWidthRatioMin = NormalizeRatio(dto.DepthToWidthRatioMin, DefaultDepthToWidthRatioMin);
 
         return new CustomBodyProfile(
             name,
@@ -5622,7 +5680,13 @@ internal static class CustomBodyProfileSupport
             gender,
             NormalizeNullableStringList(dto.ReferenceTokens),
             NormalizeNullableStringList(dto.ZapSliderNames),
-            string.IsNullOrWhiteSpace(dto.SkeletonFoundation) ? null : dto.SkeletonFoundation.Trim());
+            string.IsNullOrWhiteSpace(dto.SkeletonFoundation) ? null : dto.SkeletonFoundation.Trim(),
+            NormalizeNullableStringList(dto.Aliases),
+            string.IsNullOrWhiteSpace(dto.SkeletonFramework) ? null : dto.SkeletonFramework.Trim(),
+            heightToWidthRatioMin,
+            NormalizeRatioMaximum(dto.HeightToWidthRatioMax, heightToWidthRatioMin, DefaultHeightToWidthRatioMax),
+            depthToWidthRatioMin,
+            NormalizeRatioMaximum(dto.DepthToWidthRatioMax, depthToWidthRatioMin, DefaultDepthToWidthRatioMax));
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -5662,6 +5726,23 @@ internal static class CustomBodyProfileSupport
         return normalized.Count == 0 ? null : normalized;
     }
 
+    private static bool MatchesName(CustomBodyProfile profile, string bodyName) =>
+        string.Equals(profile.Name, bodyName, StringComparison.OrdinalIgnoreCase) ||
+        (profile.Aliases?.Contains(bodyName, StringComparer.OrdinalIgnoreCase) ?? false);
+
+    private static double NormalizeRatio(double value, double fallback) =>
+        double.IsFinite(value) && value > 0d
+            ? Math.Round(Math.Clamp(value, 0.05d, 25d), 4)
+            : fallback;
+
+    private static double NormalizeRatioMaximum(double value, double minimum, double fallback)
+    {
+        var normalized = NormalizeRatio(value, fallback);
+        return normalized > minimum
+            ? normalized
+            : Math.Round(Math.Max(fallback, minimum + 0.01d), 4);
+    }
+
     private sealed class CustomBodyProfileDto
     {
         public string? Name { get; init; }
@@ -5679,6 +5760,12 @@ internal static class CustomBodyProfileSupport
         public string[]? ReferenceTokens { get; init; }
         public string[]? ZapSliderNames { get; init; }
         public string? SkeletonFoundation { get; init; }
+        public string[]? Aliases { get; init; }
+        public string? SkeletonFramework { get; init; }
+        public double HeightToWidthRatioMin { get; init; }
+        public double HeightToWidthRatioMax { get; init; }
+        public double DepthToWidthRatioMin { get; init; }
+        public double DepthToWidthRatioMax { get; init; }
     }
 }
 
@@ -6007,6 +6094,15 @@ public sealed class ConversionOrchestrator(
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
             armor = CustomBodyProfileSupport.MergeProfiles(armor, normalized.Request.CustomProfilePaths);
+            if (CustomBodyProfileSupport.TryResolveCanonicalName(armor, normalized.Request.TargetBody, out var canonicalCustomTargetBody) &&
+                !string.Equals(normalized.Request.TargetBody, canonicalCustomTargetBody, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add($"target-body-alias:{normalized.Request.TargetBody}→{canonicalCustomTargetBody}");
+                normalized = normalized with
+                {
+                    Request = normalized.Request with { TargetBody = canonicalCustomTargetBody }
+                };
+            }
 
             // If the caller supplied an explicit skeleton NIF path, inject it into the
             // BodyReferenceFiles list so the skeleton mapping service can parse its bones.
@@ -6229,8 +6325,8 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"conversion-delta:{sourceBodyForDelta}→{normalized.Request.TargetBody}");
             }
 
-            if (BodyTypeCatalog.TryGetGender(sourceBodyForDelta, out var sourceGender) &&
-                BodyTypeCatalog.TryGetGender(normalized.Request.TargetBody, out var targetGender) &&
+            if (BodyTypeCatalog.TryGetGender(armor, sourceBodyForDelta, out var sourceGender) &&
+                BodyTypeCatalog.TryGetGender(armor, normalized.Request.TargetBody, out var targetGender) &&
                 !string.Equals(sourceGender, targetGender, StringComparison.OrdinalIgnoreCase))
             {
                 steps.Add($"cross-gender-conversion:{sourceGender}→{targetGender}");
@@ -12258,6 +12354,11 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
     {
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
         {
+            if (!string.IsNullOrWhiteSpace(customProfile.SkeletonFramework))
+            {
+                return customProfile.SkeletonFramework.Trim();
+            }
+
             var detectedCustomFramework = targetPhysicsBones.Count > 0
                 ? SkeletonFrameworkCatalog.DetectFramework(targetPhysicsBones.ToList())
                 : null;
@@ -12450,6 +12551,12 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation))
         {
             return ResolveConfiguredSkeletonFoundationLabel(customProfile.SkeletonFoundation);
+        }
+
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out customProfile) &&
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFramework))
+        {
+            return ResolveConfiguredSkeletonFoundationLabel(customProfile.SkeletonFramework);
         }
 
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) &&
@@ -16686,6 +16793,7 @@ internal sealed class LocalExportService(
         // exactly which bones mapped, which were unsupported, and which skeletons were detected.
         var skeletonCompatPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
         var physicsCompatibility = BuildPhysicsCompatibilityReport(
+            armor,
             request.TargetBody,
             skeletonMapping,
             physics,
@@ -17231,6 +17339,7 @@ internal sealed class LocalExportService(
         }
 
         var validationSummary = BuildValidationSummary(
+            armor,
             detectedBody,
             morphs,
             payloadReuse,
@@ -21073,6 +21182,7 @@ internal sealed class LocalExportService(
     }
 
     private static ConversionValidationSummary BuildValidationSummary(
+        ImportedArmor armor,
         BodyDetectionReport detectedBody,
         MorphSet morphs,
         MorphPayloadReuseSummary payloadReuse,
@@ -21097,6 +21207,7 @@ internal sealed class LocalExportService(
     {
         var issues = new List<ConversionValidationIssue>();
         var physicsCompatibility = BuildPhysicsCompatibilityReport(
+            armor,
             request.TargetBody,
             skeletonMapping,
             physics,
@@ -21131,6 +21242,11 @@ internal sealed class LocalExportService(
                 "bodyslide-incompatible",
                 "high",
                 "Generated morphs are not marked BodySlide-compatible."));
+        }
+
+        if (TryBuildTargetBodySupportIssue(armor, request.TargetBody, physicsCompatibility.RequestedProfile, out var targetBodySupportIssue))
+        {
+            issues.Add(targetBodySupportIssue);
         }
 
         if (morphs.SourceAssetSupport is { UsedFallbackSliders: true } sourceAssetSupport)
@@ -21962,7 +22078,72 @@ internal sealed class LocalExportService(
     private static bool IsBethesdaPluginFile(string path) =>
         Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
+    private static bool TryBuildTargetBodySupportIssue(
+        ImportedArmor armor,
+        string targetBody,
+        string requestedPhysicsProfile,
+        out ConversionValidationIssue issue)
+    {
+        issue = default!;
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out _))
+        {
+            return false;
+        }
+
+        if (!CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            issue = new ConversionValidationIssue(
+                "unknown-target-body-support",
+                "high",
+                $"Target body '{targetBody}' does not have built-in coverage or a loaded custom body profile, so reference matching, BodySlide export, and skeleton/physics validation are running without target-specific metadata.");
+            return true;
+        }
+
+        var missingFields = new List<string>();
+        if (customProfile.ReferenceTokens is not { Count: > 0 })
+        {
+            missingFields.Add("referenceTokens");
+        }
+
+        if (customProfile.SliderNames is not { Count: > 0 })
+        {
+            missingFields.Add("sliderNames");
+        }
+
+        var hasSkeletonMetadata =
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFramework) ||
+            !string.IsNullOrWhiteSpace(customProfile.SkeletonFoundation) ||
+            (customProfile.PhysicsBones is { Count: > 0 } physicsBones &&
+             !string.IsNullOrWhiteSpace(SkeletonFrameworkCatalog.DetectFramework(physicsBones.ToList())));
+        if (!hasSkeletonMetadata)
+        {
+            missingFields.Add("skeletonFoundation/skeletonFramework");
+        }
+
+        if (!string.Equals(requestedPhysicsProfile, "none", StringComparison.OrdinalIgnoreCase) &&
+            customProfile.PhysicsBones is not { Count: > 0 })
+        {
+            missingFields.Add("physicsBones");
+        }
+
+        if (missingFields.Count == 0)
+        {
+            return false;
+        }
+
+        var severity = missingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
+                       missingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase)
+            ? "high"
+            : "medium";
+        issue = new ConversionValidationIssue(
+            "incomplete-target-body-support",
+            severity,
+            $"Custom target body profile '{customProfile.Name}' is missing support metadata ({string.Join(", ", missingFields)}). Conversion can proceed, but certainty stays limited until those fields are supplied.");
+        return true;
+    }
+
     private static PhysicsCompatibilityReport BuildPhysicsCompatibilityReport(
+        ImportedArmor armor,
         string targetBody,
         SkeletonMappingResult skeletonMapping,
         PhysicsConfig physics,
@@ -21971,7 +22152,7 @@ internal sealed class LocalExportService(
         var injectedBones = ExtractInjectedPhysicsBones(steps);
         var remappedBones = ExtractPhysicsBoneRemaps(steps);
         var missingBones = ExtractMissingPhysicsBones(steps);
-        var hasProfile = BodyTechnicalProfileCatalog.TryGet(targetBody, out var profile);
+        var hasProfile = BodyTechnicalProfileCatalog.TryGet(armor, targetBody, out var profile);
         var expectedBones = hasProfile
             ? profile.RequiredPhysicsBones
             : [];

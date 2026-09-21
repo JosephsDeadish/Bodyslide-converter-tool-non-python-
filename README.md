@@ -194,8 +194,11 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `detectionTokens`
 - `textureTokens`
 - `physicsTokens`
+- `aliases`
 - `referenceTokens`
 - `vertexCountMin` / `vertexCountMax`
+- `heightToWidthRatioMin` / `heightToWidthRatioMax`
+- `depthToWidthRatioMin` / `depthToWidthRatioMax`
 - `transformationField` (`chest`, `waist`, `pelvis`, `legs`, `shoulders`, `breasts`, `butt`, `belly`, `arms`, `thighs`, `calves`)
 - `sliderNames`
 - `zapSliderNames`
@@ -203,6 +206,8 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
 - `gender` (`female` or `male`)
 - `bodyOutputPath`
+- `skeletonFoundation`
+- `skeletonFramework`
 
 ## Output files
 
