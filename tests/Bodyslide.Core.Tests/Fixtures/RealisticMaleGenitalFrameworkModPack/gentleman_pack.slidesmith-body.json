@@ -1,0 +1,38 @@
+{
+  "name": "Gentleman Support Reference",
+  "aliases": [
+    "TNG Raider",
+    "SOS Raider"
+  ],
+  "referenceTokens": [
+    "tng",
+    "gentleman",
+    "sos",
+    "schlong",
+    "male"
+  ],
+  "sliderNames": [
+    "Body",
+    "Chest",
+    "Waist",
+    "Genitals",
+    "ThroatDepth",
+    "MouthOpen"
+  ],
+  "physicsBones": [
+    "NPC L Pec",
+    "NPC R Pec",
+    "NPC Belly",
+    "TNG Genitals",
+    "TNG Shaft",
+    "TNG Glans",
+    "TNG Balls",
+    "HDT Mouth",
+    "HDT Throat"
+  ],
+  "physicsProfile": "smp",
+  "gender": "male",
+  "skeletonFoundation": "TNG Extended",
+  "skeletonFramework": "tng-extended",
+  "bodyOutputPath": "meshes\actors\character\character assets\"
+}

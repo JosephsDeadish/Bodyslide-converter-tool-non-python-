@@ -8,16 +8,16 @@
   },
   {
     "label": "ube-extended",
-    "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
-    "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower"],
-    "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "Anus"],
+    "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "HDT ", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
+    "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower", "HDT Mouth", "HDT Throat"],
+    "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "Anus", "HDT Mouth", "HDT Throat"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "tng-extended",
     "bonePrefixes": ["TNG "],
     "boneTokens": ["Genitals", "Glans", "Shaft", "Balls"],
-    "distinctiveSignatures": ["TNG Genitals", "TNG Balls"],
+    "distinctiveSignatures": ["TNG Genitals", "TNG Shaft", "TNG Glans", "TNG Balls"],
     "minimumSignatureMatches": 2
   },
   {

@@ -933,7 +933,8 @@
     "name": "SOS",
     "aliases": [
       "Schlongs of Skyrim",
-      "SOS Light"
+      "SOS Light",
+      "Schlongs of Skyrim Full"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -946,6 +947,8 @@
       "SOS GenitalsBase",
       "SOS Genitals01",
       "SOS Genitals02",
+      "SOS Shaft",
+      "SOS Glans",
       "SOS Scrotum"
     ],
     "referenceTokens": [
@@ -994,6 +997,8 @@
       "SOS GenitalsBase",
       "SOS Genitals01",
       "SOS Genitals02",
+      "SOS Shaft",
+      "SOS Glans",
       "SOS Scrotum"
     ],
     "skeletonFramework": "xpmsse-male-smp"
@@ -1028,7 +1033,9 @@
       "ButtLower",
       "BellyLower",
       "Vagina",
-      "Anus"
+      "Anus",
+      "HDT Mouth",
+      "HDT Throat"
     ],
     "referenceTokens": [
       "ube",
@@ -1091,6 +1098,8 @@
       "BellyLower",
       "Vagina",
       "Anus",
+      "HDT Mouth",
+      "HDT Throat",
       "NPC L Breast01",
       "NPC R Breast01",
       "NPC Belly",
@@ -1105,7 +1114,9 @@
       "The New Gentleman",
       "TNG Extended",
       "TNGExtended",
-      "New Gentleman"
+      "New Gentleman",
+      "The New Gentleman 2",
+      "TNG 2"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -1116,7 +1127,11 @@
       "NPC R Pec",
       "NPC Belly",
       "TNG Genitals",
-      "TNG Balls"
+      "TNG Shaft",
+      "TNG Glans",
+      "TNG Balls",
+      "HDT Mouth",
+      "HDT Throat"
     ],
     "referenceTokens": [
       "tng",
@@ -1170,7 +1185,11 @@
     "depthToWidthRatioMax": 0.95,
     "physicsBoneSignatures": [
       "TNG Genitals",
+      "TNG Shaft",
+      "TNG Glans",
       "TNG Balls",
+      "HDT Mouth",
+      "HDT Throat",
       "NPC L Pec",
       "NPC R Pec"
     ],

@@ -145,6 +145,8 @@
         "SOS GenitalsBase",
         "SOS Genitals01",
         "SOS Genitals02",
+        "SOS Shaft",
+        "SOS Glans",
         "SOS Scrotum"
       ]
     },
@@ -156,10 +158,14 @@
         "NPC Belly",
         "SAM Genitals",
         "SOS GenitalsBase",
+        "SOS Shaft",
+        "SOS Glans",
         "SOS Scrotum"
       ],
       "fallbackMappings": {
         "TNG Genitals": ["SAM Genitals", "SOS GenitalsBase"],
+        "TNG Shaft": ["SAM Genitals", "SOS Shaft", "SOS Genitals01"],
+        "TNG Glans": ["SAM Genitals", "SOS Glans", "SOS Genitals02"],
         "TNG Balls": ["SOS Scrotum", "NPC Pelvis"]
       }
     },
@@ -183,8 +189,14 @@
         "ButtLower",
         "BellyLower",
         "Vagina",
-        "Anus"
-      ]
+        "Anus",
+        "HDT Mouth",
+        "HDT Throat"
+      ],
+      "fallbackMappings": {
+        "HDT Mouth": ["NPC Head"],
+        "HDT Throat": ["HDT Mouth", "NPC Head"]
+      }
     },
     {
       "id": "tng-extended",
@@ -193,13 +205,21 @@
         "NPC R Pec",
         "NPC Belly",
         "TNG Genitals",
-        "TNG Balls"
+        "TNG Shaft",
+        "TNG Glans",
+        "TNG Balls",
+        "HDT Mouth",
+        "HDT Throat"
       ],
       "fallbackMappings": {
         "NPC L Lat": ["NPC L Pec"],
         "NPC R Lat": ["NPC R Pec"],
-        "SAM Genitals": ["TNG Genitals"],
-        "SOS Scrotum": ["TNG Balls", "NPC Pelvis"]
+        "SAM Genitals": ["TNG Genitals", "TNG Shaft"],
+        "SOS Genitals01": ["TNG Shaft", "TNG Genitals"],
+        "SOS Genitals02": ["TNG Glans", "TNG Shaft", "TNG Genitals"],
+        "SOS Scrotum": ["TNG Balls", "NPC Pelvis"],
+        "HDT Mouth": ["NPC Head"],
+        "HDT Throat": ["HDT Mouth", "NPC Head"]
       }
     },
     {

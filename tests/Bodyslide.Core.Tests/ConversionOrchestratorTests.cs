@@ -10516,6 +10516,38 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedMaleGenitalShapeDataPack_ResolvesOralAndGenitalPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticMaleGenitalFrameworkModPack", Path.Combine("meshes", "armor", "gentleman", "gentleman_harness_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "TNG", CancellationToken.None);
+
+        Assert.Contains("GentlemanChest", resolved.Sliders);
+        Assert.Contains("Genitals", resolved.Sliders);
+        Assert.Contains("ThroatDepth", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+        Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+        Assert.NotNull(resolved.ReusableMorphPayloads);
+        Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("Genitals", out var genitalPayloads));
+        Assert.NotNull(genitalPayloads.LowWeight);
+        Assert.NotNull(genitalPayloads.HighWeight);
+        Assert.Equal("bsd", genitalPayloads.LowWeight!.PayloadKind);
+        Assert.Equal("bsd", genitalPayloads.HighWeight!.PayloadKind);
+        Assert.True(resolved.ReusableMorphPayloads.TryGetValue("ThroatDepth", out var throatPayloads));
+        Assert.NotNull(throatPayloads.LowWeight);
+        Assert.Equal("tri", throatPayloads.LowWeight!.PayloadKind);
+        Assert.True(resolved.ReusableMorphPayloads.TryGetValue("GentlemanChest", out var chestPayloads));
+        Assert.NotNull(chestPayloads.LowWeight);
+        Assert.Equal("osd", chestPayloads.LowWeight!.PayloadKind);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithMalformedUnnamedMorphFixture_IgnoresUnnamedEntriesAndKeepsValidPayloads()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -12791,11 +12823,23 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("UBE", out var ube));
         Assert.Contains("Vagina", ube.AvailablePhysicsBones);
         Assert.Contains("Anus", ube.AvailablePhysicsBones);
+        Assert.Contains("HDT Mouth", ube.AvailablePhysicsBones);
+        Assert.Contains("HDT Throat", ube.AvailablePhysicsBones);
         Assert.Contains("BellyLower", ube.AvailablePhysicsBones);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
         Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
+        Assert.Contains("SOS Shaft", sos.AvailablePhysicsBones);
+        Assert.Contains("SOS Glans", sos.AvailablePhysicsBones);
         Assert.Contains("SOS Scrotum", sos.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("TNG", out var tng));
+        Assert.Contains("TNG Shaft", tng.AvailablePhysicsBones);
+        Assert.Contains("TNG Glans", tng.AvailablePhysicsBones);
+        Assert.Contains("HDT Mouth", tng.AvailablePhysicsBones);
+        Assert.Contains("HDT Throat", tng.AvailablePhysicsBones);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("The New Gentleman 2", out var tngAlias));
+        Assert.Equal("TNG", tngAlias.Name);
     }
 
     [Fact]
@@ -12944,6 +12988,14 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Frill.L", draconicFrillFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("FrillMid.L", "aquatic-humanoid", out var aquaticFrillMidFallbacks));
         Assert.Contains("Frill.L", aquaticFrillMidFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("TNG Shaft", "sam-light", out var tngShaftFallbacks));
+        Assert.Contains("SOS Shaft", tngShaftFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("TNG Glans", "sam-light", out var tngGlansFallbacks));
+        Assert.Contains("SOS Glans", tngGlansFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("SOS Genitals01", "tng-extended", out var sosShaftFallbacks));
+        Assert.Contains("TNG Shaft", sosShaftFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HDT Throat", "ube-extended", out var throatFallbacks));
+        Assert.Contains("HDT Mouth", throatFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailBarbSwing02", out var draconicTailGroup));
         Assert.Equal("tail", draconicTailGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("AntennaChainL", out var insectHornGroup));
@@ -12970,6 +13022,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["TailFin", "WhiskerTip.R"]));
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFinMid.L", "FrillMid.R"]));
         Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CarapaceWingMid.L", "MandibleMid.R"]));
+        Assert.Equal("tng-extended", SkeletonFrameworkCatalog.DetectFramework(["TNG Shaft", "TNG Glans"]));
+        Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["HDT Mouth", "HDT Throat"]));
     }
 }
 
@@ -14202,6 +14256,52 @@ public sealed class RealisticModPackFixtureTests
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticMaleGenitalFrameworkModPack_WritesMaleFrameworkArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMaleGenitalFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "gentleman", "gentleman_harness_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "The New Gentleman 2",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "the-new-gentleman-2", "gentleman_harness_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            Assert.True(Directory.Exists(shapeDataDirectory));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.AllDirectories));
+
+            var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
+            Assert.Contains("TNG Genitals", smpXml, StringComparison.Ordinal);
+            Assert.Contains("TNG Balls", smpXml, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
