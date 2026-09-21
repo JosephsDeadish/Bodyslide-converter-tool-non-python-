@@ -424,7 +424,7 @@ internal static class ConversionValidationGuidance
             "extreme-topology-adaptation" =>
                 "Open morphs.json, preview-workbench.html, and the generated BodySlide ShapeData in Outfit Studio, then inspect split parts, holes, straps, and layered pieces for over-smoothed or over-scaled reuse before shipping. If those regions drift badly, switch to a closer source body or plan manual cleanup instead of trusting the reused morph payloads.",
             "topology-mismatch-risk" =>
-                "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, or seam splits, and plan manual cleanup if the source and target topologies differ too much.",
+                "Open preview-workbench.html and conversion-quality.json, inspect the converted mesh in Outfit Studio for UV drift, missing geometry, seam splits, and hole/window loop shape drift, then plan manual cleanup if the source and target topologies differ too much.",
             "missing-source-partitions" =>
                 "Open conversion-quality.json and preview-workbench.html, compare the exported BSDismember partitions against the source mesh slot layout in Outfit Studio or NifSkope, then restore any missing source-driven partition blocks before shipping.",
             "missing-plugin-partitions" =>
@@ -2486,7 +2486,10 @@ internal static class NifGeometrySignatureReader
         int ComponentId,
         int LoopIndex,
         IReadOnlyList<int> VertexIndexes,
-        IReadOnlyList<(int From, int To)> OrderedEdges);
+        IReadOnlyList<(int From, int To)> OrderedEdges,
+        float ProjectedArea = 0f,
+        float ProjectedWidth = 0f,
+        float ProjectedDepth = 0f);
 
     internal readonly record struct HalfFloatVertexBlockCandidate(
         int VertexDataOffset,
@@ -3454,7 +3457,8 @@ internal static class NifGeometrySignatureReader
         }
 
         var componentIds = BuildTopologyComponentIds(bestVertexCount, bestTriangles);
-        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds);
+        var fullVertices = TryReadFullVertices(bytes);
+        var (boundaryLoopCount, boundaryVertexCount, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks) = AnalyzeBoundaryEdges(bestVertexCount, bestTriangles, componentIds, fullVertices);
         return new MeshTopologySummary(
             bestVertexCount,
             componentIds,
@@ -3539,7 +3543,8 @@ internal static class NifGeometrySignatureReader
     private static (int BoundaryLoopCount, int BoundaryVertexCount, bool[] BoundaryVertexFlags, int[] ComponentBoundaryLoopCounts, int[] ComponentBoundaryVertexCounts, IReadOnlyList<BoundaryLoopSequence> BoundaryLoops, IReadOnlyList<TopologyIslandEdgeNetworkSummary> ComponentEdgeNetworks) AnalyzeBoundaryEdges(
         int vertexCount,
         IReadOnlyList<ushort> triangles,
-        IReadOnlyList<int> componentIds)
+        IReadOnlyList<int> componentIds,
+        IReadOnlyList<MeshVertex>? vertices = null)
     {
         var edgeCounts = new Dictionary<(int Left, int Right), int>();
         for (var index = 0; index + 2 < triangles.Count; index += 3)
@@ -3738,11 +3743,17 @@ internal static class NifGeometrySignatureReader
             foreach (var entry in componentGroup
                          .OrderBy(static entry => entry.VertexIndexes.FirstOrDefault()))
             {
+                var (projectedArea, projectedWidth, projectedDepth) = vertices is { Count: > 0 }
+                    ? ComputeBoundaryLoopProjectedMetrics(vertices, entry.VertexIndexes)
+                    : (0f, 0f, 0f);
                 boundaryLoops.Add(new BoundaryLoopSequence(
                     entry.ComponentId,
                     loopIndex++,
                     entry.VertexIndexes,
-                    entry.OrderedEdges));
+                    entry.OrderedEdges,
+                    projectedArea,
+                    projectedWidth,
+                    projectedDepth));
             }
         }
 
@@ -3760,8 +3771,6 @@ internal static class NifGeometrySignatureReader
                 componentNonManifoldEdgeCounts[componentId] > 0))
             .ToArray();
 
-        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks);
-
         void AddEdge(int left, int right)
         {
             var normalized = left <= right ? (left, right) : (right, left);
@@ -3778,6 +3787,42 @@ internal static class NifGeometrySignatureReader
 
             neighbors.Add(to);
         }
+
+        return (loopCount, boundaryAdjacency.Count, boundaryVertexFlags, componentBoundaryLoopCounts, componentBoundaryVertexCounts, boundaryLoops, componentEdgeNetworks);
+    }
+
+    private static (float Area, float Width, float Depth) ComputeBoundaryLoopProjectedMetrics(
+        IReadOnlyList<MeshVertex> vertices,
+        IReadOnlyList<int> loopVertexIndexes)
+    {
+        if (vertices.Count == 0 || loopVertexIndexes.Count < 3)
+        {
+            return (0f, 0f, 0f);
+        }
+
+        var points = loopVertexIndexes
+            .Where(index => index >= 0 && index < vertices.Count)
+            .Select(index => vertices[index])
+            .ToArray();
+        if (points.Length < 3)
+        {
+            return (0f, 0f, 0f);
+        }
+
+        var minX = points.Min(static point => point.X);
+        var maxX = points.Max(static point => point.X);
+        var minY = points.Min(static point => point.Y);
+        var maxY = points.Max(static point => point.Y);
+
+        double areaAccumulator = 0d;
+        for (var index = 0; index < points.Length; index++)
+        {
+            var current = points[index];
+            var next = points[(index + 1) % points.Length];
+            areaAccumulator += (current.X * next.Y) - (next.X * current.Y);
+        }
+
+        return ((float)(Math.Abs(areaAccumulator) * 0.5d), maxX - minX, maxY - minY);
     }
 
     private static (IReadOnlyList<int> VertexIndexes, IReadOnlyList<(int From, int To)> OrderedEdges) OrderBoundaryLoopVertices(
@@ -20747,13 +20792,20 @@ internal sealed class LocalExportService(
 
         if (topologyMismatchRisk)
         {
+            var topologyLoopDriftDetail = qualityWarnings.Any(static warning =>
+                    warning.Contains("holeArea=", StringComparison.OrdinalIgnoreCase) ||
+                    warning.Contains("outerArea=", StringComparison.OrdinalIgnoreCase) ||
+                    warning.StartsWith("hole-loop-", StringComparison.OrdinalIgnoreCase) ||
+                    warning.StartsWith("boundary-loop-", StringComparison.OrdinalIgnoreCase))
+                ? " Hole/window loop shape or area drift was detected."
+                : string.Empty;
             var detail = qualityWarnings.Count > 0
                 ? $" ({string.Join(", ", qualityWarnings)})"
                 : string.Empty;
             issues.Add(new ConversionValidationIssue(
                 "topology-mismatch-risk",
                 "high",
-                $"Converted mesh topology or UV layout drifted significantly from the source{detail}."));
+                $"Converted mesh topology or UV layout drifted significantly from the source.{topologyLoopDriftDetail}{detail}"));
         }
 
         if (nifSupport is { Count: > 0 })
@@ -21857,7 +21909,16 @@ internal sealed class LocalExportService(
         int BoundaryVertexCount,
         int InteriorEdgeCount,
         int NonManifoldEdgeCount,
-        bool HasManifoldRisk);
+        bool HasManifoldRisk,
+        IReadOnlyList<TopologyVerificationLoopMetric> LoopMetrics);
+
+    private sealed record TopologyVerificationLoopMetric(
+        int LoopIndex,
+        bool IsHole,
+        int VertexCount,
+        double ProjectedArea,
+        double RelativeArea,
+        double AspectRatio);
 
     private static IReadOnlyList<string> AssessRoutedTopologyIslandMismatch(
         NifGeometrySignatureReader.MeshTopologySummary sourceTopology,
@@ -21865,7 +21926,7 @@ internal sealed class LocalExportService(
     {
         var sourceIslands = SummarizeTopologyVerificationIslands(sourceTopology);
         var convertedIslands = SummarizeTopologyVerificationIslands(convertedTopology);
-        if (sourceIslands.Count < 2 || convertedIslands.Count == 0)
+        if (sourceIslands.Count == 0 || convertedIslands.Count == 0)
         {
             return sourceIslands.Any(static island => island.HoleLoopCount > 0) && convertedIslands.Count == 0
                 ? ["island-hole-loss:all"]
@@ -21889,13 +21950,14 @@ internal sealed class LocalExportService(
             unusedConverted.Remove(matchedConverted.Island.IslandId);
             if (IsTopologyVerificationIslandMismatch(sourceIsland, matchedConverted.Island))
             {
+                var loopDriftSuffix = DescribeTopologyVerificationLoopDrift(sourceIsland.LoopMetrics, matchedConverted.Island.LoopMetrics);
                 warnings.Add(
                     $"island-routing-drift:s{sourceIsland.IslandId}->t{matchedConverted.Island.IslandId}," +
                     $"loops={sourceIsland.BoundaryLoopCount}->{matchedConverted.Island.BoundaryLoopCount}," +
                     $"holes={sourceIsland.HoleLoopCount}->{matchedConverted.Island.HoleLoopCount}," +
                     $"boundary={sourceIsland.BoundaryVertexCount}->{matchedConverted.Island.BoundaryVertexCount}," +
                     $"interior={sourceIsland.InteriorEdgeCount}->{matchedConverted.Island.InteriorEdgeCount}," +
-                    $"nonmanifold={sourceIsland.NonManifoldEdgeCount}->{matchedConverted.Island.NonManifoldEdgeCount}");
+                    $"nonmanifold={sourceIsland.NonManifoldEdgeCount}->{matchedConverted.Island.NonManifoldEdgeCount}{loopDriftSuffix}");
             }
         }
 
@@ -21903,6 +21965,42 @@ internal sealed class LocalExportService(
             .OrderBy(static islandId => islandId)
             .Select(static islandId => $"island-routing-extra:t{islandId}"));
         return warnings;
+    }
+
+    private static string DescribeTopologyVerificationLoopDrift(
+        IReadOnlyList<TopologyVerificationLoopMetric> sourceLoops,
+        IReadOnlyList<TopologyVerificationLoopMetric> convertedLoops)
+    {
+        if (sourceLoops.Count == 0 || convertedLoops.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var holeSource = sourceLoops.Where(static loop => loop.IsHole).OrderBy(static loop => loop.LoopIndex).FirstOrDefault();
+        var holeConverted = convertedLoops.Where(static loop => loop.IsHole).OrderBy(static loop => loop.LoopIndex).FirstOrDefault();
+        if (holeSource is not null && holeConverted is not null)
+        {
+            var areaDrift = Math.Abs(holeConverted.RelativeArea - holeSource.RelativeArea);
+            var aspectDrift = Math.Abs(holeConverted.AspectRatio - holeSource.AspectRatio);
+            if (areaDrift >= 0.20d || aspectDrift >= 0.65d)
+            {
+                return $",holeArea={holeSource.RelativeArea:0.00}->{holeConverted.RelativeArea:0.00},holeAspect={holeSource.AspectRatio:0.00}->{holeConverted.AspectRatio:0.00}";
+            }
+        }
+
+        var outerSource = sourceLoops.Where(static loop => !loop.IsHole).OrderBy(static loop => loop.LoopIndex).FirstOrDefault();
+        var outerConverted = convertedLoops.Where(static loop => !loop.IsHole).OrderBy(static loop => loop.LoopIndex).FirstOrDefault();
+        if (outerSource is not null && outerConverted is not null)
+        {
+            var areaDrift = Math.Abs(outerConverted.RelativeArea - outerSource.RelativeArea);
+            var aspectDrift = Math.Abs(outerConverted.AspectRatio - outerSource.AspectRatio);
+            if (areaDrift >= 0.35d || aspectDrift >= 0.65d)
+            {
+                return $",outerArea={outerSource.RelativeArea:0.00}->{outerConverted.RelativeArea:0.00},outerAspect={outerSource.AspectRatio:0.00}->{outerConverted.AspectRatio:0.00}";
+            }
+        }
+
+        return string.Empty;
     }
 
     private static IReadOnlyList<TopologyVerificationIslandSummary> SummarizeTopologyVerificationIslands(
@@ -21920,6 +22018,14 @@ internal sealed class LocalExportService(
                 .Where(static loop => loop.LoopIndex > 0)
                 .GroupBy(static loop => loop.ComponentId)
                 .ToDictionary(static group => group.Key, static group => group.Count())
+            : null;
+        var loopMetricsByIsland = topology.BoundaryLoops is { Count: > 0 }
+            ? topology.BoundaryLoops
+                .GroupBy(static loop => loop.ComponentId)
+                .ToDictionary(
+                    static group => group.Key,
+                    static group => BuildTopologyVerificationLoopMetrics(group),
+                    EqualityComparer<int>.Default)
             : null;
         var edgeNetworks = topology.ComponentEdgeNetworks?
             .ToDictionary(static network => network.ComponentId) ??
@@ -21950,9 +22056,50 @@ internal sealed class LocalExportService(
                     boundaryVertexCount,
                     edgeNetwork?.InteriorEdgeCount ?? 0,
                     edgeNetwork?.NonManifoldEdgeCount ?? 0,
-                    edgeNetwork?.HasManifoldRisk ?? false);
+                    edgeNetwork?.HasManifoldRisk ?? false,
+                    loopMetricsByIsland is not null && loopMetricsByIsland.TryGetValue(group.Key, out var metrics)
+                        ? metrics
+                        : []);
             })
             .OrderBy(static island => island.IslandId)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<TopologyVerificationLoopMetric> BuildTopologyVerificationLoopMetrics(
+        IEnumerable<NifGeometrySignatureReader.BoundaryLoopSequence> loops)
+    {
+        var materialized = loops.ToArray();
+        if (materialized.Length == 0)
+        {
+            return [];
+        }
+
+        var referenceArea = materialized
+            .Select(static loop => Math.Abs(loop.ProjectedArea))
+            .DefaultIfEmpty(0f)
+            .Max();
+        if (referenceArea <= 0.0001f)
+        {
+            referenceArea = 1f;
+        }
+
+        return materialized
+            .Select(loop =>
+            {
+                var width = Math.Abs(loop.ProjectedWidth);
+                var depth = Math.Abs(loop.ProjectedDepth);
+                var aspectRatio = width <= 0.0001f || depth <= 0.0001f
+                    ? 1d
+                    : Math.Max(width, depth) / Math.Max(0.0001f, Math.Min(width, depth));
+                return new TopologyVerificationLoopMetric(
+                    loop.LoopIndex,
+                    loop.LoopIndex > 0,
+                    loop.VertexIndexes.Count,
+                    Math.Abs(loop.ProjectedArea),
+                    Math.Abs(loop.ProjectedArea) / referenceArea,
+                    aspectRatio);
+            })
+            .OrderBy(static metric => metric.LoopIndex)
             .ToArray();
     }
 
@@ -21965,11 +22112,39 @@ internal sealed class LocalExportService(
         var interiorPenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.InteriorEdgeCount, convertedIsland.InteriorEdgeCount, 0.32d);
         var loopPenalty = Math.Abs(sourceIsland.BoundaryLoopCount - convertedIsland.BoundaryLoopCount) * 0.28d;
         var holeLoopPenalty = Math.Abs(sourceIsland.HoleLoopCount - convertedIsland.HoleLoopCount) * 0.42d;
+        var loopMetricPenalty = ComputeTopologyVerificationLoopMetricPenalty(sourceIsland.LoopMetrics, convertedIsland.LoopMetrics);
         var manifoldPenalty = sourceIsland.HasManifoldRisk == convertedIsland.HasManifoldRisk ? 0d : 0.20d;
         var nonManifoldPenalty = convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount
             ? Math.Min(0.22d, (convertedIsland.NonManifoldEdgeCount - sourceIsland.NonManifoldEdgeCount) * 0.08d)
             : Math.Abs(sourceIsland.NonManifoldEdgeCount - convertedIsland.NonManifoldEdgeCount) * 0.03d;
-        return sizePenalty + boundaryPenalty + interiorPenalty + loopPenalty + holeLoopPenalty + manifoldPenalty + nonManifoldPenalty;
+        return sizePenalty + boundaryPenalty + interiorPenalty + loopPenalty + holeLoopPenalty + loopMetricPenalty + manifoldPenalty + nonManifoldPenalty;
+    }
+
+    private static double ComputeTopologyVerificationLoopMetricPenalty(
+        IReadOnlyList<TopologyVerificationLoopMetric> sourceLoops,
+        IReadOnlyList<TopologyVerificationLoopMetric> convertedLoops)
+    {
+        if (sourceLoops.Count == 0 || convertedLoops.Count == 0)
+        {
+            return 0d;
+        }
+
+        var penalty = 0d;
+        foreach (var sourceLoop in sourceLoops)
+        {
+            var convertedLoop = convertedLoops
+                .FirstOrDefault(loop => loop.IsHole == sourceLoop.IsHole && loop.LoopIndex == sourceLoop.LoopIndex)
+                ?? convertedLoops.FirstOrDefault(loop => loop.IsHole == sourceLoop.IsHole);
+            if (convertedLoop is null)
+            {
+                continue;
+            }
+
+            penalty += Math.Abs(convertedLoop.RelativeArea - sourceLoop.RelativeArea) * (sourceLoop.IsHole ? 0.48d : 0.24d);
+            penalty += Math.Abs(convertedLoop.AspectRatio - sourceLoop.AspectRatio) * (sourceLoop.IsHole ? 0.10d : 0.05d);
+        }
+
+        return penalty;
     }
 
     private static double ComputeTopologyVerificationRatioPenalty(int left, int right, double weight)
@@ -22016,8 +22191,45 @@ internal sealed class LocalExportService(
             }
         }
 
+        if (HasTopologyVerificationLoopMetricMismatch(sourceIsland.LoopMetrics, convertedIsland.LoopMetrics))
+        {
+            return true;
+        }
+
         return convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount ||
                (!sourceIsland.HasManifoldRisk && convertedIsland.HasManifoldRisk);
+    }
+
+    private static bool HasTopologyVerificationLoopMetricMismatch(
+        IReadOnlyList<TopologyVerificationLoopMetric> sourceLoops,
+        IReadOnlyList<TopologyVerificationLoopMetric> convertedLoops)
+    {
+        if (sourceLoops.Count == 0 || convertedLoops.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var sourceLoop in sourceLoops)
+        {
+            var convertedLoop = convertedLoops
+                .FirstOrDefault(loop => loop.IsHole == sourceLoop.IsHole && loop.LoopIndex == sourceLoop.LoopIndex)
+                ?? convertedLoops.FirstOrDefault(loop => loop.IsHole == sourceLoop.IsHole);
+            if (convertedLoop is null)
+            {
+                continue;
+            }
+
+            var areaDrift = Math.Abs(convertedLoop.RelativeArea - sourceLoop.RelativeArea);
+            var aspectDrift = Math.Abs(convertedLoop.AspectRatio - sourceLoop.AspectRatio);
+            if ((sourceLoop.IsHole && areaDrift >= 0.20d) ||
+                (!sourceLoop.IsHole && areaDrift >= 0.35d) ||
+                aspectDrift >= 0.65d)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int CountHoleTopologyLoops(NifGeometrySignatureReader.MeshTopologySummary topology) =>

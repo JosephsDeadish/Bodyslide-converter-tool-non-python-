@@ -207,15 +207,16 @@ internal static class BodySlideSourceProjectSupport
                 }
             }
             else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
-                     TriMorphReader.TryRead(filePath, out var triPayload) &&
+                     TryReadTriPayload(filePath, out var triPayload, out var resolvedTriVertexCount) &&
                      triPayload is not null)
             {
                 foreach (var morph in triPayload.Morphs)
                 {
                     var sliderName = NormalizeSliderFileName(morph.Name);
+                    var deltas = ResizePayloadDeltas(morph.Deltas, resolvedTriVertexCount);
                     if (!TryCreatePayloadCandidate(
                         sliderName,
-                        morph.Deltas,
+                        deltas,
                         SourcePriority.TriPayloadBase,
                         IsHighWeightVariant(morph.Name),
                         "tri",
@@ -1004,6 +1005,90 @@ internal static class BodySlideSourceProjectSupport
 
         candidates = extracted;
         return extracted.Count > 0;
+    }
+
+    private static bool TryReadTriPayload(
+        string filePath,
+        out TriMorphPayload? payload,
+        out int resolvedVertexCount)
+    {
+        payload = null;
+        resolvedVertexCount = 0;
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(filePath);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        if (!TriMorphReader.TryRead(bytes, out payload) || payload is null)
+        {
+            return false;
+        }
+
+        resolvedVertexCount = IsPirtTriPayload(bytes)
+            ? ResolveTriPayloadVertexCount(filePath, payload.VertexCount)
+            : payload.VertexCount;
+        return true;
+    }
+
+    private static bool IsPirtTriPayload(byte[] bytes) =>
+        bytes.Length >= 4 &&
+        bytes[0] == (byte)'P' &&
+        bytes[1] == (byte)'I' &&
+        bytes[2] == (byte)'R' &&
+        bytes[3] == (byte)'T';
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ResizePayloadDeltas(
+        IReadOnlyList<(float X, float Y, float Z)> deltas,
+        int resolvedVertexCount)
+    {
+        if (resolvedVertexCount <= 0 || resolvedVertexCount == deltas.Count)
+        {
+            return deltas;
+        }
+
+        var resized = new (float X, float Y, float Z)[resolvedVertexCount];
+        var copyCount = Math.Min(resolvedVertexCount, deltas.Count);
+        for (var index = 0; index < copyCount; index++)
+        {
+            resized[index] = deltas[index];
+        }
+
+        return resized;
+    }
+
+    private static int ResolveTriPayloadVertexCount(string filePath, int inferredVertexCount)
+    {
+        var resolved = Math.Max(0, inferredVertexCount);
+        var directory = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return resolved;
+        }
+
+        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
+            if (vertices is { Count: > 0 })
+            {
+                resolved = Math.Max(resolved, vertices.Count);
+            }
+        }
+
+        return resolved;
     }
 
     private static int ResolveOsdPayloadVertexCount(string filePath, int inferredVertexCount)

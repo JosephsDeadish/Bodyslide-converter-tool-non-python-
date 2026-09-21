@@ -7108,6 +7108,55 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void AssessTopologyEdgeMismatch_FlagsHoleLoopAreaDriftWhenWindowShapeChangesWithoutLoopLoss()
+    {
+        var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var sourceSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 8,
+            ComponentIds: [0, 0, 0, 0, 0, 0, 0, 0],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 8,
+            BoundaryVertexFlags: [true, true, true, true, true, true, true, true],
+            ComponentBoundaryLoopCounts: [2],
+            ComponentBoundaryVertexCounts: [8],
+            BoundaryLoops:
+            [
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 0, [0, 1, 2, 3], [(0, 1), (1, 2), (2, 3), (3, 0)], ProjectedArea: 10f, ProjectedWidth: 4f, ProjectedDepth: 3f),
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 1, [4, 5, 6, 7], [(4, 5), (5, 6), (6, 7), (7, 4)], ProjectedArea: 4f, ProjectedWidth: 2f, ProjectedDepth: 2f)
+            ],
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 8, 4, 0, 8, 3, false, false)
+            ]);
+        var convertedSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 8,
+            ComponentIds: [0, 0, 0, 0, 0, 0, 0, 0],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 8,
+            BoundaryVertexFlags: [true, true, true, true, true, true, true, true],
+            ComponentBoundaryLoopCounts: [2],
+            ComponentBoundaryVertexCounts: [8],
+            BoundaryLoops:
+            [
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 0, [0, 1, 2, 3], [(0, 1), (1, 2), (2, 3), (3, 0)], ProjectedArea: 10f, ProjectedWidth: 4f, ProjectedDepth: 3f),
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 1, [4, 5, 6, 7], [(4, 5), (5, 6), (6, 7), (7, 4)], ProjectedArea: 1f, ProjectedWidth: 1f, ProjectedDepth: 1f)
+            ],
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 8, 4, 0, 8, 3, false, false)
+            ]);
+
+        var assessment = method!.Invoke(null, [sourceSummary, convertedSummary])!;
+        var topologyMismatchRisk = Assert.IsType<bool>(assessment.GetType().GetField("Item1")!.GetValue(assessment));
+        var qualityWarnings = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetField("Item2")!.GetValue(assessment));
+
+        Assert.True(topologyMismatchRisk, $"Expected topology mismatch risk but got warnings: {string.Join(" | ", qualityWarnings)}");
+        Assert.Contains(qualityWarnings, warning => warning.Contains("holeArea=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void AssessTopologyEdgeMismatch_FlagsMatchedIslandDriftWhenAggregateTotalsHideIt()
     {
         var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
@@ -23697,6 +23746,44 @@ public sealed class VanillaBodyOspSliderTests
 
         Assert.Contains("TravelerLift", project.Sliders);
         Assert.Contains("TravelerHideCape", project.ZapSliders ?? []);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReconcilesSparsePirtPayloadVertexCountWithNearbySourceMesh()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "traveler_outfit_0.nif");
+        var triPath = Path.Combine(tmpDir, "traveler_outfit_runtime.tri");
+        await SyntheticNifTestData.WriteAsync(nifPath,
+        [
+            (0f, 0f, 0f),
+            (1f, 0f, 0f),
+            (2f, 0f, 0f),
+            (3f, 0f, 0f),
+            (4f, 0f, 0f)
+        ]);
+        await File.WriteAllBytesAsync(triPath, BuildPirtPayload(
+            "TravelerShape",
+            5,
+            ("TravelerLift", [(0.125f, 0.25f, 0.375f), (0f, 0f, 0f), (0f, 0f, 0f), (0f, 0f, 0f), (0f, 0f, 0f)])));
+
+        try
+        {
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [triPath]);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.NotNull(resolved.ReusableMorphPayloads);
+            Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerLift", out var variants));
+            Assert.NotNull(variants.LowWeight);
+            Assert.Equal(5, variants.LowWeight!.VertexCount);
+            Assert.Equal(5, variants.LowWeight.Deltas.Count);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     [Fact]
