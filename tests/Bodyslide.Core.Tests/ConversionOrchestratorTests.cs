@@ -13489,6 +13489,12 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["maneroot_ctrl", "forelock_ctrl"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["MawLatch", "TongueBlade", "WombCore"]));
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["TailNub", "PawPad.L", "SheathNode"]));
+
+        var sparse = SkeletonFrameworkCatalog.DetectFrameworkDetails(["MawLatch", "TongueBlade", "WombCore"]);
+        Assert.Equal("ube-extended", sparse.Label);
+        Assert.True(sparse.UsedSparseInference);
+        Assert.True(sparse.Confidence > 0d);
+        Assert.Contains(sparse.Evidence, evidence => evidence.StartsWith("semantic-overlap:", StringComparison.Ordinal));
     }
 }
 
@@ -22708,7 +22714,14 @@ public sealed class OutputCompletenessTests
             var textures     = new TextureSummary(0, [], [], []);
             var pose         = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
             var detected     = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
-            var skel         = new SkeletonMappingResult("XPMSSE", "3BA", [], ["WeirdBone"]);
+            var skel         = new SkeletonMappingResult(
+                "ube-extended",
+                "3BA",
+                [],
+                ["WeirdBone"],
+                SourceSkeletonConfidence: 0.61,
+                SourceSkeletonEvidence: ["semantic-overlap:3", "token-matches:1"],
+                SourceSkeletonUsedSparseInference: true);
             var voxel        = new VoxelCollisionResult(true, ["chest"], new Dictionary<string, double> { ["chest"] = 0.05 }, 32);
 
             var (_, files) = await service.ExportAsync(
@@ -22729,7 +22742,12 @@ public sealed class OutputCompletenessTests
             Assert.True(json.Contains("cage") && json.Contains("shrinkwrap"), "Strategy should contain 'cage' and 'shrinkwrap'");
             Assert.Contains("true", json.ToLowerInvariant()); // clipping / correction
             Assert.Contains("WeirdBone", json);          // unsupported bones
-            Assert.Contains("XPMSSE", json);             // source skeleton
+            Assert.Contains("ube-extended", json);       // source skeleton
+            Assert.Contains("SourceSkeletonConfidence", json);
+            Assert.Contains("SourceSkeletonUsedSparseInference", json);
+            Assert.Contains("ManualCleanupLikely", json);
+            Assert.Contains("RuntimeVerificationRequired", json);
+            Assert.Contains("Caveats", json);
             Assert.Contains("TopologyMismatchRisk", json);
             Assert.Contains("VertexCountDeltaRatio", json);
             Assert.Contains("QualityWarnings", json);
@@ -25313,6 +25331,50 @@ public sealed class StrategyMeshConversionServiceStabilizationTests
             Assert.True(GetSpread(stabilized.RegionalMorphing) < GetSpread(plain.RegionalMorphing));
             Assert.True(stabilized.RegionalMorphing["breasts"] < plain.RegionalMorphing["breasts"]);
             Assert.True(stabilized.RegionalMorphing["pelvis"] < plain.RegionalMorphing["pelvis"]);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InspectPhysicsRigStabilizationHints_SparseAlienRigRaisesAutomaticStabilizationSeverity()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            var meshPath = Path.Combine(tmpDir, "alien-rig-armor.nif");
+            var broadPhysicsPath = Path.Combine(tmpDir, "broad-rig.xml");
+            var sparsePhysicsPath = Path.Combine(tmpDir, "sparse-alien-rig.xml");
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(
+                broadPhysicsPath,
+                "<system><bone name=\"BreastUpper\" /><bone name=\"BreastOuter\" /></system>");
+            await File.WriteAllTextAsync(
+                sparsePhysicsPath,
+                "<system><bone name=\"MawLatch\" /><bone name=\"TongueBlade\" /><bone name=\"WombCore\" /><bone name=\"TailNub\" /></system>");
+
+            var method = typeof(StrategyMeshConversionService).GetMethod("InspectPhysicsRigStabilizationHints", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(method);
+            var analysis = new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasStrapLikePieces: true, HasOpenStructurePieces: true);
+            var broadRigArmor = new ImportedArmor(tmpDir, [meshPath], [], [broadPhysicsPath], []);
+            var sparseRigArmor = new ImportedArmor(tmpDir, [meshPath], [], [sparsePhysicsPath], []);
+
+            var broadHints = method!.Invoke(null, [broadRigArmor, analysis])!;
+            var sparseHints = method.Invoke(null, [sparseRigArmor, analysis])!;
+
+            var severityProperty = sparseHints.GetType().GetProperty("SeverityFloor");
+            var sparseProperty = sparseHints.GetType().GetProperty("HasSparseFrameworkInference");
+            Assert.NotNull(severityProperty);
+            Assert.NotNull(sparseProperty);
+
+            var broadSeverity = Assert.IsType<double>(severityProperty!.GetValue(broadHints));
+            var sparseSeverity = Assert.IsType<double>(severityProperty.GetValue(sparseHints));
+            Assert.True(Assert.IsType<bool>(sparseProperty!.GetValue(sparseHints)));
+            Assert.True(sparseSeverity > broadSeverity);
         }
         finally
         {

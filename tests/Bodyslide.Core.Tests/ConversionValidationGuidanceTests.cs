@@ -402,6 +402,13 @@ public sealed class ConversionValidationGuidanceTests
             ["breasts", "belly", "thighs"],
             ["mouth", "tongue", "throat"],
             ["preview-workbench.html", "in-game-validation.json"],
+            ManualCleanupLikely: true,
+            RuntimeVerificationRequired: true,
+            Caveats:
+            [
+                "Radically different topology can still need manual Outfit Studio cleanup before release.",
+                "Generated validation guidance improves review, but it is not a substitute for real in-game/runtime checks."
+            ],
             [
                 new InGameValidationScenario(
                     "Oral articulation sweep",
@@ -439,6 +446,7 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(entries, entry => entry.Details.Contains("Body fit smoke test", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(entries, entry => entry.Details.Contains("Oral articulation sweep", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(entries, entry => entry.Details.Contains("Lower-body compression sweep", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Details.Contains("not a substitute for real in-game/runtime checks", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(entries, entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
     }
 }

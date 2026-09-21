@@ -226,7 +226,14 @@ public sealed record VoxelCollisionResult(
     IReadOnlyDictionary<string, double> PushOutMagnitudes,
     int GridResolution);
 public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, bool IsPhysicsBone);
-public sealed record SkeletonMappingResult(string SourceSkeleton, string TargetSkeleton, IReadOnlyList<SkeletonBoneMapping> BoneMappings, IReadOnlyList<string> UnsupportedBones);
+public sealed record SkeletonMappingResult(
+    string SourceSkeleton,
+    string TargetSkeleton,
+    IReadOnlyList<SkeletonBoneMapping> BoneMappings,
+    IReadOnlyList<string> UnsupportedBones,
+    double? SourceSkeletonConfidence = null,
+    IReadOnlyList<string>? SourceSkeletonEvidence = null,
+    bool SourceSkeletonUsedSparseInference = false);
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 public sealed record ConversionInspectionResult(
@@ -290,6 +297,9 @@ public sealed record InGameValidationReport(
     IReadOnlyList<string> CoreBodyRegions,
     IReadOnlyList<string> SensitiveRegions,
     IReadOnlyList<string> ReviewArtifacts,
+    bool ManualCleanupLikely,
+    bool RuntimeVerificationRequired,
+    IReadOnlyList<string> Caveats,
     IReadOnlyList<InGameValidationScenario> ScenarioMatrix,
     IReadOnlyList<InGameValidationCheckpoint> Checklist);
 
@@ -343,6 +353,15 @@ internal static class InGameValidationGuidance
                 scenario.Priority,
                 $"{scenario.Name}: {scenario.Trigger}.{animationSummary}",
                 scenario.RelatedArtifacts.FirstOrDefault()));
+        }
+
+        foreach (var caveat in report.Caveats.Take(2))
+        {
+            entries.Add(new InGameValidationGuidanceEntry(
+                "In-game caveat",
+                report.ManualCleanupLikely || report.RuntimeVerificationRequired ? "Action" : "Info",
+                caveat,
+                report.ReviewArtifacts.FirstOrDefault()));
         }
 
         return entries;
@@ -573,6 +592,8 @@ internal static class ConversionValidationGuidance
                 "Open world-physics.json, in-game-validation.json, and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
+            "sparse-skeleton-inference" =>
+                "Open skeleton-compatibility.json and conversion-quality.json, confirm the sparsely inferred source skeleton against the actual mod rig, then add or configure a closer custom body/skeleton profile before trusting automatic physics or appendage mapping.",
             "physics-profile-unsupported" =>
                 "Open skeleton-compatibility.json, compare the requested physics profile against the target body's advertised capability and generated runtime configs, then switch to a physics-capable body/skeleton or set Physics to None before release.",
             "physics-config-mismatch" =>
@@ -587,6 +608,8 @@ internal static class ConversionValidationGuidance
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
                 "Review race-compatibility.json, in-game-validation.json, and plugin-patches.json, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
+            "manual-cleanup-likely" =>
+                "Open preview-workbench.html, conversion-quality.json, skeleton-compatibility.json, and the generated ShapeData in Outfit Studio, then plan manual cleanup for extreme topology drift, sparse custom skeletons, or sensitive oral/genital/beast appendage regions before release.",
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
@@ -723,6 +746,10 @@ internal static class ConversionValidationGuidance
                 ["world-physics.json", "preview-workbench.html", "in-game-validation.json"],
             "unsupported-bones" or "race-compatibility-warning" =>
                 ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json", "in-game-validation.json"],
+            "sparse-skeleton-inference" =>
+                ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"],
+            "manual-cleanup-likely" =>
+                ["preview-workbench.html", "conversion-quality.json", "skeleton-compatibility.json", "in-game-validation.json", "CalienteTools/BodySlide/ShapeData/"],
             "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-remap" =>
                 ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json", "in-game-validation.json"],
             "missing-normal-maps" =>
@@ -963,7 +990,13 @@ public sealed record ConversionQualityReport(
     int MappedBoneCount,
     IReadOnlyList<string> UnsupportedBones,
     DateTimeOffset GeneratedAt,
+    double? SourceSkeletonConfidence = null,
+    IReadOnlyList<string>? SourceSkeletonEvidence = null,
+    bool SourceSkeletonUsedSparseInference = false,
     bool TopologyMismatchRisk = false,
+    bool ManualCleanupLikely = false,
+    bool RuntimeVerificationRequired = false,
+    IReadOnlyList<string>? Caveats = null,
     double VertexCountDeltaRatio = 0,
     double? UvCoverageDeltaRatio = null,
     double? UvAspectRatioDelta = null,
@@ -10601,6 +10634,21 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["arms"] = 0.72d,
         };
 
+    private static readonly IReadOnlyDictionary<string, double> SensitiveTopologyRegionDamping =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mouth"] = 0.58d,
+            ["genitals"] = 0.54d,
+            ["tail"] = 0.70d,
+            ["wing"] = 0.72d,
+            ["feet"] = 0.78d,
+            ["head"] = 0.82d,
+            ["shoulders"] = 0.84d,
+            ["pelvis"] = 0.72d,
+            ["thighs"] = 0.76d,
+            ["belly"] = 0.76d
+        };
+
     private sealed record ExtremeDifferenceAssessment(
         bool IsExtreme,
         double Severity,
@@ -10613,7 +10661,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     private sealed record PhysicsRigStabilizationHints(
         bool StrengthenStabilization,
         bool HasCustomRigFramework,
-        double SeverityFloor);
+        double SeverityFloor,
+        bool HasSparseFrameworkInference = false);
 
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
@@ -11775,17 +11824,18 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     private static PhysicsRigStabilizationHints InspectPhysicsRigStabilizationHints(ImportedArmor armor, MeshAnalysis analysis)
     {
-        string? frameworkLabel = null;
+        SkeletonFrameworkDetectionResult? frameworkDetection = null;
         if (armor.PhysicsFiles.Count > 0)
         {
-            frameworkLabel = DetectCustomRigFrameworkFromPhysicsFiles(armor.PhysicsFiles);
+            frameworkDetection = DetectCustomRigFrameworkFromPhysicsFiles(armor.PhysicsFiles);
         }
 
-        if (string.IsNullOrWhiteSpace(frameworkLabel) && armor.BodyReferenceFiles.Count > 0)
+        if ((frameworkDetection is null || string.IsNullOrWhiteSpace(frameworkDetection.Label)) && armor.BodyReferenceFiles.Count > 0)
         {
-            frameworkLabel = DetectCustomRigFrameworkFromBodyReferences(armor.BodyReferenceFiles);
+            frameworkDetection = DetectCustomRigFrameworkFromBodyReferences(armor.BodyReferenceFiles);
         }
 
+        var frameworkLabel = frameworkDetection?.Label;
         var hasCustomRigFramework = !string.IsNullOrWhiteSpace(frameworkLabel);
         if (!analysis.PhysicsEnabled && !hasCustomRigFramework)
         {
@@ -11806,6 +11856,16 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         if (hasCustomRigFramework)
         {
             severityFloor = Math.Max(severityFloor, 0.38d);
+        }
+
+        if (frameworkDetection?.UsedSparseInference == true)
+        {
+            severityFloor += 0.08d;
+        }
+
+        if (frameworkDetection?.Confidence is > 0d and < 0.75d)
+        {
+            severityFloor += 0.06d;
         }
 
         if (analysis.HasStrapLikePieces || analysis.HasSplitMeshes)
@@ -11846,10 +11906,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         return new PhysicsRigStabilizationHints(
             true,
             hasCustomRigFramework,
-            Math.Round(Math.Clamp(severityFloor, 0.18d, 0.72d), 6));
+            Math.Round(Math.Clamp(severityFloor, 0.18d, 0.72d), 6),
+            frameworkDetection?.UsedSparseInference == true);
     }
 
-    private static string? DetectCustomRigFrameworkFromPhysicsFiles(IReadOnlyList<string> physicsFiles)
+    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromPhysicsFiles(IReadOnlyList<string> physicsFiles)
     {
         var boneNames = new List<string>();
         foreach (var physicsPath in physicsFiles)
@@ -11874,10 +11935,10 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             }
         }
 
-        return boneNames.Count == 0 ? null : SkeletonFrameworkCatalog.DetectFramework(boneNames);
+        return boneNames.Count == 0 ? null : SkeletonFrameworkCatalog.DetectFrameworkDetails(boneNames);
     }
 
-    private static string? DetectCustomRigFrameworkFromBodyReferences(IReadOnlyList<string> bodyReferenceFiles)
+    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromBodyReferences(IReadOnlyList<string> bodyReferenceFiles)
     {
         foreach (var bodyReferencePath in bodyReferenceFiles)
         {
@@ -11888,11 +11949,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
             try
             {
-                var frameworkLabel = SkeletonFrameworkCatalog.DetectFramework(
+                var frameworkDetection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
                     SkeletonNifBoneParser.ExtractBoneNames(File.ReadAllBytes(bodyReferencePath)));
-                if (!string.IsNullOrWhiteSpace(frameworkLabel))
+                if (!string.IsNullOrWhiteSpace(frameworkDetection.Label))
                 {
-                    return frameworkLabel;
+                    return frameworkDetection;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -11974,6 +12035,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ApplyDampingProfile(
                 stabilized,
                 ScaleDampingProfile(PhysicsRigRegionDamping, stabilizationSeverity));
+            ApplyDampingProfile(
+                stabilized,
+                ScaleDampingProfile(SensitiveTopologyRegionDamping, Math.Min(1d, stabilizationSeverity + 0.10d)));
             ApplySeamContinuity(
                 stabilized,
                 maxGap: Lerp(0.10d, 0.05d, stabilizationSeverity),
@@ -12020,7 +12084,26 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 static region => region,
-                _ => (Math.Round(limits.Minimum, 6), Math.Round(limits.Maximum, 6)),
+                region =>
+                {
+                    var minimum = limits.Minimum;
+                    var maximum = limits.Maximum;
+                    if (region.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
+                        region.Contains("genitals", StringComparison.OrdinalIgnoreCase))
+                    {
+                        minimum = Math.Max(minimum, Lerp(0.90d, 0.95d, severity));
+                        maximum = Math.Min(maximum, Lerp(1.12d, 1.08d, severity));
+                    }
+                    else if (region.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+                             region.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+                             region.Contains("feet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        minimum = Math.Max(minimum, Lerp(0.88d, 0.93d, severity));
+                        maximum = Math.Min(maximum, Lerp(1.18d, 1.12d, severity));
+                    }
+
+                    return (Math.Round(minimum, 6), Math.Round(maximum, 6));
+                },
                 StringComparer.OrdinalIgnoreCase);
     }
 
@@ -12868,10 +12951,24 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
         }
 
-        var sourceSkeleton = parsedSkeletonLabel;
+        var sourceFrameworkDetection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
+            sourcePhysicsBones
+                .Concat(parsedBones)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList());
+        var sourceSkeleton = !string.IsNullOrWhiteSpace(sourceFrameworkDetection.Label)
+            ? sourceFrameworkDetection.Label!
+            : parsedSkeletonLabel;
         var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, armor, targetPhysicsBones.Count > 0);
 
-        return new SkeletonMappingResult(sourceSkeleton, targetSkeleton, mappings, unsupportedBones);
+        return new SkeletonMappingResult(
+            sourceSkeleton,
+            targetSkeleton,
+            mappings,
+            unsupportedBones,
+            SourceSkeletonConfidence: sourceFrameworkDetection.Confidence > 0d ? sourceFrameworkDetection.Confidence : null,
+            SourceSkeletonEvidence: sourceFrameworkDetection.Evidence,
+            SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference);
     }
 
     private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones, string? frameworkId)
@@ -17437,6 +17534,9 @@ internal sealed class LocalExportService(
                 skeletonMapping.TargetSkeleton,
                 skeletonMapping.BoneMappings,
                 skeletonMapping.UnsupportedBones,
+                skeletonMapping.SourceSkeletonConfidence,
+                skeletonMapping.SourceSkeletonEvidence,
+                skeletonMapping.SourceSkeletonUsedSparseInference,
                 PhysicsCompatibility = physicsCompatibility,
             }, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
@@ -18079,6 +18179,10 @@ internal sealed class LocalExportService(
             ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
         }
 
+        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
+        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
+        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
+
         var qualityReport = new ConversionQualityReport(
             DetectedSourceBody:        detectedBody.Body,
             BodyDetectionConfidence:   detectedBody.Confidence,
@@ -18098,7 +18202,13 @@ internal sealed class LocalExportService(
             MappedBoneCount:           skeletonMapping.BoneMappings.Count,
             UnsupportedBones:          skeletonMapping.UnsupportedBones,
             GeneratedAt:               DateTimeOffset.UtcNow,
+            SourceSkeletonConfidence:  skeletonMapping.SourceSkeletonConfidence,
+            SourceSkeletonEvidence:    skeletonMapping.SourceSkeletonEvidence,
+            SourceSkeletonUsedSparseInference: skeletonMapping.SourceSkeletonUsedSparseInference,
             TopologyMismatchRisk:      topologyMismatchRisk,
+            ManualCleanupLikely:       manualCleanupLikely,
+            RuntimeVerificationRequired: runtimeVerificationRequired,
+            Caveats:                   conversionCaveats,
             VertexCountDeltaRatio:     vertexCountDeltaRatio,
             UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
             UvAspectRatioDelta:        uvAspectRatioDelta,
@@ -22169,6 +22279,15 @@ internal sealed class LocalExportService(
                 $"{skeletonMapping.UnsupportedBones.Count} source bone(s) had no target equivalent."));
         }
 
+        if (skeletonMapping.SourceSkeletonUsedSparseInference ||
+            (skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.75d))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "sparse-skeleton-inference",
+                skeletonMapping.UnsupportedBones.Count > 0 ? "high" : "medium",
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' was inferred from sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}."));
+        }
+
         var physicsBoneRemaps = ExtractPhysicsBoneRemaps(steps);
         if (physicsBoneRemaps.Count > 0)
         {
@@ -22228,6 +22347,14 @@ internal sealed class LocalExportService(
                 "race-compatibility-warning",
                 "medium",
                 $"Plugin race compatibility needs review for: {string.Join(", ", raceWarnings)}."));
+        }
+
+        if (IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "manual-cleanup-likely",
+                topologyMismatchRisk || payloadReuse.ExtremelyAdaptedVariantCount > 0 ? "high" : "medium",
+                "Automatic conversion reached a high-risk combination of topology drift, sparse skeleton inference, or sensitive oral/genital/beast appendage coverage. Manual Outfit Studio cleanup is still likely before release."));
         }
 
         if (pluginRewriteVerification is not null)
@@ -26749,6 +26876,18 @@ internal sealed class LocalExportService(
            .Distinct(StringComparer.OrdinalIgnoreCase)
            .ToArray();
         var reviewArtifacts = ConversionValidationGuidance.BuildReviewArtifacts(validationSummary, maxArtifacts: 10);
+        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk: validationSummary.Issues.Any(issue =>
+               issue.Code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase) ||
+               issue.Code.Equals("extreme-topology-adaptation", StringComparison.OrdinalIgnoreCase)),
+           qualityWarnings: validationSummary.Issues.Select(static issue => issue.Code).ToArray(),
+           skeletonMapping,
+           payloadReuse: null,
+           poseSimulation);
+        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
+        var caveats = BuildConversionCaveats(targetBody, manualCleanupLikely, runtimeVerificationRequired, validationSummary.Issues.Any(issue =>
+               issue.Code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase)),
+           skeletonMapping,
+           null);
         var lowerBodyRegions = IntersectInGameRegions(coreRegions.Concat(hotspotRegions), "belly", "butt", "thighs", "waist", "pelvis", "calves", "feet");
         var oralRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "mouth", "jaw", "tongue", "throat");
         var beastRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "tail", "paw", "hock", "hoof", "wing", "feather", "talon", "sheath", "genitals", "vagina", "anus");
@@ -26812,6 +26951,7 @@ internal sealed class LocalExportService(
            lowerBodyRegions,
            oralRegions,
            beastRegions,
+           manualCleanupLikely,
            skeletonMapping,
            physics,
            poseSimulation,
@@ -26824,9 +26964,86 @@ internal sealed class LocalExportService(
            coreRegions,
            sensitiveRegions,
            reviewArtifacts,
+           manualCleanupLikely,
+           runtimeVerificationRequired,
+           caveats,
            scenarioMatrix,
            checklist);
     }
+
+    private static bool IsManualCleanupLikely(
+        bool topologyMismatchRisk,
+        IReadOnlyList<string> qualityWarnings,
+        SkeletonMappingResult skeletonMapping,
+        MorphPayloadReuseSummary? payloadReuse,
+        PoseSimulationResult poseSimulation)
+    {
+        var sensitiveUnsupportedBones = skeletonMapping.UnsupportedBones.Count(bone =>
+           NormalizeInGameRegion(bone) is "mouth" or "genitals" or "tail" or "wing" or "feet");
+        var extremeAdaptation = payloadReuse?.ExtremelyAdaptedVariantCount > 0;
+        var topologyWarningSignals = qualityWarnings.Any(static warning =>
+           warning.Contains("hole", StringComparison.OrdinalIgnoreCase) ||
+           warning.Contains("boundary", StringComparison.OrdinalIgnoreCase) ||
+           warning.Contains("uv", StringComparison.OrdinalIgnoreCase));
+
+        return topologyMismatchRisk ||
+              extremeAdaptation ||
+              skeletonMapping.SourceSkeletonUsedSparseInference ||
+              sensitiveUnsupportedBones > 0 ||
+              poseSimulation.TotalPosesAtRisk >= 3 ||
+              topologyWarningSignals;
+    }
+
+    private static bool IsRuntimeVerificationRequired(
+        bool manualCleanupLikely,
+        SkeletonMappingResult skeletonMapping,
+        PoseSimulationResult poseSimulation,
+        VoxelCollisionResult voxelResult,
+        ClippingReport clipping) =>
+        manualCleanupLikely ||
+        skeletonMapping.UnsupportedBones.Count > 0 ||
+        skeletonMapping.SourceSkeletonUsedSparseInference ||
+        poseSimulation.TotalPosesAtRisk > 0 ||
+        voxelResult.HasPenetrations ||
+        clipping.HasClipping;
+
+    private static IReadOnlyList<string> BuildConversionCaveats(
+        string targetBody,
+        bool manualCleanupLikely,
+        bool runtimeVerificationRequired,
+        bool topologyMismatchRisk,
+        SkeletonMappingResult skeletonMapping,
+        MorphPayloadReuseSummary? payloadReuse)
+    {
+        var caveats = new List<string>();
+        if (manualCleanupLikely)
+        {
+           caveats.Add("Radically different topology can still need manual Outfit Studio cleanup before release.");
+        }
+
+        if (skeletonMapping.SourceSkeletonUsedSparseInference ||
+           (skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.75d))
+        {
+           caveats.Add($"Sparse or unknown custom skeleton inference is still provisional for '{skeletonMapping.SourceSkeleton}'{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}.");
+        }
+
+        if (topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0)
+        {
+           caveats.Add("Extreme oral/genital/alien/custom appendage meshes remain the highest-risk automatic conversion path.");
+        }
+
+        if (runtimeVerificationRequired)
+        {
+           caveats.Add($"Generated validation guidance improves review for {targetBody}, but it is not a substitute for real in-game/runtime checks.");
+        }
+
+        return caveats;
+    }
+
+    private static string FormatSkeletonEvidenceSuffix(IReadOnlyList<string>? evidence) =>
+        evidence is { Count: > 0 }
+           ? $": {string.Join(", ", evidence.Take(4))}"
+           : string.Empty;
 
     private static string[] BuildInGameCoreRegions(
         string targetBody,
@@ -26883,6 +27100,7 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> lowerBodyRegions,
         IReadOnlyList<string> oralRegions,
         IReadOnlyList<string> beastRegions,
+        bool manualCleanupLikely,
         SkeletonMappingResult skeletonMapping,
         PhysicsConfig physics,
         PoseSimulationResult poseSimulation,
@@ -26941,6 +27159,17 @@ internal sealed class LocalExportService(
                ["idle", "walk", "combat"],
                sensitiveRegions.Count > 0 ? sensitiveRegions : hotspotRegions,
                ["skeleton-compatibility.json", "conversion-quality.json"]));
+        }
+
+        if (manualCleanupLikely)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Manual cleanup workbench pass",
+               "High",
+               $"Automatic conversion still left high-risk topology, sparse rig, or sensitive appendage concerns for {targetBody}",
+               ["preview compare", "Outfit Studio vertex cleanup"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : coreRegions,
+               ["preview-workbench.html", "conversion-quality.json", "skeleton-compatibility.json"]));
         }
 
         if (!string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) ||

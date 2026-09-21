@@ -9,6 +9,11 @@ internal sealed record SkeletonFrameworkMetadata(
     IReadOnlyList<string> BoneTokens,
     IReadOnlyList<string> DistinctiveSignatures,
     int MinimumSignatureMatches);
+internal sealed record SkeletonFrameworkDetectionResult(
+    string? Label,
+    double Confidence,
+    IReadOnlyList<string> Evidence,
+    bool UsedSparseInference);
 
 internal static class SkeletonFrameworkCatalog
 {
@@ -45,10 +50,13 @@ internal static class SkeletonFrameworkCatalog
     }
 
     public static string? DetectFramework(IReadOnlyList<string> boneNames)
+        => DetectFrameworkDetails(boneNames).Label;
+
+    public static SkeletonFrameworkDetectionResult DetectFrameworkDetails(IReadOnlyList<string> boneNames)
     {
         if (boneNames.Count == 0)
         {
-            return null;
+            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
         }
 
         var normalizedBoneNames = boneNames
@@ -58,7 +66,7 @@ internal static class SkeletonFrameworkCatalog
             .ToArray();
         if (normalizedBoneNames.Length == 0)
         {
-            return null;
+            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
         }
 
         var condensedBoneNames = normalizedBoneNames
@@ -68,10 +76,10 @@ internal static class SkeletonFrameworkCatalog
             .ToArray();
         if (condensedBoneNames.Length == 0)
         {
-            return null;
+            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
         }
 
-        string? bestFramework = null;
+        SkeletonFrameworkDetectionResult? bestDetection = null;
         var bestFallbackScore = 0d;
         var observedSemanticKeys = ExtractSemanticKeys(normalizedBoneNames);
         foreach (var framework in All)
@@ -89,18 +97,36 @@ internal static class SkeletonFrameworkCatalog
                 ContainsNormalized(condensedBoneNames, signature));
             if (matches >= Math.Min(Math.Max(framework.MinimumSignatureMatches, 1), signatures.Length))
             {
-                return framework.Label;
+                var matchedSignatures = signatures
+                    .Where(signature => ContainsNormalized(condensedBoneNames, signature))
+                    .Take(6)
+                    .Select(signature => $"signature:{signature}")
+                    .ToArray();
+                var confidence = Math.Min(1d, 0.7d + (matches / (double)Math.Max(signatures.Length, 1)));
+                return new SkeletonFrameworkDetectionResult(
+                    framework.Label,
+                    Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
+                    matchedSignatures,
+                    UsedSparseInference: false);
             }
 
-            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys);
+            var fallbackEvidence = new List<string>();
+            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys, fallbackEvidence);
             if (fallbackScore > bestFallbackScore)
             {
                 bestFallbackScore = fallbackScore;
-                bestFramework = framework.Label;
+                var normalizedScore = Math.Min(0.89d, 0.25d + (fallbackScore / 5d));
+                bestDetection = new SkeletonFrameworkDetectionResult(
+                    framework.Label,
+                    Math.Round(normalizedScore, 2, MidpointRounding.AwayFromZero),
+                    fallbackEvidence,
+                    UsedSparseInference: true);
             }
         }
 
-        return bestFallbackScore >= 2d ? bestFramework : null;
+        return bestFallbackScore >= 2d && bestDetection is not null
+            ? bestDetection
+            : new SkeletonFrameworkDetectionResult(null, 0d, [], false);
     }
 
     private static IReadOnlyList<SkeletonFrameworkMetadata> LoadFrameworks()
@@ -143,7 +169,8 @@ internal static class SkeletonFrameworkCatalog
     private static double ComputeFallbackScore(
         SkeletonFrameworkMetadata framework,
         IReadOnlyList<string> condensedBoneNames,
-        IReadOnlySet<string> observedSemanticKeys)
+        IReadOnlySet<string> observedSemanticKeys,
+        List<string> evidence)
     {
         var prefixes = framework.BonePrefixes
             .Select(NormalizeForMatching)
@@ -164,6 +191,14 @@ internal static class SkeletonFrameworkCatalog
             condensedBoneNames.Any(bone => bone.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
         var tokenMatches = tokens.Count(token =>
             condensedBoneNames.Any(bone => bone.Contains(token, StringComparison.OrdinalIgnoreCase)));
+        if (prefixMatches > 0)
+        {
+            evidence.Add($"prefix-matches:{prefixMatches}");
+        }
+        if (tokenMatches > 0)
+        {
+            evidence.Add($"token-matches:{tokenMatches}");
+        }
 
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
@@ -174,6 +209,10 @@ internal static class SkeletonFrameworkCatalog
             }
 
             var semanticMatches = observedSemanticKeys.Intersect(frameworkSemanticKeys, StringComparer.OrdinalIgnoreCase).Count();
+            if (semanticMatches > 0)
+            {
+                evidence.Add($"semantic-overlap:{semanticMatches}");
+            }
             return semanticMatches >= framework.MinimumSignatureMatches
                 ? semanticMatches * 0.9d
                 : 0d;
@@ -183,6 +222,10 @@ internal static class SkeletonFrameworkCatalog
         var semanticOverlap = semanticKeys.Count == 0 || observedSemanticKeys.Count == 0
             ? 0
             : observedSemanticKeys.Intersect(semanticKeys, StringComparer.OrdinalIgnoreCase).Count();
+        if (semanticOverlap > 0)
+        {
+            evidence.Add($"semantic-overlap:{semanticOverlap}");
+        }
 
         return prefixMatches + (tokenMatches * 0.75d) + (semanticOverlap * 0.65d);
     }

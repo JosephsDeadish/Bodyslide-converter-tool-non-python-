@@ -3157,6 +3157,8 @@ public sealed class MainForm : Form
                     break;
                 case "skeleton-compatibility.json":
                     AddReportMetric(reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
+                    AddReportMetric(reportName, "Source skeleton confidence", TryReadString(root, "SourceSkeletonConfidence"), filePath);
+                    AddReportMetric(reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
@@ -3176,7 +3178,10 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
                     AddReportMetric(reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
                     AddReportMetric(reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    AddReportMetric(reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
+                    AddReportMetric(reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     AddReportMetric(reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
+                    AddReportMetric(reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     AddReportMetric(reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
                 case "race-compatibility.json":
