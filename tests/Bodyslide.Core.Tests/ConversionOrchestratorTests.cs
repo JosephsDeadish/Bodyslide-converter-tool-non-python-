@@ -6691,6 +6691,49 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void AssessTopologyEdgeMismatch_FlagsMatchedIslandDriftWhenAggregateTotalsHideIt()
+    {
+        var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var sourceSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 8,
+            ComponentIds: [0, 0, 0, 0, 1, 1, 1, 1],
+            BoundaryLoopCount: 1,
+            BoundaryVertexCount: 4,
+            BoundaryVertexFlags: [true, true, true, true, false, false, false, false],
+            ComponentBoundaryLoopCounts: [1, 0],
+            ComponentBoundaryVertexCounts: [4, 0],
+            BoundaryLoops: null,
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 4, 1, 0, 4, 2, false, false),
+                new TopologyIslandEdgeNetworkSummary(1, 0, 5, 0, 0, 4, true, false)
+            ]);
+        var convertedSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 8,
+            ComponentIds: [0, 0, 0, 0, 1, 1, 1, 1],
+            BoundaryLoopCount: 1,
+            BoundaryVertexCount: 4,
+            BoundaryVertexFlags: [true, true, false, false, true, true, false, false],
+            ComponentBoundaryLoopCounts: [0, 1],
+            ComponentBoundaryVertexCounts: [2, 2],
+            BoundaryLoops: null,
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 2, 3, 0, 2, 3, false, false),
+                new TopologyIslandEdgeNetworkSummary(1, 2, 3, 0, 2, 3, false, false)
+            ]);
+
+        var assessment = method!.Invoke(null, [sourceSummary, convertedSummary])!;
+        var topologyMismatchRisk = Assert.IsType<bool>(assessment.GetType().GetField("Item1")!.GetValue(assessment));
+        var qualityWarnings = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetField("Item2")!.GetValue(assessment));
+
+        Assert.True(topologyMismatchRisk, $"Expected topology mismatch risk but got warnings: {string.Join(" | ", qualityWarnings)}");
+        Assert.Contains(qualityWarnings, warning => warning.StartsWith("island-routing-drift:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithBlockGraphStyleNif_AppliesVertexTransform()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

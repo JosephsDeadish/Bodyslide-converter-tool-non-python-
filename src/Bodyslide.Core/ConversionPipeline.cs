@@ -20596,7 +20596,164 @@ internal sealed class LocalExportService(
             warnings.Add($"introduced-non-manifold-edges:{sourceNonManifoldEdges}->{convertedNonManifoldEdges}");
         }
 
+        var routedIslandWarnings = AssessRoutedTopologyIslandMismatch(sourceTopology, convertedTopology);
+        if (routedIslandWarnings.Count > 0)
+        {
+            topologyRisk = true;
+            warnings.AddRange(routedIslandWarnings);
+        }
+
         return (topologyRisk, warnings);
+    }
+
+    private sealed record TopologyVerificationIslandSummary(
+        int IslandId,
+        int VertexCount,
+        int BoundaryLoopCount,
+        int BoundaryVertexCount,
+        int InteriorEdgeCount,
+        int NonManifoldEdgeCount,
+        bool HasManifoldRisk);
+
+    private static IReadOnlyList<string> AssessRoutedTopologyIslandMismatch(
+        NifGeometrySignatureReader.MeshTopologySummary sourceTopology,
+        NifGeometrySignatureReader.MeshTopologySummary convertedTopology)
+    {
+        var sourceIslands = SummarizeTopologyVerificationIslands(sourceTopology);
+        var convertedIslands = SummarizeTopologyVerificationIslands(convertedTopology);
+        if (sourceIslands.Count < 2 || convertedIslands.Count == 0)
+        {
+            return [];
+        }
+
+        var warnings = new List<string>();
+        var unusedConverted = convertedIslands.ToDictionary(static island => island.IslandId);
+        foreach (var sourceIsland in sourceIslands.OrderByDescending(static island => island.VertexCount))
+        {
+            var matchedConverted = unusedConverted.Values
+                .Select(convertedIsland => (Island: convertedIsland, Score: ComputeTopologyVerificationIslandMatchScore(sourceIsland, convertedIsland)))
+                .OrderBy(static candidate => candidate.Score)
+                .FirstOrDefault();
+            if (matchedConverted.Island is null)
+            {
+                warnings.Add($"island-routing-loss:s{sourceIsland.IslandId}->missing");
+                continue;
+            }
+
+            unusedConverted.Remove(matchedConverted.Island.IslandId);
+            if (IsTopologyVerificationIslandMismatch(sourceIsland, matchedConverted.Island))
+            {
+                warnings.Add(
+                    $"island-routing-drift:s{sourceIsland.IslandId}->t{matchedConverted.Island.IslandId}," +
+                    $"loops={sourceIsland.BoundaryLoopCount}->{matchedConverted.Island.BoundaryLoopCount}," +
+                    $"boundary={sourceIsland.BoundaryVertexCount}->{matchedConverted.Island.BoundaryVertexCount}," +
+                    $"interior={sourceIsland.InteriorEdgeCount}->{matchedConverted.Island.InteriorEdgeCount}," +
+                    $"nonmanifold={sourceIsland.NonManifoldEdgeCount}->{matchedConverted.Island.NonManifoldEdgeCount}");
+            }
+        }
+
+        warnings.AddRange(unusedConverted.Keys
+            .OrderBy(static islandId => islandId)
+            .Select(static islandId => $"island-routing-extra:t{islandId}"));
+        return warnings;
+    }
+
+    private static IReadOnlyList<TopologyVerificationIslandSummary> SummarizeTopologyVerificationIslands(
+        NifGeometrySignatureReader.MeshTopologySummary topology)
+    {
+        if (topology.ComponentIds.Length != topology.VertexCount)
+        {
+            return [];
+        }
+
+        var boundaryLoopCounts = topology.ComponentBoundaryLoopCounts ?? [];
+        var boundaryVertexCounts = topology.ComponentBoundaryVertexCounts ?? [];
+        var edgeNetworks = topology.ComponentEdgeNetworks?
+            .ToDictionary(static network => network.ComponentId) ??
+            new Dictionary<int, TopologyIslandEdgeNetworkSummary>();
+
+        return topology.ComponentIds
+            .Select(static (componentId, index) => (ComponentId: componentId, Index: index))
+            .GroupBy(static entry => entry.ComponentId)
+            .Select(group =>
+            {
+                edgeNetworks.TryGetValue(group.Key, out var edgeNetwork);
+                var boundaryLoopCount = group.Key >= 0 && group.Key < boundaryLoopCounts.Length
+                    ? boundaryLoopCounts[group.Key]
+                    : 0;
+                var boundaryVertexCount = group.Key >= 0 && group.Key < boundaryVertexCounts.Length
+                    ? boundaryVertexCounts[group.Key]
+                    : group.Count(indexed => indexed.Index >= 0 &&
+                                             indexed.Index < topology.BoundaryVertexFlags.Length &&
+                                             topology.BoundaryVertexFlags[indexed.Index]);
+                return new TopologyVerificationIslandSummary(
+                    group.Key,
+                    group.Count(),
+                    boundaryLoopCount,
+                    boundaryVertexCount,
+                    edgeNetwork?.InteriorEdgeCount ?? 0,
+                    edgeNetwork?.NonManifoldEdgeCount ?? 0,
+                    edgeNetwork?.HasManifoldRisk ?? false);
+            })
+            .OrderBy(static island => island.IslandId)
+            .ToArray();
+    }
+
+    private static double ComputeTopologyVerificationIslandMatchScore(
+        TopologyVerificationIslandSummary sourceIsland,
+        TopologyVerificationIslandSummary convertedIsland)
+    {
+        var sizePenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.VertexCount, convertedIsland.VertexCount, 0.25d);
+        var boundaryPenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.BoundaryVertexCount, convertedIsland.BoundaryVertexCount, 0.40d);
+        var interiorPenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.InteriorEdgeCount, convertedIsland.InteriorEdgeCount, 0.32d);
+        var loopPenalty = Math.Abs(sourceIsland.BoundaryLoopCount - convertedIsland.BoundaryLoopCount) * 0.28d;
+        var manifoldPenalty = sourceIsland.HasManifoldRisk == convertedIsland.HasManifoldRisk ? 0d : 0.20d;
+        var nonManifoldPenalty = convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount
+            ? Math.Min(0.22d, (convertedIsland.NonManifoldEdgeCount - sourceIsland.NonManifoldEdgeCount) * 0.08d)
+            : Math.Abs(sourceIsland.NonManifoldEdgeCount - convertedIsland.NonManifoldEdgeCount) * 0.03d;
+        return sizePenalty + boundaryPenalty + interiorPenalty + loopPenalty + manifoldPenalty + nonManifoldPenalty;
+    }
+
+    private static double ComputeTopologyVerificationRatioPenalty(int left, int right, double weight)
+    {
+        if (left <= 0 && right <= 0)
+        {
+            return 0d;
+        }
+
+        return Math.Abs(right - left) / (double)Math.Max(1, left) * weight;
+    }
+
+    private static bool IsTopologyVerificationIslandMismatch(
+        TopologyVerificationIslandSummary sourceIsland,
+        TopologyVerificationIslandSummary convertedIsland)
+    {
+        var boundaryLoopDelta = Math.Abs(convertedIsland.BoundaryLoopCount - sourceIsland.BoundaryLoopCount);
+        if (boundaryLoopDelta >= 1 && sourceIsland.BoundaryLoopCount > 0)
+        {
+            return true;
+        }
+
+        var boundaryCoverageDelta = Math.Abs(
+            (convertedIsland.BoundaryVertexCount / (double)Math.Max(1, convertedIsland.VertexCount)) -
+            (sourceIsland.BoundaryVertexCount / (double)Math.Max(1, sourceIsland.VertexCount)));
+        if (boundaryCoverageDelta >= 0.18d)
+        {
+            return true;
+        }
+
+        if (sourceIsland.InteriorEdgeCount > 0)
+        {
+            var interiorEdgeDeltaRatio = Math.Abs(convertedIsland.InteriorEdgeCount - sourceIsland.InteriorEdgeCount) /
+                                         (double)Math.Max(1, sourceIsland.InteriorEdgeCount);
+            if (interiorEdgeDeltaRatio >= 0.45d)
+            {
+                return true;
+            }
+        }
+
+        return convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount ||
+               (!sourceIsland.HasManifoldRisk && convertedIsland.HasManifoldRisk);
     }
 
     private static NifGeometrySignatureReader.MeshTopologySummary? TryReadBestTopologySummary(
