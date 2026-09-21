@@ -20439,6 +20439,78 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void StabilizeRetargetedMorphPayload_DampensCrossIslandFallbackNeighborsWhenSameIslandIsUnavailable()
+    {
+        var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        Assert.NotNull(stabilizeMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 3);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 0.30f), CreateInfluence(0, 0.70f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var context = contextCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
+            new[] { 0, 1, 2 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            new IReadOnlyList<int>[] { [1], [0, 2], [1] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
+            new[] { Zone(0, 1, 0, 2), Zone(0, 1, 0, 2), Zone(0, 1, 0, 2) },
+            new[] { 0, 0, 1 },
+            new[] { 0, 0, 1 },
+            new[] { 0, 1 },
+            new[] { 0.78f, 0.80f, 0f },
+            1f,
+            1f,
+            false,
+            Array.Empty<string>(),
+            null
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (10f, 0f, 0f),
+            (20f, 0f, 0f),
+            (0f, 0f, 0f)
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            stabilizeMethod!.Invoke(null, [retargeted, context]));
+
+        Assert.True(result[1].X > 12.7f, $"Expected fallback stabilization to dampen cross-island neighbor influence instead of averaging equally across islands, got {result[1].X}.");
+        Assert.True(result[1].X < retargeted[1].X);
+    }
+
+    [Fact]
     public void AdaptRetargetedMorphPayload_DampsRiskyPartHintsDuringExtremeTopologyReuse()
     {
         var adaptMethod = typeof(LocalExportService).GetMethod("AdaptRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);

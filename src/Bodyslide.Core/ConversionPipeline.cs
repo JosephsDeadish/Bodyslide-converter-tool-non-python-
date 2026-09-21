@@ -25454,6 +25454,7 @@ internal sealed class LocalExportService(
 
                 if (sampleCount == 0)
                 {
+                    var fallbackWeight = 0f;
                     foreach (var neighborIndex in neighbors)
                     {
                         if (neighborIndex < 0 || neighborIndex >= retargetedDeltas.Count)
@@ -25461,22 +25462,37 @@ internal sealed class LocalExportService(
                             continue;
                         }
 
+                        var neighborIsland = neighborIndex < morphTransferContext.TargetTransferIslands.Length
+                            ? morphTransferContext.TargetTransferIslands[neighborIndex]
+                            : -1;
+                        var weight = targetIsland >= 0 &&
+                                     neighborIsland >= 0 &&
+                                     neighborIsland != targetIsland
+                            ? 0.62f
+                            : 1f;
                         var delta = retargetedDeltas[neighborIndex];
-                        averageX += delta.X;
-                        averageY += delta.Y;
-                        averageZ += delta.Z;
+                        averageX += delta.X * weight;
+                        averageY += delta.Y * weight;
+                        averageZ += delta.Z * weight;
+                        fallbackWeight += weight;
                         sampleCount++;
                     }
 
-                    if (sampleCount == 0)
+                    if (sampleCount == 0 || fallbackWeight <= 0.0001f)
                     {
                         continue;
                     }
-                }
 
-                averageX /= sampleCount;
-                averageY /= sampleCount;
-                averageZ /= sampleCount;
+                    averageX /= fallbackWeight;
+                    averageY /= fallbackWeight;
+                    averageZ /= fallbackWeight;
+                }
+                else
+                {
+                    averageX /= sampleCount;
+                    averageY /= sampleCount;
+                    averageZ /= sampleCount;
+                }
 
                 var current = retargetedDeltas[targetIndex];
                 var partAwareDamping = ComputePartAwareTopologyDamping(
