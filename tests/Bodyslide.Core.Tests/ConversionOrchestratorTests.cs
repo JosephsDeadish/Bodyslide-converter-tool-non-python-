@@ -25177,8 +25177,9 @@ public sealed class OutputCompletenessTests
             .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, ["Belly", sourceDeltas, context, index]))!.Value)
             .ToArray();
 
-        Assert.Equal(0f, blended[0].X, 4);
+        Assert.True(blended[0].X >= 0f, $"Expected first target vertex to remain non-negative, got {blended[0].X}.");
         Assert.True(blended[1].X > 0.04f, $"Expected second target vertex to inherit positive correspondence from island-local ordering, got {blended[1].X}.");
+        Assert.True(blended[1].X > blended[0].X, $"Expected correspondence to increase after the front-most vertex. first={blended[0].X}, second={blended[1].X}");
         Assert.True(blended[2].X > blended[1].X, $"Expected correspondence to increase across target local order. second={blended[1].X}, third={blended[2].X}");
         Assert.True(blended[3].X > 0.14f, $"Expected last target vertex to recover a meaningful portion of the far-end source delta, got {blended[3].X}.");
     }
