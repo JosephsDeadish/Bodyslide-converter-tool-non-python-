@@ -19824,6 +19824,20 @@ internal sealed class LocalExportService(
                 depthScale = 1d + ((depthScale - 1d) * Math.Min(0.96d, topologyDamping + 0.04d));
                 heightScale = 1d + ((heightScale - 1d) * Math.Min(0.98d, topologyDamping + 0.08d));
             }
+
+            var maxDeviation = Math.Max(
+                Math.Abs(widthScale - 1d),
+                Math.Max(Math.Abs(depthScale - 1d), Math.Abs(heightScale - 1d)));
+            var piecewiseProjectionDamping = ComputeIslandProjectionPiecewiseDamping(
+                islandControl,
+                boundaryLoopControl,
+                maxDeviation);
+            if (piecewiseProjectionDamping < 1d)
+            {
+                widthScale = 1d + ((widthScale - 1d) * piecewiseProjectionDamping);
+                depthScale = 1d + ((depthScale - 1d) * piecewiseProjectionDamping);
+                heightScale = 1d + ((heightScale - 1d) * piecewiseProjectionDamping);
+            }
         }
 
         return (
@@ -19865,6 +19879,65 @@ internal sealed class LocalExportService(
         }
 
         return Math.Clamp(damping, 0.74d, 1d);
+    }
+
+    private static double ComputeIslandProjectionPiecewiseDamping(
+        CageIslandControl islandControl,
+        CageIslandBoundaryLoopControl? boundaryLoopControl,
+        double maxDeviation)
+    {
+        if (maxDeviation < 0.12d)
+        {
+            return 1d;
+        }
+
+        var damping = 1d;
+        if (islandControl.SemanticLabels is { Count: > 0 } labels)
+        {
+            if (labels.Contains("window-frame-island", StringComparer.OrdinalIgnoreCase))
+            {
+                damping = Math.Min(damping, 0.76d);
+            }
+
+            if (labels.Contains("bridge-strap-island", StringComparer.OrdinalIgnoreCase))
+            {
+                damping = Math.Min(damping, 0.80d);
+            }
+        }
+
+        var boundaryLoopCount = islandControl.BoundaryLoops?.Count ?? 0;
+        if (boundaryLoopCount > 0)
+        {
+            damping = Math.Min(damping, 1d - Math.Min(0.18d, boundaryLoopCount * 0.05d));
+        }
+
+        var targetsHoleBoundary = boundaryLoopControl?.IsHole == true ||
+                                  islandControl.BoundaryLoops?.Any(static loop => loop.IsHole) == true;
+        if (targetsHoleBoundary)
+        {
+            damping = Math.Min(damping, 0.42d);
+        }
+
+        var edgeSummary = islandControl.EdgeNetworkSummary;
+        if (edgeSummary is not null)
+        {
+            if (edgeSummary.HasManifoldRisk)
+            {
+                damping = Math.Min(damping, targetsHoleBoundary ? 0d : 0.34d);
+            }
+            else if (edgeSummary.InteriorEdgeCount > 0 && edgeSummary.BoundaryVertexCount > 0)
+            {
+                damping = Math.Min(damping, 0.78d);
+            }
+        }
+
+        if (maxDeviation >= 0.28d &&
+            (targetsHoleBoundary || (edgeSummary?.HasManifoldRisk == true && boundaryLoopCount >= 2)))
+        {
+            return 0d;
+        }
+
+        return Math.Clamp(damping, 0d, 1d);
     }
 
     private static CageIslandControl? ResolveIslandCageControl(

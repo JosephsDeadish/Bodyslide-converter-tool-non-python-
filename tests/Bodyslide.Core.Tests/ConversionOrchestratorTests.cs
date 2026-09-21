@@ -7935,6 +7935,54 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void ComputeCageProjectionScales_StopsMorphStyleDeformationForHighRiskHoleIslands()
+    {
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(scaleMethod);
+
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = new(0.72f, 0.24f, 0.50f, 0.96f, 0.50f, 0.96f, 1.00f, 1.00f, 1.00f, 0.00f),
+            ["waist"] = new(0.56f, 0.20f, 0.50f, 0.92f, 0.50f, 0.92f, 1.00f, 1.00f, 1.00f, 0.00f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.48d,
+            ["waist"] = 0.64d
+        };
+        var cage = new DeformationCage("piecewise-stop", cageRegions);
+        var islandControl = new CageIslandControl(
+            "piecewise-stop_0",
+            0,
+            ["chest", "waist"],
+            BoundaryDamping: 0.16f,
+            SemanticLabels: ["window-frame-island"],
+            BoundaryLoops:
+            [
+                new CageIslandBoundaryLoopControl(0, ["chest", "waist"], IsHole: false),
+                new CageIslandBoundaryLoopControl(1, ["chest", "waist"], IsHole: true)
+            ],
+            EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(
+                0,
+                BoundaryEdgeCount: 10,
+                InteriorEdgeCount: 6,
+                NonManifoldEdgeCount: 2,
+                BoundaryVertexCount: 12,
+                MaxVertexValence: 5,
+                IsClosedManifold: false,
+                HasManifoldRisk: true));
+        var holeLoop = islandControl.BoundaryLoops!.Single(loop => loop.IsHole);
+
+        var scales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(
+            null,
+            [0.70f, 0.35f, 0.50f, morphing, cage, islandControl, holeLoop])!;
+
+        Assert.Equal(1d, scales.WidthScale, 6);
+        Assert.Equal(1d, scales.DepthScale, 6);
+        Assert.Equal(1d, scales.HeightScale, 6);
+    }
+
+    [Fact]
     public void RebuildStageShrinkwrap_RoutesByIslandRegionDuringTransform()
     {
         var buildTopologyMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
