@@ -13697,13 +13697,71 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                 return true;
             }
 
-            return BinaryArmaParser.ExtractArmoRecords(bytes)
+            var armoHasFe = BinaryArmaParser.ExtractArmoRecords(bytes)
                 .Any(static desc => IsFeLightFormId(desc.FormId));
+            if (armoHasFe)
+            {
+                return true;
+            }
+
+            return HasGenericFeLightRecordEvidence(bytes);
         }
         catch (InvalidDataException)
         {
             return false;
         }
+    }
+
+    private static bool HasGenericFeLightRecordEvidence(byte[] bytes)
+    {
+        if (bytes.Length < 24 ||
+            bytes[0] != 'T' || bytes[1] != 'E' || bytes[2] != 'S' || bytes[3] != '4')
+        {
+            return false;
+        }
+
+        var headerSize = BinaryArmaParser.DetectHeaderSize(bytes);
+        return HasGenericFeLightRecordEvidence(bytes, 0, bytes.Length, headerSize);
+    }
+
+    private static bool HasGenericFeLightRecordEvidence(byte[] bytes, int start, int end, int headerSize)
+    {
+        var pos = start;
+        while (pos + headerSize <= end)
+        {
+            if (bytes[pos] == 'G' && bytes[pos + 1] == 'R' && bytes[pos + 2] == 'U' && bytes[pos + 3] == 'P')
+            {
+                var groupSize = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos + 4, 4));
+                if (groupSize < headerSize || pos + groupSize > end)
+                {
+                    break;
+                }
+
+                if (HasGenericFeLightRecordEvidence(bytes, pos + headerSize, pos + groupSize, headerSize))
+                {
+                    return true;
+                }
+
+                pos += groupSize;
+                continue;
+            }
+
+            var dataSize = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos + 4, 4));
+            if (dataSize < 0 || pos + headerSize + dataSize > end)
+            {
+                break;
+            }
+
+            var formId = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos + 12, 4));
+            if (IsFeLightFormId(formId))
+            {
+                return true;
+            }
+
+            pos += headerSize + dataSize;
+        }
+
+        return false;
     }
 
     private static bool IsFeLightFormId(uint formId)
@@ -13728,6 +13786,11 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         if (hasMasterFlag || string.Equals(extension, ".esm", StringComparison.OrdinalIgnoreCase))
         {
             return "ESM";
+        }
+
+        if (string.Equals(extension, ".esl", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ESL-light";
         }
 
         if (hasLightFlag && hasFeFormIds)
@@ -13768,7 +13831,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         if (type == "ESM" && (hasMasterFlag || extension == ".esm")) confidence += 0.20d;
         if (type == "ESP" && extension == ".esp") confidence += 0.20d;
         if (type == "ESPFE" && hasLightFlag && hasFeFormIds) confidence += 0.25d;
-        if (type == "ESL-light" && (hasLightFlag || extension == ".esl")) confidence += 0.20d;
+        if (type == "ESL-light" && extension == ".esl") confidence += hasLightFlag ? 0.25d : 0.20d;
         if (type == "AMBIGUOUS" && hasLightFlag && !hasFeFormIds) confidence += 0.05d;
         if (type == "AMBIGUOUS" && !hasRuntimeFormIdEvidence) confidence -= 0.10d;
 

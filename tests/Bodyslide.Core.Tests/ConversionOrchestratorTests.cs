@@ -14560,6 +14560,64 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_LightMasterChainFixture_UsesLightPluginFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticLightMasterChainStandaloneAddonModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["LightMasterChainChild.esl", "LightMasterChainMaster.esm"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "LightMasterChainMaster.esm",
+                    ["meshes/devious/ebonite/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "LinkedDeviousHarnessPanelAA",
+                    OwningPluginFileName: "LightMasterChainMaster.esm",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "LightMasterChainChild.esl",
+                    ["meshes/devious/devices/restraint_0.nif"],
+                    FormId: 0xFE000801u,
+                    EditorId: "LinkedDeviousHarnessRestraintAA",
+                    OwningPluginFileName: "LightMasterChainChild.esl",
+                    LocalFormId: 0x00000801u,
+                    DeclaredMasterFileNames: ["LightMasterChainMaster.esm"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var unresolvedTieGroups = Assert.IsAssignableFrom<IReadOnlyList<object>>(
+            plan.GetType().GetProperty("UnresolvedTieGroups")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Empty(unresolvedTieGroups);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/ebonite/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+    }
+
+    [Fact]
     public void BuildPluginRewritePlan_RealisticLinkedModularFrameworkFixture_UsesLinkedMasterChildFamilyContext()
     {
         var fixtureDirectory = GetFixtureDirectory("RealisticLinkedModularFrameworkModPack");
@@ -16188,9 +16246,23 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
+    public void DetectPluginKind_EspWithLightFlagAndGenericFeRecord_ReturnsEspfe()
+    {
+        var bytes = BuildPluginWithRecordFormIds(0x00000200u, "NPC_", 0x000FE456u);
+        Assert.Equal("ESPFE", BasicPluginAnalysisService.DetectPluginKind("Test.esp", bytes));
+    }
+
+    [Fact]
     public void DetectPluginKind_EslExtension_ReturnsEsl()
     {
         var bytes = BuildTes4HeaderWithFlags(0u);
+        Assert.Equal("ESL-light", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
+    }
+
+    [Fact]
+    public void DetectPluginKind_EslWithLightFlagButNoFeEvidence_ReturnsEslLight()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
         Assert.Equal("ESL-light", BasicPluginAnalysisService.DetectPluginKind("Test.esl", bytes));
     }
 
@@ -16236,6 +16308,18 @@ public sealed class BinaryPluginRewriteServiceTests
         Assert.Equal("AMBIGUOUS", classification.Type);
         Assert.True(classification.Confidence < 0.80d);
         Assert.Contains(classification.Reasons, reason => reason.Contains("not yet resolved", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ClassifyPluginKind_EslWithLightFlagWithoutFeEvidence_ReturnsCertainEslLight()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+        var classification = BasicPluginAnalysisService.ClassifyPluginKind("Test.esl", bytes);
+
+        Assert.Equal("ESL-light", classification.Type);
+        Assert.True(classification.Confidence >= 0.95d);
+        Assert.Contains(classification.Reasons, reason => reason.Contains("ESL flag present", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(classification.Reasons, reason => reason.Contains("Extension .esl", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -16288,6 +16372,19 @@ public sealed class BinaryPluginRewriteServiceTests
             var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TestArmor\0"));
             var arma = BuildFlatRecordForTests("ARMA", armaData, formId);
             pluginBytes.AddRange(arma);
+        }
+
+        return [.. pluginBytes];
+    }
+
+    private static byte[] BuildPluginWithRecordFormIds(uint tes4Flags, string recordTag, params uint[] recordFormIds)
+    {
+        var pluginBytes = new List<byte>(BuildTes4HeaderWithFlags(tes4Flags));
+        foreach (var formId in recordFormIds)
+        {
+            var recordData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("TestRecord\0"));
+            var record = BuildFlatRecordForTests(recordTag, recordData, formId);
+            pluginBytes.AddRange(record);
         }
 
         return [.. pluginBytes];
