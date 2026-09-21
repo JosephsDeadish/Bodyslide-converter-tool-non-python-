@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="HiveCuirassPhysics">
+  <bone name="AbdomenRoot" />
+  <bone name="AbdomenMid" />
+  <bone name="AbdomenTip" />
+  <bone name="AntennaTip.L" />
+  <bone name="AntennaTip.R" />
+  <bone name="MandibleTip.L" />
+  <bone name="MandibleTip.R" />
+  <bone name="CarapaceWingMid.L" />
+  <bone name="CarapaceWingMid.R" />
+</system>

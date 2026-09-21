@@ -2269,7 +2269,11 @@
       "Mantisfolk",
       "Netchitin",
       "Arachnid Humanoid",
-      "Hivekin"
+      "Hivekin",
+      "Scarabfolk",
+      "Beetleborn",
+      "Mothfolk",
+      "Vespid"
     ],
     "gender": "female",
     "defaultPhysics": "none",

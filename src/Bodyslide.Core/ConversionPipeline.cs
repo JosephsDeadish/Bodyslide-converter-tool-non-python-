@@ -10513,7 +10513,17 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var regionDamping = BuildIslandAwareRegionDamping(field.Keys, deformationCage);
         var piecewiseDamping = BuildPiecewiseReconstructionDamping(field.Keys, deformationCage);
         var ownershipDamping = BuildIslandOwnershipRoutingDamping(field.Keys, deformationCage);
-        if (field.Count == 0 || (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0))
+        var appendageDamping = BuildMultiPieceAppendageRoutingDamping(field.Keys, deformationCage);
+        if (field.Count == 0 &&
+            regionDamping.Count == 0 &&
+            piecewiseDamping.Count == 0 &&
+            ownershipDamping.Count == 0 &&
+            appendageDamping.Count == 0)
+        {
+            return field;
+        }
+
+        if (field.Count == 0 || (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0 && appendageDamping.Count == 0))
         {
             return field;
         }
@@ -10528,6 +10538,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 if (ownershipDamping.TryGetValue(pair.Key, out var ownership))
                 {
                     damping = Math.Min(damping, ownership);
+                }
+
+                if (appendageDamping.TryGetValue(pair.Key, out var appendage))
+                {
+                    damping = Math.Min(damping, appendage);
                 }
 
                 if (Math.Abs(pair.Value - 1d) >= 0.18d &&
@@ -10556,7 +10571,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var regionDamping = BuildIslandAwareRegionDamping(updatedField.Keys, deformationCage);
         var piecewiseDamping = BuildPiecewiseReconstructionDamping(updatedField.Keys, deformationCage);
         var ownershipDamping = BuildIslandOwnershipRoutingDamping(updatedField.Keys, deformationCage);
-        if (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0)
+        var appendageDamping = BuildMultiPieceAppendageRoutingDamping(updatedField.Keys, deformationCage);
+        if (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0 && appendageDamping.Count == 0)
         {
             return updatedField;
         }
@@ -10573,6 +10589,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 if (ownershipDamping.TryGetValue(pair.Key, out var ownership))
                 {
                     damping = Math.Min(damping, ownership);
+                }
+
+                if (appendageDamping.TryGetValue(pair.Key, out var appendage))
+                {
+                    damping = Math.Min(damping, appendage);
                 }
 
                 var previous = previousField.GetValueOrDefault(pair.Key, 1d);
@@ -10765,6 +10786,102 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         return regionDamping;
     }
 
+    private static IReadOnlyDictionary<string, double> BuildMultiPieceAppendageRoutingDamping(
+        IEnumerable<string> regions,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 1 } islandControls)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var targetRegions = regions
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (targetRegions.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var familyMembership = islandControls
+            .SelectMany(control => GetAppendageFamilies(control).Select(family => new
+            {
+                control.MeshKey,
+                control.IslandId,
+                Family = family,
+                Control = control
+            }))
+            .GroupBy(static item => $"{item.MeshKey}\u001f{item.Family}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group
+                    .GroupBy(static item => $"{item.MeshKey}\u001f{item.IslandId}", StringComparer.OrdinalIgnoreCase)
+                    .Select(static item => item.First().Control)
+                    .ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+        if (familyMembership.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var regionDamping = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var member in familyMembership.Values)
+        {
+            if (member.Length < 2)
+            {
+                continue;
+            }
+
+            var damping = member.Length >= 4 ? 0.78d : member.Length == 3 ? 0.82d : 0.86d;
+            if (member.Any(control => control.EdgeNetworkSummary?.HasManifoldRisk == true))
+            {
+                damping = Math.Min(damping, member.Length >= 3 ? 0.74d : 0.80d);
+            }
+
+            if (member.Any(control =>
+                    control.BoundaryLoops?.Any(static loop => loop.IsHole) == true ||
+                    control.AuthoredRegions?.Any(static region => region.IsHole) == true))
+            {
+                damping = Math.Min(damping, member.Length >= 3 ? 0.72d : 0.78d);
+            }
+
+            foreach (var control in member)
+            {
+                foreach (var region in control.CageRegions)
+                {
+                    if (!targetRegions.Contains(region))
+                    {
+                        continue;
+                    }
+
+                    regionDamping[region] = regionDamping.TryGetValue(region, out var existing)
+                        ? Math.Min(existing, damping)
+                        : damping;
+                }
+
+                if (control.AuthoredRegions is not { Count: > 0 } authoredRegions)
+                {
+                    continue;
+                }
+
+                foreach (var authoredRegion in authoredRegions)
+                {
+                    if (!targetRegions.Contains(authoredRegion.RegionName))
+                    {
+                        continue;
+                    }
+
+                    regionDamping[authoredRegion.RegionName] = regionDamping.TryGetValue(authoredRegion.RegionName, out var existing)
+                        ? Math.Min(existing, damping)
+                        : damping;
+                }
+            }
+        }
+
+        return regionDamping;
+    }
+
     private static IReadOnlyDictionary<string, double> BuildPiecewiseReconstructionDamping(
         IEnumerable<string> regions,
         DeformationCage? deformationCage)
@@ -10887,6 +11004,65 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             label.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("paw", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlySet<string> GetAppendageFamilies(CageIslandControl islandControl)
+    {
+        var families = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (islandControl.SemanticLabels is { Count: > 0 } labels)
+        {
+            foreach (var label in labels)
+            {
+                AddAppendageFamiliesForToken(families, label);
+            }
+        }
+
+        foreach (var region in islandControl.CageRegions)
+        {
+            AddAppendageFamiliesForToken(families, region);
+        }
+
+        if (islandControl.AuthoredRegions is { Count: > 0 } authoredRegions)
+        {
+            foreach (var authoredRegion in authoredRegions)
+            {
+                AddAppendageFamiliesForToken(families, authoredRegion.RegionName);
+            }
+        }
+
+        return families;
+    }
+
+    private static void AddAppendageFamiliesForToken(ISet<string> families, string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        AddFamilyWhenContains(families, token, "tail", "tail");
+        AddFamilyWhenContains(families, token, "wing", "wing");
+        AddFamilyWhenContains(families, token, "fin", "fin");
+        AddFamilyWhenContains(families, token, "frill", "frill");
+        AddFamilyWhenContains(families, token, "whisker", "whisker");
+        AddFamilyWhenContains(families, token, "antenna", "antenna");
+        AddFamilyWhenContains(families, token, "mandible", "mandible");
+        AddFamilyWhenContains(families, token, "branch", "branch");
+        AddFamilyWhenContains(families, token, "vine", "branch");
+        AddFamilyWhenContains(families, token, "carapace", "wing");
+        AddFamilyWhenContains(families, token, "spinefin", "fin");
+        AddFamilyWhenContains(families, token, "mane", "mane");
+        AddFamilyWhenContains(families, token, "ear", "ear");
+        AddFamilyWhenContains(families, token, "paw", "paw");
+    }
+
+    private static void AddFamilyWhenContains(ISet<string> families, string token, string match, string family)
+    {
+        if (token.Contains(match, StringComparison.OrdinalIgnoreCase))
+        {
+            families.Add(family);
+        }
     }
 
     private static bool IsExtremeAppendageRegion(string region) =>
@@ -12218,7 +12394,12 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
     private static string ClassifyPhysicsBoneGroup(string boneName, bool isMale)
     {
         var lowered = boneName.Trim().ToLowerInvariant();
-        if (MatchesSemanticAlias(lowered, "genitals") || lowered.Contains("balls", StringComparison.Ordinal))
+        if (MatchesSemanticAlias(lowered, "genitals") ||
+            lowered.Contains("balls", StringComparison.Ordinal) ||
+            lowered.Contains("testicle", StringComparison.Ordinal) ||
+            lowered.Contains("scrot", StringComparison.Ordinal) ||
+            lowered.Contains("shaft", StringComparison.Ordinal) ||
+            lowered.Contains("glans", StringComparison.Ordinal))
         {
             return "genitals";
         }
@@ -12276,7 +12457,9 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
         if (MatchesSemanticAlias(lowered, "mouth") ||
             lowered.Contains("jaw", StringComparison.Ordinal) ||
             lowered.Contains("tongue", StringComparison.Ordinal) ||
-            lowered.Contains("lip", StringComparison.Ordinal))
+            lowered.Contains("lip", StringComparison.Ordinal) ||
+            lowered.Contains("throat", StringComparison.Ordinal) ||
+            lowered.Contains("pharynx", StringComparison.Ordinal))
         {
             return "mouth";
         }

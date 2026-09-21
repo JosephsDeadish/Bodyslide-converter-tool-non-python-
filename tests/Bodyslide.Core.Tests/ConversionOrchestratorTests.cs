@@ -3387,6 +3387,78 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_DampsMultiPieceAppendageFamiliesAcrossSharedMesh()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["left-wing"] = 1.34d,
+            ["right-wing"] = 1.34d,
+            ["tail"] = 1.31d,
+            ["chest"] = 1.34d
+        };
+
+        var cage = new DeformationCage(
+            "shared-appendage-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["left-wing"] = new(0.82f, 0.16f),
+                ["right-wing"] = new(0.82f, 0.16f),
+                ["tail"] = new(0.78f, 0.14f),
+                ["chest"] = new(0.88f, 0.22f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "ornate-appendage-mesh",
+                    IslandId: 0,
+                    CageRegions: ["left-wing"],
+                    SemanticLabels: ["left-wing-panel", "carapace-wing-mid"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["left-wing"], IsHole: true)
+                    ],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 14, 18, 2, 12, 6, false, true)),
+                new CageIslandControl(
+                    MeshKey: "ornate-appendage-mesh",
+                    IslandId: 1,
+                    CageRegions: ["right-wing"],
+                    SemanticLabels: ["right-wing-panel", "carapace-wing-tip"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["right-wing"])
+                    ],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 12, 14, 1, 10, 5, false, false)),
+                new CageIslandControl(
+                    MeshKey: "ornate-appendage-mesh",
+                    IslandId: 2,
+                    CageRegions: ["tail"],
+                    SemanticLabels: ["tail-segment-panel"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["tail"])
+                    ],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 10, 12, 1, 8, 4, false, false)),
+                new CageIslandControl(
+                    MeshKey: "body-core",
+                    IslandId: 3,
+                    CageRegions: ["chest"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"])
+                    ])
+            ]);
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, cage]));
+
+        Assert.True(result["left-wing"] < result["chest"]);
+        Assert.True(result["right-wing"] < result["chest"]);
+        Assert.True(result["tail"] < result["chest"]);
+        Assert.True(result["left-wing"] < 1.22d);
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10398,6 +10470,40 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedInsectoidShapeDataPack_ResolvesExoticPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticExoticInsectoidModPack", Path.Combine("meshes", "insectoid", "hive", "hive_cuirass_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Insectoid Humanoid", CancellationToken.None);
+
+        Assert.Contains("InsectWaist", resolved.Sliders);
+        Assert.Contains("AbdomenLength", resolved.Sliders);
+        Assert.Contains("WingSpan", resolved.Sliders);
+        Assert.Contains("HideWings", resolved.ZapSliders ?? []);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+        Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+        Assert.DoesNotContain("reference-assets", resolved.SourceAssetSupport.MissingAssets ?? []);
+        Assert.NotNull(resolved.ReusableMorphPayloads);
+        Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("WingSpan", out var wingPayloads));
+        Assert.NotNull(wingPayloads.LowWeight);
+        Assert.NotNull(wingPayloads.HighWeight);
+        Assert.Equal("bsd", wingPayloads.LowWeight!.PayloadKind);
+        Assert.Equal("bsd", wingPayloads.HighWeight!.PayloadKind);
+        Assert.True(resolved.ReusableMorphPayloads.TryGetValue("AbdomenLength", out var abdomenPayloads));
+        Assert.NotNull(abdomenPayloads.LowWeight);
+        Assert.Equal("tri", abdomenPayloads.LowWeight!.PayloadKind);
+        Assert.True(resolved.ReusableMorphPayloads.TryGetValue("InsectWaist", out var waistPayloads));
+        Assert.NotNull(waistPayloads.LowWeight);
+        Assert.Equal("osd", waistPayloads.LowWeight!.PayloadKind);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithMalformedUnnamedMorphFixture_IgnoresUnnamedEntriesAndKeepsValidPayloads()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -12713,6 +12819,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("AntennaLength", insectoid.SliderNames);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hivekin", out var insectoidAlias));
         Assert.Equal("Insectoid Humanoid", insectoidAlias.Name);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Mothfolk", out var insectoidAliasTwo));
+        Assert.Equal("Insectoid Humanoid", insectoidAliasTwo.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Aquatic Humanoid", out var aquatic));
         Assert.Contains("Fin.DorsalTip", aquatic.AvailablePhysicsBones);
@@ -12832,12 +12940,17 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("fin", aquaticWingGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("GillFrillSwing", out var aquaticManeGroup));
         Assert.Equal("frill", aquaticManeGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("SchlongShaftPhysics", out var shaftGroup));
+        Assert.Equal("genitals", shaftGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("ThroatLatchSwing", out var throatGroup));
+        Assert.Equal("mouth", throatGroup);
         var longTailToken = $"{new string('X', 384)}TailChain";
         Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
         Assert.Equal("tail", longTokenGroup);
-        var detectedGroups = PhysicsRepairCatalog.DetectGroups([" TailFluffSwing ", "PinionFeatherSwing01", "UnknownBone"]);
+        var detectedGroups = PhysicsRepairCatalog.DetectGroups([" TailFluffSwing ", "PinionFeatherSwing01", "UnknownBone", "ThroatLatchSwing"]);
         Assert.Contains("tail", detectedGroups);
         Assert.Contains("wing", detectedGroups);
+        Assert.Contains("mouth", detectedGroups);
         Assert.DoesNotContain("UnknownBone", detectedGroups);
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingFinger01.L", "TailBarbTip"]));
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["FrillTip.L", "TailBarbTip"]));
@@ -14111,6 +14224,50 @@ public sealed class RealisticModPackFixtureTests
             var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
             Assert.True(Directory.Exists(sliderSetsDirectory));
             Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticExoticInsectoidModPack_WritesInsectoidBodyArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticExoticInsectoidModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "insectoid", "hive", "hive_cuirass_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Mothfolk",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "mothfolk", "hive_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            Assert.True(Directory.Exists(shapeDataDirectory));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories));
+            Assert.NotEmpty(Directory.GetFiles(shapeDataDirectory, "*.bsd", SearchOption.AllDirectories));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
