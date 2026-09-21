@@ -4850,6 +4850,44 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicRaceCompatibilityService_WarnsForMixedCustomPluginRaceFamiliesAndInferenceModes()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["khajiit-followers.esp", "avian-overrides.esl"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/khajiit/waist_0.nif"],
+                    0x01000800u,
+                    "KhajiitHarnessAddon",
+                    [32],
+                    0x00023FE9u,
+                    "khajiit-followers.esp",
+                    0x00000800u,
+                    ["Skyrim.esm"]),
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/avian/feather_wrap_0.nif"],
+                    0xFE000801u,
+                    "AvianWingHarnessAddon",
+                    [32, 40],
+                    null,
+                    "avian-overrides.esl",
+                    0x00000801u,
+                    ["Skyrim.esm"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "CBBE", CancellationToken.None);
+
+        Assert.False(report.IsCompatible);
+        Assert.Contains(report.Warnings, warning => warning.Contains("Mixed race/body families", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.Warnings, warning => warning.Contains("mixes explicit race assignments with inferred race/body context", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BasicRaceCompatibilityService_WarnsForCanineVariantOnVanillaBeastBody()
     {
         var service = new BasicRaceCompatibilityService();
@@ -13513,6 +13551,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(sparse.UsedSparseInference);
         Assert.True(sparse.Confidence > 0d);
         Assert.Contains(sparse.Evidence, evidence => evidence.StartsWith("semantic-overlap:", StringComparison.Ordinal));
+
+        var sparseDigitigrade = SkeletonFrameworkCatalog.DetectFrameworkDetails(["TailNub", "PawPad.L", "SheathNode"]);
+        Assert.Equal("digitigrade-beast", sparseDigitigrade.Label);
+        Assert.True(sparseDigitigrade.UsedSparseInference);
+        Assert.Contains(sparseDigitigrade.Evidence, evidence => evidence.StartsWith("group-overlap:", StringComparison.Ordinal));
     }
 }
 
@@ -15126,6 +15169,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("genitals", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Beast locomotion sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Digitigrade prowl and pounce sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Sensitive collision and articulation sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
         }
         finally
@@ -15259,7 +15304,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(result.Success);
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "equine-humanoid", "equine_harness_0.nif")));
-            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
+            Assert.Contains("Equine stride and rear sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
             var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
             Assert.Contains("TailSheath", smpXml, StringComparison.Ordinal);
             Assert.Contains("BeastKnot", smpXml, StringComparison.Ordinal);
@@ -24752,6 +24800,186 @@ public sealed class OutputCompletenessTests
         Assert.True(blended[1].X > 0.04f, $"Expected second target vertex to inherit positive correspondence from island-local ordering, got {blended[1].X}.");
         Assert.True(blended[2].X > blended[1].X, $"Expected correspondence to increase across target local order. second={blended[1].X}, third={blended[2].X}");
         Assert.True(blended[3].X > 0.14f, $"Expected last target vertex to recover a meaningful portion of the far-end source delta, got {blended[3].X}.");
+    }
+
+    [Fact]
+    public void TryBlendRetargetedDelta_UsesAngularIslandCorrespondenceWhenLocalOrderDrifts()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        var islandProfileType = typeof(LocalExportService).GetNestedType("MorphTransferIslandProfile", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+        Assert.NotNull(islandProfileType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        for (var index = 0; index < 4; index++)
+        {
+            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), index);
+        }
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision() => decisionCtor.Invoke(
+        [
+            0.5f,
+            1f,
+            2.2f,
+            1f,
+            0.80f,
+            0.48f,
+            0,
+            0,
+            true
+        ]);
+
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        for (var index = 0; index < 4; index++)
+        {
+            decisions.Add(CreateDecision());
+        }
+
+        var adjacencyType = typeof(LocalExportService).GetNestedType("MorphTransferIslandAdjacencySummary", BindingFlags.NonPublic);
+        Assert.NotNull(adjacencyType);
+        var emptyAdjacency = Array.CreateInstance(adjacencyType!, 0);
+        var islandProfileCtor = islandProfileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        object CreateIslandProfile(int islandId, MeshVertex centroid, int[] vertexIndexes, Dictionary<int, int> localOrderByVertex) => islandProfileCtor.Invoke(
+        [
+            islandId,
+            vertexIndexes.Length,
+            centroid,
+            vertexIndexes,
+            localOrderByVertex,
+            Array.Empty<int>(),
+            emptyAdjacency,
+            0f,
+            1f,
+            true
+        ]);
+
+        var islandProfileDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), islandProfileType);
+        var sourceIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        sourceIslandProfiles.Add(0, CreateIslandProfile(0, new MeshVertex(0f, 0f, 0f), [0, 1, 2, 3], new Dictionary<int, int> { [1] = 0, [3] = 1, [0] = 2, [2] = 3 }));
+        var targetIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        targetIslandProfiles.Add(0, CreateIslandProfile(0, new MeshVertex(0f, 0f, 0f), [0, 1, 2, 3], new Dictionary<int, int> { [0] = 0, [1] = 1, [2] = 2, [3] = 3 }));
+
+        var transferSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandTransferSummary", BindingFlags.NonPublic);
+        var influenceSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandInfluenceSummary", BindingFlags.NonPublic);
+        Assert.NotNull(transferSummaryType);
+        Assert.NotNull(influenceSummaryType);
+        var influenceSummaryListType = typeof(List<>).MakeGenericType(influenceSummaryType!);
+        var emptyInfluenceSummaries = Activator.CreateInstance(influenceSummaryListType)!;
+        var transferSummaryCtor = transferSummaryType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 7);
+        var targetIslandTransfersType = typeof(Dictionary<,>).MakeGenericType(typeof(int), transferSummaryType);
+        var targetIslandTransfers = (System.Collections.IDictionary)Activator.CreateInstance(targetIslandTransfersType)!;
+        targetIslandTransfers.Add(0, transferSummaryCtor.Invoke(
+        [
+            0,
+            0,
+            emptyInfluenceSummaries,
+            0,
+            emptyAdjacency,
+            0.08f,
+            true
+        ]));
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var sourceVertices = new[]
+        {
+            new MeshVertex(-1f, 0f, 0f),
+            new MeshVertex(1f, 0f, 0f),
+            new MeshVertex(0f, -1f, 0f),
+            new MeshVertex(0f, 1f, 0f)
+        };
+        var targetVertices = new[]
+        {
+            new MeshVertex(1f, 0f, 0f),
+            new MeshVertex(0f, 1f, 0f),
+            new MeshVertex(-1f, 0f, 0f),
+            new MeshVertex(0f, -1f, 0f)
+        };
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            2f,
+            2f,
+            1f,
+            decisions,
+            sourceIslandProfiles,
+            targetIslandProfiles,
+            targetIslandTransfers,
+            null
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var context = contextCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            new[] { 0, 0, 0, 0 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [2, 3], [2, 3], [0, 1], [0, 1] },
+            new IReadOnlyList<int>[] { [1, 3], [0, 2], [1, 3], [0, 2] },
+            null,
+            null,
+            new[] { Zone(0, 1, 2, 2), Zone(0, 1, 0, 2), Zone(0, 1, 1, 0), Zone(0, 1, 1, 4) },
+            new[] { Zone(0, 1, 2, 2), Zone(0, 1, 1, 4), Zone(0, 1, 0, 2), Zone(0, 1, 1, 0) },
+            new[] { 0, 0, 0, 0 },
+            new[] { 0, 0, 0, 0 },
+            new[] { 0 },
+            new[] { 0f, 0f, 0f, 0f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            decisionCache
+        ]);
+
+        var sourceDeltas = new (float X, float Y, float Z)[]
+        {
+            (-1.20f, 0f, 0f),
+            (1.20f, 0f, 0f),
+            (0f, -0.35f, 0f),
+            (0f, 0.35f, 0f)
+        };
+
+        var blended = Enumerable.Range(0, 4)
+            .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, [sourceDeltas, context, index]))!.Value)
+            .ToArray();
+
+        Assert.True(blended[2].X < -0.35f, $"Expected left-side target vertex to recover a left-biased delta from angular island correspondence, got {blended[2].X}.");
+        Assert.True(blended[0].X > 0.35f, $"Expected right-side target vertex to recover a right-biased delta from angular island correspondence, got {blended[0].X}.");
+        Assert.True(Math.Abs(blended[1].Y) > 0.10f, $"Expected top vertex to keep meaningful vertical correspondence, got {blended[1].Y}.");
     }
 
     [Fact]
