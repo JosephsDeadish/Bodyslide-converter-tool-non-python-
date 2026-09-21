@@ -7746,6 +7746,102 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void ResolveTopologyDrivenDeformationRegion_PrefersIslandMappedRegionsOverHeightBands()
+    {
+        var method = typeof(LocalExportService).GetMethod("ResolveTopologyDrivenDeformationRegion", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["belly"] = 1.42d,
+            ["arms"] = 0.84d
+        };
+        var islandControl = new CageIslandControl("routing_region_bias", 1, ["arms"]);
+
+        var region = Assert.IsType<string>(method!.Invoke(null, [0.57f, morphing, islandControl, null])!);
+
+        Assert.Equal("arms", region);
+    }
+
+    [Fact]
+    public void RebuildStageShrinkwrap_RoutesByIslandRegionDuringTransform()
+    {
+        var buildTopologyMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveFrameMethod = typeof(LocalExportService).GetMethod("ResolveTopologyProjectionFrame", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveIslandMethod = typeof(LocalExportService).GetMethod("ResolveIslandCageControl", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveRegionMethod = typeof(LocalExportService).GetMethod("ResolveTopologyDrivenDeformationRegion", BindingFlags.NonPublic | BindingFlags.Static);
+        var shrinkwrapMethod = typeof(LocalExportService).GetMethod("ApplyShrinkwrapProjection", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildTopologyMethod);
+        Assert.NotNull(resolveFrameMethod);
+        Assert.NotNull(resolveIslandMethod);
+        Assert.NotNull(resolveRegionMethod);
+        Assert.NotNull(shrinkwrapMethod);
+
+        var rawVertices = new (float X, float Y, float Z)[]
+        {
+            (-0.18f, 0.00f, 0.82f), (-0.14f, 0.00f, 0.86f), (-0.10f, 0.00f, 0.90f), (-0.06f, 0.00f, 0.94f),
+            (-0.18f, 0.03f, 0.84f), (-0.14f, 0.03f, 0.88f), (-0.10f, 0.03f, 0.92f), (-0.06f, 0.03f, 0.96f),
+            (0.52f, 0.00f, 0.82f), (0.56f, 0.00f, 0.86f), (0.60f, 0.00f, 0.90f), (0.64f, 0.00f, 0.94f),
+            (0.52f, 0.03f, 0.84f), (0.56f, 0.03f, 0.88f), (0.60f, 0.03f, 0.92f), (0.64f, 0.03f, 0.96f)
+        };
+        var topologySummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: rawVertices.Length,
+            ComponentIds: [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: rawVertices.Length,
+            BoundaryVertexFlags: Enumerable.Repeat(true, rawVertices.Length).ToArray());
+        var topologyContext = buildTopologyMethod!.Invoke(null, [rawVertices, topologySummary]);
+        Assert.NotNull(topologyContext);
+
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pelvis"] = new(0.60f, 0.20f, 0.50f, 1.00f, 0.50f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f),
+            ["arms"] = new(0.86f, 0.12f, 0.95f, 0.16f, 0.50f, 1.00f, 0.00f, 0.00f, 0.00f, 0.00f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pelvis"] = 1.44d,
+            ["arms"] = 0.82d
+        };
+        var baselineCage = new DeformationCage("routing-test", cageRegions);
+        var islandAwareCage = new DeformationCage(
+            "routing-test",
+            cageRegions,
+            [
+                new CageIslandControl("routing_region_bias", 0, ["pelvis"]),
+                new CageIslandControl("routing_region_bias", 1, ["arms"])
+            ]);
+
+        object[] BuildFrameArgs() => [topologyContext!, 10, 0.23f, 0.015f, 0.82f, 0.14f, 0.41f, 0.015f, 0f, 0f, 0f, 0f, 0f, 0f, 0f];
+        var frameArgs = BuildFrameArgs();
+        resolveFrameMethod!.Invoke(null, frameArgs);
+        var frameCenterX = (float)frameArgs[8];
+        var frameCenterY = (float)frameArgs[9];
+        var frameMinZ = (float)frameArgs[10];
+        var frameZRange = (float)frameArgs[11];
+        var normalizedHeight = (rawVertices[10].Z - frameMinZ) / frameZRange;
+
+        var baselineControl = resolveIslandMethod!.Invoke(null, [baselineCage, "/tmp/routing_region_bias_0.nif", topologyContext, 10]);
+        var islandControl = Assert.IsType<CageIslandControl>(resolveIslandMethod.Invoke(null, [islandAwareCage, "/tmp/routing_region_bias_0.nif", topologyContext, 10]));
+        var baselineRegion = Assert.IsType<string>(resolveRegionMethod!.Invoke(null, [normalizedHeight, morphing, baselineControl, null])!);
+        var islandRegion = Assert.IsType<string>(resolveRegionMethod.Invoke(null, [normalizedHeight, morphing, islandControl, null])!);
+
+        var baselineArgs = new object[] { frameCenterX, frameCenterY, 0.82f, baselineRegion, morphing, 0.01f, rawVertices[10].X, rawVertices[10].Y };
+        shrinkwrapMethod!.Invoke(null, baselineArgs);
+        var baselineX = Assert.IsType<float>(baselineArgs[6]);
+
+        var islandArgs = new object[] { frameCenterX, frameCenterY, 0.82f, islandRegion, morphing, 0.01f, rawVertices[10].X, rawVertices[10].Y };
+        shrinkwrapMethod.Invoke(null, islandArgs);
+        var islandX = Assert.IsType<float>(islandArgs[6]);
+
+        Assert.Equal("pelvis", baselineRegion);
+        Assert.Equal("arms", islandRegion);
+        Assert.True(
+            islandX - rawVertices[10].X < baselineX - rawVertices[10].X - 0.01f,
+            $"Expected island-routed rebuild shrinkwrap to reduce unrelated belly-driven expansion on the second island. baseline={baselineX - rawVertices[10].X:F4}, island-aware={islandX - rawVertices[10].X:F4}");
+    }
+
+    [Fact]
     public void ExportCageProjection_PrefersAuthoredLoopRegionsOverBroadIslandRegions()
     {
         var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);

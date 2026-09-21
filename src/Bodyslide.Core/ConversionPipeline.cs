@@ -18175,7 +18175,11 @@ internal sealed class LocalExportService(
             // Animation-driven push-out: move vertex outward along its XY direction from the
             // body centre by the push-out depth so that it sits outside the body envelope at
             // the worst animation pose.
-            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            var region = ResolveTopologyDrivenDeformationRegion(
+                normalizedHeight,
+                regionalMorphing,
+                islandControl,
+                boundaryLoopControl);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
                 var dx = transformedX - frameCenterX;
@@ -18195,7 +18199,11 @@ internal sealed class LocalExportService(
             // little or no penetration for this region.
             if (regionalMorphing.Count > 0)
             {
-                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var shrinkRegion = ResolveTopologyDrivenDeformationRegion(
+                    normalizedHeight,
+                    regionalMorphing,
+                    islandControl,
+                    boundaryLoopControl);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
                     frameCenterX,
@@ -18324,7 +18332,11 @@ internal sealed class LocalExportService(
             var transformedY = frameCenterY + ((y - frameCenterY) * (float)depthScale);
             var transformedZ = frameMinZ + ((z - frameMinZ) * (float)heightScale);
 
-            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            var region = ResolveTopologyDrivenDeformationRegion(
+                normalizedHeight,
+                regionalMorphing,
+                islandControl,
+                boundaryLoopControl);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
                 var dx = transformedX - frameCenterX;
@@ -18340,7 +18352,11 @@ internal sealed class LocalExportService(
 
             if (regionalMorphing.Count > 0)
             {
-                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var shrinkRegion = ResolveTopologyDrivenDeformationRegion(
+                    normalizedHeight,
+                    regionalMorphing,
+                    islandControl,
+                    boundaryLoopControl);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
                     frameCenterX,
@@ -18544,7 +18560,11 @@ internal sealed class LocalExportService(
             var transformedY = frameCenterY + ((y - frameCenterY) * (float)depthScale);
             var transformedZ = frameMinZ + ((z - frameMinZ) * (float)heightScale);
 
-            var region = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+            var region = ResolveTopologyDrivenDeformationRegion(
+                normalizedHeight,
+                regionalMorphing,
+                islandControl,
+                boundaryLoopControl);
             if (pushOut.TryGetValue(region, out var depth) && depth > 0)
             {
                 var dx = transformedX - frameCenterX;
@@ -18560,7 +18580,11 @@ internal sealed class LocalExportService(
 
             if (regionalMorphing.Count > 0)
             {
-                var shrinkRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+                var shrinkRegion = ResolveTopologyDrivenDeformationRegion(
+                    normalizedHeight,
+                    regionalMorphing,
+                    islandControl,
+                    boundaryLoopControl);
                 var clearanceNorm = 0.010f + MathF.Min(0.080f, MathF.Abs((float)widthScale - 1f) * 0.015f);
                 ApplyShrinkwrapProjection(
                     frameCenterX,
@@ -19320,6 +19344,55 @@ internal sealed class LocalExportService(
         }
 
         return bestControl;
+    }
+
+    private static string ResolveTopologyDrivenDeformationRegion(
+        float normalizedHeight,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        CageIslandControl? islandControl,
+        CageIslandBoundaryLoopControl? boundaryLoopControl)
+    {
+        var fallbackRegion = AnimationDrivenGeometrySolver.HeightToRegion(normalizedHeight);
+        if (regionalMorphing.Count == 0)
+        {
+            return fallbackRegion;
+        }
+
+        var candidates = (boundaryLoopControl?.CageRegions is { Count: > 0 }
+                ? boundaryLoopControl.CageRegions
+                : islandControl?.CageRegions)
+            ?.Where(region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (candidates is not { Length: > 0 })
+        {
+            return fallbackRegion;
+        }
+
+        string? bestRegion = null;
+        var bestDistance = float.MaxValue;
+        foreach (var candidate in candidates)
+        {
+            if (!regionalMorphing.ContainsKey(candidate) &&
+                !AnimationDrivenGeometrySolver.TryGetRegionPivotHeight(candidate, out _))
+            {
+                continue;
+            }
+
+            if (!AnimationDrivenGeometrySolver.TryGetRegionPivotHeight(candidate, out var pivotHeight))
+            {
+                return candidate;
+            }
+
+            var distance = MathF.Abs(pivotHeight - normalizedHeight);
+            if (bestRegion is null || distance < bestDistance - 0.0001f)
+            {
+                bestRegion = candidate;
+                bestDistance = distance;
+            }
+        }
+
+        return bestRegion ?? fallbackRegion;
     }
 
     private static float ComputeCageAxisWeight(float value, float center, float falloff)
@@ -27560,6 +27633,17 @@ internal static class AnimationDrivenGeometrySolver
             if (normalizedHeight <= max) return region;
         }
         return "arms";
+    }
+
+    internal static bool TryGetRegionPivotHeight(string region, out float pivotHeight)
+    {
+        if (PivotHeight.TryGetValue(region, out pivotHeight))
+        {
+            return true;
+        }
+
+        pivotHeight = 0f;
+        return false;
     }
 
     /// <summary>
