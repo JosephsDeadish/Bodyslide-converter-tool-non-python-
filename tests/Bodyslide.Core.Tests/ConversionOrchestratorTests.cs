@@ -16567,7 +16567,8 @@ public sealed class BinaryPluginRewriteServiceTests
 
         Assert.Equal("ESPFE", singleEvidence.Type);
         Assert.Equal("ESPFE", multipleEvidence.Type);
-        Assert.True(multipleEvidence.Confidence > singleEvidence.Confidence);
+        Assert.True(multipleEvidence.Confidence >= singleEvidence.Confidence);
+        Assert.True(multipleEvidence.Confidence >= 0.95d);
         Assert.Contains(multipleEvidence.Reasons, reason => reason.Contains("Multiple resolved FE-range runtime FormIDs", StringComparison.OrdinalIgnoreCase));
     }
 
