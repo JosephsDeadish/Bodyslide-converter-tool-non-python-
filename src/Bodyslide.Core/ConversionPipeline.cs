@@ -17730,12 +17730,9 @@ internal sealed class LocalExportService(
             return deformationCage;
         }
 
-        if (deformationCage.IslandControls is { Count: > 0 })
-        {
-            return deformationCage;
-        }
-
-        var islandControls = new List<CageIslandControl>();
+        var islandControls = deformationCage.IslandControls is { Count: > 0 } existingControls
+            ? new List<CageIslandControl>(existingControls)
+            : [];
         foreach (var meshFile in meshFiles
                      .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
@@ -17838,7 +17835,7 @@ internal sealed class LocalExportService(
                     MathF.Min(0.18f, boundaryRatio * 0.45f),
                     0f,
                     0.36f);
-                islandControls.Add(new CageIslandControl(
+                var enrichedControl = new CageIslandControl(
                     MeshKey: GetMeshTopologyLookupKey(meshFile),
                     IslandId: group.Key,
                     CageRegions: effectiveRegions,
@@ -17850,7 +17847,14 @@ internal sealed class LocalExportService(
                     HeightScaleBias: semanticProfile.HeightScaleBias,
                     BoundaryLoops: boundaryLoopControls,
                     AuthoredRegions: authoredRegions,
-                    EdgeNetworkSummary: edgeNetworkSummary));
+                    EdgeNetworkSummary: edgeNetworkSummary);
+                var existingControl = deformationCage.IslandControls?
+                    .FirstOrDefault(control =>
+                        control.IslandId == group.Key &&
+                        control.MeshKey.Equals(enrichedControl.MeshKey, StringComparison.OrdinalIgnoreCase));
+                islandControls.Add(existingControl is null
+                    ? enrichedControl
+                    : MergeExportIslandControl(existingControl, enrichedControl));
             }
         }
 
@@ -17867,6 +17871,129 @@ internal sealed class LocalExportService(
             .ThenBy(static control => control.IslandId)
             .ToArray();
         return deformationCage with { IslandControls = merged };
+    }
+
+    private static CageIslandControl MergeExportIslandControl(
+        CageIslandControl existingControl,
+        CageIslandControl enrichedControl)
+    {
+        static IReadOnlyList<string> MergeOrderedStrings(
+            IReadOnlyList<string>? first,
+            IReadOnlyList<string>? second)
+        {
+            var merged = new List<string>();
+            void AddRange(IReadOnlyList<string>? values)
+            {
+                if (values is null)
+                {
+                    return;
+                }
+
+                foreach (var value in values)
+                {
+                    if (!string.IsNullOrWhiteSpace(value) &&
+                        !merged.Contains(value, StringComparer.OrdinalIgnoreCase))
+                    {
+                        merged.Add(value);
+                    }
+                }
+            }
+
+            AddRange(first);
+            AddRange(second);
+            return merged;
+        }
+
+        static IReadOnlyList<CageIslandBoundaryLoopControl>? MergeBoundaryLoopControls(
+            IReadOnlyList<CageIslandBoundaryLoopControl>? first,
+            IReadOnlyList<CageIslandBoundaryLoopControl>? second)
+        {
+            var merged = new List<CageIslandBoundaryLoopControl>();
+            if (first is { Count: > 0 })
+            {
+                merged.AddRange(first);
+            }
+
+            if (second is { Count: > 0 })
+            {
+                foreach (var control in second)
+                {
+                    var existingIndex = merged.FindIndex(existing => existing.LoopIndex == control.LoopIndex);
+                    if (existingIndex >= 0)
+                    {
+                        var existing = merged[existingIndex];
+                        merged[existingIndex] = existing with
+                        {
+                            CageRegions = MergeOrderedStrings(existing.CageRegions, control.CageRegions),
+                            IsHole = existing.IsHole || control.IsHole,
+                            InfluenceRadius = Math.Max(existing.InfluenceRadius, control.InfluenceRadius),
+                            RigidityBias = Math.Max(existing.RigidityBias, control.RigidityBias),
+                            BoundaryDamping = Math.Max(existing.BoundaryDamping, control.BoundaryDamping)
+                        };
+                    }
+                    else
+                    {
+                        merged.Add(control);
+                    }
+                }
+            }
+
+            return merged.Count == 0
+                ? null
+                : merged
+                    .OrderBy(static control => control.LoopIndex)
+                    .ToArray();
+        }
+
+        static IReadOnlyList<CageIslandAuthoredRegion>? MergeAuthoredRegions(
+            IReadOnlyList<CageIslandAuthoredRegion>? first,
+            IReadOnlyList<CageIslandAuthoredRegion>? second)
+        {
+            var merged = new List<CageIslandAuthoredRegion>();
+            if (first is { Count: > 0 })
+            {
+                merged.AddRange(first);
+            }
+
+            if (second is { Count: > 0 })
+            {
+                foreach (var region in second)
+                {
+                    var existingIndex = merged.FindIndex(existing =>
+                        existing.LoopIndex == region.LoopIndex &&
+                        existing.RegionName.Equals(region.RegionName, StringComparison.OrdinalIgnoreCase));
+                    if (existingIndex >= 0)
+                    {
+                        merged[existingIndex] = region;
+                    }
+                    else
+                    {
+                        merged.Add(region);
+                    }
+                }
+            }
+
+            return merged.Count == 0
+                ? null
+                : merged
+                    .OrderBy(static region => region.LoopIndex ?? -1)
+                    .ThenBy(static region => region.RegionName, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+        }
+
+        return existingControl with
+        {
+            CageRegions = MergeOrderedStrings(existingControl.CageRegions, enrichedControl.CageRegions),
+            RigidityBias = Math.Max(existingControl.RigidityBias, enrichedControl.RigidityBias),
+            BoundaryDamping = Math.Max(existingControl.BoundaryDamping, enrichedControl.BoundaryDamping),
+            SemanticLabels = MergeOrderedStrings(existingControl.SemanticLabels, enrichedControl.SemanticLabels),
+            WidthScaleBias = Math.Min(existingControl.WidthScaleBias, enrichedControl.WidthScaleBias),
+            DepthScaleBias = Math.Min(existingControl.DepthScaleBias, enrichedControl.DepthScaleBias),
+            HeightScaleBias = Math.Min(existingControl.HeightScaleBias, enrichedControl.HeightScaleBias),
+            BoundaryLoops = MergeBoundaryLoopControls(existingControl.BoundaryLoops, enrichedControl.BoundaryLoops),
+            AuthoredRegions = MergeAuthoredRegions(existingControl.AuthoredRegions, enrichedControl.AuthoredRegions),
+            EdgeNetworkSummary = enrichedControl.EdgeNetworkSummary ?? existingControl.EdgeNetworkSummary
+        };
     }
 
     private sealed record CageIslandSemanticProfile(

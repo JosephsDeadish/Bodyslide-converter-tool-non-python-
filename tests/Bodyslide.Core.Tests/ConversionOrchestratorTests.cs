@@ -2797,6 +2797,87 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BuildExportDeformationCage_EnrichesExistingIslandControlsWithAuthoredTopologyData()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "existing_island_control_enrichment_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>();
+        var triangles = new List<(ushort A, ushort B, ushort C)>();
+        const int ringCount = 5;
+        const int segments = 12;
+        for (var ringIndex = 0; ringIndex < ringCount; ringIndex++)
+        {
+            var radius = 1.35f - (ringIndex * 0.22f);
+            for (var segment = 0; segment < segments; segment++)
+            {
+                var angle = (MathF.PI * 2f * segment) / segments;
+                vertices.Add((MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0.55f + (ringIndex * 0.015f)));
+            }
+        }
+
+        for (ushort ringIndex = 0; ringIndex < ringCount - 1; ringIndex++)
+        {
+            for (ushort segment = 0; segment < segments; segment++)
+            {
+                var nextSegment = (ushort)((segment + 1) % segments);
+                var a = (ushort)((ringIndex * segments) + segment);
+                var b = (ushort)((ringIndex * segments) + nextSegment);
+                var c = (ushort)(((ringIndex + 1) * segments) + segment);
+                var d = (ushort)(((ringIndex + 1) * segments) + nextSegment);
+                triangles.Add((a, c, b));
+                triangles.Add((b, c, d));
+            }
+        }
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+        try
+        {
+            var buildCageMethod = typeof(LocalExportService).GetMethod("BuildExportDeformationCage", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildCageMethod);
+
+            var meshKey = "existing_island_control_enrichment";
+            var cage = new DeformationCage(
+                "test-cage",
+                new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = new(0.72f, 0.26f, 0.50f, 0.96f, 0.50f, 0.96f, 0.72f, 0.18f, 0.08f, 0.02f),
+                    ["waist"] = new(0.56f, 0.22f, 0.50f, 0.90f, 0.50f, 0.90f, 0.62f, 0.16f, 0.06f, 0.00f),
+                    ["arms"] = new(0.84f, 0.18f, 0.95f, 0.16f, 0.50f, 1.00f, 0.90f, 0.12f, 0.04f, 0.05f)
+                },
+                [
+                    new CageIslandControl(
+                        meshKey,
+                        0,
+                        ["arms"],
+                        RigidityBias: 0.03f,
+                        SemanticLabels: ["pre-authored-island"])
+                ]);
+
+            var result = Assert.IsType<DeformationCage>(buildCageMethod!.Invoke(null, [new[] { inputFile }, cage]));
+
+            Assert.NotNull(result.IslandControls);
+            var control = Assert.Single(result.IslandControls!);
+            Assert.Contains("arms", control.CageRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("window-frame-island", control.SemanticLabels ?? [], StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("pre-authored-island", control.SemanticLabels ?? [], StringComparer.OrdinalIgnoreCase);
+            Assert.NotNull(control.BoundaryLoops);
+            Assert.Equal(2, control.BoundaryLoops!.Count);
+            Assert.NotNull(control.AuthoredRegions);
+            Assert.Contains(control.AuthoredRegions!, region => region.RegionName.Equals("arms", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(control.AuthoredRegions!, region => region.IsHole);
+            Assert.NotNull(control.EdgeNetworkSummary);
+            Assert.True(control.RigidityBias >= 0.03f);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BuildCageTopologyReport_UsesPropagatedEdgeNetworkSummaryWhenWrittenMeshLacksExplicitTopology()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
