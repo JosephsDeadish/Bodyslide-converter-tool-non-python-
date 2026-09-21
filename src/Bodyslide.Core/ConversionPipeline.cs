@@ -7770,6 +7770,23 @@ internal sealed class BasicRaceCompatibilityService : IRaceCompatibilityService
             }
         }
 
+        var distinctGroups = referencedRaces
+            .SelectMany(static referencedRace => referencedRace.Race.Groups ?? [])
+            .Where(static group => !string.IsNullOrWhiteSpace(group))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static group => group, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (distinctGroups.Length > 1 && (pluginAnalysis.ScannedPlugins.Count > 1 || referencedRaces.Count > 1))
+        {
+            warnings.Add($"Mixed race/body families were detected across the scanned plugin stack ({string.Join(", ", distinctGroups)}); smoke-test the conversion with every affected race/body variant before release.");
+        }
+
+        var inferredRaceCount = referencedRaces.Count(static referencedRace => referencedRace.IsInferred);
+        if (inferredRaceCount > 0 && inferredRaceCount < referencedRaces.Count)
+        {
+            warnings.Add("The scanned plugin stack mixes explicit race assignments with inferred race/body context; recheck custom followers, overrides, and load order before shipping.");
+        }
+
         return Task.FromResult(new RaceCompatibilityReport(
             IsCompatible: incompatible.Count == 0,
             Warnings: warnings,
@@ -27153,6 +27170,43 @@ internal sealed class LocalExportService(
                ["preview-workbench.html", "skeleton-compatibility.json", "in-game-validation.json"]));
         }
 
+        if (targetBody.Contains("equine", StringComparison.OrdinalIgnoreCase))
+        {
+            var equineRegions = beastRegions.Count > 0 ? beastRegions : lowerBodyRegions.Count > 0 ? lowerBodyRegions : coreRegions;
+            scenarios.Add(new InGameValidationScenario(
+               "Equine stride and rear sweep",
+               "Action",
+               $"Equine locomotion coverage was detected for {targetBody}; verify rearing, hind-leg extension, and tail balance under live animation.",
+               ["walk", "gallop", "rear", "turn in place"],
+               equineRegions,
+               ["race-compatibility.json", "pose-simulation-report.json", "preview-workbench.html"]));
+        }
+
+        if (targetBody.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+            targetBody.Contains("canine", StringComparison.OrdinalIgnoreCase))
+        {
+            var digitigradeRegions = beastRegions.Count > 0 ? beastRegions : lowerBodyRegions.Count > 0 ? lowerBodyRegions : coreRegions;
+            scenarios.Add(new InGameValidationScenario(
+               "Digitigrade prowl and pounce sweep",
+               "Action",
+               $"Digitigrade gait coverage was detected for {targetBody}; verify crouch, sprint, and landing compression for paws, hocks, tail, and pelvis.",
+               ["crouch", "walk", "sprint", "jump / landing"],
+               digitigradeRegions,
+               ["race-compatibility.json", "pose-simulation-report.json", "preview-workbench.html"]));
+        }
+
+        if (targetBody.Contains("aquatic", StringComparison.OrdinalIgnoreCase))
+        {
+            var aquaticRegions = sensitiveRegions.Count > 0 ? sensitiveRegions : beastRegions.Count > 0 ? beastRegions : coreRegions;
+            scenarios.Add(new InGameValidationScenario(
+               "Aquatic fin and tail sweep",
+               "Action",
+               $"Aquatic appendage coverage was detected for {targetBody}; verify fin spread, tail follow-through, and torso twist under swim-like animation families.",
+               ["idle", "turn in place", "sprint", "stagger"],
+               aquaticRegions,
+               ["preview-workbench.html", "skeleton-compatibility.json", "world-physics.json"]));
+        }
+
         if (beastRegions.Count > 0 || IsBeastOrExoticTarget(targetBody))
         {
            scenarios.Add(new InGameValidationScenario(
@@ -27162,6 +27216,17 @@ internal sealed class LocalExportService(
                ["walk", "turn in place", "sprint", "jump"],
                beastRegions.Count > 0 ? beastRegions : coreRegions,
                ["race-compatibility.json", "skeleton-compatibility.json", "preview-workbench.html"]));
+        }
+
+        if (sensitiveRegions.Any(static region => region is "genitals" or "mouth"))
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Sensitive collision and articulation sweep",
+               "High",
+               $"Sensitive oral/genital topology was detected for {targetBody}; verify collision, clipping, and contact-driven articulation across isolated body islands.",
+               ["idle", "walk", "sit", "stagger"],
+               sensitiveRegions.Where(static region => region is "genitals" or "mouth").ToArray(),
+               ["preview-workbench.html", "skeleton-compatibility.json", "world-physics.json"]));
         }
 
         if (skeletonMapping.UnsupportedBones.Count > 0)
@@ -30254,10 +30319,194 @@ internal sealed class LocalExportService(
                 : sourcePosition - lowerOrder;
             var lower = sourceDeltas[lowerIndex];
             var upper = sourceDeltas[upperIndex];
-            return (
+            var localOrderDelta = (
                 Lerp(lower.X, upper.X, blend),
                 Lerp(lower.Y, upper.Y, blend),
                 Lerp(lower.Z, upper.Z, blend));
+
+            var angularDelta = TryBuildIslandAngularCorrespondedDelta(
+                sourceDeltas,
+                decisionCache,
+                sourceIslandProfile,
+                targetIslandProfile,
+                targetIndex);
+            if (angularDelta is null)
+            {
+                return localOrderDelta;
+            }
+
+            var orientationBlendWeight = ComputeIslandAngularCorrespondenceWeight(
+                decision,
+                sourceIslandProfile,
+                targetIslandProfile);
+            return (
+                Lerp(localOrderDelta.X, angularDelta.Value.X, orientationBlendWeight),
+                Lerp(localOrderDelta.Y, angularDelta.Value.Y, orientationBlendWeight),
+                Lerp(localOrderDelta.Z, angularDelta.Value.Z, orientationBlendWeight));
+        }
+
+        private static (float X, float Y, float Z)? TryBuildIslandAngularCorrespondedDelta(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferDecisionCache decisionCache,
+            MorphTransferIslandProfile sourceIslandProfile,
+            MorphTransferIslandProfile targetIslandProfile,
+            int targetIndex)
+        {
+            if (targetIndex < 0 ||
+                targetIndex >= decisionCache.NormalizedTargetVertices.Count ||
+                sourceIslandProfile.VertexIndexes.Count == 0 ||
+                targetIslandProfile.VertexIndexes.Count == 0)
+            {
+                return null;
+            }
+
+            var targetVertex = decisionCache.NormalizedTargetVertices[targetIndex];
+            var targetHeightRange = ComputeIslandHeightRange(decisionCache.NormalizedTargetVertices, targetIslandProfile.VertexIndexes);
+            var sourceHeightRange = ComputeIslandHeightRange(decisionCache.NormalizedSourceVertices, sourceIslandProfile.VertexIndexes);
+            var targetHeightPhase = ComputeIslandPhase(targetVertex.Z, targetHeightRange.Min, targetHeightRange.Max);
+            var targetRadius = ComputeIslandRadialPhase(targetVertex, targetIslandProfile.Centroid);
+            var targetAngle = MathF.Atan2(targetVertex.Y - targetIslandProfile.Centroid.Y, targetVertex.X - targetIslandProfile.Centroid.X);
+            var targetBoundarySensitive = targetIslandProfile.BoundaryVertexIndexes.Contains(targetIndex);
+
+            var best = new List<(int Index, float Score)>(2);
+            foreach (var sourceIndex in sourceIslandProfile.VertexIndexes)
+            {
+                if (sourceIndex < 0 ||
+                    sourceIndex >= sourceDeltas.Count ||
+                    sourceIndex >= decisionCache.NormalizedSourceVertices.Count)
+                {
+                    continue;
+                }
+
+                var sourceVertex = decisionCache.NormalizedSourceVertices[sourceIndex];
+                var sourceHeightPhase = ComputeIslandPhase(sourceVertex.Z, sourceHeightRange.Min, sourceHeightRange.Max);
+                var sourceRadius = ComputeIslandRadialPhase(sourceVertex, sourceIslandProfile.Centroid);
+                var sourceAngle = MathF.Atan2(sourceVertex.Y - sourceIslandProfile.Centroid.Y, sourceVertex.X - sourceIslandProfile.Centroid.X);
+                var sourceBoundarySensitive = sourceIslandProfile.BoundaryVertexIndexes.Contains(sourceIndex);
+
+                var angleDelta = ComputeNormalizedAngularDifference(targetAngle, sourceAngle);
+                var heightDelta = MathF.Abs(targetHeightPhase - sourceHeightPhase);
+                var radiusDelta = MathF.Abs(targetRadius - sourceRadius);
+                var boundaryPenalty = targetBoundarySensitive == sourceBoundarySensitive ? 0f : 0.18f;
+                var score = (angleDelta * 0.58f) + (heightDelta * 0.34f) + (radiusDelta * 0.16f) + boundaryPenalty;
+
+                best.Add((sourceIndex, score));
+            }
+
+            if (best.Count == 0)
+            {
+                return null;
+            }
+
+            var ordered = best
+                .OrderBy(static candidate => candidate.Score)
+                .ThenBy(static candidate => candidate.Index)
+                .Take(2)
+                .ToArray();
+            if (ordered[0].Score > 0.92f)
+            {
+                return null;
+            }
+
+            if (ordered.Length == 1)
+            {
+                return sourceDeltas[ordered[0].Index];
+            }
+
+            var firstWeight = 1f / MathF.Max(0.0001f, ordered[0].Score + 0.08f);
+            var secondWeight = 1f / MathF.Max(0.0001f, ordered[1].Score + 0.08f);
+            var totalWeight = firstWeight + secondWeight;
+            var first = sourceDeltas[ordered[0].Index];
+            var second = sourceDeltas[ordered[1].Index];
+            return (
+                ((first.X * firstWeight) + (second.X * secondWeight)) / totalWeight,
+                ((first.Y * firstWeight) + (second.Y * secondWeight)) / totalWeight,
+                ((first.Z * firstWeight) + (second.Z * secondWeight)) / totalWeight);
+        }
+
+        private static float ComputeIslandAngularCorrespondenceWeight(
+            MorphTransferTargetDecision decision,
+            MorphTransferIslandProfile sourceIslandProfile,
+            MorphTransferIslandProfile targetIslandProfile)
+        {
+            var weight = 0.18f;
+            if (decision.StructuralDivergence >= 0.08f)
+            {
+                weight += MathF.Min(0.30f, (decision.StructuralDivergence - 0.08f) * 0.95f);
+            }
+
+            var boundaryCoverageDelta = MathF.Abs(sourceIslandProfile.BoundaryCoverage - targetIslandProfile.BoundaryCoverage);
+            if (boundaryCoverageDelta <= 0.20f)
+            {
+                weight += 0.10f;
+            }
+
+            if (decision.BoundarySensitive)
+            {
+                weight += 0.08f;
+            }
+
+            if (sourceIslandProfile.UsesExplicitTopology && targetIslandProfile.UsesExplicitTopology)
+            {
+                weight += 0.06f;
+            }
+
+            return Math.Clamp(weight, 0.12f, 0.56f);
+        }
+
+        private static (float Min, float Max) ComputeIslandHeightRange(
+            IReadOnlyList<MeshVertex> vertices,
+            IReadOnlyList<int> vertexIndexes)
+        {
+            var min = float.MaxValue;
+            var max = float.MinValue;
+            foreach (var index in vertexIndexes)
+            {
+                if (index < 0 || index >= vertices.Count)
+                {
+                    continue;
+                }
+
+                var z = vertices[index].Z;
+                min = MathF.Min(min, z);
+                max = MathF.Max(max, z);
+            }
+
+            if (min == float.MaxValue || max == float.MinValue)
+            {
+                return (0f, 1f);
+            }
+
+            return (min, max);
+        }
+
+        private static float ComputeIslandPhase(float value, float min, float max)
+        {
+            var range = max - min;
+            if (range <= 0.0001f)
+            {
+                return 0.5f;
+            }
+
+            return Math.Clamp((value - min) / range, 0f, 1f);
+        }
+
+        private static float ComputeIslandRadialPhase(MeshVertex vertex, MeshVertex centroid)
+        {
+            var dx = vertex.X - centroid.X;
+            var dy = vertex.Y - centroid.Y;
+            return MathF.Sqrt((dx * dx) + (dy * dy));
+        }
+
+        private static float ComputeNormalizedAngularDifference(float leftAngle, float rightAngle)
+        {
+            var delta = MathF.Abs(leftAngle - rightAngle);
+            while (delta > MathF.PI)
+            {
+                delta = MathF.Abs(delta - (MathF.PI * 2f));
+            }
+
+            return Math.Clamp(delta / MathF.PI, 0f, 1f);
         }
 
         private static float ComputeIslandCorrespondenceBlendWeight(

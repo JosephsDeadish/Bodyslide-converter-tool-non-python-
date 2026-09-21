@@ -82,6 +82,7 @@ internal static class SkeletonFrameworkCatalog
         SkeletonFrameworkDetectionResult? bestDetection = null;
         var bestFallbackScore = 0d;
         var observedSemanticKeys = ExtractSemanticKeys(normalizedBoneNames);
+        var observedPhysicsGroups = PhysicsRepairCatalog.DetectGroups(normalizedBoneNames);
         foreach (var framework in All)
         {
             var signatures = framework.DistinctiveSignatures
@@ -111,7 +112,7 @@ internal static class SkeletonFrameworkCatalog
             }
 
             var fallbackEvidence = new List<string>();
-            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys, fallbackEvidence);
+            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys, observedPhysicsGroups, fallbackEvidence);
             if (fallbackScore > bestFallbackScore)
             {
                 bestFallbackScore = fallbackScore;
@@ -170,6 +171,7 @@ internal static class SkeletonFrameworkCatalog
         SkeletonFrameworkMetadata framework,
         IReadOnlyList<string> condensedBoneNames,
         IReadOnlySet<string> observedSemanticKeys,
+        IReadOnlySet<string> observedPhysicsGroups,
         List<string> evidence)
     {
         var prefixes = framework.BonePrefixes
@@ -203,9 +205,13 @@ internal static class SkeletonFrameworkCatalog
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
             var frameworkSemanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+            var frameworkPhysicsGroups = ExtractPhysicsGroups(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
             if (observedSemanticKeys.Count == 0 || frameworkSemanticKeys.Count == 0)
             {
-                return 0d;
+                if (observedPhysicsGroups.Count == 0 || frameworkPhysicsGroups.Count == 0)
+                {
+                    return 0d;
+                }
             }
 
             var semanticMatches = observedSemanticKeys.Intersect(frameworkSemanticKeys, StringComparer.OrdinalIgnoreCase).Count();
@@ -213,12 +219,25 @@ internal static class SkeletonFrameworkCatalog
             {
                 evidence.Add($"semantic-overlap:{semanticMatches}");
             }
-            return semanticMatches >= framework.MinimumSignatureMatches
+            var physicsMatches = observedPhysicsGroups.Count == 0 || frameworkPhysicsGroups.Count == 0
+                ? 0
+                : observedPhysicsGroups.Intersect(frameworkPhysicsGroups, StringComparer.OrdinalIgnoreCase).Count();
+            if (physicsMatches > 0)
+            {
+                evidence.Add($"group-overlap:{physicsMatches}");
+            }
+
+            var semanticScore = semanticMatches >= framework.MinimumSignatureMatches
                 ? semanticMatches * 0.9d
                 : 0d;
+            var physicsScore = physicsMatches >= framework.MinimumSignatureMatches
+                ? physicsMatches * 0.85d
+                : 0d;
+            return Math.Max(semanticScore, physicsScore);
         }
 
         var semanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+        var frameworkPhysicsGroups = ExtractPhysicsGroups(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
         var semanticOverlap = semanticKeys.Count == 0 || observedSemanticKeys.Count == 0
             ? 0
             : observedSemanticKeys.Intersect(semanticKeys, StringComparer.OrdinalIgnoreCase).Count();
@@ -227,7 +246,15 @@ internal static class SkeletonFrameworkCatalog
             evidence.Add($"semantic-overlap:{semanticOverlap}");
         }
 
-        return prefixMatches + (tokenMatches * 0.75d) + (semanticOverlap * 0.65d);
+        var physicsOverlap = frameworkPhysicsGroups.Count == 0 || observedPhysicsGroups.Count == 0
+            ? 0
+            : observedPhysicsGroups.Intersect(frameworkPhysicsGroups, StringComparer.OrdinalIgnoreCase).Count();
+        if (physicsOverlap > 0)
+        {
+            evidence.Add($"group-overlap:{physicsOverlap}");
+        }
+
+        return prefixMatches + (tokenMatches * 0.75d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)
@@ -281,6 +308,20 @@ internal static class SkeletonFrameworkCatalog
         }
 
         return semanticKeys;
+    }
+
+    private static IReadOnlySet<string> ExtractPhysicsGroups(IEnumerable<string> values)
+    {
+        var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            if (PhysicsRepairCatalog.TryMatchGroup(value, out var groupName))
+            {
+                groups.Add(groupName);
+            }
+        }
+
+        return groups;
     }
 
     private sealed class SkeletonFrameworkMetadataDto
