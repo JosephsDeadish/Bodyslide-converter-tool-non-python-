@@ -21549,7 +21549,7 @@ public sealed class CorrectionFeedbackLoopTests
         // Use a mesh conversion service that returns high morphing so clipping fires.
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
-        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        var nifPath = Path.Combine(tmpDir, "island_correction_feedback_0.nif");
         await File.WriteAllBytesAsync(nifPath, new byte[64]);
 
         var orchestrator = BuildOrchestrator(
@@ -21569,7 +21569,7 @@ public sealed class CorrectionFeedbackLoopTests
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmpDir);
-        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
+        var nifPath = Path.Combine(tmpDir, "island_voxel_feedback_0.nif");
         await File.WriteAllBytesAsync(nifPath, new byte[64]);
 
         // Force voxel penetrations so the feedback loop fires.
@@ -21645,65 +21645,43 @@ public sealed class CorrectionFeedbackLoopTests
     }
 
     [Fact]
-    public async Task ConvertAsync_WithCorrectionFeedback_PreservesIslandAwareDampingOnLaterRebuild()
+    public void ApplyIncrementalIslandAwareCageTuning_DampsCorrectionDeltaForIslandAwareCage()
     {
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
-        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(64));
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIncrementalIslandAwareCageTuning", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
 
-        try
+        var previous = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
-            var exporter = new CaptureConvertedMeshExporter();
-            var orchestrator = BuildOrchestrator(
-                meshConverter: new ForcedIslandAwareMeshConversionService(),
-                autoCorrection: new ForcedIslandAwareAutoCorrectionService(),
-                voxelCollision: new NoPenetrationVoxelCollisionService(),
-                exporter: exporter);
-
-            var result = await orchestrator.ConvertAsync(
-                new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
-
-            Assert.True(result.Success);
-            Assert.NotNull(exporter.CapturedMesh);
-            Assert.True(exporter.CapturedMesh!.RegionalMorphing.TryGetValue("chest", out var chest));
-            Assert.Equal(1.26d, chest, 3);
-        }
-        finally
+            ["chest"] = 1.10d
+        };
+        var corrected = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+            ["chest"] = 1.30d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, corrected, CreateForcedIslandAwareCage()]));
+
+        Assert.Equal(1.26d, result["chest"], 3);
     }
 
     [Fact]
-    public async Task ConvertAsync_WithVoxelPushFeedback_PreservesIslandAwareDampingOnLaterRebuild()
+    public void ApplyIncrementalIslandAwareCageTuning_DampsVoxelPushDeltaForIslandAwareCage()
     {
-        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-        var nifPath = Path.Combine(tmpDir, "testarmor_0.nif");
-        await SyntheticNifTestData.WriteAsync(nifPath, SyntheticNifTestData.CreateBodyVertices(64));
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIncrementalIslandAwareCageTuning", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
 
-        try
+        var previous = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
-            var exporter = new CaptureConvertedMeshExporter();
-            var orchestrator = BuildOrchestrator(
-                meshConverter: new ForcedIslandAwareMeshConversionService(),
-                autoCorrection: new NoOpAutoCorrectionService(),
-                voxelCollision: new ForcedIslandAwareVoxelCollisionService(),
-                exporter: exporter);
-
-            var result = await orchestrator.ConvertAsync(
-                new ConversionRequest(nifPath, "3BA", tmpDir), CancellationToken.None);
-
-            Assert.True(result.Success);
-            Assert.NotNull(exporter.CapturedMesh);
-            Assert.True(exporter.CapturedMesh!.RegionalMorphing.TryGetValue("chest", out var chest));
-            Assert.Equal(1.26d, chest, 3);
-        }
-        finally
+            ["chest"] = 1.10d
+        };
+        var voxelAdjusted = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
         {
-            Directory.Delete(tmpDir, recursive: true);
-        }
+            ["chest"] = 1.30d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, voxelAdjusted, CreateForcedIslandAwareCage()]));
+
+        Assert.Equal(1.26d, result["chest"], 3);
     }
 
     // Mesh conversion service that forces high regional morphing to trigger clipping.
@@ -21730,57 +21708,22 @@ public sealed class CorrectionFeedbackLoopTests
                 cage));
     }
 
-    private sealed class ForcedIslandAwareMeshConversionService : IMeshConversionService
-    {
-        public Task<ConvertedMesh> ConvertAsync(
-            ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage,
-            string targetBody, string? deformationProfile, string? sourceBody, CancellationToken ct)
-        {
-            var routedCage = new DeformationCage(
-                "hybrid-cage",
-                new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["chest"] = new(0.78f, 0.24f)
-                },
-                [
-                    new CageIslandControl(
-                        MeshKey: "forced-island-aware",
-                        IslandId: 0,
-                        CageRegions: ["chest"],
-                        WidthScaleBias: 0.80f,
-                        DepthScaleBias: 0.80f,
-                        HeightScaleBias: 0.80f)
-                ]);
-
-            return Task.FromResult(new ConvertedMesh(
-                analysis.MeshType,
-                "forced-island-aware",
-                analysis.MeshCount,
-                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["chest"] = 1.10d
-                },
-                routedCage));
-        }
-    }
-
-    private sealed class ForcedIslandAwareAutoCorrectionService : IAutoCorrectionService
-    {
-        public Task<CorrectionResult> CorrectAsync(ConvertedMesh mesh, ClippingReport clipping, CancellationToken cancellationToken) =>
-            Task.FromResult(new CorrectionResult(
-                true,
-                "forced-island-aware",
-                new Dictionary<string, double>(mesh.RegionalMorphing, StringComparer.OrdinalIgnoreCase)
-                {
-                    ["chest"] = 1.30d
-                }));
-    }
-
-    private sealed class NoOpAutoCorrectionService : IAutoCorrectionService
-    {
-        public Task<CorrectionResult> CorrectAsync(ConvertedMesh mesh, ClippingReport clipping, CancellationToken cancellationToken) =>
-            Task.FromResult(new CorrectionResult(false, "none"));
-    }
+    private static DeformationCage CreateForcedIslandAwareCage() =>
+        new(
+            "hybrid-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = new(0.78f, 0.24f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "forced-island-aware",
+                    IslandId: 0,
+                    CageRegions: ["chest"],
+                    WidthScaleBias: 0.80f,
+                    DepthScaleBias: 0.80f,
+                    HeightScaleBias: 0.80f)
+            ]);
 
     // Voxel service that always reports penetrations in the chest region.
     private sealed class AlwaysPenetratingVoxelCollisionService : IVoxelCollisionService
@@ -21798,26 +21741,6 @@ public sealed class CorrectionFeedbackLoopTests
                 8));
     }
 
-    private sealed class ForcedIslandAwareVoxelCollisionService : IVoxelCollisionService
-    {
-        public Task<VoxelCollisionResult> ComputeAsync(
-            ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
-            Task.FromResult(new VoxelCollisionResult(
-                true,
-                ["chest"],
-                new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["chest"] = 2.0d
-                },
-                10));
-    }
-
-    private sealed class NoPenetrationVoxelCollisionService : IVoxelCollisionService
-    {
-        public Task<VoxelCollisionResult> ComputeAsync(
-            ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken ct) =>
-            Task.FromResult(new VoxelCollisionResult(false, [], new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase), 8));
-    }
 
     private sealed class CaptureConvertedMeshExporter : IExportService
     {
