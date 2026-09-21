@@ -4935,6 +4935,63 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicRaceCompatibilityService_AllowsMatchingCustomBodyAcrossLinkedPluginFamilyChain()
+    {
+        var service = new BasicRaceCompatibilityService();
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["DraconicChild.esp", "DraconicBridge.esl", "DraconicMaster.esm"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/draconic/wing_tail_0.nif"],
+                    0x00000800u,
+                    "DragonkinWingHarnessAddon",
+                    [32, 40],
+                    null,
+                    "DraconicMaster.esm",
+                    0x00000800u,
+                    ["Skyrim.esm"]),
+                new PluginArmorAddon(
+                    "ARMA",
+                    ["meshes/armor/draconic/horn_collar_0.nif"],
+                    0xFE000801u,
+                    "DragonkinHornHarnessAddon",
+                    [32],
+                    null,
+                    "DraconicBridge.esl",
+                    0x00000801u,
+                    ["DraconicMaster.esm"])
+            ],
+            ArmorRecords:
+            [
+                new PluginArmorRecord(
+                    "ARMO",
+                    ["meshes/armor/draconic/world_harness.nif"],
+                    0x02000810u,
+                    "DragonkinFollowerHarness",
+                    null,
+                    null,
+                    [32, 40],
+                    null,
+                    "DraconicChild.esp",
+                    0x00000810u,
+                    [
+                        new PluginLinkedFormReference(0x00000800u, "DraconicMaster.esm", 0x00000800u),
+                        new PluginLinkedFormReference(0xFE000801u, "DraconicBridge.esl", 0x00000801u)
+                    ],
+                    ["DraconicMaster.esm", "DraconicBridge.esl"])
+            ],
+            PatchGuidance: string.Empty);
+
+        var report = await service.CheckAsync(pluginAnalysis, "Draconic Humanoid", CancellationToken.None);
+
+        Assert.True(report.IsCompatible);
+        Assert.Empty(report.IncompatibleRaces);
+        Assert.Empty(report.Warnings);
+    }
+
+    [Fact]
     public async Task BasicRaceCompatibilityService_ReturnsCompatibleWhenNoRaceFormIds()
     {
         var service = new BasicRaceCompatibilityService();
@@ -14743,6 +14800,95 @@ public sealed class RealisticModPackFixtureTests
                     OwningPluginFileName: "MixedHarnessChild.esp",
                     LocalFormId: 0x00000810u,
                     DeclaredMasterFileNames: ["MixedHarnessMaster.esm", "MixedHarnessAddon.esl"])
+            ]);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var unresolvedTieGroups = Assert.IsAssignableFrom<IReadOnlyList<object>>(
+            plan.GetType().GetProperty("UnresolvedTieGroups")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Empty(unresolvedTieGroups);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/devices/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_1.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_1.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "world", "restraint_ground.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_ground.nif"]);
+    }
+
+    [Fact]
+    public void BuildPluginRewritePlan_TransitiveMixedLightMasterPluginFamilyFixture_UsesGrandparentFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticTransitiveMixedLightMasterPluginFamilyModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["MixedHarnessChild.esp", "MixedHarnessBridge.esp", "MixedHarnessAddon.esl", "MixedHarnessMaster.esm"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "MixedHarnessMaster.esm",
+                    ["meshes/devious/devices/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "MixedHarnessPanelAA",
+                    OwningPluginFileName: "MixedHarnessMaster.esm",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "MixedHarnessBridge.esp",
+                    ["meshes/devious/devices/restraint_0.nif"],
+                    FormId: 0x01000801u,
+                    EditorId: "MixedHarnessRestraintAA",
+                    OwningPluginFileName: "MixedHarnessBridge.esp",
+                    LocalFormId: 0x00000801u,
+                    DeclaredMasterFileNames: ["MixedHarnessMaster.esm"]),
+                new PluginArmorAddon(
+                    "MixedHarnessAddon.esl",
+                    ["meshes/devious/devices/restraint_1.nif"],
+                    FormId: 0xFE000802u,
+                    EditorId: "MixedHarnessRestraintVariantAA",
+                    OwningPluginFileName: "MixedHarnessAddon.esl",
+                    LocalFormId: 0x00000802u,
+                    DeclaredMasterFileNames: ["MixedHarnessBridge.esp"])
+            ],
+            PatchGuidance: string.Empty,
+            ArmorRecords:
+            [
+                new PluginArmorRecord(
+                    "MixedHarnessChild.esp",
+                    ["meshes/devious/devices/restraint_ground.nif"],
+                    FormId: 0x02000810u,
+                    EditorId: "MixedHarnessArmor",
+                    LinkedArmorAddonReferences:
+                    [
+                        new PluginLinkedFormReference(0x00000800u, "MixedHarnessMaster.esm", 0x00000800u),
+                        new PluginLinkedFormReference(0x01000801u, "MixedHarnessBridge.esp", 0x00000801u),
+                        new PluginLinkedFormReference(0xFE000802u, "MixedHarnessAddon.esl", 0x00000802u)
+                    ],
+                    OwningPluginFileName: "MixedHarnessChild.esp",
+                    LocalFormId: 0x00000810u,
+                    DeclaredMasterFileNames: ["MixedHarnessMaster.esm", "MixedHarnessBridge.esp", "MixedHarnessAddon.esl"])
             ]);
 
         var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
