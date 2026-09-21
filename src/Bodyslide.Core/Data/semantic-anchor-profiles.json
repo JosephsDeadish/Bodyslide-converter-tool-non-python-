@@ -9,6 +9,35 @@
       "thighs": ["Thighs"],
       "mouth": ["HDT Jaw", "HDT JawLower", "HDT JawUpper", "HDT Tongue", "HDT TongueMid", "HDT TongueTip", "HDT Throat", "HDT ThroatLower"],
       "genitals": ["Vagina", "VaginaDeep", "Labia", "Anus", "AnusOuter"]
+    },
+    "landmarks": {
+      "breasts": [
+        { "label": "left-breast", "x": 0.34, "y": 0.50, "z": 0.76 },
+        { "label": "right-breast", "x": 0.66, "y": 0.50, "z": 0.76 },
+        { "label": "cleavage", "x": 0.50, "y": 0.49, "z": 0.75 }
+      ],
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.52, "z": 0.57 },
+        { "label": "lower-belly", "x": 0.50, "y": 0.53, "z": 0.46 }
+      ],
+      "butt": [
+        { "label": "left-butt", "x": 0.36, "y": 0.60, "z": 0.44 },
+        { "label": "right-butt", "x": 0.64, "y": 0.60, "z": 0.44 }
+      ],
+      "thighs": [
+        { "label": "left-thigh", "x": 0.36, "y": 0.53, "z": 0.31 },
+        { "label": "right-thigh", "x": 0.64, "y": 0.53, "z": 0.31 }
+      ],
+      "mouth": [
+        { "label": "mouth-center", "x": 0.50, "y": 0.50, "z": 0.88 },
+        { "label": "tongue-base", "x": 0.50, "y": 0.52, "z": 0.84 },
+        { "label": "throat-core", "x": 0.50, "y": 0.56, "z": 0.79 }
+      ],
+      "genitals": [
+        { "label": "pelvic-center", "x": 0.50, "y": 0.54, "z": 0.22 },
+        { "label": "left-labia", "x": 0.45, "y": 0.54, "z": 0.22 },
+        { "label": "right-labia", "x": 0.55, "y": 0.54, "z": 0.22 }
+      ]
     }
   },
   {
@@ -20,6 +49,28 @@
       "thighs": ["Thighs"],
       "mouth": ["HDT Jaw", "HDT Tongue", "HDT TongueTip", "HDT Throat"],
       "genitals": ["TNG Genitals", "TNG Foreskin", "TNG Shaft", "TNG Glans", "TNG Balls"]
+    },
+    "landmarks": {
+      "breasts": [
+        { "label": "left-pec", "x": 0.35, "y": 0.50, "z": 0.74 },
+        { "label": "right-pec", "x": 0.65, "y": 0.50, "z": 0.74 }
+      ],
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.52, "z": 0.56 }
+      ],
+      "thighs": [
+        { "label": "left-thigh", "x": 0.37, "y": 0.52, "z": 0.31 },
+        { "label": "right-thigh", "x": 0.63, "y": 0.52, "z": 0.31 }
+      ],
+      "mouth": [
+        { "label": "mouth-center", "x": 0.50, "y": 0.50, "z": 0.87 },
+        { "label": "throat-core", "x": 0.50, "y": 0.55, "z": 0.80 }
+      ],
+      "genitals": [
+        { "label": "shaft-root", "x": 0.50, "y": 0.55, "z": 0.22 },
+        { "label": "glans-tip", "x": 0.50, "y": 0.61, "z": 0.18 },
+        { "label": "scrotum-center", "x": 0.50, "y": 0.49, "z": 0.18 }
+      ]
     }
   },
   {
@@ -30,6 +81,24 @@
       "belly": ["NPC Belly", "Belly"],
       "thighs": ["Thighs"],
       "genitals": ["SOS GenitalsBase", "SOS Foreskin", "SOS Shaft", "SOS Glans", "SOS Scrotum"]
+    },
+    "landmarks": {
+      "breasts": [
+        { "label": "left-pec", "x": 0.35, "y": 0.50, "z": 0.74 },
+        { "label": "right-pec", "x": 0.65, "y": 0.50, "z": 0.74 }
+      ],
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.52, "z": 0.56 }
+      ],
+      "thighs": [
+        { "label": "left-thigh", "x": 0.37, "y": 0.52, "z": 0.31 },
+        { "label": "right-thigh", "x": 0.63, "y": 0.52, "z": 0.31 }
+      ],
+      "genitals": [
+        { "label": "shaft-root", "x": 0.50, "y": 0.55, "z": 0.22 },
+        { "label": "glans-tip", "x": 0.50, "y": 0.61, "z": 0.18 },
+        { "label": "scrotum-center", "x": 0.50, "y": 0.49, "z": 0.18 }
+      ]
     }
   },
   {
@@ -39,6 +108,19 @@
       "breasts": ["NPC L Pec", "NPC R Pec", "Pecs"],
       "belly": ["NPC Belly", "Belly"],
       "thighs": ["Thighs"]
+    },
+    "landmarks": {
+      "breasts": [
+        { "label": "left-pec", "x": 0.35, "y": 0.50, "z": 0.74 },
+        { "label": "right-pec", "x": 0.65, "y": 0.50, "z": 0.74 }
+      ],
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.52, "z": 0.56 }
+      ],
+      "thighs": [
+        { "label": "left-thigh", "x": 0.37, "y": 0.52, "z": 0.31 },
+        { "label": "right-thigh", "x": 0.63, "y": 0.52, "z": 0.31 }
+      ]
     }
   },
   {
@@ -51,6 +133,31 @@
       "feet": ["PawFront.L", "PawFront.R", "PawRear.L", "PawRear.R"],
       "mouth": ["JawLower", "TongueMid", "TongueTip"],
       "genitals": ["BeastForeskin", "BeastGlans", "BeastKnot", "BeastVagina", "BeastAnus"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.53, "z": 0.56 }
+      ],
+      "thighs": [
+        { "label": "left-haunch", "x": 0.37, "y": 0.54, "z": 0.30 },
+        { "label": "right-haunch", "x": 0.63, "y": 0.54, "z": 0.30 }
+      ],
+      "tail": [
+        { "label": "tail-root", "x": 0.50, "y": 0.78, "z": 0.21 },
+        { "label": "tail-mid", "x": 0.50, "y": 0.88, "z": 0.18 }
+      ],
+      "feet": [
+        { "label": "left-forepaw", "x": 0.36, "y": 0.58, "z": 0.08 },
+        { "label": "right-forepaw", "x": 0.64, "y": 0.58, "z": 0.08 }
+      ],
+      "mouth": [
+        { "label": "muzzle", "x": 0.50, "y": 0.60, "z": 0.87 },
+        { "label": "tongue-base", "x": 0.50, "y": 0.57, "z": 0.83 }
+      ],
+      "genitals": [
+        { "label": "sheath-root", "x": 0.50, "y": 0.60, "z": 0.20 },
+        { "label": "rear-groin", "x": 0.50, "y": 0.53, "z": 0.18 }
+      ]
     }
   },
   {
@@ -63,6 +170,54 @@
       "feet": ["Hoof.L", "Hoof.R", "Fetlock"],
       "mouth": ["JawLower", "TongueMid", "TongueTip"],
       "genitals": ["BeastForeskin", "BeastGlans", "BeastKnot", "BeastVagina", "BeastAnus"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.55, "z": 0.58 }
+      ],
+      "thighs": [
+        { "label": "left-haunch", "x": 0.36, "y": 0.56, "z": 0.31 },
+        { "label": "right-haunch", "x": 0.64, "y": 0.56, "z": 0.31 }
+      ],
+      "tail": [
+        { "label": "tail-root", "x": 0.50, "y": 0.80, "z": 0.22 },
+        { "label": "tail-mid", "x": 0.50, "y": 0.90, "z": 0.18 }
+      ],
+      "feet": [
+        { "label": "left-hoof", "x": 0.36, "y": 0.60, "z": 0.05 },
+        { "label": "right-hoof", "x": 0.64, "y": 0.60, "z": 0.05 }
+      ],
+      "mouth": [
+        { "label": "muzzle", "x": 0.50, "y": 0.62, "z": 0.87 },
+        { "label": "tongue-base", "x": 0.50, "y": 0.58, "z": 0.82 }
+      ],
+      "genitals": [
+        { "label": "sheath-root", "x": 0.50, "y": 0.61, "z": 0.20 },
+        { "label": "rear-groin", "x": 0.50, "y": 0.53, "z": 0.18 }
+      ]
+    }
+  },
+  {
+    "name": "Serpentine Humanoid",
+    "aliases": ["Lamia", "Naga"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly", "Abdomen"],
+      "tail": ["Tail4", "Tail5", "TailTip", "CoilRoot", "CoilMid", "CoilTip"],
+      "mouth": ["JawLower", "TongueMid", "TongueTip"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.54, "z": 0.58 }
+      ],
+      "tail": [
+        { "label": "coil-root", "x": 0.50, "y": 0.74, "z": 0.26 },
+        { "label": "coil-mid", "x": 0.50, "y": 0.84, "z": 0.18 },
+        { "label": "coil-tip", "x": 0.50, "y": 0.93, "z": 0.10 }
+      ],
+      "mouth": [
+        { "label": "maw", "x": 0.50, "y": 0.60, "z": 0.88 },
+        { "label": "tongue-base", "x": 0.50, "y": 0.57, "z": 0.83 }
+      ]
     }
   },
   {
@@ -72,6 +227,21 @@
       "belly": ["NPC Belly", "Belly"],
       "wing": ["Wing.L", "Wing.R", "WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "Feather01.L", "Feather01.R"],
       "feet": ["Talon.L", "Talon.R"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.52, "z": 0.57 }
+      ],
+      "wing": [
+        { "label": "left-wing-root", "x": 0.26, "y": 0.54, "z": 0.74 },
+        { "label": "right-wing-root", "x": 0.74, "y": 0.54, "z": 0.74 },
+        { "label": "left-pinion", "x": 0.16, "y": 0.61, "z": 0.72 },
+        { "label": "right-pinion", "x": 0.84, "y": 0.61, "z": 0.72 }
+      ],
+      "feet": [
+        { "label": "left-talon", "x": 0.38, "y": 0.58, "z": 0.06 },
+        { "label": "right-talon", "x": 0.62, "y": 0.58, "z": 0.06 }
+      ]
     }
   },
   {
@@ -82,6 +252,23 @@
       "tail": ["TailFin", "TailFinTip"],
       "wing": ["PectoralFin.L", "PectoralFin.R", "PectoralFinMid.L", "PectoralFinMid.R"],
       "mouth": ["Whisker.L", "Whisker.R", "FrillMid.L", "FrillMid.R"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.53, "z": 0.57 }
+      ],
+      "tail": [
+        { "label": "tail-fin-root", "x": 0.50, "y": 0.82, "z": 0.18 },
+        { "label": "tail-fin-tip", "x": 0.50, "y": 0.93, "z": 0.08 }
+      ],
+      "wing": [
+        { "label": "left-pectoral", "x": 0.30, "y": 0.56, "z": 0.68 },
+        { "label": "right-pectoral", "x": 0.70, "y": 0.56, "z": 0.68 }
+      ],
+      "mouth": [
+        { "label": "left-whisker", "x": 0.40, "y": 0.60, "z": 0.86 },
+        { "label": "right-whisker", "x": 0.60, "y": 0.60, "z": 0.86 }
+      ]
     }
   }
 ]

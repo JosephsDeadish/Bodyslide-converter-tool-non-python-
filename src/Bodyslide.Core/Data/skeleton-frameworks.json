@@ -28,6 +28,7 @@
     "bonePrefixes": ["Tail", "Wing"],
     "boneTokens": ["NPC Tail", "LeftWing", "RightWing", "Khajiit", "Argonian", "TailTip", "TailBase"],
     "distinctiveSignatures": ["Tail1", "Tail2", "TailTip"],
+    "ecosystemCues": ["tailnub", "leftwingfold", "rightwingfold", "argtail", "khajiitrig"],
     "minimumSignatureMatches": 2
   },
   {
@@ -35,6 +36,7 @@
     "bonePrefixes": ["Tail", "Coil", "Serpent"],
     "boneTokens": ["NPC Tail", "Tail4", "Tail5", "TailTip", "CoilRoot", "CoilMid", "CoilTip", "Lamia", "Naga", "Serpent"],
     "distinctiveSignatures": ["CoilRoot", "CoilMid", "CoilTip", "SerpentTail"],
+    "ecosystemCues": ["coilnub", "coilring", "serpentjaw", "lamiahood", "nagacrest"],
     "minimumSignatureMatches": 2
   },
   {
@@ -42,6 +44,7 @@
     "bonePrefixes": ["Horn", "GoatHorn", "LeftHorn", "RightHorn", "HornTip", "RamHorn", "Cloven"],
     "boneTokens": ["Horn.L", "Horn.R", "Goat", "Hoof", "HornTip", "HornTrail", "Cloven", "Ramhorn"],
     "distinctiveSignatures": ["Horn.L", "Horn.R", "HornTip.L", "HornTip.R", "GoatHorn.L", "GoatHorn.R", "HornTrail.L", "HornTrail.R"],
+    "ecosystemCues": ["ramcrest", "goathorn", "clovenrear", "horntwist"],
     "minimumSignatureMatches": 2
   },
   {
@@ -49,6 +52,7 @@
     "bonePrefixes": ["Wing", "Feather", "WingTip", "WingMembrane"],
     "boneTokens": ["Wing.L", "Wing.R", "LeftWing", "RightWing", "WingTip", "WingMembrane", "Feather", "Hagraven", "Spriggan"],
     "distinctiveSignatures": ["Wing.L", "Wing.R", "WingTip.L", "WingTip.R", "WingMembrane.L", "WingMembrane.R"],
+    "ecosystemCues": ["wingfold", "pinionspread", "membranetip", "hagraven"],
     "minimumSignatureMatches": 2
   },
   {

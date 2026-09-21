@@ -6,7 +6,14 @@ namespace Bodyslide.Core;
 internal sealed record SemanticAnchorProfile(
     string Name,
     IReadOnlyList<string> Aliases,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> Anchors);
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Anchors,
+    IReadOnlyDictionary<string, IReadOnlyList<SemanticLandmark>> Landmarks);
+
+internal sealed record SemanticLandmark(
+    string Label,
+    float X,
+    float Y,
+    float Z);
 
 internal static class SemanticAnchorCatalog
 {
@@ -93,7 +100,28 @@ internal static class SemanticAnchorCatalog
                 .Select(static alias => alias.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray() ?? [],
-            anchors);
+            anchors,
+            NormalizeLandmarks(dto.Landmarks));
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<SemanticLandmark>> NormalizeLandmarks(
+        Dictionary<string, SemanticLandmarkDto[]>? landmarks)
+    {
+        return (landmarks ?? new Dictionary<string, SemanticLandmarkDto[]>(StringComparer.OrdinalIgnoreCase))
+            .Where(static pair => !string.IsNullOrWhiteSpace(pair.Key))
+            .ToDictionary(
+                static pair => pair.Key.Trim(),
+                static pair => (IReadOnlyList<SemanticLandmark>)pair.Value
+                    .Where(static landmark => !string.IsNullOrWhiteSpace(landmark.Label))
+                    .Select(static landmark => new SemanticLandmark(
+                        landmark.Label!.Trim(),
+                        Math.Clamp(landmark.X, 0f, 1f),
+                        Math.Clamp(landmark.Y, 0f, 1f),
+                        Math.Clamp(landmark.Z, 0f, 1f)))
+                    .GroupBy(static landmark => landmark.Label, StringComparer.OrdinalIgnoreCase)
+                    .Select(static group => group.First())
+                    .ToArray(),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class SemanticAnchorProfileDto
@@ -101,5 +129,14 @@ internal static class SemanticAnchorCatalog
         public string? Name { get; init; }
         public string[]? Aliases { get; init; }
         public Dictionary<string, string[]>? Anchors { get; init; }
+        public Dictionary<string, SemanticLandmarkDto[]>? Landmarks { get; init; }
+    }
+
+    private sealed class SemanticLandmarkDto
+    {
+        public string? Label { get; init; }
+        public float X { get; init; }
+        public float Y { get; init; }
+        public float Z { get; init; }
     }
 }

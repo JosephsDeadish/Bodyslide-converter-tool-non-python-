@@ -1,0 +1,30 @@
+{
+  "name": "SerpentineSparseRig",
+  "aliases": [
+    "Coilborn Sparse",
+    "Naga Sparse"
+  ],
+  "referenceTokens": [
+    "serpentine",
+    "naga",
+    "coil",
+    "sparse"
+  ],
+  "sliderNames": [
+    "TailBase",
+    "TailLength",
+    "CoilLength",
+    "Belly"
+  ],
+  "physicsBones": [
+    "CoilNub",
+    "CoilRing",
+    "SerpentJaw",
+    "TailTip"
+  ],
+  "physicsProfile": "none",
+  "gender": "female",
+  "skeletonFoundation": "Serpentine Humanoid",
+  "skeletonFramework": "serpentine-humanoid",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

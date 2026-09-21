@@ -10933,6 +10933,42 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedSerpentineSparseRigPack_ResolvesSparseCoilPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticSerpentineSparseRigModPack", Path.Combine("meshes", "beast", "serpentine_sparse", "serpentine_sparse_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Serpentine Humanoid", CancellationToken.None);
+
+        Assert.Contains("TailBase", resolved.Sliders);
+        Assert.Contains("TailLength", resolved.Sliders);
+        Assert.Contains("CoilLength", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedAvianSparseRigPack_ResolvesSparseWingPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticAvianSparseRigModPack", Path.Combine("meshes", "beast", "avian_sparse", "avian_sparse_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Avian Humanoid", CancellationToken.None);
+
+        Assert.Contains("WingSpan", resolved.Sliders);
+        Assert.Contains("FeatherSpread", resolved.Sliders);
+        Assert.Contains("TalonWidth", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedHimboShapeDataPack_ResolvesMaleBodyPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticHimboModPack", Path.Combine("meshes", "male", "himbo", "variant", "himbo_raider_0.nif"));
@@ -13563,6 +13599,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["maneroot_ctrl", "forelock_ctrl"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["MawLatch", "TongueBlade", "WombCore"]));
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["TailNub", "PawPad.L", "SheathNode"]));
+        Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PinionFoldCtrl.L", "TalonRearCtrl.R"]));
+        Assert.Equal("serpentine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CoilNub", "SerpentJaw"]));
 
         var sparse = SkeletonFrameworkCatalog.DetectFrameworkDetails(["MawLatch", "TongueBlade", "WombCore"]);
         Assert.Equal("ube-extended", sparse.Label);
@@ -13576,6 +13614,16 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(sparseDigitigrade.UsedSparseInference);
         Assert.Contains(sparseDigitigrade.Evidence, evidence => evidence.StartsWith("group-overlap:", StringComparison.Ordinal));
         Assert.Contains(sparseDigitigrade.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseAvian = SkeletonFrameworkCatalog.DetectFrameworkDetails(["PinionFoldCtrl.L", "TalonRearCtrl.R"]);
+        Assert.Equal("avian-humanoid", sparseAvian.Label);
+        Assert.True(sparseAvian.UsedSparseInference);
+        Assert.Contains(sparseAvian.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseSerpentine = SkeletonFrameworkCatalog.DetectFrameworkDetails(["CoilNub", "SerpentJaw"]);
+        Assert.Equal("serpentine-humanoid", sparseSerpentine.Label);
+        Assert.True(sparseSerpentine.UsedSparseInference);
+        Assert.Contains(sparseSerpentine.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
     }
 }
 
@@ -15581,6 +15629,64 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("wing", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("feather", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticSerpentineSparseRigModPack_WritesSparseRigArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSerpentineSparseRigModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "serpentine_sparse", "serpentine_sparse_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Serpentine Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "none"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "serpentine-humanoid", "serpentine_sparse_0.nif")));
+            var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
+            Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
+            var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
+            Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticAvianSparseRigModPack_WritesSparseWingRigArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAvianSparseRigModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "avian_sparse", "avian_sparse_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Avian Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "none"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "avian-humanoid", "avian_sparse_0.nif")));
+            var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
+            Assert.Contains("wing", inGameJson, StringComparison.OrdinalIgnoreCase);
+            var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
+            Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -25036,7 +25142,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             sourceVertices,
@@ -25057,6 +25163,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             Array.Empty<string>(),
+            null,
             decisionCache
         ]);
 
@@ -25067,13 +25174,107 @@ public sealed class OutputCompletenessTests
         };
 
         var blended = Enumerable.Range(0, 4)
-            .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, [sourceDeltas, context, index]))!.Value)
+            .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, ["Belly", sourceDeltas, context, index]))!.Value)
             .ToArray();
 
         Assert.Equal(0f, blended[0].X, 4);
         Assert.True(blended[1].X > 0.04f, $"Expected second target vertex to inherit positive correspondence from island-local ordering, got {blended[1].X}.");
         Assert.True(blended[2].X > blended[1].X, $"Expected correspondence to increase across target local order. second={blended[1].X}, third={blended[2].X}");
         Assert.True(blended[3].X > 0.14f, $"Expected last target vertex to recover a meaningful portion of the far-end source delta, got {blended[3].X}.");
+    }
+
+    [Fact]
+    public void TryBlendRetargetedDelta_UsesSemanticLandmarksForAmbiguousMouthCorrespondence()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var landmarkPairType = typeof(LocalExportService).GetNestedType("SemanticLandmarkPair", BindingFlags.NonPublic);
+        var landmarkProfileType = typeof(LocalExportService).GetNestedType("SemanticLandmarkTransferProfile", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(landmarkPairType);
+        Assert.NotNull(landmarkProfileType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var wrongInfluenceLists = Array.CreateInstance(influenceArrayType, 2);
+        wrongInfluenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 0);
+        wrongInfluenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 1);
+        var baselineInfluenceLists = Array.CreateInstance(influenceArrayType, 2);
+        baselineInfluenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 0);
+        baselineInfluenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+
+        var pairCtor = landmarkPairType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 5);
+        var pairListType = typeof(List<>).MakeGenericType(landmarkPairType);
+        var pairList = (System.Collections.IList)Activator.CreateInstance(pairListType)!;
+        var sourceVertices = new[] { new MeshVertex(-1f, 0f, 0f), new MeshVertex(1f, 0f, 0f) };
+        var targetVertices = new[] { new MeshVertex(-1f, 0f, 0f), new MeshVertex(1f, 0f, 0f) };
+        pairList.Add(pairCtor.Invoke(["mouth-left", 0, 0, sourceVertices[0], targetVertices[0]]));
+        pairList.Add(pairCtor.Invoke(["mouth-right", 1, 1, sourceVertices[1], targetVertices[1]]));
+
+        var regionPairsType = typeof(Dictionary<,>).MakeGenericType(typeof(string), typeof(IReadOnlyList<>).MakeGenericType(landmarkPairType));
+        var regionPairs = (System.Collections.IDictionary)Activator.CreateInstance(regionPairsType)!;
+        regionPairs.Add("mouth", pairList);
+
+        var profileCtor = landmarkProfileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        var semanticProfile = profileCtor.Invoke(["Semantic Mouth", regionPairs]);
+
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 20);
+        object CreateContext(Array influences, object? semanticLandmarks) => contextCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            new[] { 1, 1 },
+            influences,
+            new IReadOnlyList<int>[] { [1], [0] },
+            new IReadOnlyList<int>[] { [1], [0] },
+            null,
+            null,
+            new[] { 0, 0 },
+            new[] { 0, 0 },
+            new[] { 0, 0 },
+            new[] { 0, 0 },
+            new[] { 0 },
+            new[] { 1f, 1f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            semanticLandmarks,
+            null
+        ]);
+
+        var sourceDeltas = new (float X, float Y, float Z)[]
+        {
+            (1f, 0f, 0f),
+            (0f, 0f, 0f)
+        };
+
+        var withoutSemantic = (((float X, float Y, float Z)?)blendMethod!.Invoke(null, ["MouthOpen", sourceDeltas, CreateContext(baselineInfluenceLists, null), 0]))!.Value;
+        var withSemantic = (((float X, float Y, float Z)?)blendMethod.Invoke(null, ["MouthOpen", sourceDeltas, CreateContext(wrongInfluenceLists, semanticProfile), 0]))!.Value;
+
+        Assert.True(withoutSemantic.X < 0.01f, $"Expected baseline mouth correspondence to miss the authored landmark, got {withoutSemantic.X}.");
+        Assert.True(withSemantic.X > 0.45f, $"Expected semantic landmark transfer to recover a strong positive mouth delta, got {withSemantic.X}.");
     }
 
     [Fact]
@@ -25215,7 +25416,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             sourceVertices,
@@ -25236,6 +25437,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             Array.Empty<string>(),
+            null,
             decisionCache
         ]);
 

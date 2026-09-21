@@ -17741,7 +17741,7 @@ internal sealed class LocalExportService(
                 outputFiles.Add(shapeDataNifPath);
             }
 
-            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis);
+            morphTransferContext = CreateMorphTransferContext(armor.MeshFiles, writtenNifs, analysis, request.TargetBody);
 
             // Write BSD slider data files (.bsd) — one per slider for low-weight and high-weight morphs.
             // The BSD binary format encodes per-slider vertex displacement deltas used by BodySlide.
@@ -28168,6 +28168,17 @@ internal sealed class LocalExportService(
             IReadOnlyDictionary<int, MorphTransferIslandTransferSummary> TargetIslandTransfers,
             MorphTransferIslandDataLayer? IslandDataLayer);
 
+        private sealed record SemanticLandmarkPair(
+            string Label,
+            int SourceIndex,
+            int TargetIndex,
+            MeshVertex SourceVertex,
+            MeshVertex TargetVertex);
+
+        private sealed record SemanticLandmarkTransferProfile(
+            string ProfileName,
+            IReadOnlyDictionary<string, IReadOnlyList<SemanticLandmarkPair>> RegionPairs);
+
         private sealed record MorphTransferContext(
             IReadOnlyList<MeshVertex> SourceVertices,
             IReadOnlyList<MeshVertex> TargetVertices,
@@ -28187,12 +28198,14 @@ internal sealed class LocalExportService(
             float TargetGlobalNeighborDistance,
             bool ExtremeTopologyAdaptationRisk,
             IReadOnlyList<string> PartHints,
+            SemanticLandmarkTransferProfile? SemanticLandmarks = null,
             MorphTransferDecisionCache? DecisionCache = null);
 
         private static MorphTransferContext? CreateMorphTransferContext(
             IReadOnlyList<string> sourceMeshFiles,
             IReadOnlyList<string> writtenNifs,
-            MeshAnalysis? analysis)
+            MeshAnalysis? analysis,
+            string targetBody)
         {
             var sourceSnapshot = sourceMeshFiles
                 .Select(GetMeshTransferTopologySnapshot)
@@ -28311,6 +28324,7 @@ internal sealed class LocalExportService(
                 targetGlobalNeighborDistance,
                 false,
                 partHints,
+                BuildSemanticLandmarkTransferProfile(targetBody, normalizedSourceVertices, normalizedTargetVertices),
                 null);
             var decisionCache = BuildMorphTransferDecisionCache(
                 context,
@@ -28324,6 +28338,82 @@ internal sealed class LocalExportService(
                 ExtremeTopologyAdaptationRisk = HasExtremeTopologyAdaptation(context, decisionCache),
                 DecisionCache = decisionCache
             };
+        }
+
+        private static SemanticLandmarkTransferProfile? BuildSemanticLandmarkTransferProfile(
+            string targetBody,
+            IReadOnlyList<MeshVertex> normalizedSourceVertices,
+            IReadOnlyList<MeshVertex> normalizedTargetVertices)
+        {
+            if (!SemanticAnchorCatalog.TryGet(targetBody, out var profile) ||
+                profile.Landmarks.Count == 0 ||
+                normalizedSourceVertices.Count == 0 ||
+                normalizedTargetVertices.Count == 0)
+            {
+                return null;
+            }
+
+            var regionPairs = new Dictionary<string, IReadOnlyList<SemanticLandmarkPair>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (region, landmarks) in profile.Landmarks)
+            {
+                if (landmarks.Count == 0)
+                {
+                    continue;
+                }
+
+                var pairs = landmarks
+                    .Select(landmark =>
+                    {
+                        var sourceIndex = FindNearestSemanticLandmarkVertexIndex(normalizedSourceVertices, landmark);
+                        var targetIndex = FindNearestSemanticLandmarkVertexIndex(normalizedTargetVertices, landmark);
+                        return sourceIndex < 0 || targetIndex < 0
+                            ? null
+                            : new SemanticLandmarkPair(
+                                landmark.Label,
+                                sourceIndex,
+                                targetIndex,
+                                normalizedSourceVertices[sourceIndex],
+                                normalizedTargetVertices[targetIndex]);
+                    })
+                    .Where(static pair => pair is not null)
+                    .Cast<SemanticLandmarkPair>()
+                    .ToArray();
+                if (pairs.Length == 0)
+                {
+                    continue;
+                }
+
+                regionPairs[region] = pairs;
+            }
+
+            return regionPairs.Count == 0
+                ? null
+                : new SemanticLandmarkTransferProfile(profile.Name, regionPairs);
+        }
+
+        private static int FindNearestSemanticLandmarkVertexIndex(
+            IReadOnlyList<MeshVertex> normalizedVertices,
+            SemanticLandmark landmark)
+        {
+            var bestIndex = -1;
+            var bestDistance = float.MaxValue;
+            for (var index = 0; index < normalizedVertices.Count; index++)
+            {
+                var vertex = normalizedVertices[index];
+                var dx = vertex.X - landmark.X;
+                var dy = vertex.Y - landmark.Y;
+                var dz = vertex.Z - landmark.Z;
+                var distanceSquared = (dx * dx) + (dy * dy) + (dz * dz);
+                if (distanceSquared >= bestDistance)
+                {
+                    continue;
+                }
+
+                bestDistance = distanceSquared;
+                bestIndex = index;
+            }
+
+            return bestIndex;
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> ResolveMorphDeltas(
@@ -28402,7 +28492,7 @@ internal sealed class LocalExportService(
             {
                 VertexCount = vertexCount,
                 PayloadKind = $"{candidate.PayloadKind}-retargeted",
-                Deltas = RetargetMorphPayload(candidate.Deltas, vertexCount, morphTransferContext)
+                Deltas = RetargetMorphPayload(sliderName, candidate.Deltas, vertexCount, morphTransferContext)
             };
             wasRetargeted = true;
             return true;
@@ -28704,6 +28794,7 @@ internal sealed class LocalExportService(
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
+            string sliderName,
             IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
             int targetVertexCount,
             MorphTransferContext? morphTransferContext)
@@ -28721,7 +28812,7 @@ internal sealed class LocalExportService(
                 var nearestSurface = new (float X, float Y, float Z)[targetVertexCount];
                 for (var targetIndex = 0; targetIndex < targetVertexCount; targetIndex++)
                 {
-                    var blended = TryBlendRetargetedDelta(sourceDeltas, morphTransferContext, targetIndex);
+                    var blended = TryBlendRetargetedDelta(sliderName, sourceDeltas, morphTransferContext, targetIndex);
                     nearestSurface[targetIndex] = blended ?? sourceDeltas[morphTransferContext.TargetToSourceIndexMap[targetIndex]];
                 }
 
@@ -30788,6 +30879,7 @@ internal sealed class LocalExportService(
         }
 
         private static (float X, float Y, float Z)? TryBlendRetargetedDelta(
+            string sliderName,
             IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
             MorphTransferContext morphTransferContext,
             int targetIndex)
@@ -30824,6 +30916,32 @@ internal sealed class LocalExportService(
             var influenceBlended = totalWeight <= 0.000001f
                 ? ((float X, float Y, float Z)?)null
                 : (x / totalWeight, y / totalWeight, z / totalWeight);
+            var semanticLandmarkDelta = TryBuildSemanticLandmarkCorrespondedDelta(
+                sliderName,
+                sourceDeltas,
+                morphTransferContext,
+                targetIndex);
+            if (semanticLandmarkDelta is not null)
+            {
+                var semanticWeight = ComputeSemanticLandmarkBlendWeight(
+                    sliderName,
+                    morphTransferContext,
+                    targetIndex,
+                    semanticLandmarkDelta.Value.MatchDistance);
+                if (influenceBlended is null || semanticWeight >= 0.99f)
+                {
+                    influenceBlended = semanticLandmarkDelta.Value.Delta;
+                }
+                else if (semanticWeight > 0.01f)
+                {
+                    var blendedBase = influenceBlended.Value;
+                    influenceBlended = (
+                        Lerp(blendedBase.X, semanticLandmarkDelta.Value.Delta.X, semanticWeight),
+                        Lerp(blendedBase.Y, semanticLandmarkDelta.Value.Delta.Y, semanticWeight),
+                        Lerp(blendedBase.Z, semanticLandmarkDelta.Value.Delta.Z, semanticWeight));
+                }
+            }
+
             var islandCorresponded = TryBuildIslandCorrespondedDelta(sourceDeltas, morphTransferContext, targetIndex);
             if (islandCorresponded is null)
             {
@@ -30847,6 +30965,113 @@ internal sealed class LocalExportService(
                 Lerp(baseDelta.X, islandDelta.X, correspondenceWeight),
                 Lerp(baseDelta.Y, islandDelta.Y, correspondenceWeight),
                 Lerp(baseDelta.Z, islandDelta.Z, correspondenceWeight));
+        }
+
+        private static ((float X, float Y, float Z) Delta, float MatchDistance)? TryBuildSemanticLandmarkCorrespondedDelta(
+            string sliderName,
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            var region = NormalizeInGameRegion(sliderName);
+            if (string.IsNullOrWhiteSpace(region) ||
+                morphTransferContext.SemanticLandmarks?.RegionPairs.TryGetValue(region, out var regionPairs) is not true ||
+                regionPairs.Count == 0)
+            {
+                return null;
+            }
+
+            var normalizedTargetVertices = morphTransferContext.DecisionCache?.NormalizedTargetVertices ?? morphTransferContext.TargetVertices;
+            if (targetIndex < 0 || targetIndex >= normalizedTargetVertices.Count)
+            {
+                return null;
+            }
+
+            var targetVertex = normalizedTargetVertices[targetIndex];
+            var candidates = regionPairs
+                .Where(pair => pair.SourceIndex >= 0 &&
+                               pair.SourceIndex < sourceDeltas.Count &&
+                               pair.TargetIndex >= 0 &&
+                               pair.TargetIndex < normalizedTargetVertices.Count)
+                .Select(pair =>
+                {
+                    var landmarkVertex = normalizedTargetVertices[pair.TargetIndex];
+                    var dx = targetVertex.X - landmarkVertex.X;
+                    var dy = targetVertex.Y - landmarkVertex.Y;
+                    var dz = targetVertex.Z - landmarkVertex.Z;
+                    var distance = MathF.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+                    return (Pair: pair, Distance: distance);
+                })
+                .OrderBy(static candidate => candidate.Distance)
+                .Take(2)
+                .ToArray();
+            if (candidates.Length == 0 || candidates[0].Distance > 0.34f)
+            {
+                return null;
+            }
+
+            var weightedX = 0f;
+            var weightedY = 0f;
+            var weightedZ = 0f;
+            var totalWeight = 0f;
+            foreach (var candidate in candidates)
+            {
+                var weight = 1f / MathF.Max(0.015f, candidate.Distance + 0.04f);
+                var delta = sourceDeltas[candidate.Pair.SourceIndex];
+                weightedX += delta.X * weight;
+                weightedY += delta.Y * weight;
+                weightedZ += delta.Z * weight;
+                totalWeight += weight;
+            }
+
+            if (totalWeight <= 0.000001f)
+            {
+                return null;
+            }
+
+            return (
+                (weightedX / totalWeight, weightedY / totalWeight, weightedZ / totalWeight),
+                candidates[0].Distance);
+        }
+
+        private static float ComputeSemanticLandmarkBlendWeight(
+            string sliderName,
+            MorphTransferContext morphTransferContext,
+            int targetIndex,
+            float landmarkDistance)
+        {
+            var region = NormalizeInGameRegion(sliderName);
+            if (string.IsNullOrWhiteSpace(region))
+            {
+                return 0f;
+            }
+
+            var weight = region is "mouth" or "genitals" or "tail" or "wing" or "feet"
+                ? 0.28f
+                : 0.18f;
+            weight += MathF.Max(0f, (0.28f - landmarkDistance) * 0.55f);
+            if (morphTransferContext.ExtremeTopologyAdaptationRisk)
+            {
+                weight += 0.08f;
+            }
+
+            if (targetIndex >= 0 && targetIndex < morphTransferContext.TargetTransferAmbiguity.Length)
+            {
+                weight += MathF.Min(0.10f, morphTransferContext.TargetTransferAmbiguity[targetIndex] * 0.18f);
+            }
+
+            if (morphTransferContext.DecisionCache is { } decisionCache &&
+                targetIndex >= 0 &&
+                targetIndex < decisionCache.TargetDecisions.Count)
+            {
+                var decision = decisionCache.TargetDecisions[targetIndex];
+                if (decision.StructuralDivergence >= 0.08f)
+                {
+                    weight += MathF.Min(0.14f, (decision.StructuralDivergence - 0.08f) * 0.60f);
+                }
+            }
+
+            return Math.Clamp(weight, 0f, 0.58f);
         }
 
         private static (float X, float Y, float Z)? TryBuildIslandCorrespondedDelta(
