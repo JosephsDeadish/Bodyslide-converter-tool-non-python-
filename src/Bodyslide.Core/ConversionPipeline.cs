@@ -18356,6 +18356,19 @@ internal sealed class LocalExportService(
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, index);
             var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, index);
+            ApplyIslandProjectionFrameRouting(
+                x,
+                y,
+                z,
+                islandControl,
+                boundaryLoopControl,
+                ref frameCenterX,
+                ref frameCenterY,
+                ref frameMinZ,
+                ref frameZRange,
+                ref frameHalfRangeX,
+                ref frameHalfRangeY,
+                ref boundaryPreservationWeight);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -18516,6 +18529,19 @@ internal sealed class LocalExportService(
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, index);
             var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, index);
+            ApplyIslandProjectionFrameRouting(
+                x,
+                y,
+                z,
+                islandControl,
+                boundaryLoopControl,
+                ref frameCenterX,
+                ref frameCenterY,
+                ref frameMinZ,
+                ref frameZRange,
+                ref frameHalfRangeX,
+                ref frameHalfRangeY,
+                ref boundaryPreservationWeight);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -18744,6 +18770,19 @@ internal sealed class LocalExportService(
                 out var boundaryPreservationWeight);
             var islandControl = ResolveIslandCageControl(effectiveCage, sourcePath, topologyContext, i);
             var boundaryLoopControl = ResolveBoundaryLoopCageControl(islandControl, topologyContext, i);
+            ApplyIslandProjectionFrameRouting(
+                x,
+                y,
+                z,
+                islandControl,
+                boundaryLoopControl,
+                ref frameCenterX,
+                ref frameCenterY,
+                ref frameMinZ,
+                ref frameZRange,
+                ref frameHalfRangeX,
+                ref frameHalfRangeY,
+                ref boundaryPreservationWeight);
             var normalizedHeight = (z - frameMinZ) / frameZRange;
             var lateralPosition = MathF.Min(1f, MathF.Abs(x - frameCenterX) / frameHalfRangeX);
             var depthPosition = MathF.Min(1f, MathF.Abs(y - frameCenterY) / frameHalfRangeY);
@@ -19311,6 +19350,105 @@ internal sealed class LocalExportService(
                 0f,
                 0.72f);
         }
+    }
+
+    private static void ApplyIslandProjectionFrameRouting(
+        float x,
+        float y,
+        float z,
+        CageIslandControl? islandControl,
+        CageIslandBoundaryLoopControl? boundaryLoopControl,
+        ref float centerX,
+        ref float centerY,
+        ref float minZ,
+        ref float zRange,
+        ref float halfRangeX,
+        ref float halfRangeY,
+        ref float boundaryPreservationWeight)
+    {
+        var normalizedHeight = Math.Clamp((z - minZ) / MathF.Max(0.0001f, zRange), 0f, 1f);
+        var lateralPosition = Math.Clamp(MathF.Abs(x - centerX) / MathF.Max(0.0001f, halfRangeX), 0f, 1f);
+        var depthPosition = Math.Clamp(MathF.Abs(y - centerY) / MathF.Max(0.0001f, halfRangeY), 0f, 1f);
+        var authoredRegion = ResolveAuthoredProjectionRegion(
+            islandControl,
+            boundaryLoopControl,
+            normalizedHeight,
+            lateralPosition,
+            depthPosition);
+        if (authoredRegion is null)
+        {
+            return;
+        }
+
+        halfRangeX = MathF.Max(0.0001f, halfRangeX * Math.Clamp(authoredRegion.LateralFalloff, 0.08f, 1f));
+        halfRangeY = MathF.Max(0.0001f, halfRangeY * Math.Clamp(authoredRegion.DepthFalloff, 0.08f, 1f));
+
+        var normalizedStart = Math.Clamp(authoredRegion.HeightCenter - authoredRegion.HeightFalloff, 0f, 1f);
+        var normalizedEnd = Math.Clamp(authoredRegion.HeightCenter + authoredRegion.HeightFalloff, 0f, 1f);
+        if (normalizedEnd - normalizedStart < 0.04f)
+        {
+            var center = (normalizedStart + normalizedEnd) * 0.5f;
+            normalizedStart = Math.Clamp(center - 0.02f, 0f, 1f);
+            normalizedEnd = Math.Clamp(center + 0.02f, 0f, 1f);
+        }
+
+        var originalRange = MathF.Max(0.0001f, zRange);
+        minZ += originalRange * normalizedStart;
+        zRange = MathF.Max(0.0001f, originalRange * MathF.Max(0.04f, normalizedEnd - normalizedStart));
+        boundaryPreservationWeight = Math.Clamp(
+            boundaryPreservationWeight + MathF.Max(0f, 1f - authoredRegion.WidthInfluence) * 0.06f,
+            0f,
+            0.72f);
+    }
+
+    private static CageRegion? ResolveAuthoredProjectionRegion(
+        CageIslandControl? islandControl,
+        CageIslandBoundaryLoopControl? boundaryLoopControl,
+        float normalizedHeight,
+        float lateralPosition,
+        float depthPosition)
+    {
+        if (islandControl?.AuthoredRegions is not { Count: > 0 } authoredRegions)
+        {
+            return null;
+        }
+
+        var loopScopedCandidates = boundaryLoopControl is null
+            ? []
+            : authoredRegions
+                .Where(region => region.LoopIndex == boundaryLoopControl.LoopIndex &&
+                                 (boundaryLoopControl.CageRegions.Count == 0 ||
+                                  boundaryLoopControl.CageRegions.Contains(region.RegionName, StringComparer.OrdinalIgnoreCase)))
+                .ToArray();
+        if (loopScopedCandidates.Length > 0)
+        {
+            return loopScopedCandidates
+                .OrderBy(region => ComputeAuthoredProjectionFit(region.Region, normalizedHeight, lateralPosition, depthPosition))
+                .Select(static region => region.Region)
+                .FirstOrDefault();
+        }
+
+        var islandScopedCandidates = authoredRegions
+            .Where(region => region.LoopIndex is null &&
+                             (islandControl.CageRegions.Count == 0 ||
+                              islandControl.CageRegions.Contains(region.RegionName, StringComparer.OrdinalIgnoreCase)))
+            .ToArray();
+        return islandScopedCandidates
+            .OrderBy(region => ComputeAuthoredProjectionFit(region.Region, normalizedHeight, lateralPosition, depthPosition))
+            .Select(static region => region.Region)
+            .FirstOrDefault();
+    }
+
+    private static float ComputeAuthoredProjectionFit(
+        CageRegion authoredRegion,
+        float normalizedHeight,
+        float lateralPosition,
+        float depthPosition)
+    {
+        var heightDistance = MathF.Abs(authoredRegion.HeightCenter - normalizedHeight) / MathF.Max(0.03f, authoredRegion.HeightFalloff);
+        var lateralDistance = MathF.Abs(authoredRegion.LateralCenter - lateralPosition) / MathF.Max(0.08f, authoredRegion.LateralFalloff);
+        var depthDistance = MathF.Abs(authoredRegion.DepthCenter - depthPosition) / MathF.Max(0.08f, authoredRegion.DepthFalloff);
+        return heightDistance + lateralDistance + depthDistance;
     }
 
     private static float ComputeIslandEdgePreservationAmplification(

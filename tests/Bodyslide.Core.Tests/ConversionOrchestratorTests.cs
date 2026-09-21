@@ -7926,6 +7926,67 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void ApplyIslandProjectionFrameRouting_LocalizesFrameForAuthoredIslandAndLoopRegions()
+    {
+        var method = typeof(LocalExportService).GetMethod("ApplyIslandProjectionFrameRouting", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var islandWideRegion = new CageIslandAuthoredRegion(
+            "chest",
+            new CageRegion(0.78f, 0.18f, 0.46f, 0.64f, 0.46f, 0.64f, 0.76f, 0.32f, 0.10f, 0.08f));
+        var loopLocalRegion = new CageIslandAuthoredRegion(
+            "chest",
+            new CageRegion(0.78f, 0.08f, 0.22f, 0.14f, 0.18f, 0.14f, 0.28f, 0.18f, 0.06f, 0.28f),
+            LoopIndex: 1,
+            IsHole: true);
+
+        var islandControl = new CageIslandControl(
+            "authored_loop_projection",
+            0,
+            ["chest"],
+            BoundaryLoops:
+            [
+                new CageIslandBoundaryLoopControl(1, ["chest"], IsHole: true, InfluenceRadius: 0.16f, RigidityBias: 0.10f, BoundaryDamping: 0.12f)
+            ],
+            AuthoredRegions:
+            [
+                islandWideRegion,
+                loopLocalRegion
+            ]);
+        var loopControl = Assert.Single(islandControl.BoundaryLoops!);
+
+        object[] BuildArgs(CageIslandBoundaryLoopControl? boundaryLoop) =>
+        [
+            0.60f, 0.00f, 0.90f,
+            islandControl,
+            boundaryLoop is null ? null! : boundaryLoop,
+            0.23f, 0.015f, 0.82f, 0.14f, 0.41f, 0.015f, 0f
+        ];
+
+        var islandArgs = BuildArgs(null);
+        method!.Invoke(null, islandArgs);
+        var islandZRange = Assert.IsType<float>(islandArgs[8]);
+        var islandHalfRangeX = Assert.IsType<float>(islandArgs[9]);
+        var islandHalfRangeY = Assert.IsType<float>(islandArgs[10]);
+        var islandBoundaryWeight = Assert.IsType<float>(islandArgs[11]);
+
+        var loopArgs = BuildArgs(loopControl);
+        method.Invoke(null, loopArgs);
+        var loopZRange = Assert.IsType<float>(loopArgs[8]);
+        var loopHalfRangeX = Assert.IsType<float>(loopArgs[9]);
+        var loopHalfRangeY = Assert.IsType<float>(loopArgs[10]);
+        var loopBoundaryWeight = Assert.IsType<float>(loopArgs[11]);
+
+        Assert.True(islandZRange < 0.14f, $"Expected island-authored frame routing to narrow the vertical projection range, got {islandZRange:F4}.");
+        Assert.True(islandHalfRangeX < 0.41f, $"Expected island-authored frame routing to narrow the lateral projection range, got {islandHalfRangeX:F4}.");
+        Assert.True(islandHalfRangeY < 0.015f, $"Expected island-authored frame routing to narrow the depth projection range, got {islandHalfRangeY:F4}.");
+        Assert.True(loopZRange < islandZRange, $"Expected loop-authored frame routing to localize the vertical range more tightly than the broad island region. island={islandZRange:F4}, loop={loopZRange:F4}");
+        Assert.True(loopHalfRangeX < islandHalfRangeX, $"Expected loop-authored frame routing to localize lateral projection more tightly than the broad island region. island={islandHalfRangeX:F4}, loop={loopHalfRangeX:F4}");
+        Assert.True(loopHalfRangeY < islandHalfRangeY, $"Expected loop-authored frame routing to localize depth projection more tightly than the broad island region. island={islandHalfRangeY:F4}, loop={loopHalfRangeY:F4}");
+        Assert.True(loopBoundaryWeight > islandBoundaryWeight, $"Expected loop-authored routing to raise preservation weight for hole-like regions. island={islandBoundaryWeight:F4}, loop={loopBoundaryWeight:F4}");
+    }
+
+    [Fact]
     public void ExportCageProjection_HoleAndEdgeTopologyDampenLoopScaleMoreStrongly()
     {
         var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
