@@ -12709,14 +12709,19 @@ public sealed class PhysicsMeshTypeTuningTests
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Insectoid Humanoid", out var insectoid));
         Assert.Contains("AntennaTip.L", insectoid.AvailablePhysicsBones);
+        Assert.Contains("CarapaceWingTip.L", insectoid.AvailablePhysicsBones);
         Assert.Contains("AntennaLength", insectoid.SliderNames);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hivekin", out var insectoidAlias));
         Assert.Equal("Insectoid Humanoid", insectoidAlias.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Aquatic Humanoid", out var aquatic));
         Assert.Contains("Fin.DorsalTip", aquatic.AvailablePhysicsBones);
+        Assert.Contains("WhiskerTip.L", aquatic.AvailablePhysicsBones);
+        Assert.Contains("WhiskerLength", aquatic.SliderNames);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Mermaid", out var aquaticAlias));
         Assert.Equal("Aquatic Humanoid", aquaticAlias.Name);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Sirenborn", out var aquaticAliasTwo));
+        Assert.Equal("Aquatic Humanoid", aquaticAliasTwo.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Equine Humanoid", out var equine));
         Assert.Contains("ManeTip", equine.AvailablePhysicsBones);
@@ -12805,12 +12810,20 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Antenna.L", insectAntennaFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("CarapaceWingTip.L", "insectoid-humanoid", out var insectWingFallbacks));
         Assert.Contains("CarapaceWing.L", insectWingFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("CarapaceWingMid.L", "insectoid-humanoid", out var insectWingMidFallbacks));
+        Assert.Contains("CarapaceWing.L", insectWingMidFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Fin.DorsalTip", "aquatic-humanoid", out var aquaticFinFallbacks));
         Assert.Contains("Fin.Dorsal", aquaticFinFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("PectoralFinMid.L", "aquatic-humanoid", out var aquaticFinMidFallbacks));
+        Assert.Contains("PectoralFin.L", aquaticFinMidFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WhiskerTip.L", "aquatic-humanoid", out var aquaticWhiskerFallbacks));
         Assert.Contains("Whisker.L", aquaticWhiskerFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WhiskerMid.L", "aquatic-humanoid", out var aquaticWhiskerMidFallbacks));
+        Assert.Contains("Whisker.L", aquaticWhiskerMidFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("FrillTip.L", "draconic-humanoid", out var draconicFrillFallbacks));
         Assert.Contains("Frill.L", draconicFrillFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("FrillMid.L", "aquatic-humanoid", out var aquaticFrillMidFallbacks));
+        Assert.Contains("Frill.L", aquaticFrillMidFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailBarbSwing02", out var draconicTailGroup));
         Assert.Equal("tail", draconicTailGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("AntennaChainL", out var insectHornGroup));
@@ -12830,6 +12843,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["FrillTip.L", "TailBarbTip"]));
         Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["AntennaMid.L", "CarapaceWingTip.R"]));
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["TailFin", "WhiskerTip.R"]));
+        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFinMid.L", "FrillMid.R"]));
+        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CarapaceWingMid.L", "MandibleMid.R"]));
     }
 }
 
@@ -14048,6 +14063,45 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(result.Success);
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "draconic-humanoid", "dragon_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticExoticAquaticModPack_WritesAquaticBodyArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticExoticAquaticModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "aquatic", "merrow", "siren_cuirass_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Mermaid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "mermaid", "siren_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));

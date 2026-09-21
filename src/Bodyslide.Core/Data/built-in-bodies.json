@@ -2282,14 +2282,22 @@
       "AbdomenTip",
       "Antenna.L",
       "Antenna.R",
+      "AntennaMid.L",
+      "AntennaMid.R",
       "Mandible.L",
       "Mandible.R",
+      "MandibleMid.L",
+      "MandibleMid.R",
       "AntennaTip.L",
       "AntennaTip.R",
       "MandibleTip.L",
       "MandibleTip.R",
       "CarapaceWing.L",
-      "CarapaceWing.R"
+      "CarapaceWing.R",
+      "CarapaceWingMid.L",
+      "CarapaceWingMid.R",
+      "CarapaceWingTip.L",
+      "CarapaceWingTip.R"
     ],
     "referenceTokens": [
       "arachne",
@@ -2382,7 +2390,9 @@
       "Finfolk",
       "Merfolk",
       "Mermaid",
-      "Merman"
+      "Merman",
+      "Sea Dragonkin",
+      "Sirenborn"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -2397,16 +2407,29 @@
       "Tail4",
       "Tail5",
       "TailFin",
+      "TailFinTip",
       "Fin.Dorsal",
       "Fin.DorsalTip",
       "PectoralFin.L",
       "PectoralFin.R",
+      "PectoralFinMid.L",
+      "PectoralFinMid.R",
+      "PectoralFinTip.L",
+      "PectoralFinTip.R",
       "VentralFin.L",
       "VentralFin.R",
       "Whisker.L",
       "Whisker.R",
+      "WhiskerMid.L",
+      "WhiskerMid.R",
+      "WhiskerTip.L",
+      "WhiskerTip.R",
       "Frill.L",
-      "Frill.R"
+      "Frill.R",
+      "FrillMid.L",
+      "FrillMid.R",
+      "FrillTip.L",
+      "FrillTip.R"
     ],
     "referenceTokens": [
       "aquatic",
@@ -2417,7 +2440,12 @@
       "frill",
       "whisker",
       "gill",
-      "tailfin"
+      "tailfin",
+      "mermaid",
+      "merfolk",
+      "sirenborn",
+      "sea",
+      "mer"
     ],
     "sliderNames": [
       "Belly",
@@ -2427,6 +2455,7 @@
       "TailBase",
       "FinSpread",
       "FrillWidth",
+      "WhiskerLength",
       "Shoulders"
     ],
     "transformationField": {
@@ -2451,7 +2480,9 @@
       "frill",
       "whisker",
       "gill",
-      "tailfin"
+      "tailfin",
+      "mermaid",
+      "merfolk"
     ],
     "textureTokens": [
       "scale",

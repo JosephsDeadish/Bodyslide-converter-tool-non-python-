@@ -10877,10 +10877,13 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             label.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("frill", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("fin", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("whisker", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("antenna", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("mandible", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("branch", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("vine", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("carapace", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("spinefin", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
             label.Contains("paw", StringComparison.OrdinalIgnoreCase));
@@ -10892,10 +10895,13 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         region.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("frill", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("fin", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("whisker", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("antenna", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("mandible", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("branch", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("vine", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("carapace", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("spinefin", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
         region.Contains("paw", StringComparison.OrdinalIgnoreCase);
@@ -22776,6 +22782,7 @@ internal sealed class LocalExportService(
                                             loweredSignalText.Contains("pinion", StringComparison.Ordinal));
         AddSliderIfMatched("FinSpread", SignalMatchesSemanticAlias(loweredSignalText, "fin"));
         AddSliderIfMatched("FrillWidth", SignalMatchesSemanticAlias(loweredSignalText, "frill"));
+        AddSliderIfMatched("WhiskerLength", loweredSignalText.Contains("whisker", StringComparison.Ordinal));
         AddSliderIfMatched("ManeLength", SignalMatchesSemanticAlias(loweredSignalText, "mane"));
         AddSliderIfMatched("BranchSpread", SignalMatchesSemanticAlias(loweredSignalText, "branch"));
         AddSliderIfMatched("AbdomenLength", loweredSignalText.Contains("abdomen", StringComparison.Ordinal) ||

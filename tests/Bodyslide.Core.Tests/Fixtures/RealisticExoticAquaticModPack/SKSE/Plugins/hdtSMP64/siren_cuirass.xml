@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="SirenCuirassPhysics">
+  <bone name="TailFin" />
+  <bone name="PectoralFinMid.L" />
+  <bone name="PectoralFinMid.R" />
+  <bone name="WhiskerTip.L" />
+  <bone name="WhiskerTip.R" />
+  <bone name="FrillTip.L" />
+  <bone name="FrillTip.R" />
+</system>

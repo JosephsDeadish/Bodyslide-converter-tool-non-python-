@@ -488,8 +488,10 @@
         "MandibleTip.R": ["Mandible.R", "NPC Head", "NPC Neck"],
         "CarapaceWing.L": ["Wing.L", "LeftWing", "NPC L Clavicle"],
         "CarapaceWing.R": ["Wing.R", "RightWing", "NPC R Clavicle"],
-        "CarapaceWingTip.L": ["CarapaceWing.L", "Wing.L", "LeftWing", "NPC L Clavicle"],
-        "CarapaceWingTip.R": ["CarapaceWing.R", "Wing.R", "RightWing", "NPC R Clavicle"]
+        "CarapaceWingMid.L": ["CarapaceWing.L", "Wing.L", "LeftWing", "NPC L Clavicle"],
+        "CarapaceWingMid.R": ["CarapaceWing.R", "Wing.R", "RightWing", "NPC R Clavicle"],
+        "CarapaceWingTip.L": ["CarapaceWingMid.L", "CarapaceWing.L", "Wing.L", "LeftWing", "NPC L Clavicle"],
+        "CarapaceWingTip.R": ["CarapaceWingMid.R", "CarapaceWing.R", "Wing.R", "RightWing", "NPC R Clavicle"]
       }
     },
     {
@@ -520,18 +522,24 @@
         "Fin.DorsalTip": ["Fin.Dorsal", "NPC Spine2", "NPC Spine1", "NPC Spine"],
         "PectoralFin.L": ["NPC L Clavicle", "NPC L UpperArm", "Wing.L", "LeftWing"],
         "PectoralFin.R": ["NPC R Clavicle", "NPC R UpperArm", "Wing.R", "RightWing"],
+        "PectoralFinMid.L": ["PectoralFin.L", "NPC L Clavicle", "NPC L UpperArm", "Wing.L"],
+        "PectoralFinMid.R": ["PectoralFin.R", "NPC R Clavicle", "NPC R UpperArm", "Wing.R"],
         "PectoralFinTip.L": ["PectoralFin.L", "NPC L Clavicle", "NPC L UpperArm", "Wing.L"],
         "PectoralFinTip.R": ["PectoralFin.R", "NPC R Clavicle", "NPC R UpperArm", "Wing.R"],
         "VentralFin.L": ["NPC L Thigh", "NPC Pelvis", "Tail2"],
         "VentralFin.R": ["NPC R Thigh", "NPC Pelvis", "Tail2"],
         "Whisker.L": ["NPC Head", "NPC Neck"],
         "Whisker.R": ["NPC Head", "NPC Neck"],
+        "WhiskerMid.L": ["Whisker.L", "NPC Head", "NPC Neck"],
+        "WhiskerMid.R": ["Whisker.R", "NPC Head", "NPC Neck"],
         "WhiskerTip.L": ["Whisker.L", "NPC Head", "NPC Neck"],
         "WhiskerTip.R": ["Whisker.R", "NPC Head", "NPC Neck"],
         "Frill.L": ["Whisker.L", "NPC Head", "NPC Neck"],
         "Frill.R": ["Whisker.R", "NPC Head", "NPC Neck"],
-        "FrillTip.L": ["Frill.L", "Whisker.L", "NPC Head", "NPC Neck"],
-        "FrillTip.R": ["Frill.R", "Whisker.R", "NPC Head", "NPC Neck"]
+        "FrillMid.L": ["Frill.L", "Whisker.L", "NPC Head", "NPC Neck"],
+        "FrillMid.R": ["Frill.R", "Whisker.R", "NPC Head", "NPC Neck"],
+        "FrillTip.L": ["FrillMid.L", "Frill.L", "Whisker.L", "NPC Head", "NPC Neck"],
+        "FrillTip.R": ["FrillMid.R", "Frill.R", "Whisker.R", "NPC Head", "NPC Neck"]
       }
     },
     {
