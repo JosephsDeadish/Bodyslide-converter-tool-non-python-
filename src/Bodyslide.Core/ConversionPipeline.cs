@@ -10313,16 +10313,29 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         DeformationCage? deformationCage)
     {
         var regionDamping = BuildIslandAwareRegionDamping(field.Keys, deformationCage);
-        if (field.Count == 0 || regionDamping.Count == 0)
+        var piecewiseDamping = BuildPiecewiseReconstructionDamping(field.Keys, deformationCage);
+        if (field.Count == 0 || (regionDamping.Count == 0 && piecewiseDamping.Count == 0))
         {
             return field;
         }
 
         return field.ToDictionary(
             pair => pair.Key,
-            pair => regionDamping.TryGetValue(pair.Key, out var damping)
-                ? 1d + ((pair.Value - 1d) * damping)
-                : pair.Value,
+            pair =>
+            {
+                var damping = regionDamping.TryGetValue(pair.Key, out var regional)
+                    ? regional
+                    : 1d;
+                if (Math.Abs(pair.Value - 1d) >= 0.18d &&
+                    piecewiseDamping.TryGetValue(pair.Key, out var piecewise))
+                {
+                    damping = Math.Min(damping, piecewise);
+                }
+
+                return damping < 1d
+                    ? 1d + ((pair.Value - 1d) * damping)
+                    : pair.Value;
+            },
             StringComparer.OrdinalIgnoreCase);
     }
 
@@ -10337,7 +10350,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         }
 
         var regionDamping = BuildIslandAwareRegionDamping(updatedField.Keys, deformationCage);
-        if (regionDamping.Count == 0)
+        var piecewiseDamping = BuildPiecewiseReconstructionDamping(updatedField.Keys, deformationCage);
+        if (regionDamping.Count == 0 && piecewiseDamping.Count == 0)
         {
             return updatedField;
         }
@@ -10348,10 +10362,17 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             {
                 if (!regionDamping.TryGetValue(pair.Key, out var damping))
                 {
-                    return pair.Value;
+                    damping = 1d;
                 }
 
                 var previous = previousField.GetValueOrDefault(pair.Key, 1d);
+                if (Math.Abs(pair.Value - previous) >= 0.08d &&
+                    Math.Abs(pair.Value - 1d) >= 0.18d &&
+                    piecewiseDamping.TryGetValue(pair.Key, out var piecewise))
+                {
+                    damping = Math.Min(damping, piecewise);
+                }
+
                 return Math.Round(previous + ((pair.Value - previous) * damping), 6);
             },
             StringComparer.OrdinalIgnoreCase);
@@ -10417,6 +10438,95 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 (islandControl.WidthScaleBias + islandControl.DepthScaleBias + islandControl.HeightScaleBias) / 3d);
             damping = Math.Clamp(damping, 0.78d, 1d);
 
+            foreach (var region in islandControl.CageRegions)
+            {
+                if (!targetRegions.Contains(region))
+                {
+                    continue;
+                }
+
+                regionDamping[region] = regionDamping.TryGetValue(region, out var existing)
+                    ? Math.Min(existing, damping)
+                    : damping;
+            }
+        }
+
+        return regionDamping;
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildPiecewiseReconstructionDamping(
+        IEnumerable<string> regions,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var targetRegions = regions
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (targetRegions.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var regionDamping = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var islandControl in islandControls)
+        {
+            if (islandControl.CageRegions.Count == 0)
+            {
+                continue;
+            }
+
+            var damping = 1d;
+            if (islandControl.SemanticLabels is { Count: > 0 } labels)
+            {
+                if (labels.Contains("window-frame-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.72d);
+                }
+
+                if (labels.Contains("bridge-strap-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.76d);
+                }
+
+                if (labels.Contains("outer-shell-island", StringComparer.OrdinalIgnoreCase) ||
+                    labels.Contains("outer-flank-island", StringComparer.OrdinalIgnoreCase))
+                {
+                    damping = Math.Min(damping, 0.82d);
+                }
+            }
+
+            if (islandControl.BoundaryLoops is { Count: > 0 } boundaryLoops)
+            {
+                damping = Math.Min(damping, 1d - Math.Min(0.16d, boundaryLoops.Count * 0.04d));
+                if (boundaryLoops.Any(static loop => loop.IsHole))
+                {
+                    damping = Math.Min(damping, 0.68d);
+                }
+            }
+
+            if (islandControl.EdgeNetworkSummary is { } edgeSummary)
+            {
+                if (edgeSummary.HasManifoldRisk)
+                {
+                    damping = Math.Min(damping, 0.70d);
+                }
+                else if (edgeSummary.InteriorEdgeCount > 0 && edgeSummary.BoundaryVertexCount > 0)
+                {
+                    damping = Math.Min(damping, 0.84d);
+                }
+            }
+
+            if (damping >= 0.999d)
+            {
+                continue;
+            }
+
+            damping = Math.Clamp(damping, 0.62d, 0.96d);
             foreach (var region in islandControl.CageRegions)
             {
                 if (!targetRegions.Contains(region))

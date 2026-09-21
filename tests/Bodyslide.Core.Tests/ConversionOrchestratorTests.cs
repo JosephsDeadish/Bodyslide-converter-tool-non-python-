@@ -3153,6 +3153,64 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_UsesPiecewiseFallbackForHighRiskIslandControls()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.46d,
+            ["waist"] = 0.70d,
+            ["arms"] = 1.22d
+        };
+        var baseCage = BasicCageGenerationService.CreatePresetCage("mixed");
+        var semanticOnlyCage = baseCage with
+        {
+            IslandControls =
+            [
+                new CageIslandControl(
+                    "armor",
+                    0,
+                    ["chest", "waist"],
+                    SemanticLabels: ["window-frame-island"],
+                    WidthScaleBias: 0.80f,
+                    DepthScaleBias: 0.84f,
+                    HeightScaleBias: 0.88f)
+            ]
+        };
+        var piecewiseCage = semanticOnlyCage with
+        {
+            IslandControls =
+            [
+                semanticOnlyCage.IslandControls![0] with
+                {
+                    BoundaryLoops =
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest", "waist"], IsHole: true)
+                    ],
+                    EdgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
+                        0,
+                        BoundaryEdgeCount: 10,
+                        InteriorEdgeCount: 8,
+                        NonManifoldEdgeCount: 1,
+                        BoundaryVertexCount: 12,
+                        MaxVertexValence: 5,
+                        IsClosedManifold: false,
+                        HasManifoldRisk: true)
+                }
+            ]
+        };
+
+        var semanticOnly = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, semanticOnlyCage]));
+        var piecewise = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [field, piecewiseCage]));
+
+        Assert.True(piecewise["chest"] < semanticOnly["chest"]);
+        Assert.True(Math.Abs(piecewise["waist"] - 1d) < Math.Abs(semanticOnly["waist"] - 1d));
+        Assert.Equal(semanticOnly["arms"], piecewise["arms"], 6);
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -21862,6 +21920,70 @@ public sealed class CorrectionFeedbackLoopTests
         var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, cacheMerged, CreateForcedIslandAwareCage()]));
 
         Assert.Equal(1.244d, result["chest"], 3);
+    }
+
+    [Fact]
+    public void ApplyIncrementalIslandAwareCageTuning_UsesPiecewiseFallbackForRiskyIslandUpdates()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIncrementalIslandAwareCageTuning", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
+
+        var previous = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.08d,
+            ["waist"] = 0.92d,
+            ["arms"] = 1.04d
+        };
+        var updated = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.34d,
+            ["waist"] = 0.72d,
+            ["arms"] = 1.20d
+        };
+        var baseCage = BasicCageGenerationService.CreatePresetCage("mixed");
+        var semanticOnlyCage = baseCage with
+        {
+            IslandControls =
+            [
+                new CageIslandControl(
+                    "armor",
+                    0,
+                    ["chest", "waist"],
+                    SemanticLabels: ["window-frame-island"],
+                    WidthScaleBias: 0.80f,
+                    DepthScaleBias: 0.84f,
+                    HeightScaleBias: 0.88f)
+            ]
+        };
+        var piecewiseCage = semanticOnlyCage with
+        {
+            IslandControls =
+            [
+                semanticOnlyCage.IslandControls![0] with
+                {
+                    BoundaryLoops =
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest", "waist"], IsHole: true)
+                    ],
+                    EdgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
+                        0,
+                        BoundaryEdgeCount: 10,
+                        InteriorEdgeCount: 8,
+                        NonManifoldEdgeCount: 1,
+                        BoundaryVertexCount: 12,
+                        MaxVertexValence: 5,
+                        IsClosedManifold: false,
+                        HasManifoldRisk: true)
+                }
+            ]
+        };
+
+        var semanticOnly = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, updated, semanticOnlyCage]));
+        var piecewise = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [previous, updated, piecewiseCage]));
+
+        Assert.True(piecewise["chest"] < semanticOnly["chest"]);
+        Assert.True(Math.Abs(piecewise["waist"] - previous["waist"]) < Math.Abs(semanticOnly["waist"] - previous["waist"]));
+        Assert.Equal(semanticOnly["arms"], piecewise["arms"], 6);
     }
 
     // Mesh conversion service that forces high regional morphing to trigger clipping.
