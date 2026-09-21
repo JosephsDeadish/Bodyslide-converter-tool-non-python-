@@ -157,7 +157,8 @@ public sealed record WeightedMesh(
     IReadOnlyList<string>? SourceSmpBones = null,
     IReadOnlyList<string>? TargetPhysicsBones = null,
     IReadOnlyList<string>? PhysicsBoneRemaps = null,
-    IReadOnlyList<string>? UnsupportedTargetPhysicsBones = null);
+    IReadOnlyList<string>? UnsupportedTargetPhysicsBones = null,
+    DeformationCage? DeformationCage = null);
 /// <param name="SliderCount">Number of BodySlide sliders generated for the target body (0 = unknown).</param>
 /// <param name="SourceBodyMatchRatio">Confidence ratio [0,1] that the source mesh vertex topology matched the detected source body signature.</param>
 public sealed record SourceMorphQualityMetrics(
@@ -11299,7 +11300,8 @@ internal sealed class BasicWeightTransferService : IWeightTransferService
             smpBones,
             targetPhysBones,
             physicsBoneRemaps,
-            unsupportedTargetPhysicsBones));
+            unsupportedTargetPhysicsBones,
+            mesh.DeformationCage));
     }
 
     // Parse bone names from SMP XML physics files bundled with the source armor.
@@ -12236,7 +12238,7 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
     public Task<PartitionRebuildingResult> RebuildAsync(WeightedMesh mesh, MeshAnalysis analysis, string targetBody, CancellationToken cancellationToken)
     {
         // Select partitions based on mesh type and target body.
-        var slots = new List<int>();
+        var slots = new HashSet<int>();
 
         if (analysis.IsFootwear)
         {
@@ -12301,20 +12303,76 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
             slots.Add(56); // Genitals
         }
 
+        foreach (var routedSlot in DeriveIslandRoutedSlots(mesh.DeformationCage, analysis))
+        {
+            slots.Add(routedSlot);
+        }
+
         var partitionLabels = slots
-            .Distinct()
             .Where(PartitionSlots.ContainsKey)
             .Select(s => $"{s}:{PartitionSlots[s]}")
             .ToList();
 
         // Report any slots that cannot be mapped to valid partition names as removed.
         var removedSlots = slots
-            .Distinct()
             .Where(s => !PartitionSlots.ContainsKey(s))
             .Select(s => s.ToString())
             .ToList();
 
         return Task.FromResult(new PartitionRebuildingResult(true, partitionLabels, removedSlots));
+    }
+
+    private static IReadOnlyList<int> DeriveIslandRoutedSlots(DeformationCage? deformationCage, MeshAnalysis analysis)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return [];
+        }
+
+        var slots = new HashSet<int>();
+        foreach (var islandControl in islandControls)
+        {
+            var regionSet = islandControl.CageRegions
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var semanticSet = islandControl.SemanticLabels
+                ?.Where(static label => !string.IsNullOrWhiteSpace(label))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                ?? [];
+
+            if (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
+                semanticSet.Contains("upper-lateral-island") || semanticSet.Contains("bridge-strap-island"))
+            {
+                slots.Add(33);
+            }
+
+            if (regionSet.Contains("feet"))
+            {
+                slots.Add(37);
+            }
+
+            if (regionSet.Contains("calves") || regionSet.Contains("legs") || regionSet.Contains("thighs") ||
+                semanticSet.Contains("lower-lateral-island") || semanticSet.Contains("lower-core-island"))
+            {
+                slots.Add(38);
+            }
+
+            if (regionSet.Contains("chest") || regionSet.Contains("breasts") || regionSet.Contains("waist") ||
+                regionSet.Contains("belly") || regionSet.Contains("pelvis") || regionSet.Contains("butt") ||
+                semanticSet.Contains("core-panel-island") || semanticSet.Contains("window-frame-island"))
+            {
+                slots.Add(32);
+            }
+        }
+
+        if (!analysis.IsFootwear &&
+            slots.Contains(37) &&
+            (slots.Contains(32) || slots.Contains(33)))
+        {
+            slots.Add(38);
+        }
+
+        return slots.OrderBy(static slot => slot).ToArray();
     }
 }
 

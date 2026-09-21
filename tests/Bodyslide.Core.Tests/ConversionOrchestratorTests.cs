@@ -17990,6 +17990,44 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public async Task BasicPartitionRebuildingService_UsesIslandCageRegionsToAugmentSlots()
+    {
+        var mesh = new WeightedMesh(
+            "cloth",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "smooth-adaptive-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "split_window_skirt",
+                        IslandId: 0,
+                        CageRegions: ["chest", "waist"],
+                        SemanticLabels: ["window-frame-island"]),
+                    new CageIslandControl(
+                        MeshKey: "split_window_skirt",
+                        IslandId: 1,
+                        CageRegions: ["thighs", "calves"],
+                        SemanticLabels: ["lower-lateral-island"]),
+                    new CageIslandControl(
+                        MeshKey: "split_window_skirt",
+                        IslandId: 2,
+                        CageRegions: ["arms"],
+                        SemanticLabels: ["bridge-strap-island"])
+                ]));
+        var analysis = new MeshAnalysis("cloth", false, 1, HasSplitMeshes: true);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.Contains("32:Body", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("33:Hands", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("38:Calves", result.Partitions, StringComparer.Ordinal);
+    }
+
+    [Fact]
     public void BuildPartitionSignalReport_FlagsCoarseRoutingForComplexTopology()
     {
         var method = typeof(LocalExportService).GetMethod("BuildPartitionSignalReport", BindingFlags.NonPublic | BindingFlags.Static);
@@ -18032,8 +18070,11 @@ public sealed class ConversionReadmeGeneratorTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
 
             Assert.True(result.Success);
+            var partitionsStep = Assert.Single(result.Steps, step => step.StartsWith("partitions:", StringComparison.Ordinal));
+            Assert.Contains("32:Body", partitionsStep, StringComparison.Ordinal);
+            Assert.Contains("38:Calves", partitionsStep, StringComparison.Ordinal);
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
-            Assert.Contains("\"Code\": \"topology-partition-review\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"topology-partition-review\"", qualityJson, StringComparison.Ordinal);
         }
         finally
         {
