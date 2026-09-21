@@ -24261,6 +24261,8 @@ internal sealed class LocalExportService(
             int IslandId,
             int VertexCount,
             MeshVertex Centroid,
+            IReadOnlyList<int> VertexIndexes,
+            IReadOnlyDictionary<int, int> LocalOrderByVertex,
             IReadOnlyList<int> BoundaryVertexIndexes,
             IReadOnlyList<MorphTransferIslandAdjacencySummary> AdjacentIslands,
             float BoundaryCoverage,
@@ -24495,7 +24497,7 @@ internal sealed class LocalExportService(
             var deltas = new (float X, float Y, float Z)[vertexCount];
             for (var index = 0; index < vertexCount; index++)
             {
-                deltas[index] = ComputeMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing);
+                deltas[index] = ComputeSyntheticMorphDelta(sliderName, index, vertexCount, isHighWeight, regionalMorphing, morphTransferContext);
             }
 
             return deltas;
@@ -24582,7 +24584,7 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
-                var synthetic = ComputeMorphDelta(sliderName, targetIndex, blended.Length, isHighWeight, regionalMorphing);
+                var synthetic = ComputeSyntheticMorphDelta(sliderName, targetIndex, blended.Length, isHighWeight, regionalMorphing, morphTransferContext);
                 var current = blended[targetIndex];
                 blended[targetIndex] = (
                     Lerp(current.X, synthetic.X, blendWeight),
@@ -24747,6 +24749,93 @@ internal sealed class LocalExportService(
             blendWeight += MathF.Min(0.10f, (1f - decision.EdgeDrivenDamping) * 0.18f);
             var maxBlend = decision.PreferredSourceIsland < 0 ? 0.76f : 0.66f;
             return Math.Clamp(blendWeight, 0f, maxBlend);
+        }
+
+        private static (float X, float Y, float Z) ComputeSyntheticMorphDelta(
+            string sliderName,
+            int vertexIndex,
+            int vertexCount,
+            bool isHighWeight,
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (TryComputeIslandOwnedSyntheticMorphDelta(
+                    sliderName,
+                    vertexIndex,
+                    isHighWeight,
+                    regionalMorphing,
+                    morphTransferContext,
+                    out var islandOwned))
+            {
+                return islandOwned;
+            }
+
+            return ComputeMorphDelta(sliderName, vertexIndex, vertexCount, isHighWeight, regionalMorphing);
+        }
+
+        private static bool TryComputeIslandOwnedSyntheticMorphDelta(
+            string sliderName,
+            int targetIndex,
+            bool isHighWeight,
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            MorphTransferContext? morphTransferContext,
+            out (float X, float Y, float Z) delta)
+        {
+            delta = default;
+            if (morphTransferContext?.DecisionCache is not { TargetIslandProfiles.Count: > 0 } decisionCache ||
+                targetIndex < 0 ||
+                targetIndex >= morphTransferContext.TargetTransferIslands.Length)
+            {
+                return false;
+            }
+
+            var targetIsland = morphTransferContext.TargetTransferIslands[targetIndex];
+            if (targetIsland < 0 ||
+                !decisionCache.TargetIslandProfiles.TryGetValue(targetIsland, out var islandProfile) ||
+                islandProfile.VertexIndexes.Count == 0 ||
+                !islandProfile.LocalOrderByVertex.TryGetValue(targetIndex, out var localOrder))
+            {
+                return false;
+            }
+
+            var morphFactor = ResolveSliderMorphFactor(sliderName, regionalMorphing);
+            var normalizedDelta = Math.Clamp(morphFactor - 1d, -0.4d, 0.4d);
+            var adaptiveScale = 0.0012f + (float)Math.Abs(normalizedDelta) * 0.0042f;
+            var weightScale = isHighWeight ? 1.35f : 0.85f;
+            var hash = StableHash(sliderName);
+            var localPhase = islandProfile.VertexIndexes.Count <= 1
+                ? 0f
+                : localOrder / (float)(islandProfile.VertexIndexes.Count - 1);
+            var waveA = MathF.Sin(((localPhase * 6.2831855f) * (1f + ((hash & 7) * 0.07f))) + ((hash & 31) * 0.043f));
+            var waveB = MathF.Cos(((localPhase * 6.2831855f) * (0.8f + (((hash >> 5) & 7) * 0.06f))) + ((hash & 63) * 0.029f));
+            var localCenterBias = localPhase - 0.5f;
+
+            var normalizedTargetVertices = decisionCache.NormalizedTargetVertices;
+            var vertex = targetIndex < normalizedTargetVertices.Count
+                ? normalizedTargetVertices[targetIndex]
+                : islandProfile.Centroid;
+            var centroid = islandProfile.Centroid;
+            var localXBias = Math.Clamp((vertex.X - centroid.X) * 2f, -1f, 1f);
+            var localYBias = Math.Clamp((vertex.Y - centroid.Y) * 2f, -1f, 1f);
+            var localZBias = Math.Clamp((vertex.Z - centroid.Z) * 2f, -1f, 1f);
+
+            var x = adaptiveScale * weightScale * ((0.58f * waveA) + (localXBias * 0.18f));
+            var y = adaptiveScale * weightScale * ((0.42f * waveB) + (localYBias * 0.16f));
+            var z = adaptiveScale * weightScale * ((0.72f * waveA) + (0.26f * localCenterBias) + (localZBias * 0.18f));
+
+            var boundaryWeight = decisionCache.IslandDataLayer is { TargetBoundaryBlendWeights.Length: > 0 } islandDataLayer &&
+                                 targetIndex < islandDataLayer.TargetBoundaryBlendWeights.Length
+                ? islandDataLayer.TargetBoundaryBlendWeights[targetIndex]
+                : 0f;
+            var islandDecision = targetIndex < decisionCache.TargetDecisions.Count
+                ? decisionCache.TargetDecisions[targetIndex]
+                : null;
+            var ownershipDamping = Math.Clamp(
+                1f - (boundaryWeight * 0.55f) - ((islandDecision?.BoundarySensitive ?? false) ? 0.06f : 0f),
+                0.32f,
+                1f);
+            delta = (x * ownershipDamping, y * ownershipDamping, z * ownershipDamping);
+            return true;
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(
@@ -25504,6 +25593,16 @@ internal sealed class LocalExportService(
                     continue;
                 }
 
+                var vertexIndexes = group
+                    .Select(static entry => entry.Index)
+                    .OrderBy(index => normalizedVertices[index].Z)
+                    .ThenBy(index => normalizedVertices[index].X)
+                    .ThenBy(index => normalizedVertices[index].Y)
+                    .ThenBy(static index => index)
+                    .ToArray();
+                var localOrderByVertex = vertexIndexes
+                    .Select(static (index, localOrder) => (index, localOrder))
+                    .ToDictionary(static pair => pair.index, static pair => pair.localOrder);
                 var boundaryVertexIndexes = edgeNetworks is not null &&
                                             edgeNetworks.TryGetValue(group.Key, out var edgeNetwork)
                     ? edgeNetwork.BoundaryVertexIndexes
@@ -25528,6 +25627,8 @@ internal sealed class LocalExportService(
                     group.Key,
                     summary.VertexCount,
                     summary.Centroid,
+                    vertexIndexes,
+                    localOrderByVertex,
                     boundaryVertexIndexes,
                     adjacencyByIsland.TryGetValue(group.Key, out var adjacent)
                         ? adjacent

@@ -20910,6 +20910,150 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void ResolveMorphDeltas_RebuildsSyntheticDeltasPerIslandLocalOrder()
+    {
+        var resolveMethod = typeof(LocalExportService).GetMethod("ResolveMorphDeltas", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        var islandProfileType = typeof(LocalExportService).GetNestedType("MorphTransferIslandProfile", BindingFlags.NonPublic);
+        Assert.NotNull(resolveMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+        Assert.NotNull(islandProfileType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision(int targetIsland) => decisionCtor.Invoke(
+        [
+            0.50f,
+            1f,
+            1f,
+            1f,
+            0.60f,
+            0.58f,
+            targetIsland,
+            -1,
+            false
+        ]);
+
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        decisions.Add(CreateDecision(0));
+        decisions.Add(CreateDecision(0));
+        decisions.Add(CreateDecision(1));
+        decisions.Add(CreateDecision(1));
+
+        var adjacencyType = typeof(LocalExportService).GetNestedType("MorphTransferIslandAdjacencySummary", BindingFlags.NonPublic);
+        Assert.NotNull(adjacencyType);
+        var emptyAdjacency = Array.CreateInstance(adjacencyType!, 0);
+        var islandProfileCtor = islandProfileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        object CreateIslandProfile(int islandId, MeshVertex centroid, int[] vertexIndexes, Dictionary<int, int> localOrderByVertex) => islandProfileCtor.Invoke(
+        [
+            islandId,
+            vertexIndexes.Length,
+            centroid,
+            vertexIndexes,
+            localOrderByVertex,
+            Array.Empty<int>(),
+            emptyAdjacency,
+            0f,
+            1f,
+            false
+        ]);
+
+        var islandProfileDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), islandProfileType);
+        var targetIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        targetIslandProfiles.Add(0, CreateIslandProfile(0, new MeshVertex(0.5f, 0f, 0.15f), [0, 1], new Dictionary<int, int> { [0] = 0, [1] = 1 }));
+        targetIslandProfiles.Add(1, CreateIslandProfile(1, new MeshVertex(0.5f, 0f, 0.85f), [2, 3], new Dictionary<int, int> { [2] = 0, [3] = 1 }));
+        var sourceIslandProfiles = Activator.CreateInstance(islandProfileDictionaryType)!;
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var normalizedVertices = new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) };
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            normalizedVertices,
+            normalizedVertices,
+            1f,
+            1f,
+            1f,
+            decisions,
+            sourceIslandProfiles,
+            targetIslandProfiles,
+            null,
+            null
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var context = contextCtor.Invoke(
+        [
+            normalizedVertices,
+            normalizedVertices,
+            new[] { 0, 1, 2, 3 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0], [3], [2] },
+            new IReadOnlyList<int>[] { [1], [0], [3], [2] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 1), Zone(0, 1, 0, 0), Zone(0, 1, 2, 1) },
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 1), Zone(0, 1, 0, 0), Zone(0, 1, 2, 1) },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 0, 1, 1 },
+            new[] { -1, -1 },
+            new[] { 0.42f, 0.42f, 0.42f, 0.42f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            decisionCache
+        ]);
+
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breasts"] = 1.18d,
+            ["chest"] = 1.14d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            resolveMethod!.Invoke(null, ["BreastLift", true, 4, morphing, null!, context]));
+
+        Assert.Equal(4, result.Count);
+        Assert.Equal(result[0].X, result[2].X, 6);
+        Assert.Equal(result[1].X, result[3].X, 6);
+        Assert.NotEqual(Math.Round(result[0].X, 6), Math.Round(result[1].X, 6));
+    }
+
+    [Fact]
     public void StabilizeRetargetedMorphPayload_PrefersMatchingIslandBeforeCrossBoundaryNeighbors()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
