@@ -1,0 +1,11 @@
+<SliderSetInfo version="1">
+  <SliderSet name="SerpentineFramework" set="Serpentine Humanoid">
+    <OutputPath>meshes\beast\serpentine\</OutputPath>
+    <OutputFile gender="f" use="true">serpent_regalia_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">serpent_regalia_1.nif</OutputFile>
+    <Slider name="TailBase" />
+    <Slider name="TailLength" />
+    <Slider name="CoilLength" />
+    <Slider name="Belly" />
+  </SliderSet>
+</SliderSetInfo>

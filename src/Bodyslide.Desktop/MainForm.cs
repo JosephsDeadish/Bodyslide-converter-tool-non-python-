@@ -3148,6 +3148,11 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "High-risk poses", TryReadInt(root, "HighRiskPoseCount"), filePath);
                     AddReportMetric(reportName, "Missing normals", TryReadInt(root, "MissingNormalCount"), filePath);
                     AddReportMetric(reportName, "Quality warnings", TryReadArray(root, "QualityWarnings"), filePath);
+                    AddReportMetric(reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    AddReportMetric(reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
+                    AddReportMetric(reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
+                    AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    AddReportMetric(reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
                     break;
                 case "dependency-map.json":
                     AddReportMetric(reportName, "Entries", CountElements(root), filePath);
@@ -3158,7 +3163,10 @@ public sealed class MainForm : Form
                 case "skeleton-compatibility.json":
                     AddReportMetric(reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
                     AddReportMetric(reportName, "Source skeleton confidence", TryReadString(root, "SourceSkeletonConfidence"), filePath);
+                    AddReportMetric(reportName, "Source skeleton evidence", TryReadArray(root, "SourceSkeletonEvidence"), filePath);
                     AddReportMetric(reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
+                    AddReportMetric(reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonInferenceReliability"), filePath);
+                    AddReportMetric(reportName, "Source skeleton summary", TryReadString(root, "SourceSkeletonInferenceSummary"), filePath);
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
@@ -3180,6 +3188,9 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
                     AddReportMetric(reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
                     AddReportMetric(reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
+                    AddReportMetric(reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    AddReportMetric(reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
+                    AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
                     AddReportMetric(reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     AddReportMetric(reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     AddReportMetric(reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
@@ -3278,6 +3289,16 @@ public sealed class MainForm : Form
     private static string? TryReadNestedString(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
         TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
             ? TryReadString(nested, nestedPropertyName)
+            : null;
+
+    private static bool? TryReadNestedBoolValue(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadBoolValue(nested, nestedPropertyName)
+            : null;
+
+    private static string? TryReadNestedArray(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadArray(nested, nestedPropertyName)
             : null;
 
     private static int? TryReadIntValue(JsonElement element, string propertyName) =>

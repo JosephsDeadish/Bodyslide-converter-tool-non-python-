@@ -300,6 +300,7 @@ public sealed record InGameValidationReport(
     bool ManualCleanupLikely,
     bool RuntimeVerificationRequired,
     IReadOnlyList<string> Caveats,
+    TopologyCorrespondenceReport? TopologyCorrespondence,
     IReadOnlyList<InGameValidationScenario> ScenarioMatrix,
     IReadOnlyList<InGameValidationCheckpoint> Checklist);
 
@@ -997,6 +998,7 @@ public sealed record ConversionQualityReport(
     bool ManualCleanupLikely = false,
     bool RuntimeVerificationRequired = false,
     IReadOnlyList<string>? Caveats = null,
+    TopologyCorrespondenceReport? TopologyCorrespondence = null,
     double VertexCountDeltaRatio = 0,
     double? UvCoverageDeltaRatio = null,
     double? UvAspectRatioDelta = null,
@@ -1015,6 +1017,13 @@ public sealed record ConversionQualityReport(
     PartitionSignalReport? PartitionSignals = null,
     CageTopologyReport? CageTopology = null,
     IReadOnlyList<string>? SuggestedBodyProfileArtifacts = null);
+
+public sealed record TopologyCorrespondenceReport(
+    string Classification,
+    double Confidence,
+    bool HeuristicHeavy,
+    IReadOnlyList<string> Signals,
+    IReadOnlyList<string> FocusRegions);
 
 public sealed record CageTopologyReport(
     int IslandCount,
@@ -17554,6 +17563,8 @@ internal sealed class LocalExportService(
                 skeletonMapping.SourceSkeletonConfidence,
                 skeletonMapping.SourceSkeletonEvidence,
                 skeletonMapping.SourceSkeletonUsedSparseInference,
+                SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
+                SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
             }, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
@@ -18169,6 +18180,19 @@ internal sealed class LocalExportService(
                 validationSummary),
             cancellationToken);
 
+        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
+        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
+        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
+        var topologyCorrespondence = BuildTopologyCorrespondenceReport(
+            topologyMismatchRisk,
+            qualityWarnings,
+            payloadReuse,
+            cageTopology,
+            mesh.RegionalMorphing,
+            clipping,
+            voxelResult,
+            poseSimulation);
+
         var inGameValidationPath = Path.Combine(outputDirectory, "in-game-validation.json");
         var inGameValidation = BuildInGameValidationReport(
             request.TargetBody,
@@ -18179,7 +18203,8 @@ internal sealed class LocalExportService(
             skeletonMapping,
             physics,
             poseSimulation,
-            worldPhysics);
+            worldPhysics,
+            topologyCorrespondence);
         await File.WriteAllTextAsync(
             inGameValidationPath,
             JsonSerializer.Serialize(inGameValidation, new JsonSerializerOptions { WriteIndented = true }),
@@ -18195,10 +18220,6 @@ internal sealed class LocalExportService(
 
             ZipFile.CreateFromDirectory(outputDirectory, zipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
         }
-
-        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
-        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
-        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
 
         var qualityReport = new ConversionQualityReport(
             DetectedSourceBody:        detectedBody.Body,
@@ -18226,6 +18247,7 @@ internal sealed class LocalExportService(
             ManualCleanupLikely:       manualCleanupLikely,
             RuntimeVerificationRequired: runtimeVerificationRequired,
             Caveats:                   conversionCaveats,
+            TopologyCorrespondence:    topologyCorrespondence,
             VertexCountDeltaRatio:     vertexCountDeltaRatio,
             UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
             UvAspectRatioDelta:        uvAspectRatioDelta,
@@ -26881,7 +26903,8 @@ internal sealed class LocalExportService(
         SkeletonMappingResult skeletonMapping,
         PhysicsConfig physics,
         PoseSimulationResult poseSimulation,
-        WorldObjectPhysicsReport worldPhysics)
+        WorldObjectPhysicsReport worldPhysics,
+        TopologyCorrespondenceReport topologyCorrespondence)
     {
         var coreRegions = BuildInGameCoreRegions(targetBody, mesh.RegionalMorphing);
         var sensitiveRegions = BuildInGameSensitiveRegions(targetBody, skeletonMapping.UnsupportedBones);
@@ -26970,6 +26993,7 @@ internal sealed class LocalExportService(
            oralRegions,
            beastRegions,
            wingRegions,
+           topologyCorrespondence,
            manualCleanupLikely,
            skeletonMapping,
            physics,
@@ -26986,8 +27010,155 @@ internal sealed class LocalExportService(
            manualCleanupLikely,
            runtimeVerificationRequired,
            caveats,
+           topologyCorrespondence,
            scenarioMatrix,
            checklist);
+    }
+
+    private static TopologyCorrespondenceReport BuildTopologyCorrespondenceReport(
+        bool topologyMismatchRisk,
+        IReadOnlyList<string> qualityWarnings,
+        MorphPayloadReuseSummary? payloadReuse,
+        CageTopologyReport? cageTopology,
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        ClippingReport clipping,
+        VoxelCollisionResult voxelResult,
+        PoseSimulationResult poseSimulation)
+    {
+        var signals = new List<string>();
+        var penalty = 0d;
+
+        if (topologyMismatchRisk)
+        {
+            signals.Add("topology-mismatch-risk");
+            penalty += 0.32d;
+        }
+
+        if (payloadReuse?.RetargetedVariantCount > 0)
+        {
+            signals.Add($"retargeted-morph-reuse:{payloadReuse.RetargetedVariantCount}");
+            penalty += 0.10d;
+        }
+
+        if (payloadReuse?.ExtremelyAdaptedVariantCount > 0)
+        {
+            signals.Add($"extreme-topology-adaptation:{payloadReuse.ExtremelyAdaptedVariantCount}");
+            penalty += 0.22d;
+        }
+
+        if (cageTopology is not null)
+        {
+            if (cageTopology.IslandCount > 1)
+            {
+                signals.Add($"topology-islands:{cageTopology.IslandCount}");
+                penalty += Math.Min(0.08d, cageTopology.IslandCount * 0.015d);
+            }
+
+            if (cageTopology.BoundaryLoopCount > 0)
+            {
+                signals.Add($"boundary-loops:{cageTopology.BoundaryLoopCount}");
+                penalty += Math.Min(0.08d, cageTopology.BoundaryLoopCount * 0.02d);
+            }
+
+            if (cageTopology.NonManifoldEdgeCount > 0)
+            {
+                signals.Add($"non-manifold-edges:{cageTopology.NonManifoldEdgeCount}");
+                penalty += 0.08d;
+            }
+        }
+
+        foreach (var warning in qualityWarnings)
+        {
+            if (warning.Contains("hole", StringComparison.OrdinalIgnoreCase))
+            {
+                signals.Add("hole-boundary-warning");
+                penalty += 0.05d;
+            }
+            else if (warning.Contains("boundary", StringComparison.OrdinalIgnoreCase))
+            {
+                signals.Add("boundary-warning");
+                penalty += 0.05d;
+            }
+            else if (warning.Contains("uv", StringComparison.OrdinalIgnoreCase))
+            {
+                signals.Add("uv-drift-warning");
+                penalty += 0.05d;
+            }
+            else if (warning.Contains("interior", StringComparison.OrdinalIgnoreCase) ||
+                     warning.Contains("non-manifold", StringComparison.OrdinalIgnoreCase))
+            {
+                signals.Add("edge-network-warning");
+                penalty += 0.05d;
+            }
+        }
+
+        if (clipping.HasClipping || voxelResult.HasPenetrations || poseSimulation.TotalPosesAtRisk > 0)
+        {
+            signals.Add("runtime-stress-signals");
+            penalty += 0.04d;
+        }
+
+        signals = [.. signals.Distinct(StringComparer.OrdinalIgnoreCase)];
+        var confidence = Math.Max(0.15d, Math.Min(0.99d, 1d - penalty));
+        var classification = confidence < 0.60d || topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0
+            ? "heuristic-heavy"
+            : confidence < 0.82d || signals.Count >= 3
+                ? "review"
+                : "aligned";
+        var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
+
+        return new TopologyCorrespondenceReport(
+            classification,
+            Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
+            classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase),
+            signals,
+            focusRegions);
+    }
+
+    private static IReadOnlyList<string> BuildTopologyCorrespondenceFocusRegions(
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        ClippingReport clipping,
+        VoxelCollisionResult voxelResult,
+        PoseSimulationResult poseSimulation) =>
+        regionalMorphing.Keys
+            .Concat(clipping.Regions)
+            .Concat(voxelResult.AffectedRegions)
+            .Concat(poseSimulation.HighRiskRegions)
+            .Select(NormalizeInGameRegion)
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToArray();
+
+    private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping)
+    {
+        if (skeletonMapping.SourceSkeletonUsedSparseInference ||
+            skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.55d)
+        {
+            return "provisional";
+        }
+
+        if (skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.80d)
+        {
+            return "review";
+        }
+
+        return "direct";
+    }
+
+    private static string BuildSourceSkeletonInferenceSummary(SkeletonMappingResult skeletonMapping)
+    {
+        var reliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
+        return reliability switch
+        {
+            "provisional" =>
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' still relies on sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}.",
+            "review" =>
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved with limited confidence and should be reviewed against the real rig{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}.",
+            _ =>
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved through direct framework evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}."
+        };
     }
 
     private static bool IsManualCleanupLikely(
@@ -27120,6 +27291,7 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> oralRegions,
         IReadOnlyList<string> beastRegions,
         IReadOnlyList<string> wingRegions,
+        TopologyCorrespondenceReport topologyCorrespondence,
         bool manualCleanupLikely,
         SkeletonMappingResult skeletonMapping,
         PhysicsConfig physics,
@@ -27159,6 +27331,17 @@ internal sealed class LocalExportService(
                ["skeleton-compatibility.json", "preview-workbench.html", "in-game-validation.json"]));
         }
 
+        if (topologyCorrespondence.HeuristicHeavy || !topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
+        {
+            scenarios.Add(new InGameValidationScenario(
+               "Topology correspondence workbench pass",
+               topologyCorrespondence.HeuristicHeavy ? "High" : "Action",
+               $"Topology correspondence remains {topologyCorrespondence.Classification} for {targetBody}. Signals: {string.Join(", ", topologyCorrespondence.Signals.Take(4))}.",
+               ["idle", "crouch", "jump", "preview compare"],
+               topologyCorrespondence.FocusRegions.Count > 0 ? topologyCorrespondence.FocusRegions : coreRegions,
+               ["conversion-quality.json", "preview-workbench.html", "morphs.json"]));
+        }
+
         if (wingRegions.Count > 0 || targetBody.Contains("avian", StringComparison.OrdinalIgnoreCase))
         {
             scenarios.Add(new InGameValidationScenario(
@@ -27179,6 +27362,18 @@ internal sealed class LocalExportService(
                $"Equine locomotion coverage was detected for {targetBody}; verify rearing, hind-leg extension, and tail balance under live animation.",
                ["walk", "gallop", "rear", "turn in place"],
                equineRegions,
+               ["race-compatibility.json", "pose-simulation-report.json", "preview-workbench.html"]));
+        }
+
+        if (targetBody.Contains("serpentine", StringComparison.OrdinalIgnoreCase))
+        {
+            var serpentineRegions = beastRegions.Count > 0 ? beastRegions : lowerBodyRegions.Count > 0 ? lowerBodyRegions : coreRegions;
+            scenarios.Add(new InGameValidationScenario(
+               "Serpentine coil and tail sweep",
+               "Action",
+               $"Serpentine locomotion coverage was detected for {targetBody}; verify coil compression, hip-to-tail seam placement, and tail follow-through under live animation.",
+               ["idle", "turn in place", "crouch", "sprint"],
+               serpentineRegions,
                ["race-compatibility.json", "pose-simulation-report.json", "preview-workbench.html"]));
         }
 
@@ -27238,6 +27433,18 @@ internal sealed class LocalExportService(
                ["idle", "walk", "combat"],
                sensitiveRegions.Count > 0 ? sensitiveRegions : hotspotRegions,
                ["skeleton-compatibility.json", "conversion-quality.json"]));
+        }
+
+        if (skeletonMapping.SourceSkeletonUsedSparseInference ||
+           skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.75d)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Sparse skeleton confidence sweep",
+               skeletonMapping.SourceSkeletonUsedSparseInference ? "High" : "Action",
+               BuildSourceSkeletonInferenceSummary(skeletonMapping),
+               ["idle", "walk", "combat", "jump"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
+               ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"]));
         }
 
         if (manualCleanupLikely)

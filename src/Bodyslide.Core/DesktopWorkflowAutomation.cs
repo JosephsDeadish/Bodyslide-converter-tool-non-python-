@@ -194,7 +194,11 @@ internal static class DesktopWorkflowAutomation
              !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Sparse source inference", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Source skeleton reliability", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("provisional", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Heuristic-heavy topology", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Runtime verification required", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
@@ -248,6 +252,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
                     Add(metrics, reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
                     Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
+                    Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    Add(metrics, reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
+                    Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
+                    Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    Add(metrics, reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
                     Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
                     Add(metrics, reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
                     break;
@@ -256,6 +265,8 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Source skeleton confidence", TryReadString(root, "SourceSkeletonConfidence"), filePath);
                     Add(metrics, reportName, "Source skeleton evidence", TryReadArray(root, "SourceSkeletonEvidence"), filePath);
                     Add(metrics, reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
+                    Add(metrics, reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonInferenceReliability"), filePath);
+                    Add(metrics, reportName, "Source skeleton summary", TryReadString(root, "SourceSkeletonInferenceSummary"), filePath);
                     Add(metrics, reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     Add(metrics, reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     Add(metrics, reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
@@ -267,6 +278,9 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     Add(metrics, reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
                     Add(metrics, reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
+                    Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
                     Add(metrics, reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     Add(metrics, reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     Add(metrics, reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
@@ -335,6 +349,16 @@ internal static class DesktopWorkflowAutomation
     private static string? TryReadNestedString(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
         TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
             ? TryReadString(nested, nestedPropertyName)
+            : null;
+
+    private static bool? TryReadNestedBoolValue(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadBoolValue(nested, nestedPropertyName)
+            : null;
+
+    private static string? TryReadNestedArray(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadArray(nested, nestedPropertyName)
             : null;
 
     private static string? TryReadArray(JsonElement element, string propertyName) =>

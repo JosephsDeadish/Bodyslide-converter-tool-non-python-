@@ -10897,6 +10897,24 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedSerpentineBeastShapeDataPack_ResolvesCoilAndTailPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticSerpentineBeastFrameworkModPack", Path.Combine("meshes", "beast", "serpentine", "serpent_regalia_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Serpentine Humanoid", CancellationToken.None);
+
+        Assert.Contains("TailBase", resolved.Sliders);
+        Assert.Contains("TailLength", resolved.Sliders);
+        Assert.Contains("CoilLength", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedAvianBeastShapeDataPack_ResolvesWingedPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticAvianBeastFrameworkModPack", Path.Combine("meshes", "beast", "avian", "avian_regalia_0.nif"));
@@ -15354,6 +15372,77 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesTopologyCorrespondenceMetrics()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "conversion-quality.json"),
+                """
+                {
+                  "DetectedSourceBody": "CBBE",
+                  "TargetBody": "Serpentine Humanoid",
+                  "MeshType": "plate",
+                  "Strategy": "cage+shrinkwrap",
+                  "ClippingDetected": true,
+                  "TopologyMismatchRisk": true,
+                  "ManualCleanupLikely": true,
+                  "RuntimeVerificationRequired": true,
+                  "ValidationSummary": { "Status": "needs-review", "Score": 44, "HighSeverityCount": 1, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] },
+                  "TopologyCorrespondence": {
+                    "Classification": "heuristic-heavy",
+                    "Confidence": 0.42,
+                    "HeuristicHeavy": true,
+                    "Signals": ["topology-mismatch-risk", "boundary-warning"],
+                    "FocusRegions": ["belly", "tail"]
+                  }
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "in-game-validation.json"),
+                """
+                {
+                  "TargetBody": "Serpentine Humanoid",
+                  "ValidationGate": "REVIEW REQUIRED",
+                  "CoreBodyRegions": ["belly", "butt"],
+                  "SensitiveRegions": ["tail"],
+                  "ManualCleanupLikely": true,
+                  "RuntimeVerificationRequired": true,
+                  "Caveats": ["Topology remains heuristic-heavy."],
+                  "TopologyCorrespondence": {
+                    "Classification": "heuristic-heavy",
+                    "Confidence": 0.42,
+                    "HeuristicHeavy": true,
+                    "Signals": ["topology-mismatch-risk", "boundary-warning"],
+                    "FocusRegions": ["belly", "tail"]
+                  },
+                  "ScenarioMatrix": [],
+                  "Checklist": []
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Topology correspondence", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Heuristic-heavy topology", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Topology focus regions", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("tail", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");
@@ -15378,6 +15467,44 @@ public sealed class RealisticModPackFixtureTests
             var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
             Assert.Contains("TailSheath", smpXml, StringComparison.Ordinal);
             Assert.Contains("BeastKnot", smpXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticSerpentineBeastFrameworkModPack_WritesCoilFocusedArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSerpentineBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "serpentine", "serpent_regalia_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Serpentine Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "serpentine-humanoid", "serpent_regalia_0.nif")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            var qualityJsonPath = Path.Combine(outputDirectory, "conversion-quality.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            Assert.True(File.Exists(qualityJsonPath));
+
+            var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
+            Assert.Contains("Serpentine coil and tail sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("TopologyCorrespondence", inGameJson, StringComparison.OrdinalIgnoreCase);
+
+            var qualityJson = await File.ReadAllTextAsync(qualityJsonPath);
+            Assert.Contains("TopologyCorrespondence", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("FocusRegions", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -22929,8 +23056,11 @@ public sealed class OutputCompletenessTests
                 CancellationToken.None);
 
             var qualityPath = files.FirstOrDefault(f => f.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            var skeletonPath = files.FirstOrDefault(f => f.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(qualityPath);
             Assert.True(File.Exists(qualityPath));
+            Assert.NotNull(skeletonPath);
+            Assert.True(File.Exists(skeletonPath));
 
             var json = await File.ReadAllTextAsync(qualityPath!);
             Assert.Contains("CBBE", json);               // detected source body
@@ -22946,11 +23076,18 @@ public sealed class OutputCompletenessTests
             Assert.Contains("RuntimeVerificationRequired", json);
             Assert.Contains("Caveats", json);
             Assert.Contains("TopologyMismatchRisk", json);
+            Assert.Contains("TopologyCorrespondence", json);
+            Assert.Contains("Signals", json);
             Assert.Contains("VertexCountDeltaRatio", json);
             Assert.Contains("QualityWarnings", json);
             Assert.Contains("ValidationSummary", json);
             Assert.Contains("HighRiskPoseCount", json);
             Assert.Contains("MissingNormalCount", json);
+
+            var skeletonJson = await File.ReadAllTextAsync(skeletonPath!);
+            Assert.Contains("SourceSkeletonInferenceReliability", skeletonJson);
+            Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson);
+            Assert.Contains("semantic-overlap", skeletonJson);
             Assert.Contains("SourceMorphQuality", json);
             Assert.Contains("SourceAssetSupport", json);
             Assert.Contains("PayloadReuse", json);

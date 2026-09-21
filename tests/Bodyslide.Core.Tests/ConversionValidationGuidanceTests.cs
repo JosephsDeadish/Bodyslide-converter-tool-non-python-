@@ -409,6 +409,13 @@ public sealed class ConversionValidationGuidanceTests
                 "Radically different topology can still need manual Outfit Studio cleanup before release.",
                 "Generated validation guidance improves review, but it is not a substitute for real in-game/runtime checks."
             ],
+            TopologyCorrespondence: new TopologyCorrespondenceReport(
+                "heuristic-heavy",
+                0.42,
+                true,
+                ["topology-mismatch-risk"],
+                ["belly", "thighs"]),
+            ScenarioMatrix:
             [
                 new InGameValidationScenario(
                     "Oral articulation sweep",
@@ -425,6 +432,7 @@ public sealed class ConversionValidationGuidanceTests
                     ["belly", "thighs"],
                     ["pose-simulation-report.json"])
             ],
+            Checklist:
             [
                 new InGameValidationCheckpoint(
                     "Body fit smoke test",
