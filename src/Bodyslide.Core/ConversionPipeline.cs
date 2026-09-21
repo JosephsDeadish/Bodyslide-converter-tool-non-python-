@@ -19945,12 +19945,14 @@ internal sealed class LocalExportService(
             halfRangeY = region.HalfRangeY;
         }
 
-        if (vertexIndex < topologyContext.BoundaryVertexFlags.Length &&
-            topologyContext.BoundaryVertexFlags[vertexIndex])
+        var perVertexWeight = vertexIndex < topologyContext.BoundaryVertexWeights.Length
+            ? topologyContext.BoundaryVertexWeights[vertexIndex]
+            : 0f;
+        var hasBoundarySignal = (vertexIndex < topologyContext.BoundaryVertexFlags.Length &&
+                                 topologyContext.BoundaryVertexFlags[vertexIndex]) ||
+                                perVertexWeight > 0.0001f;
+        if (hasBoundarySignal)
         {
-            var perVertexWeight = vertexIndex < topologyContext.BoundaryVertexWeights.Length
-                ? topologyContext.BoundaryVertexWeights[vertexIndex]
-                : 0f;
             var edgeAmplification = ComputeIslandEdgePreservationAmplification(
                 topologyContext.EdgeNetworks,
                 componentId);
@@ -19958,8 +19960,18 @@ internal sealed class LocalExportService(
                 (topologyContext.BoundaryPreservationWeight + perVertexWeight) * (1f + edgeAmplification),
                 0f,
                 0.72f);
+            if (TopologyComponentHasHoleLoops(topologyContext, componentId))
+            {
+                boundaryPreservationWeight = Math.Clamp(
+                    boundaryPreservationWeight + 0.08f + MathF.Min(0.06f, perVertexWeight * 0.75f),
+                    0f,
+                    0.72f);
+            }
         }
     }
+
+    private static bool TopologyComponentHasHoleLoops(TopologyTransformContext topologyContext, int componentId) =>
+        topologyContext.BoundaryLoops?.Any(loop => loop.ComponentId == componentId && loop.LoopIndex > 0) == true;
 
     private static void ApplyIslandProjectionFrameRouting(
         float x,
@@ -21777,6 +21789,23 @@ internal sealed class LocalExportService(
             }
         }
 
+        var sourceHoleLoopCount = CountHoleTopologyLoops(sourceTopology);
+        var convertedHoleLoopCount = CountHoleTopologyLoops(convertedTopology);
+        if (sourceHoleLoopCount > 0 && convertedHoleLoopCount == 0)
+        {
+            topologyRisk = true;
+            warnings.Add($"hole-loop-loss:{sourceHoleLoopCount}->0");
+        }
+        else if (sourceHoleLoopCount > 0)
+        {
+            var holeLoopDeltaRatio = Math.Abs(convertedHoleLoopCount - sourceHoleLoopCount) / (double)Math.Max(1, sourceHoleLoopCount);
+            if (holeLoopDeltaRatio >= 0.40d)
+            {
+                topologyRisk = true;
+                warnings.Add($"hole-loop-drift:{sourceHoleLoopCount}->{convertedHoleLoopCount}");
+            }
+        }
+
         var sourceBoundaryCoverage = sourceTopology.VertexCount <= 0
             ? 0d
             : sourceTopology.BoundaryVertexCount / (double)sourceTopology.VertexCount;
@@ -21824,6 +21853,7 @@ internal sealed class LocalExportService(
         int IslandId,
         int VertexCount,
         int BoundaryLoopCount,
+        int HoleLoopCount,
         int BoundaryVertexCount,
         int InteriorEdgeCount,
         int NonManifoldEdgeCount,
@@ -21837,7 +21867,9 @@ internal sealed class LocalExportService(
         var convertedIslands = SummarizeTopologyVerificationIslands(convertedTopology);
         if (sourceIslands.Count < 2 || convertedIslands.Count == 0)
         {
-            return [];
+            return sourceIslands.Any(static island => island.HoleLoopCount > 0) && convertedIslands.Count == 0
+                ? ["island-hole-loss:all"]
+                : [];
         }
 
         var warnings = new List<string>();
@@ -21860,6 +21892,7 @@ internal sealed class LocalExportService(
                 warnings.Add(
                     $"island-routing-drift:s{sourceIsland.IslandId}->t{matchedConverted.Island.IslandId}," +
                     $"loops={sourceIsland.BoundaryLoopCount}->{matchedConverted.Island.BoundaryLoopCount}," +
+                    $"holes={sourceIsland.HoleLoopCount}->{matchedConverted.Island.HoleLoopCount}," +
                     $"boundary={sourceIsland.BoundaryVertexCount}->{matchedConverted.Island.BoundaryVertexCount}," +
                     $"interior={sourceIsland.InteriorEdgeCount}->{matchedConverted.Island.InteriorEdgeCount}," +
                     $"nonmanifold={sourceIsland.NonManifoldEdgeCount}->{matchedConverted.Island.NonManifoldEdgeCount}");
@@ -21882,6 +21915,12 @@ internal sealed class LocalExportService(
 
         var boundaryLoopCounts = topology.ComponentBoundaryLoopCounts ?? [];
         var boundaryVertexCounts = topology.ComponentBoundaryVertexCounts ?? [];
+        var holeLoopCounts = topology.BoundaryLoops is { Count: > 0 }
+            ? topology.BoundaryLoops
+                .Where(static loop => loop.LoopIndex > 0)
+                .GroupBy(static loop => loop.ComponentId)
+                .ToDictionary(static group => group.Key, static group => group.Count())
+            : null;
         var edgeNetworks = topology.ComponentEdgeNetworks?
             .ToDictionary(static network => network.ComponentId) ??
             new Dictionary<int, TopologyIslandEdgeNetworkSummary>();
@@ -21900,10 +21939,14 @@ internal sealed class LocalExportService(
                     : group.Count(indexed => indexed.Index >= 0 &&
                                              indexed.Index < topology.BoundaryVertexFlags.Length &&
                                              topology.BoundaryVertexFlags[indexed.Index]);
+                var holeLoopCount = holeLoopCounts is not null && holeLoopCounts.TryGetValue(group.Key, out var explicitHoleLoopCount)
+                    ? explicitHoleLoopCount
+                    : 0;
                 return new TopologyVerificationIslandSummary(
                     group.Key,
                     group.Count(),
                     boundaryLoopCount,
+                    holeLoopCount,
                     boundaryVertexCount,
                     edgeNetwork?.InteriorEdgeCount ?? 0,
                     edgeNetwork?.NonManifoldEdgeCount ?? 0,
@@ -21921,11 +21964,12 @@ internal sealed class LocalExportService(
         var boundaryPenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.BoundaryVertexCount, convertedIsland.BoundaryVertexCount, 0.40d);
         var interiorPenalty = ComputeTopologyVerificationRatioPenalty(sourceIsland.InteriorEdgeCount, convertedIsland.InteriorEdgeCount, 0.32d);
         var loopPenalty = Math.Abs(sourceIsland.BoundaryLoopCount - convertedIsland.BoundaryLoopCount) * 0.28d;
+        var holeLoopPenalty = Math.Abs(sourceIsland.HoleLoopCount - convertedIsland.HoleLoopCount) * 0.42d;
         var manifoldPenalty = sourceIsland.HasManifoldRisk == convertedIsland.HasManifoldRisk ? 0d : 0.20d;
         var nonManifoldPenalty = convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount
             ? Math.Min(0.22d, (convertedIsland.NonManifoldEdgeCount - sourceIsland.NonManifoldEdgeCount) * 0.08d)
             : Math.Abs(sourceIsland.NonManifoldEdgeCount - convertedIsland.NonManifoldEdgeCount) * 0.03d;
-        return sizePenalty + boundaryPenalty + interiorPenalty + loopPenalty + manifoldPenalty + nonManifoldPenalty;
+        return sizePenalty + boundaryPenalty + interiorPenalty + loopPenalty + holeLoopPenalty + manifoldPenalty + nonManifoldPenalty;
     }
 
     private static double ComputeTopologyVerificationRatioPenalty(int left, int right, double weight)
@@ -21944,6 +21988,12 @@ internal sealed class LocalExportService(
     {
         var boundaryLoopDelta = Math.Abs(convertedIsland.BoundaryLoopCount - sourceIsland.BoundaryLoopCount);
         if (boundaryLoopDelta >= 1 && sourceIsland.BoundaryLoopCount > 0)
+        {
+            return true;
+        }
+
+        var holeLoopDelta = Math.Abs(convertedIsland.HoleLoopCount - sourceIsland.HoleLoopCount);
+        if (holeLoopDelta >= 1 && sourceIsland.HoleLoopCount > 0)
         {
             return true;
         }
@@ -21969,6 +22019,9 @@ internal sealed class LocalExportService(
         return convertedIsland.NonManifoldEdgeCount > sourceIsland.NonManifoldEdgeCount ||
                (!sourceIsland.HasManifoldRisk && convertedIsland.HasManifoldRisk);
     }
+
+    private static int CountHoleTopologyLoops(NifGeometrySignatureReader.MeshTopologySummary topology) =>
+        topology.BoundaryLoops?.Count(static loop => loop.LoopIndex > 0) ?? 0;
 
     private static NifGeometrySignatureReader.MeshTopologySummary? TryReadBestTopologySummary(
         IReadOnlyList<string> meshFiles,

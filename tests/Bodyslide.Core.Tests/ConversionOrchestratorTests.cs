@@ -6935,6 +6935,68 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void ResolveTopologyProjectionFrame_UsesHoleLoopWeightsForInteriorOwnedVertices()
+    {
+        var buildContextMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);
+        var resolveMethod = typeof(LocalExportService).GetMethod("ResolveTopologyProjectionFrame", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildContextMethod);
+        Assert.NotNull(resolveMethod);
+
+        var rawVertices = new (float X, float Y, float Z)[]
+        {
+            (-1.0f, -1.0f, 0.0f),
+            ( 1.0f, -1.0f, 0.0f),
+            ( 1.0f,  1.0f, 0.0f),
+            (-1.0f,  1.0f, 0.0f),
+            ( 0.15f, 0.10f, 0.0f)
+        };
+        var topologySummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: rawVertices.Length,
+            ComponentIds: [0, 0, 0, 0, 0],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 4,
+            BoundaryVertexFlags: [true, true, true, true, false],
+            ComponentBoundaryLoopCounts: [2],
+            ComponentBoundaryVertexCounts: [4],
+            BoundaryLoops:
+            [
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 0, [0, 1, 2, 3], [(0, 1), (1, 2), (2, 3), (3, 0)]),
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 1, [0, 1, 2], [(0, 1), (1, 2), (2, 0)])
+            ],
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 4, 2, 0, 4, 2, false, false)
+            ]);
+
+        var context = buildContextMethod!.Invoke(null, [rawVertices, topologySummary]);
+        Assert.NotNull(context);
+
+        var parameters = new object?[]
+        {
+            context,
+            4,
+            0f,
+            0f,
+            0f,
+            1f,
+            1f,
+            1f,
+            0f,
+            0f,
+            0f,
+            0f,
+            0f,
+            0f,
+            0f
+        };
+
+        resolveMethod!.Invoke(null, parameters);
+
+        var boundaryPreservationWeight = Assert.IsType<float>(parameters[14]);
+        Assert.True(boundaryPreservationWeight > 0.12f, $"Expected hole-loop ownership to preserve interior-adjacent vertices during export, got {boundaryPreservationWeight}.");
+    }
+
+    [Fact]
     public async Task AssessTopologyEdgeMismatch_FlagsBoundaryLoopLossAndIntroducedNonManifoldEdges()
     {
         var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
@@ -6995,6 +7057,54 @@ public sealed class NifOutputAndSourceOverrideTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void AssessTopologyEdgeMismatch_FlagsHoleLoopLossWhenWindowTopologyCollapses()
+    {
+        var method = typeof(LocalExportService).GetMethod("AssessTopologyEdgeMismatch", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var sourceSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 6,
+            ComponentIds: [0, 0, 0, 0, 0, 0],
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 6,
+            BoundaryVertexFlags: [true, true, true, true, true, true],
+            ComponentBoundaryLoopCounts: [2],
+            ComponentBoundaryVertexCounts: [6],
+            BoundaryLoops:
+            [
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 0, [0, 1, 2, 3], [(0, 1), (1, 2), (2, 3), (3, 0)]),
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 1, [1, 4, 5], [(1, 4), (4, 5), (5, 1)])
+            ],
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 6, 3, 0, 6, 3, false, false)
+            ]);
+        var convertedSummary = new NifGeometrySignatureReader.MeshTopologySummary(
+            VertexCount: 6,
+            ComponentIds: [0, 0, 0, 0, 0, 0],
+            BoundaryLoopCount: 1,
+            BoundaryVertexCount: 4,
+            BoundaryVertexFlags: [true, true, true, true, false, false],
+            ComponentBoundaryLoopCounts: [1],
+            ComponentBoundaryVertexCounts: [4],
+            BoundaryLoops:
+            [
+                new NifGeometrySignatureReader.BoundaryLoopSequence(0, 0, [0, 1, 2, 3], [(0, 1), (1, 2), (2, 3), (3, 0)])
+            ],
+            ComponentEdgeNetworks:
+            [
+                new TopologyIslandEdgeNetworkSummary(0, 4, 4, 0, 4, 3, false, false)
+            ]);
+
+        var assessment = method!.Invoke(null, [sourceSummary, convertedSummary])!;
+        var topologyMismatchRisk = Assert.IsType<bool>(assessment.GetType().GetField("Item1")!.GetValue(assessment));
+        var qualityWarnings = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetField("Item2")!.GetValue(assessment));
+
+        Assert.True(topologyMismatchRisk, $"Expected topology mismatch risk but got warnings: {string.Join(" | ", qualityWarnings)}");
+        Assert.Contains(qualityWarnings, warning => warning.StartsWith("hole-loop-loss:", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
