@@ -24388,9 +24388,16 @@ internal sealed class LocalExportService(
             IReadOnlyDictionary<string, SourceMorphPayloadVariants>? reusableSourceMorphPayloads,
             MorphTransferContext? morphTransferContext)
         {
-            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out _, out _))
+            if (TryGetReusableMorphPayload(reusableSourceMorphPayloads, sliderName, isHighWeight, vertexCount, morphTransferContext, out var sourcePayload, out var wasRetargeted, out _))
             {
-                return sourcePayload.Deltas;
+                return wasRetargeted
+                    ? BlendRetargetedMorphPayloadForHardDivergence(
+                        sliderName,
+                        isHighWeight,
+                        regionalMorphing,
+                        sourcePayload.Deltas,
+                        morphTransferContext)
+                    : sourcePayload.Deltas;
             }
 
             var deltas = new (float X, float Y, float Z)[vertexCount];
@@ -24455,6 +24462,45 @@ internal sealed class LocalExportService(
             return true;
         }
 
+        private static IReadOnlyList<(float X, float Y, float Z)> BlendRetargetedMorphPayloadForHardDivergence(
+            string sliderName,
+            bool isHighWeight,
+            IReadOnlyDictionary<string, double> regionalMorphing,
+            IReadOnlyList<(float X, float Y, float Z)> retargetedDeltas,
+            MorphTransferContext? morphTransferContext)
+        {
+            if (retargetedDeltas.Count == 0 ||
+                morphTransferContext?.DecisionCache is not { TargetDecisions.Count: > 0 } decisionCache ||
+                decisionCache.TargetDecisions.Count != retargetedDeltas.Count)
+            {
+                return retargetedDeltas;
+            }
+
+            var islandBlendWeights = BuildMorphTransferIslandSyntheticBlendWeights(morphTransferContext, decisionCache);
+            var blended = retargetedDeltas.ToArray();
+            for (var targetIndex = 0; targetIndex < blended.Length; targetIndex++)
+            {
+                var decision = decisionCache.TargetDecisions[targetIndex];
+                var islandBlendWeight = decision.TargetIsland >= 0 && decision.TargetIsland < islandBlendWeights.Length
+                    ? islandBlendWeights[decision.TargetIsland]
+                    : 0f;
+                var blendWeight = ComputeMorphTransferSyntheticBlendWeight(decision, islandBlendWeight);
+                if (blendWeight <= 0.01f)
+                {
+                    continue;
+                }
+
+                var synthetic = ComputeMorphDelta(sliderName, targetIndex, blended.Length, isHighWeight, regionalMorphing);
+                var current = blended[targetIndex];
+                blended[targetIndex] = (
+                    Lerp(current.X, synthetic.X, blendWeight),
+                    Lerp(current.Y, synthetic.Y, blendWeight),
+                    Lerp(current.Z, synthetic.Z, blendWeight));
+            }
+
+            return blended;
+        }
+
         private static bool ShouldPreferSyntheticMorphFallbackForHardDivergence(
             int sourceVertexCount,
             int targetVertexCount,
@@ -24484,6 +24530,121 @@ internal sealed class LocalExportService(
 
             return severeDivergenceRatio >= 0.08d ||
                    boundarySensitiveDivergenceRatio >= 0.16d;
+        }
+
+        private static float[] BuildMorphTransferIslandSyntheticBlendWeights(
+            MorphTransferContext morphTransferContext,
+            MorphTransferDecisionCache decisionCache)
+        {
+            if (decisionCache.TargetDecisions.Count == 0)
+            {
+                return [];
+            }
+
+            var maxIslandId = decisionCache.TargetDecisions.Max(static decision => decision.TargetIsland);
+            if (maxIslandId < 0)
+            {
+                return [];
+            }
+
+            var divergenceTotals = new float[maxIslandId + 1];
+            var edgeRiskTotals = new float[maxIslandId + 1];
+            var decisionCounts = new int[maxIslandId + 1];
+            var severeDecisionCounts = new int[maxIslandId + 1];
+            var boundarySensitiveCounts = new int[maxIslandId + 1];
+            var missingSourceCounts = new int[maxIslandId + 1];
+
+            foreach (var decision in decisionCache.TargetDecisions)
+            {
+                if (decision.TargetIsland < 0 || decision.TargetIsland >= divergenceTotals.Length)
+                {
+                    continue;
+                }
+
+                divergenceTotals[decision.TargetIsland] += decision.StructuralDivergence;
+                edgeRiskTotals[decision.TargetIsland] += 1f - decision.EdgeDrivenDamping;
+                decisionCounts[decision.TargetIsland]++;
+                if (decision.StructuralDivergence >= 0.34f)
+                {
+                    severeDecisionCounts[decision.TargetIsland]++;
+                }
+
+                if (decision.BoundarySensitive)
+                {
+                    boundarySensitiveCounts[decision.TargetIsland]++;
+                }
+
+                if (decision.PreferredSourceIsland < 0)
+                {
+                    missingSourceCounts[decision.TargetIsland]++;
+                }
+            }
+
+            var weights = new float[maxIslandId + 1];
+            for (var islandId = 0; islandId < weights.Length; islandId++)
+            {
+                if (decisionCounts[islandId] == 0)
+                {
+                    continue;
+                }
+
+                var averageDivergence = divergenceTotals[islandId] / decisionCounts[islandId];
+                var averageEdgeRisk = edgeRiskTotals[islandId] / decisionCounts[islandId];
+                var severeRatio = severeDecisionCounts[islandId] / (float)decisionCounts[islandId];
+                var boundaryRatio = boundarySensitiveCounts[islandId] / (float)decisionCounts[islandId];
+                var missingSourceRatio = missingSourceCounts[islandId] / (float)decisionCounts[islandId];
+
+                var blendWeight = 0f;
+                if (averageDivergence >= 0.24f)
+                {
+                    blendWeight = MathF.Max(blendWeight, MathF.Min(0.42f, (averageDivergence - 0.24f) * 1.35f));
+                }
+
+                if (severeRatio >= 0.30f)
+                {
+                    blendWeight = MathF.Max(blendWeight, MathF.Min(0.56f, severeRatio * 0.48f));
+                }
+
+                if (boundaryRatio >= 0.40f && averageDivergence >= 0.26f)
+                {
+                    blendWeight += 0.06f;
+                }
+
+                if (missingSourceRatio > 0f)
+                {
+                    blendWeight = MathF.Max(blendWeight, 0.44f + MathF.Min(0.20f, missingSourceRatio * 0.24f));
+                }
+
+                blendWeight += MathF.Min(0.08f, averageEdgeRisk * 0.16f);
+                weights[islandId] = Math.Clamp(blendWeight, 0f, 0.68f);
+            }
+
+            return weights;
+        }
+
+        private static float ComputeMorphTransferSyntheticBlendWeight(
+            MorphTransferTargetDecision decision,
+            float islandBlendWeight)
+        {
+            var blendWeight = islandBlendWeight;
+            if (decision.StructuralDivergence >= 0.30f)
+            {
+                blendWeight = MathF.Max(blendWeight, MathF.Min(0.60f, (decision.StructuralDivergence - 0.24f) * 1.30f));
+            }
+
+            if (decision.PreferredSourceIsland < 0)
+            {
+                blendWeight = MathF.Max(blendWeight, 0.52f);
+            }
+
+            if (decision.BoundarySensitive && decision.StructuralDivergence >= 0.22f)
+            {
+                blendWeight += 0.06f;
+            }
+
+            blendWeight += MathF.Min(0.10f, (1f - decision.EdgeDrivenDamping) * 0.18f);
+            var maxBlend = decision.PreferredSourceIsland < 0 ? 0.76f : 0.66f;
+            return Math.Clamp(blendWeight, 0f, maxBlend);
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> RetargetMorphPayload(

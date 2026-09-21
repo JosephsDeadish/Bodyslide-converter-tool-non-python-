@@ -20714,6 +20714,127 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BlendRetargetedMorphPayloadForHardDivergence_RebuildsOnlyDivergentIslands()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("BlendRetargetedMorphPayloadForHardDivergence", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision(float divergence, float edgeDamping, int targetIsland, int preferredSourceIsland, bool boundarySensitive) => decisionCtor.Invoke(
+        [
+            0.50f,
+            1f,
+            1f,
+            1f,
+            edgeDamping,
+            divergence,
+            targetIsland,
+            preferredSourceIsland,
+            boundarySensitive
+        ]);
+
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        decisions.Add(CreateDecision(0.10f, 1f, 0, 0, false));
+        decisions.Add(CreateDecision(0.12f, 1f, 0, 0, false));
+        decisions.Add(CreateDecision(0.58f, 0.62f, 1, -1, true));
+        decisions.Add(CreateDecision(0.52f, 0.66f, 1, -1, true));
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6);
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
+            1f,
+            1f,
+            1f,
+            decisions
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var contextArgs = new object?[]
+        {
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
+            new[] { 0, 1, 2, 3 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0], [3], [2] },
+            new IReadOnlyList<int>[] { [1], [0], [3], [2] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 1), Zone(0, 1, 0, 3), Zone(0, 1, 2, 4) },
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 1), Zone(0, 1, 0, 3), Zone(0, 1, 2, 4) },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, 0, 1, 1 },
+            new[] { 0, -1 },
+            new[] { 0f, 0f, 0.42f, 0.40f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            decisionCache
+        };
+
+        var context = contextCtor.Invoke(contextArgs);
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (0.20f, 0f, 0f),
+            (0.20f, 0f, 0f),
+            (0.20f, 0f, 0f),
+            (0.20f, 0f, 0f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breasts"] = 1.18d,
+            ["chest"] = 1.14d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            blendMethod!.Invoke(null, ["BreastLift", true, morphing, retargeted, context]));
+
+        Assert.Equal(4, result.Count);
+        Assert.True(result[0].X > 0.16f);
+        Assert.True(result[1].X > 0.16f);
+        Assert.True(result[2].X < 0.12f, $"Expected divergent island vertices to blend strongly toward piecewise synthetic reconstruction, got {result[2].X}.");
+        Assert.True(result[3].X < 0.12f, $"Expected divergent island vertices to blend strongly toward piecewise synthetic reconstruction, got {result[3].X}.");
+    }
+
+    [Fact]
     public void StabilizeRetargetedMorphPayload_PrefersMatchingIslandBeforeCrossBoundaryNeighbors()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
