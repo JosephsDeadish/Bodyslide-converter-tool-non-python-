@@ -7764,6 +7764,32 @@ public sealed class NifOutputAndSourceOverrideTests
     }
 
     [Fact]
+    public void ComputeCageProjectionScales_PrefersIslandRoutedRegionBeyondShrinkwrapAndPushOut()
+    {
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(scaleMethod);
+
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pelvis"] = new(0.72f, 0.24f, 0.52f, 0.90f, 0.50f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f),
+            ["arms"] = new(0.82f, 0.22f, 0.92f, 0.18f, 0.50f, 1.00f, 1.00f, 0.00f, 0.00f, 0.00f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pelvis"] = 1.44d,
+            ["arms"] = 0.82d
+        };
+        var cage = new DeformationCage("routing-scales", cageRegions);
+        var islandControl = new CageIslandControl("routing-scales_0", 0, ["pelvis", "arms"]);
+
+        var scales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(
+            null,
+            [0.80f, 0.92f, 0.50f, morphing, cage, islandControl, null])!;
+
+        Assert.True(scales.WidthScale < 1.00d, $"Expected routed cage scaling to prefer the island-mapped arm region instead of blending back toward pelvis expansion. widthScale={scales.WidthScale:F4}");
+    }
+
+    [Fact]
     public void RebuildStageShrinkwrap_RoutesByIslandRegionDuringTransform()
     {
         var buildTopologyMethod = typeof(LocalExportService).GetMethod("BuildTopologyTransformContext", BindingFlags.NonPublic | BindingFlags.Static);

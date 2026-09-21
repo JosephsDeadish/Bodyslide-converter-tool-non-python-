@@ -19169,6 +19169,26 @@ internal sealed class LocalExportService(
             activeRegions = regions;
         }
 
+        if (authoredRegions is not { Length: > 0 } &&
+            preferredRegionNames is { Count: > 1 })
+        {
+            var routedRegion = ResolveTopologyDrivenDeformationRegion(
+                normalizedHeight,
+                regionalMorphing,
+                islandControl,
+                boundaryLoopControl);
+            if (!string.IsNullOrWhiteSpace(routedRegion))
+            {
+                var routedRegions = activeRegions
+                    .Where(pair => pair.Key.Equals(routedRegion, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (routedRegions.Length > 0)
+                {
+                    activeRegions = routedRegions;
+                }
+            }
+        }
+
         double widthTotal = 0;
         double depthTotal = 0;
         double heightTotal = 0;
