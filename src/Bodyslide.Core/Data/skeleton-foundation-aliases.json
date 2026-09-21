@@ -93,5 +93,23 @@
       "Avian Humanoid",
       "Winged Follower"
     ]
+  },
+  {
+    "canonical": "insectoid-humanoid",
+    "aliases": [
+      "Insectoid Humanoid",
+      "Insectoid chitin-wing skeleton",
+      "Arachne Humanoid",
+      "Hive Follower"
+    ]
+  },
+  {
+    "canonical": "aquatic-humanoid",
+    "aliases": [
+      "Aquatic Humanoid",
+      "Aquatic fin-tail skeleton",
+      "Siren Humanoid",
+      "Merrow Follower"
+    ]
   }
 ]

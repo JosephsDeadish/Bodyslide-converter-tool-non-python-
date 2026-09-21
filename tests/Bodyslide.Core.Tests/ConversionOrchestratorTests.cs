@@ -21833,6 +21833,11 @@ public sealed class OutputCompletenessTests
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"unknown-target-body-support\"", qualityJson);
             Assert.Contains("without target-specific metadata", qualityJson, StringComparison.OrdinalIgnoreCase);
+            var templatePath = Path.Combine(outputDir, "target-body-template.slidesmith-body.json");
+            Assert.True(File.Exists(templatePath));
+            var templateJson = await File.ReadAllTextAsync(templatePath);
+            Assert.Contains("\"name\": \"CustomMystery\"", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"sliderNames\": [", templateJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -21898,6 +21903,62 @@ public sealed class OutputCompletenessTests
             Assert.Contains("referenceTokens", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("sliderNames", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("skeletonFoundation/skeletonFramework", qualityJson, StringComparison.OrdinalIgnoreCase);
+            var templatePath = Path.Combine(outputDir, "target-body-template.slidesmith-body.json");
+            Assert.True(File.Exists(templatePath));
+            var templateJson = await File.ReadAllTextAsync(templatePath);
+            Assert.Contains("\"name\": \"MyFollower\"", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"bodyOutputPath\":", templateJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CustomDetection_WritesDetectedSourceStarterTemplate()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "mantis_shell_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp", SmpConfigXml: "<system><bone name=\"Antenna.L\" /><bone name=\"Mandible.L\" /></system>");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("MantisShell", "CBBE", ["Belly", "Shoulders"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]);
+            var skel = new SkeletonMappingResult("insectoid-humanoid", "xpmsse", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var templatePath = Path.Combine(outputDir, "detected-source-body-template.slidesmith-body.json");
+            Assert.True(File.Exists(templatePath));
+            var templateJson = await File.ReadAllTextAsync(templatePath);
+            Assert.Contains("\"name\": \"", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"physicsBones\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("Antenna.L", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"skeletonFramework\": \"insectoid-humanoid\"", templateJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -25467,6 +25528,21 @@ public sealed class CustomBodyProfileSupportTests
             ]);
 
         var result = await service.MapAsync(armor, "AliasTarget", CancellationToken.None);
+
+        Assert.Equal(expectedTargetSkeleton, result.TargetSkeleton);
+    }
+
+    [Theory]
+    [InlineData("Aquatic Humanoid", "aquatic-humanoid-physics")]
+    [InlineData("Insectoid Humanoid", "insectoid-humanoid-physics")]
+    public async Task BasicSkeletonMappingService_TargetSkeletonLabel_UsesNewBuiltInFrameworks(
+        string targetBody,
+        string expectedTargetSkeleton)
+    {
+        var service = new BasicSkeletonMappingService();
+        var armor = new ImportedArmor("input", [], [], [], []);
+
+        var result = await service.MapAsync(armor, targetBody, CancellationToken.None);
 
         Assert.Equal(expectedTargetSkeleton, result.TargetSkeleton);
     }

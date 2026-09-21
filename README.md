@@ -209,6 +209,8 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `skeletonFoundation`
 - `skeletonFramework`
 
+When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them.
+
 ## Output files
 
 Each successful conversion produces a **Data-relative package** in the output directory. The folder structure maps directly to Skyrim's `Data\` folder so mod managers and manual installs both work without any re-pathing:

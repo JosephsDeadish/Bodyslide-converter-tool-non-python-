@@ -7,6 +7,7 @@ using System.Numerics;
 using System.Security;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SharpCompress.Archives.SevenZip;
 using SharpCompress.Readers;
 
@@ -412,9 +413,9 @@ internal static class ConversionValidationGuidance
             "bodyslide-incompatible" =>
                 "Open conversion-quality.json, verify the target body has compatible BodySlide slider support for this outfit, and re-run with slider export disabled or with matching BodySlide OSP/TRI/BSD/reference assets before release.",
             "unknown-target-body-support" =>
-                "Add a *.slidesmith-body.json profile for the target body with referenceTokens, sliderNames, skeletonFoundation or skeletonFramework, and any required physicsBones, then re-run so detection, BodySlide export, and skeleton/physics validation use real target-body metadata.",
+                "Open target-body-template.slidesmith-body.json, fill in any missing referenceTokens, sliderNames, skeletonFoundation or skeletonFramework, and required physicsBones for the target body, then place it beside the input or pass it explicitly before re-running.",
             "incomplete-target-body-support" =>
-                "Expand the target body's *.slidesmith-body.json profile with the missing support metadata called out in conversion-quality.json, then re-run so BodySlide export, reference matching, and skeleton/physics validation stop falling back to generic assumptions.",
+                "Open target-body-template.slidesmith-body.json, merge it into the target body's existing *.slidesmith-body.json profile, and fill the missing support metadata called out in conversion-quality.json before re-running.",
             "unsupported-nif-layout" =>
                 "Open preview-workbench.html and conversion-quality.json to identify the listed mesh and any geometry-family notes, zoom into the failing piece in the preview, then re-save/export that source mesh in NifSkope or Outfit Studio using a supported Skyrim NIF layout before re-running the conversion.",
             "heuristic-nif-read" =>
@@ -568,7 +569,7 @@ internal static class ConversionValidationGuidance
             "bodyslide-incompatible" =>
                 ["conversion-quality.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
             "unknown-target-body-support" or "incomplete-target-body-support" =>
-                ["conversion-quality.json", "skeleton-compatibility.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
+                ["conversion-quality.json", "skeleton-compatibility.json", "target-body-template.slidesmith-body.json", "CalienteTools/BodySlide/SliderSets/", "CalienteTools/BodySlide/ShapeData/"],
             "unsupported-nif-layout" or "heuristic-nif-read" =>
                 ["conversion-quality.json", "preview-workbench.html"],
             "incomplete-source-fallback" =>
@@ -852,7 +853,8 @@ public sealed record ConversionQualityReport(
     IReadOnlyList<NifSupportReport>? NifSupport = null,
     PluginRewriteVerificationReport? PluginRewriteVerification = null,
     PartitionSignalReport? PartitionSignals = null,
-    CageTopologyReport? CageTopology = null);
+    CageTopologyReport? CageTopology = null,
+    IReadOnlyList<string>? SuggestedBodyProfileArtifacts = null);
 
 public sealed record CageTopologyReport(
     int IslandCount,
@@ -17128,6 +17130,41 @@ internal sealed class LocalExportService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var targetBodySupportAssessment = AssessTargetBodySupport(
+            armor,
+            request.TargetBody,
+            physics.Profile);
+        var suggestedBodyProfileArtifacts = new List<string>();
+        if (TryBuildTargetBodyProfileTemplate(
+                targetBodySupportAssessment,
+                request.TargetBody,
+                armor,
+                skeletonMapping,
+                physics,
+                bodySlideProject,
+                sourceNifSupport,
+                out var targetProfileTemplate))
+        {
+            var targetProfileTemplatePath = Path.Combine(outputDirectory, "target-body-template.slidesmith-body.json");
+            await File.WriteAllTextAsync(targetProfileTemplatePath, targetProfileTemplate, cancellationToken);
+            outputFiles.Add(targetProfileTemplatePath);
+            suggestedBodyProfileArtifacts.Add(Path.GetFileName(targetProfileTemplatePath));
+        }
+
+        if (TryBuildDetectedBodyProfileTemplate(
+                armor,
+                detectedBody,
+                skeletonMapping,
+                physics,
+                sourceNifSupport,
+                out var detectedProfileTemplate))
+        {
+            var detectedProfileTemplatePath = Path.Combine(outputDirectory, "detected-source-body-template.slidesmith-body.json");
+            await File.WriteAllTextAsync(detectedProfileTemplatePath, detectedProfileTemplate, cancellationToken);
+            outputFiles.Add(detectedProfileTemplatePath);
+            suggestedBodyProfileArtifacts.Add(Path.GetFileName(detectedProfileTemplatePath));
+        }
+
         // Generate a scratch ESP when no source plugin exists for this armor.
         // This enables the converted meshes to be installed as a new standalone mod without
         // requiring the user to create ARMO/ARMA records in xEdit manually.
@@ -17432,7 +17469,8 @@ internal sealed class LocalExportService(
             NifSupport:                nifSupport,
             PluginRewriteVerification: pluginRewriteVerification,
             PartitionSignals:          partitionSignals,
-            CageTopology:              cageTopology);
+            CageTopology:              cageTopology,
+            SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -22078,25 +22116,29 @@ internal sealed class LocalExportService(
     private static bool IsBethesdaPluginFile(string path) =>
         Path.GetExtension(path) is ".esp" or ".esm" or ".esl";
 
-    private static bool TryBuildTargetBodySupportIssue(
+    private sealed record TargetBodySupportAssessment(
+        bool HasBuiltInCoverage,
+        CustomBodyProfile? CustomProfile,
+        IReadOnlyList<string> MissingFields);
+
+    private static TargetBodySupportAssessment AssessTargetBodySupport(
         ImportedArmor armor,
         string targetBody,
-        string requestedPhysicsProfile,
-        out ConversionValidationIssue issue)
+        string requestedPhysicsProfile)
     {
-        issue = default!;
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out _))
         {
-            return false;
+            return new TargetBodySupportAssessment(true, null, []);
         }
 
         if (!CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
         {
-            issue = new ConversionValidationIssue(
-                "unknown-target-body-support",
-                "high",
-                $"Target body '{targetBody}' does not have built-in coverage or a loaded custom body profile, so reference matching, BodySlide export, and skeleton/physics validation are running without target-specific metadata.");
-            return true;
+            return new TargetBodySupportAssessment(
+                false,
+                null,
+                requestedPhysicsProfile.Equals("none", StringComparison.OrdinalIgnoreCase)
+                    ? ["referenceTokens", "sliderNames", "skeletonFoundation/skeletonFramework"]
+                    : ["referenceTokens", "sliderNames", "skeletonFoundation/skeletonFramework", "physicsBones"]);
         }
 
         var missingFields = new List<string>();
@@ -22126,19 +22168,361 @@ internal sealed class LocalExportService(
             missingFields.Add("physicsBones");
         }
 
-        if (missingFields.Count == 0)
+        return new TargetBodySupportAssessment(false, customProfile, missingFields);
+    }
+
+    private static bool TryBuildTargetBodyProfileTemplate(
+        TargetBodySupportAssessment assessment,
+        string targetBody,
+        ImportedArmor armor,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
+        BodySlideProject bodySlideProject,
+        IReadOnlyList<NifSupportReport> sourceNifSupport,
+        out string json)
+    {
+        json = string.Empty;
+        if (assessment.HasBuiltInCoverage || assessment.MissingFields.Count == 0 && assessment.CustomProfile is null)
         {
             return false;
         }
 
-        var severity = missingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
-                       missingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase)
+        var profile = assessment.CustomProfile;
+        var targetGender = BodyTypeCatalog.TryGetGender(armor, targetBody, out var resolvedTargetGender)
+            ? resolvedTargetGender
+            : "female";
+        var requestedPhysicsProfile = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedPhysicsProfile)
+            ? normalizedPhysicsProfile
+            : physics.Profile;
+        var inferredReferenceTokens = profile?.ReferenceTokens is { Count: > 0 } existingReferenceTokens
+            ? existingReferenceTokens
+            : BuildSuggestedReferenceTokens(targetBody, armor.BodyReferenceFiles, bodySlideProject.ProjectName);
+        var inferredDetectionTokens = profile?.DetectionTokens.Count > 0
+            ? profile.DetectionTokens
+            : BuildSuggestedNameTokens(targetBody, profile?.Aliases, bodySlideProject.ProjectName);
+        var inferredTextureTokens = profile?.TextureTokens.Count > 0
+            ? profile.TextureTokens
+            : inferredReferenceTokens.Take(4).ToArray();
+        var inferredPhysicsTokens = profile?.PhysicsTokens.Count > 0
+            ? profile.PhysicsTokens
+            : BuildSuggestedPhysicsTokens(requestedPhysicsProfile, physics);
+        var inferredSkeletonFoundation = !string.IsNullOrWhiteSpace(profile?.SkeletonFoundation)
+            ? profile!.SkeletonFoundation
+            : NormalizeSuggestedSkeletonFoundation(skeletonMapping.TargetSkeleton);
+        var inferredSkeletonFramework = !string.IsNullOrWhiteSpace(profile?.SkeletonFramework)
+            ? profile!.SkeletonFramework
+            : NormalizeSuggestedSkeletonFramework(skeletonMapping.TargetSkeleton);
+        var inferredPhysicsBones = profile?.PhysicsBones is { Count: > 0 }
+            ? profile.PhysicsBones
+            : ExtractSuggestedPhysicsBones(physics);
+        var inferredSliderNames = profile?.SliderNames is { Count: > 0 }
+            ? profile.SliderNames
+            : bodySlideProject.Sliders;
+        var (vertexCountMin, vertexCountMax) = GetSuggestedVertexRange(sourceNifSupport);
+        var bodyOutputPath = !string.IsNullOrWhiteSpace(profile?.BodyOutputPath)
+            ? profile!.BodyOutputPath
+            : targetGender.Equals("male", StringComparison.OrdinalIgnoreCase)
+                ? @"meshes\actors\character\character assets male\"
+                : @"meshes\actors\character\character assets\";
+
+        var template = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["name"] = profile?.Name ?? targetBody,
+            ["aliases"] = profile?.Aliases ?? [],
+            ["detectionTokens"] = inferredDetectionTokens,
+            ["textureTokens"] = inferredTextureTokens,
+            ["physicsTokens"] = inferredPhysicsTokens,
+            ["referenceTokens"] = inferredReferenceTokens,
+            ["vertexCountMin"] = vertexCountMin,
+            ["vertexCountMax"] = vertexCountMax,
+            ["sliderNames"] = inferredSliderNames,
+            ["zapSliderNames"] = profile?.ZapSliderNames,
+            ["physicsBones"] = inferredPhysicsBones,
+            ["physicsProfile"] = string.IsNullOrWhiteSpace(profile?.PhysicsProfile) ? requestedPhysicsProfile : profile!.PhysicsProfile,
+            ["gender"] = targetGender,
+            ["bodyOutputPath"] = bodyOutputPath,
+            ["skeletonFoundation"] = inferredSkeletonFoundation,
+            ["skeletonFramework"] = inferredSkeletonFramework,
+            ["transformationField"] = profile?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField(),
+            ["heightToWidthRatioMin"] = profile?.HeightToWidthRatioMin ?? 3.0,
+            ["heightToWidthRatioMax"] = profile?.HeightToWidthRatioMax ?? 8.5,
+            ["depthToWidthRatioMin"] = profile?.DepthToWidthRatioMin ?? 0.25,
+            ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? 1.20
+        };
+
+        json = JsonSerializer.Serialize(
+            template,
+            new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
+        return true;
+    }
+
+    private static bool TryBuildDetectedBodyProfileTemplate(
+        ImportedArmor armor,
+        BodyDetectionReport detectedBody,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
+        IReadOnlyList<NifSupportReport> sourceNifSupport,
+        out string json)
+    {
+        json = string.Empty;
+        var shouldSuggest = detectedBody.Body.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase) ||
+                            detectedBody.Body.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase) ||
+                            detectedBody.Confidence < 0.70d;
+        if (!shouldSuggest)
+        {
+            return false;
+        }
+
+        var suggestedName = detectedBody.Body is "CUSTOM" or "UNKNOWN"
+            ? InferSuggestedProfileName(armor.SourcePath, armor.MeshFiles)
+            : detectedBody.Body;
+        var (vertexCountMin, vertexCountMax) = GetSuggestedVertexRange(sourceNifSupport);
+        var template = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["name"] = suggestedName,
+            ["detectionTokens"] = BuildSuggestedNameTokens(suggestedName, aliases: null, Path.GetFileNameWithoutExtension(armor.SourcePath)),
+            ["textureTokens"] = BuildSuggestedReferenceTokens(suggestedName, armor.TextureFiles, null),
+            ["physicsTokens"] = BuildSuggestedPhysicsTokens(physics.Profile, physics),
+            ["referenceTokens"] = BuildSuggestedReferenceTokens(suggestedName, armor.BodyReferenceFiles, Path.GetFileNameWithoutExtension(armor.SourcePath)),
+            ["vertexCountMin"] = vertexCountMin,
+            ["vertexCountMax"] = vertexCountMax,
+            ["sliderNames"] = DefaultSlidersForSuggestedProfile(detectedBody.Body),
+            ["physicsBones"] = ExtractSuggestedPhysicsBones(physics),
+            ["physicsProfile"] = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedProfile) ? normalizedProfile : physics.Profile,
+            ["gender"] = BodyTypeCatalog.TryGetGender(detectedBody.Body, out var detectedGender) ? detectedGender : "female",
+            ["skeletonFoundation"] = NormalizeSuggestedSkeletonFoundation(skeletonMapping.SourceSkeleton),
+            ["skeletonFramework"] = NormalizeSuggestedSkeletonFramework(skeletonMapping.SourceSkeleton),
+            ["transformationField"] = BodyTransformationFieldCatalog.CreateFallbackField(),
+            ["heightToWidthRatioMin"] = 3.0,
+            ["heightToWidthRatioMax"] = 8.5,
+            ["depthToWidthRatioMin"] = 0.25,
+            ["depthToWidthRatioMax"] = 1.20
+        };
+
+        json = JsonSerializer.Serialize(
+            template,
+            new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
+        return true;
+    }
+
+    private static IReadOnlyList<string> BuildSuggestedNameTokens(
+        string bodyName,
+        IReadOnlyList<string>? aliases,
+        string? extraToken)
+    {
+        var tokens = new List<string>();
+        tokens.AddRange(ExtractSuggestedTokens(bodyName));
+        if (aliases is { Count: > 0 })
+        {
+            foreach (var alias in aliases)
+            {
+                tokens.AddRange(ExtractSuggestedTokens(alias));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(extraToken))
+        {
+            tokens.AddRange(ExtractSuggestedTokens(extraToken));
+        }
+
+        return tokens
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildSuggestedReferenceTokens(
+        string bodyName,
+        IReadOnlyList<string> sourcePaths,
+        string? extraToken)
+    {
+        var tokens = new List<string>(BuildSuggestedNameTokens(bodyName, aliases: null, extraToken));
+        foreach (var path in sourcePaths)
+        {
+            tokens.AddRange(ExtractSuggestedTokens(Path.GetFileNameWithoutExtension(path)));
+            tokens.AddRange(ExtractSuggestedTokens(Path.GetFileName(Path.GetDirectoryName(path))));
+        }
+
+        return tokens
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildSuggestedPhysicsTokens(string requestedPhysicsProfile, PhysicsConfig physics)
+    {
+        var tokens = new List<string>();
+        if (!string.IsNullOrWhiteSpace(requestedPhysicsProfile) &&
+            !requestedPhysicsProfile.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            tokens.Add(requestedPhysicsProfile);
+        }
+
+        if (!string.IsNullOrWhiteSpace(physics.CbpcConfigXml))
+        {
+            tokens.Add("cbpc");
+        }
+
+        if (!string.IsNullOrWhiteSpace(physics.SmpConfigXml))
+        {
+            tokens.Add("smp");
+        }
+
+        return tokens.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static IReadOnlyList<string> ExtractSuggestedPhysicsBones(PhysicsConfig physics)
+    {
+        var bones = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        TryCollectPhysicsBonesFromXml(physics.CbpcConfigXml, bones);
+        TryCollectPhysicsBonesFromXml(physics.SmpConfigXml, bones);
+        return bones.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static void TryCollectPhysicsBonesFromXml(string? xml, ISet<string> bones)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return;
+        }
+
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            foreach (var element in doc.Descendants())
+            {
+                if (!string.Equals(element.Name.LocalName, "bone", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var boneName = (string?)element.Attribute("name");
+                if (!string.IsNullOrWhiteSpace(boneName))
+                {
+                    bones.Add(boneName.Trim());
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort starter template generation should not fail export.
+        }
+    }
+
+    private static (int VertexCountMin, int VertexCountMax) GetSuggestedVertexRange(IReadOnlyList<NifSupportReport> sourceNifSupport)
+    {
+        var counts = sourceNifSupport
+            .Select(static report => report.VertexCount)
+            .Where(static count => count is > 0)
+            .Select(static count => count!.Value)
+            .OrderBy(static count => count)
+            .ToArray();
+        return counts.Length == 0 ? (0, 0) : (counts[0], counts[^1]);
+    }
+
+    private static string NormalizeSuggestedSkeletonFoundation(string skeletonLabel) =>
+        skeletonLabel.EndsWith("-physics", StringComparison.OrdinalIgnoreCase)
+            ? skeletonLabel[..^"-physics".Length]
+            : skeletonLabel;
+
+    private static string NormalizeSuggestedSkeletonFramework(string skeletonLabel) =>
+        NormalizeSuggestedSkeletonFoundation(skeletonLabel);
+
+    private static string InferSuggestedProfileName(string sourcePath, IReadOnlyList<string> meshFiles)
+    {
+        var folderName = Path.GetFileName(Path.GetDirectoryName(sourcePath));
+        if (!string.IsNullOrWhiteSpace(folderName))
+        {
+            return SanitizeSuggestedProfileName(folderName);
+        }
+
+        var meshName = meshFiles
+            .Select(Path.GetFileNameWithoutExtension)
+            .FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+        return string.IsNullOrWhiteSpace(meshName)
+            ? "CustomBody"
+            : SanitizeSuggestedProfileName(meshName);
+    }
+
+    private static string SanitizeSuggestedProfileName(string rawName)
+    {
+        var words = ExtractSuggestedTokens(rawName)
+            .Select(static token => char.ToUpperInvariant(token[0]) + token[1..])
+            .ToArray();
+        return words.Length == 0 ? "CustomBody" : string.Concat(words);
+    }
+
+    private static IReadOnlyList<string> ExtractSuggestedTokens(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        var tokens = raw
+            .Replace('\\', ' ')
+            .Replace('/', ' ')
+            .Replace('_', ' ')
+            .Replace('-', ' ')
+            .Split([' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static token => token.Trim().ToLowerInvariant())
+            .Where(static token => token.Length >= 3)
+            .Where(static token => token is not "mesh" and not "meshes" and not "armor" and not "outfit" and not "body" and not "bodies" and not "female" and not "male" and not "character" and not "assets")
+            .ToArray();
+        return tokens;
+    }
+
+    private static IReadOnlyList<string> DefaultSlidersForSuggestedProfile(string detectedBody) =>
+        detectedBody.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase) ||
+        detectedBody.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase)
+            ? ["Belly", "Butt", "WaistWidth", "HipWidth", "Shoulders"]
+            : BuiltInBodyMetadataCatalog.TryGet(detectedBody, out var metadata) && metadata.SliderNames.Count > 0
+                ? metadata.SliderNames
+                : ["Belly", "Butt", "WaistWidth", "HipWidth", "Shoulders"];
+
+    private static bool TryBuildTargetBodySupportIssue(
+        ImportedArmor armor,
+        string targetBody,
+        string requestedPhysicsProfile,
+        out ConversionValidationIssue issue)
+    {
+        issue = default!;
+        var assessment = AssessTargetBodySupport(armor, targetBody, requestedPhysicsProfile);
+        if (assessment.HasBuiltInCoverage)
+        {
+            return false;
+        }
+
+        if (assessment.CustomProfile is null)
+        {
+            issue = new ConversionValidationIssue(
+                "unknown-target-body-support",
+                "high",
+                $"Target body '{targetBody}' does not have built-in coverage or a loaded custom body profile, so reference matching, BodySlide export, and skeleton/physics validation are running without target-specific metadata.");
+            return true;
+        }
+
+        if (assessment.MissingFields.Count == 0)
+        {
+            return false;
+        }
+
+        var severity = assessment.MissingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase)
             ? "high"
             : "medium";
         issue = new ConversionValidationIssue(
             "incomplete-target-body-support",
             severity,
-            $"Custom target body profile '{customProfile.Name}' is missing support metadata ({string.Join(", ", missingFields)}). Conversion can proceed, but certainty stays limited until those fields are supplied.");
+            $"Custom target body profile '{assessment.CustomProfile.Name}' is missing support metadata ({string.Join(", ", assessment.MissingFields)}). Conversion can proceed, but certainty stays limited until those fields are supplied.");
         return true;
     }
 

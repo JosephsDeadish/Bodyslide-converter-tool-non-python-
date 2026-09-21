@@ -2240,5 +2240,221 @@
       "Wing.R"
     ],
     "skeletonFramework": "draconic-humanoid"
+  },
+  {
+    "name": "Insectoid Humanoid",
+    "aliases": [
+      "Arachne",
+      "Chitinfolk",
+      "Mandiblekin",
+      "Hiveborn",
+      "Carapace Humanoid",
+      "Mantisfolk",
+      "Netchitin"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Insectoid chitin-wing skeleton",
+    "notes": "Custom-race insectoid target for arachne, mantis, hiveborn, and other chitin-heavy humanoid ecosystems with abdomen, antenna, mandible, and carapace-wing anatomy. No built-in physics by default; abdomen curl, mandible seams, and antenna collision should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "AbdomenRoot",
+      "AbdomenMid",
+      "AbdomenTip",
+      "Antenna.L",
+      "Antenna.R",
+      "Mandible.L",
+      "Mandible.R",
+      "CarapaceWing.L",
+      "CarapaceWing.R"
+    ],
+    "referenceTokens": [
+      "arachne",
+      "insectoid",
+      "chitin",
+      "mantis",
+      "hive",
+      "mandible",
+      "antenna",
+      "abdomen",
+      "carapace"
+    ],
+    "sliderNames": [
+      "Belly",
+      "WaistWidth",
+      "HipWidth",
+      "Shoulders",
+      "Arms",
+      "AbdomenLength",
+      "MandibleSpread",
+      "WingSpan"
+    ],
+    "transformationField": {
+      "chest": 0.98,
+      "waist": 0.93,
+      "pelvis": 1.02,
+      "legs": 1.01,
+      "shoulders": 1.06,
+      "breasts": 0.9,
+      "butt": 0.98,
+      "belly": 1.08,
+      "arms": 1.04,
+      "thighs": 1.0,
+      "calves": 0.99
+    },
+    "detectionTokens": [
+      "arachne",
+      "insectoid",
+      "chitin",
+      "mantis",
+      "hive",
+      "mandible",
+      "antenna",
+      "abdomen",
+      "carapace"
+    ],
+    "textureTokens": [
+      "chitin",
+      "carapace",
+      "shell",
+      "mantis",
+      "insect",
+      "antenna"
+    ],
+    "physicsTokens": [
+      "abdomen",
+      "antenna",
+      "mandible",
+      "carapacewing"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7600,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 8.0,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 1.02,
+    "physicsBoneSignatures": [
+      "AbdomenRoot",
+      "AbdomenMid",
+      "AbdomenTip",
+      "Antenna.L",
+      "Antenna.R",
+      "Mandible.L",
+      "Mandible.R",
+      "CarapaceWing.L",
+      "CarapaceWing.R"
+    ],
+    "skeletonFramework": "insectoid-humanoid"
+  },
+  {
+    "name": "Aquatic Humanoid",
+    "aliases": [
+      "Sirenfolk",
+      "Merrow",
+      "Koi Humanoid",
+      "Leviathankin",
+      "Gillfolk",
+      "Nereid",
+      "Finfolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Aquatic fin-tail skeleton",
+    "notes": "Custom-race aquatic target for siren, koi, merrow, and other finned humanoid ecosystems with dorsal, pectoral, ventral, frill, whisker, and tail-fin anatomy. No built-in physics by default; fin spread, whisker drift, and tail-ground clearance should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "TailFin",
+      "Fin.Dorsal",
+      "PectoralFin.L",
+      "PectoralFin.R",
+      "VentralFin.L",
+      "VentralFin.R",
+      "Whisker.L",
+      "Whisker.R",
+      "Frill.L",
+      "Frill.R"
+    ],
+    "referenceTokens": [
+      "aquatic",
+      "siren",
+      "merrow",
+      "koi",
+      "fin",
+      "frill",
+      "whisker",
+      "gill",
+      "tailfin"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "TailBase",
+      "FinSpread",
+      "FrillWidth",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 0.99,
+      "waist": 0.94,
+      "pelvis": 1.04,
+      "legs": 1.0,
+      "shoulders": 1.04,
+      "breasts": 0.94,
+      "butt": 1.02,
+      "belly": 1.05,
+      "arms": 1.01,
+      "thighs": 1.01,
+      "calves": 0.98
+    },
+    "detectionTokens": [
+      "aquatic",
+      "siren",
+      "merrow",
+      "koi",
+      "fin",
+      "frill",
+      "whisker",
+      "gill",
+      "tailfin"
+    ],
+    "textureTokens": [
+      "scale",
+      "scales",
+      "fin",
+      "gill",
+      "koi",
+      "siren",
+      "whisker"
+    ],
+    "physicsTokens": [
+      "fin",
+      "frill",
+      "whisker",
+      "tailfin"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7600,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.9,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 1.0,
+    "physicsBoneSignatures": [
+      "TailFin",
+      "Fin.Dorsal",
+      "PectoralFin.L",
+      "PectoralFin.R",
+      "VentralFin.L",
+      "VentralFin.R",
+      "Whisker.L",
+      "Whisker.R",
+      "Frill.L",
+      "Frill.R"
+    ],
+    "skeletonFramework": "aquatic-humanoid"
   }
 ]
