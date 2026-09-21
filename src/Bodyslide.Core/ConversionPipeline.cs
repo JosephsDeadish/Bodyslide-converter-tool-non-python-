@@ -12687,6 +12687,16 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
             var hasUniqueTailOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "tail", "tails");
             var hasBoundaryOwnedEarRegion = HasBoundaryOwnedRegion(islandControl, "ear", "ears");
             var hasUniqueEarOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "ear", "ears");
+            var hasBoundaryOwnedHeadRegion = HasBoundaryOwnedRegion(islandControl, "head", "horn", "horns");
+            var hasUniqueHeadOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "head", "horn", "horns");
+            var hasBoundaryOwnedWingRegion = HasBoundaryOwnedRegion(islandControl, "wing", "wings", "left-wing", "right-wing");
+            var hasUniqueWingOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "wing", "wings", "left-wing", "right-wing");
+            var hasLeftWingSignal =
+                regionSet.Contains("left-wing") ||
+                ContainsIslandSemantic(semanticSet, "left-wing", "wing-left", "leftwing", "left-pinion", "pinion-left", "wing.l");
+            var hasRightWingSignal =
+                regionSet.Contains("right-wing") ||
+                ContainsIslandSemantic(semanticSet, "right-wing", "wing-right", "rightwing", "right-pinion", "pinion-right", "wing.r");
 
             if (!analysis.IsFootwear &&
                 (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
@@ -12716,6 +12726,28 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 (hasBoundaryOwnedEarRegion || ContainsIslandSemantic(semanticSet, "ear", "lynx", "wolf", "fox", "feline", "canine")))
             {
                 slots.Add(43);
+            }
+
+            if (!analysis.IsFootwear &&
+                hasUniqueHeadOwnership &&
+                (hasBoundaryOwnedHeadRegion || ContainsIslandSemantic(semanticSet, "horn", "head", "draconic", "goat", "hagraven")))
+            {
+                slots.Add(44);
+            }
+
+            if (!analysis.IsFootwear &&
+                hasUniqueWingOwnership &&
+                (hasBoundaryOwnedWingRegion || ContainsIslandSemantic(semanticSet, "wing", "pinion", "avian", "draconic", "hagraven")))
+            {
+                if (!hasRightWingSignal || hasLeftWingSignal)
+                {
+                    slots.Add(45);
+                }
+
+                if (!hasLeftWingSignal || hasRightWingSignal)
+                {
+                    slots.Add(46);
+                }
             }
 
             if (regionSet.Contains("feet"))
@@ -13889,7 +13921,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         var hasTes4Flags = TryReadTes4Flags(bytes, out var flags);
         var hasMasterFlag = (flags & PluginFlagMaster) != 0;
         var hasLightFlag = (flags & PluginFlagLight) != 0;
-        var hasRuntimeFormIdEvidence = resolvedRuntimeFormIds is { Count: > 0 };
+        var resolvedRuntimeFeFormIdCount = CountResolvedFeRuntimeFormIds(resolvedRuntimeFormIds);
+        var hasRuntimeFormIdEvidence = resolvedRuntimeFeFormIdCount > 0;
         var hasFeFormIds = HasFeLightFormIdEvidence(bytes, resolvedRuntimeFormIds);
         var reasons = new List<string>();
         if (hasTes4Flags)
@@ -13913,6 +13946,10 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                 ? "Resolved runtime FormIDs in FE range detected"
                 : "Raw plugin FormIDs in FE range detected");
         }
+        if (resolvedRuntimeFeFormIdCount > 1)
+        {
+            reasons.Add($"Multiple resolved FE-range runtime FormIDs detected ({resolvedRuntimeFeFormIdCount})");
+        }
         else if (hasLightFlag)
         {
             reasons.Add("ESL flag present but FE runtime evidence not yet resolved");
@@ -13931,9 +13968,13 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             hasMasterFlag,
             hasLightFlag,
             hasFeFormIds,
-            hasRuntimeFormIdEvidence);
+            hasRuntimeFormIdEvidence,
+            resolvedRuntimeFeFormIdCount);
         return new PluginTypeClassification(type, confidence, reasons);
     }
+
+    private static int CountResolvedFeRuntimeFormIds(IReadOnlyList<uint>? resolvedRuntimeFormIds) =>
+        resolvedRuntimeFormIds?.Count(static formId => IsRuntimeFeLightFormId(formId) || IsFeLightFormId(formId)) ?? 0;
 
     private static bool TryReadTes4Flags(byte[] bytes, out uint flags)
     {
@@ -14097,7 +14138,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         bool hasMasterFlag,
         bool hasLightFlag,
         bool hasFeFormIds,
-        bool hasRuntimeFormIdEvidence)
+        bool hasRuntimeFormIdEvidence,
+        int resolvedRuntimeFeFormIdCount)
     {
         double confidence = 0.50d;
         if (hasTes4Flags) confidence += 0.20d;
@@ -14105,6 +14147,8 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         if (type == "ESM" && (hasMasterFlag || extension == ".esm")) confidence += 0.20d;
         if (type == "ESP" && extension == ".esp") confidence += 0.20d;
         if (type == "ESPFE" && hasLightFlag && hasFeFormIds) confidence += 0.25d;
+        if (type == "ESPFE" && hasRuntimeFormIdEvidence) confidence += 0.10d;
+        if (type == "ESPFE" && resolvedRuntimeFeFormIdCount > 1) confidence += 0.05d;
         if (type == "ESL-light" && extension == ".esl") confidence += hasLightFlag ? 0.25d : 0.20d;
         if (type == "AMBIGUOUS" && hasLightFlag && !hasFeFormIds) confidence += 0.05d;
         if (type == "AMBIGUOUS" && !hasRuntimeFormIdEvidence) confidence -= 0.10d;

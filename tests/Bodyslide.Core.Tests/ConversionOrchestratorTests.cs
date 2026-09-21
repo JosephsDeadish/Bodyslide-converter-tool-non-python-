@@ -16552,6 +16552,26 @@ public sealed class BinaryPluginRewriteServiceTests
     }
 
     [Fact]
+    public void ClassifyPluginKind_RuntimeFeEvidenceAcrossMultipleResolvedIds_IncreasesEspfeConfidence()
+    {
+        var bytes = BuildPluginWithArmaFormId(0x00000200u, 0x00012345u);
+
+        var singleEvidence = BasicPluginAnalysisService.ClassifyPluginKind(
+            "Test.esp",
+            bytes,
+            [0xFE000801u]);
+        var multipleEvidence = BasicPluginAnalysisService.ClassifyPluginKind(
+            "Test.esp",
+            bytes,
+            [0xFE000801u, 0xFE0008A2u]);
+
+        Assert.Equal("ESPFE", singleEvidence.Type);
+        Assert.Equal("ESPFE", multipleEvidence.Type);
+        Assert.True(multipleEvidence.Confidence > singleEvidence.Confidence);
+        Assert.Contains(multipleEvidence.Reasons, reason => reason.Contains("Multiple resolved FE-range runtime FormIDs", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void DetectPluginKind_UnknownExtensionWithoutFlags_ReturnsUnknown()
     {
         var bytes = BuildTes4HeaderWithFlags(0u);
@@ -19785,6 +19805,56 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("32:Body", result.Partitions, StringComparer.Ordinal);
         Assert.Contains("40:Tail", result.Partitions, StringComparer.Ordinal);
         Assert.Contains("43:Ears", result.Partitions, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_UsesUniqueIslandOwnershipToAugmentWingAndHeadSlots()
+    {
+        var mesh = new WeightedMesh(
+            "cloth",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "smooth-adaptive-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "draconic_appendage",
+                        IslandId: 0,
+                        CageRegions: ["left-wing"],
+                        SemanticLabels: ["left-wing-island", "draconic-wing-panel"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["left-wing"])
+                        ]),
+                    new CageIslandControl(
+                        MeshKey: "draconic_appendage",
+                        IslandId: 1,
+                        CageRegions: ["right-wing"],
+                        SemanticLabels: ["right-wing-island", "draconic-wing-panel"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["right-wing"])
+                        ]),
+                    new CageIslandControl(
+                        MeshKey: "draconic_appendage",
+                        IslandId: 2,
+                        CageRegions: ["horns"],
+                        SemanticLabels: ["goat-horn-island"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["horns"])
+                        ])
+                ]));
+        var analysis = new MeshAnalysis("cloth", false, 1, HasSplitMeshes: true);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "Draconic Humanoid", CancellationToken.None);
+
+        Assert.Contains("44:Dragon Head", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("45:Dragon LWing", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("46:Dragon RWing", result.Partitions, StringComparer.Ordinal);
     }
 
     [Fact]
