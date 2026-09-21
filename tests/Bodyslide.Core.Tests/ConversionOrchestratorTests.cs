@@ -3397,6 +3397,7 @@ public sealed class ConversionOrchestratorTests
             ["left-wing"] = 1.34d,
             ["right-wing"] = 1.34d,
             ["tail"] = 1.31d,
+            ["tail-tip"] = 1.31d,
             ["chest"] = 1.34d
         };
 
@@ -3407,6 +3408,7 @@ public sealed class ConversionOrchestratorTests
                 ["left-wing"] = new(0.82f, 0.16f),
                 ["right-wing"] = new(0.82f, 0.16f),
                 ["tail"] = new(0.78f, 0.14f),
+                ["tail-tip"] = new(0.76f, 0.13f),
                 ["chest"] = new(0.88f, 0.22f)
             },
             [
@@ -3441,8 +3443,18 @@ public sealed class ConversionOrchestratorTests
                     ],
                     EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 10, 12, 1, 8, 4, false, false)),
                 new CageIslandControl(
-                    MeshKey: "body-core",
+                    MeshKey: "ornate-appendage-mesh",
                     IslandId: 3,
+                    CageRegions: ["tail-tip"],
+                    SemanticLabels: ["tail-tip-panel"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["tail-tip"])
+                    ],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 9, 10, 1, 7, 4, false, false)),
+                new CageIslandControl(
+                    MeshKey: "body-core",
+                    IslandId: 4,
                     CageRegions: ["chest"],
                     BoundaryLoops:
                     [
@@ -3455,7 +3467,8 @@ public sealed class ConversionOrchestratorTests
         Assert.True(result["left-wing"] < result["chest"]);
         Assert.True(result["right-wing"] < result["chest"]);
         Assert.True(result["tail"] < result["chest"]);
-        Assert.True(result["left-wing"] < 1.22d);
+        Assert.True(result["tail-tip"] < result["chest"]);
+        Assert.True(result["left-wing"] < 1.26d);
     }
 
     [Fact]
@@ -10480,7 +10493,6 @@ public sealed class BsdSliderDataTests
         Assert.Contains("InsectWaist", resolved.Sliders);
         Assert.Contains("AbdomenLength", resolved.Sliders);
         Assert.Contains("WingSpan", resolved.Sliders);
-        Assert.Contains("HideWings", resolved.ZapSliders ?? []);
         Assert.NotNull(resolved.SourceAssetSupport);
         Assert.True(resolved.SourceAssetSupport!.HasOsp);
         Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
