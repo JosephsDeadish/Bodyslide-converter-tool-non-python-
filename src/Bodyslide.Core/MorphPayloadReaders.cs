@@ -4,6 +4,8 @@ using System.Text;
 namespace Bodyslide.Core;
 
 internal sealed record BsdMorphPayload(string SliderName, bool IsHighWeight, int VertexCount, IReadOnlyList<(float X, float Y, float Z)> Deltas);
+internal sealed record OsdMorphEntry(string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> SparseDeltas);
+internal sealed record OsdMorphPayload(int InferredVertexCount, IReadOnlyList<OsdMorphEntry> Morphs);
 internal sealed record TriMorphEntry(string Name, IReadOnlyList<(float X, float Y, float Z)> Deltas);
 internal sealed record TriMorphPayload(int VertexCount, IReadOnlyList<TriMorphEntry> Morphs);
 internal readonly record struct MorphDeltaStats(int TotalCount, int MeaningfulCount, float TotalMagnitude, float MaxMagnitude)
@@ -233,18 +235,13 @@ internal static class TriMorphReader
                 return false;
             }
 
-            if (deltaCount != vertexCount)
-            {
-                return false;
-            }
-
             var expectedBytes = checked(deltaCount * (usesQuantizedInt16 ? 6 : 12));
             if (offset + expectedBytes > bytes.Length)
             {
                 return false;
             }
 
-            var deltas = new (float X, float Y, float Z)[deltaCount];
+            var deltas = new (float X, float Y, float Z)[vertexCount];
             for (var j = 0; j < deltaCount; j++)
             {
                 float x;
@@ -406,6 +403,107 @@ internal static class TriMorphReader
         }
 
         payload = new TriMorphPayload(firstShapeVertexCount, firstShapeMorphs);
+        return true;
+    }
+}
+
+internal static class OsdMorphReader
+{
+    private static ReadOnlySpan<byte> Magic => [0x4f, 0x53, 0x44, 0x01];
+
+    public static bool TryRead(string filePath, out OsdMorphPayload? payload)
+    {
+        payload = null;
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            return TryRead(File.ReadAllBytes(filePath), out payload);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    public static bool TryRead(ReadOnlySpan<byte> bytes, out OsdMorphPayload? payload)
+    {
+        payload = null;
+        if (bytes.Length < 8 || !bytes[..Magic.Length].SequenceEqual(Magic))
+        {
+            return false;
+        }
+
+        var offset = Magic.Length;
+        var morphCount = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]);
+        offset += 4;
+        if (morphCount <= 0 || morphCount > 65_535)
+        {
+            return false;
+        }
+
+        var morphs = new List<OsdMorphEntry>(morphCount);
+        var inferredVertexCount = 0;
+        for (var morphIndex = 0; morphIndex < morphCount; morphIndex++)
+        {
+            if (offset + 3 > bytes.Length)
+            {
+                return false;
+            }
+
+            var nameLength = bytes[offset++];
+            if (nameLength == 0 || offset + nameLength + 2 > bytes.Length)
+            {
+                return false;
+            }
+
+            var morphName = Encoding.UTF8.GetString(bytes[offset..(offset + nameLength)]);
+            offset += nameLength;
+            var deltaCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+            offset += 2;
+            if (deltaCount == 0)
+            {
+                morphs.Add(new OsdMorphEntry(morphName, []));
+                continue;
+            }
+
+            var expectedBytes = checked(deltaCount * 14);
+            if (offset + expectedBytes > bytes.Length)
+            {
+                return false;
+            }
+
+            var sparseDeltas = new List<(int Index, float X, float Y, float Z)>(deltaCount);
+            for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
+            {
+                var vertexIndex = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+                offset += 2;
+                var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
+                offset += 4;
+                var y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
+                offset += 4;
+                var z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
+                offset += 4;
+                sparseDeltas.Add((vertexIndex, x, y, z));
+                inferredVertexCount = Math.Max(inferredVertexCount, vertexIndex + 1);
+            }
+
+            morphs.Add(new OsdMorphEntry(morphName, sparseDeltas));
+        }
+
+        if (offset != bytes.Length || morphs.Count == 0)
+        {
+            return false;
+        }
+
+        payload = new OsdMorphPayload(inferredVertexCount, morphs);
         return true;
     }
 }

@@ -24849,6 +24849,15 @@ internal sealed class LocalExportService(
                     blendWeight = MathF.Max(blendWeight, 0.44f + MathF.Min(0.20f, missingSourceRatio * 0.24f));
                 }
 
+                if (averageDivergence >= 0.42f && (missingSourceRatio >= 0.35f || boundaryRatio >= 0.45f))
+                {
+                    blendWeight = MathF.Max(
+                        blendWeight,
+                        0.58f +
+                        MathF.Min(0.10f, (averageDivergence - 0.42f) * 0.45f) +
+                        MathF.Min(0.08f, missingSourceRatio * 0.10f));
+                }
+
                 blendWeight += MathF.Min(0.08f, averageEdgeRisk * 0.16f);
                 if (decisionCache.TargetIslandTransfers is not null &&
                     decisionCache.TargetIslandTransfers.TryGetValue(islandId, out var islandTransfer))
@@ -24860,7 +24869,7 @@ internal sealed class LocalExportService(
                     }
                 }
 
-                weights[islandId] = Math.Clamp(blendWeight, 0f, 0.68f);
+                weights[islandId] = Math.Clamp(blendWeight, 0f, 0.82f);
             }
 
             return weights;
@@ -24879,6 +24888,10 @@ internal sealed class LocalExportService(
             if (decision.PreferredSourceIsland < 0)
             {
                 blendWeight = MathF.Max(blendWeight, 0.52f);
+                if (decision.StructuralDivergence >= 0.48f)
+                {
+                    blendWeight = MathF.Max(blendWeight, 0.68f + MathF.Min(0.12f, (decision.StructuralDivergence - 0.48f) * 0.35f));
+                }
             }
 
             if (decision.BoundarySensitive && decision.StructuralDivergence >= 0.22f)
@@ -24887,7 +24900,7 @@ internal sealed class LocalExportService(
             }
 
             blendWeight += MathF.Min(0.10f, (1f - decision.EdgeDrivenDamping) * 0.18f);
-            var maxBlend = decision.PreferredSourceIsland < 0 ? 0.76f : 0.66f;
+            var maxBlend = decision.PreferredSourceIsland < 0 ? 0.88f : 0.72f;
             return Math.Clamp(blendWeight, 0f, maxBlend);
         }
 

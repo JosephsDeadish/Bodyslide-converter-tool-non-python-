@@ -9539,6 +9539,26 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void OsdMorphReader_ReadsSparsePayloadHeaderAndDeltas()
+    {
+        var bytes = BuildOsdPayload(
+            ("PayloadWaist", [(0, 0.125f, -0.25f, 0.375f), (2, 0.5f, 0.625f, -0.75f)]),
+            ("HideCape_1", [(1, 0.25f, 0f, 0.5f)]));
+
+        var ok = OsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal(3, payload!.InferredVertexCount);
+        Assert.Equal(2, payload.Morphs.Count);
+        Assert.Equal("PayloadWaist", payload.Morphs[0].Name);
+        Assert.Equal(2, payload.Morphs[0].SparseDeltas.Count);
+        Assert.Equal(2, payload.Morphs[0].SparseDeltas[1].Index);
+        Assert.Equal(-0.75f, payload.Morphs[0].SparseDeltas[1].Z, 3);
+        Assert.Equal("HideCape_1", payload.Morphs[1].Name);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithOnlySliderFiles_StillMarksReferenceAssetsMissing()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -9724,7 +9744,9 @@ public sealed class BsdSliderDataTests
               </SliderSet>
             </SliderSetInfo>
             """);
-        await File.WriteAllBytesAsync(osdPath, [0x4f, 0x53, 0x44, 0x01]);
+        await File.WriteAllBytesAsync(osdPath, BuildOsdPayload(
+            ("TravelerWaist", [(0, 0.125f, 0f, 0f), (2, 0.25f, 0.05f, -0.025f)]),
+            ("TravelerWaist_1", [(1, 0.375f, 0f, 0.125f)])));
         await File.WriteAllBytesAsync(referencePath, new byte[64]);
 
         try
@@ -9740,6 +9762,15 @@ public sealed class BsdSliderDataTests
             Assert.False(resolved.SourceAssetSupport.HasTriPayloads);
             Assert.False(resolved.SourceAssetSupport.HasBsdPayloads);
             Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+            Assert.NotNull(resolved.ReusableMorphPayloads);
+            Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerWaist", out var osdPayloads));
+            Assert.NotNull(osdPayloads.LowWeight);
+            Assert.NotNull(osdPayloads.HighWeight);
+            Assert.Equal("osd", osdPayloads.LowWeight!.PayloadKind);
+            Assert.Equal(3, osdPayloads.LowWeight.VertexCount);
+            Assert.Equal(0.125f, osdPayloads.LowWeight.Deltas[0].X, 3);
+            Assert.Equal(0f, osdPayloads.LowWeight.Deltas[1].X, 3);
+            Assert.Equal(0.375f, osdPayloads.HighWeight!.Deltas[1].X, 3);
         }
         finally
         {
@@ -9878,6 +9909,30 @@ public sealed class BsdSliderDataTests
         return ms.ToArray();
     }
 
+    private static byte[] BuildOsdPayload(params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(new byte[] { 0x4f, 0x53, 0x44, 0x01 });
+        writer.Write(morphs.Length);
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((byte)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((ushort)morph.Deltas.Count);
+            foreach (var (index, x, y, z) in morph.Deltas)
+            {
+                writer.Write((ushort)index);
+                writer.Write(x);
+                writer.Write(y);
+                writer.Write(z);
+            }
+        }
+
+        return ms.ToArray();
+    }
+
     public sealed class TriMorphFileTests
     {
         [Fact]
@@ -9964,13 +10019,20 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
-        public void TriMorphReader_WithSparseDeltaCount_IsRejected()
+        public void TriMorphReader_WithSparseDeltaCount_IsAccepted()
         {
             var bytes = BuildTriPayload(
                 vertexCount: 2,
                 ("BreastLift", [(0.125f, 0f, -0.25f)]));
 
-            Assert.False(TriMorphReader.TryRead(bytes, out _));
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(2, payload!.VertexCount);
+            Assert.Single(payload.Morphs);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
         }
 
         [Fact]
@@ -11832,6 +11894,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
         Assert.Contains("NPC L Breast02", fallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "XP32 Maximum Skeleton Special Extended Female Advanced", out var aliasedFallbacks));
+        Assert.Contains("NPC L Breast02", aliasedFallbacks);
+        Assert.Contains("NPC L Pec", SkeletonMappingCatalog.GetFrameworkBones("SAM Light"));
         Assert.True(SkeletonMappingCatalog.ContainsFrameworkBone(" NPC L Breast01 "));
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates(" NPC L Breast03 ", "xpmsse-female-advanced", out var trimmedFallbacks));
         Assert.Contains("NPC L Breast02", trimmedFallbacks);
@@ -21007,6 +21072,120 @@ public sealed class OutputCompletenessTests
         Assert.True(result[1].X > 0.16f);
         Assert.True(result[2].X < 0.12f, $"Expected divergent island vertices to blend strongly toward piecewise synthetic reconstruction, got {result[2].X}.");
         Assert.True(result[3].X < 0.12f, $"Expected divergent island vertices to blend strongly toward piecewise synthetic reconstruction, got {result[3].X}.");
+    }
+
+    [Fact]
+    public void BlendRetargetedMorphPayloadForHardDivergence_StrengthensSevereUnmatchRebuilds()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("BlendRetargetedMorphPayloadForHardDivergence", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision(float divergence, float edgeDamping) => decisionCtor.Invoke(
+        [
+            0.5f,
+            1f,
+            1f,
+            1f,
+            edgeDamping,
+            divergence,
+            0,
+            -1,
+            true
+        ]);
+
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        decisions.Add(CreateDecision(0.74f, 0.42f));
+        decisions.Add(CreateDecision(0.70f, 0.46f));
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            1f,
+            1f,
+            1f,
+            decisions,
+            null,
+            null,
+            null,
+            null
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var context = contextCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { 0, 1 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0] },
+            new IReadOnlyList<int>[] { [1], [0] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 4) },
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 4) },
+            new[] { 0, 0 },
+            new[] { 0, 0 },
+            new[] { -1 },
+            new[] { 0.45f, 0.43f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            decisionCache
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (0.20f, 0f, 0f),
+            (0.20f, 0f, 0f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["waist"] = 1.22d,
+            ["belly"] = 1.18d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            blendMethod!.Invoke(null, ["Belly", true, morphing, retargeted, context]));
+
+        Assert.All(result, delta => Assert.True(delta.X < 0.08f, $"Expected severe unmatched topology to rebuild more aggressively toward synthetic output, got {delta.X}."));
     }
 
     [Fact]

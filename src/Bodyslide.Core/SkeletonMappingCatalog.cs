@@ -25,12 +25,12 @@ internal static class SkeletonMappingCatalog
 
     public static IReadOnlyList<string> GetFrameworkBones(string? frameworkId)
     {
-        if (string.IsNullOrWhiteSpace(frameworkId))
+        if (!TryNormalizeFrameworkId(frameworkId, out var normalizedFrameworkId))
         {
             return [];
         }
 
-        return Data.Value.Frameworks.TryGetValue(frameworkId.Trim(), out var framework)
+        return Data.Value.Frameworks.TryGetValue(normalizedFrameworkId, out var framework)
             ? framework.Bones
             : [];
     }
@@ -47,8 +47,8 @@ internal static class SkeletonMappingCatalog
             return true;
         }
 
-        return !string.IsNullOrWhiteSpace(frameworkId) &&
-               Data.Value.Frameworks.TryGetValue(frameworkId.Trim(), out var framework) &&
+        return TryNormalizeFrameworkId(frameworkId, out var normalizedFrameworkId) &&
+               Data.Value.Frameworks.TryGetValue(normalizedFrameworkId, out var framework) &&
                framework.Bones.Contains(boneName.Trim(), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -108,8 +108,8 @@ internal static class SkeletonMappingCatalog
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(frameworkId) &&
-            Data.Value.Frameworks.TryGetValue(frameworkId.Trim(), out var framework) &&
+        if (TryNormalizeFrameworkId(frameworkId, out var normalizedFrameworkId) &&
+            Data.Value.Frameworks.TryGetValue(normalizedFrameworkId, out var framework) &&
             framework.FallbackMappings.TryGetValue(normalizedSourceBone, out var frameworkCandidates))
         {
             fallbackCandidates = frameworkCandidates;
@@ -159,6 +159,88 @@ internal static class SkeletonMappingCatalog
             dto.Id.Trim(),
             NormalizeStringList(dto.Bones),
             NormalizeFallbackMappings(dto.FallbackMappings));
+    }
+
+    private static bool TryNormalizeFrameworkId(string? frameworkId, out string normalizedFrameworkId)
+    {
+        normalizedFrameworkId = string.Empty;
+        if (string.IsNullOrWhiteSpace(frameworkId))
+        {
+            return false;
+        }
+
+        var trimmed = frameworkId.Trim();
+        if (Data.Value.Frameworks.ContainsKey(trimmed))
+        {
+            normalizedFrameworkId = trimmed;
+            return true;
+        }
+
+        var slug = Slugify(trimmed);
+        if (Data.Value.Frameworks.ContainsKey(slug))
+        {
+            normalizedFrameworkId = slug;
+            return true;
+        }
+
+        if (SkeletonFoundationAliasCatalog.TryResolve(trimmed, out var canonicalFoundation))
+        {
+            if (Data.Value.Frameworks.ContainsKey(canonicalFoundation))
+            {
+                normalizedFrameworkId = canonicalFoundation;
+                return true;
+            }
+        }
+
+        var segments = slug.Split('-', StringSplitOptions.RemoveEmptyEntries);
+        for (var length = segments.Length - 1; length >= 1; length--)
+        {
+            var aliasPrefix = string.Join('-', segments[..length]);
+            if (!SkeletonFoundationAliasCatalog.TryResolve(aliasPrefix, out canonicalFoundation))
+            {
+                continue;
+            }
+
+            var suffix = string.Join('-', segments[length..]);
+            var composite = string.IsNullOrWhiteSpace(suffix)
+                ? canonicalFoundation
+                : $"{canonicalFoundation}-{suffix}";
+            if (Data.Value.Frameworks.ContainsKey(composite))
+            {
+                normalizedFrameworkId = composite;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string Slugify(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        var lastWasSeparator = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+                continue;
+            }
+
+            if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>> NormalizeFallbackMappings(

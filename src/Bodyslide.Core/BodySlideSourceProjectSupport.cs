@@ -191,6 +191,20 @@ internal static class BodySlideSourceProjectSupport
             else if (extension.Equals(".osd", StringComparison.OrdinalIgnoreCase))
             {
                 hasOsdPayloads = true;
+                if (TryReadOsdSliders(filePath, out var osdCandidates))
+                {
+                    foreach (var candidate in osdCandidates)
+                    {
+                        if (candidate.IsZap)
+                        {
+                            zapSliders.Add(candidate);
+                        }
+                        else
+                        {
+                            sliders.Add(candidate);
+                        }
+                    }
+                }
             }
             else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
                      TriMorphReader.TryRead(filePath, out var triPayload) &&
@@ -944,6 +958,75 @@ internal static class BodySlideSourceProjectSupport
         return false;
     }
 
+    private static bool TryReadOsdSliders(string filePath, out IReadOnlyList<SourceSliderCandidate> candidates)
+    {
+        candidates = [];
+        if (!OsdMorphReader.TryRead(filePath, out var payload) || payload is null || payload.Morphs.Count == 0)
+        {
+            return false;
+        }
+
+        var resolvedVertexCount = ResolveOsdPayloadVertexCount(filePath, payload.InferredVertexCount);
+        var extracted = new List<SourceSliderCandidate>(payload.Morphs.Count);
+        foreach (var morph in payload.Morphs)
+        {
+            var sliderName = NormalizeSliderFileName(morph.Name);
+            var vertexCount = Math.Max(resolvedVertexCount, morph.SparseDeltas.Count == 0
+                ? payload.InferredVertexCount
+                : morph.SparseDeltas.Max(static delta => delta.Index + 1));
+            if (vertexCount <= 0)
+            {
+                continue;
+            }
+
+            var deltas = new (float X, float Y, float Z)[vertexCount];
+            foreach (var (index, x, y, z) in morph.SparseDeltas)
+            {
+                if (index < 0 || index >= deltas.Length)
+                {
+                    continue;
+                }
+
+                deltas[index] = (x, y, z);
+            }
+
+            if (TryCreatePayloadCandidate(
+                sliderName,
+                deltas,
+                SourcePriority.OsdPayloadBase,
+                IsHighWeightVariant(morph.Name),
+                "osd",
+                out var candidate))
+            {
+                extracted.Add(candidate);
+            }
+        }
+
+        candidates = extracted;
+        return extracted.Count > 0;
+    }
+
+    private static int ResolveOsdPayloadVertexCount(string filePath, int inferredVertexCount)
+    {
+        var resolved = Math.Max(0, inferredVertexCount);
+        var directory = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return resolved;
+        }
+
+        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
+            if (vertices is { Count: > 0 })
+            {
+                resolved = Math.Max(resolved, vertices.Count);
+            }
+        }
+
+        return resolved;
+    }
+
     private static bool TryCreatePayloadCandidate(
         string sliderName,
         IReadOnlyList<(float X, float Y, float Z)> deltas,
@@ -996,7 +1079,9 @@ internal static class BodySlideSourceProjectSupport
     {
         return candidates
             .Where(static candidate => IsLikelySliderName(candidate.Name))
-            .GroupBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(
+                static candidate => $"{candidate.Name}\u001f{candidate.IsZap}\u001f{candidate.ReusablePayload?.IsHighWeight ?? false}",
+                StringComparer.OrdinalIgnoreCase)
             .Select(static group => group
                 .OrderByDescending(static candidate => candidate.Priority)
                 .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
@@ -1192,6 +1277,7 @@ internal static class BodySlideSourceProjectSupport
         public const int OspSlider = 100;
         public const int OspZap = 100;
         public const int TriPayloadBase = 220;
+        public const int OsdPayloadBase = 240;
         public const int BsdLowWeightBase = 260;
         public const int BsdHighWeightBase = 300;
         public const int UnreadablePayloadZapFallback = 40;
