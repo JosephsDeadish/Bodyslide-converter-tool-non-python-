@@ -2161,7 +2161,9 @@
       "Wyvernkin",
       "Kobold",
       "Scaled Dragonborn",
-      "Dragonfolk"
+      "Dragonfolk",
+      "Half-Dragon",
+      "Dragonblood"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -2265,7 +2267,9 @@
       "Hiveborn",
       "Carapace Humanoid",
       "Mantisfolk",
-      "Netchitin"
+      "Netchitin",
+      "Arachnid Humanoid",
+      "Hivekin"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -2375,7 +2379,10 @@
       "Leviathankin",
       "Gillfolk",
       "Nereid",
-      "Finfolk"
+      "Finfolk",
+      "Merfolk",
+      "Mermaid",
+      "Merman"
     ],
     "gender": "female",
     "defaultPhysics": "none",

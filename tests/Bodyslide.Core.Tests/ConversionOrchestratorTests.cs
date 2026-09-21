@@ -3341,6 +3341,52 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_DampsExtremeAppendageIslandsMoreAggressively()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tail"] = 1.32d,
+            ["chest"] = 1.32d
+        };
+
+        var cage = new DeformationCage(
+            "hybrid-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["tail"] = new(0.80f, 0.16f),
+                ["chest"] = new(0.86f, 0.20f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "extreme-appendage",
+                    IslandId: 0,
+                    CageRegions: ["tail"],
+                    SemanticLabels: ["serpent-tail-island", "draconic-frill-panel"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["tail"], IsHole: true)
+                    ],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 8, 10, 1, 8, 5, false, true)),
+                new CageIslandControl(
+                    MeshKey: "body-core",
+                    IslandId: 1,
+                    CageRegions: ["chest"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"])
+                    ])
+            ]);
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, cage]));
+
+        Assert.True(result["tail"] < result["chest"]);
+        Assert.True(result["tail"] < 1.24d);
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -12658,13 +12704,19 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("Wing.L", draconic.AvailablePhysicsBones);
         Assert.Contains("TailBarb", draconic.AvailablePhysicsBones);
         Assert.Contains("FrillWidth", draconic.SliderNames);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Half-Dragon", out var draconicAlias));
+        Assert.Equal("Draconic Humanoid", draconicAlias.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Insectoid Humanoid", out var insectoid));
         Assert.Contains("AntennaTip.L", insectoid.AvailablePhysicsBones);
         Assert.Contains("AntennaLength", insectoid.SliderNames);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Hivekin", out var insectoidAlias));
+        Assert.Equal("Insectoid Humanoid", insectoidAlias.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Aquatic Humanoid", out var aquatic));
         Assert.Contains("Fin.DorsalTip", aquatic.AvailablePhysicsBones);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Mermaid", out var aquaticAlias));
+        Assert.Equal("Aquatic Humanoid", aquaticAlias.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Equine Humanoid", out var equine));
         Assert.Contains("ManeTip", equine.AvailablePhysicsBones);
@@ -12751,8 +12803,14 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("WingFinger02.L", draconicWingFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("AntennaTip.L", "insectoid-humanoid", out var insectAntennaFallbacks));
         Assert.Contains("Antenna.L", insectAntennaFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("CarapaceWingTip.L", "insectoid-humanoid", out var insectWingFallbacks));
+        Assert.Contains("CarapaceWing.L", insectWingFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("Fin.DorsalTip", "aquatic-humanoid", out var aquaticFinFallbacks));
         Assert.Contains("Fin.Dorsal", aquaticFinFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WhiskerTip.L", "aquatic-humanoid", out var aquaticWhiskerFallbacks));
+        Assert.Contains("Whisker.L", aquaticWhiskerFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("FrillTip.L", "draconic-humanoid", out var draconicFrillFallbacks));
+        Assert.Contains("Frill.L", draconicFrillFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailBarbSwing02", out var draconicTailGroup));
         Assert.Equal("tail", draconicTailGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("AntennaChainL", out var insectHornGroup));
@@ -12769,8 +12827,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("wing", detectedGroups);
         Assert.DoesNotContain("UnknownBone", detectedGroups);
         Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["WingFinger01.L", "TailBarbTip"]));
-        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["Antenna.L", "Mandible.R"]));
-        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PectoralFin.L", "Whisker.R"]));
+        Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["FrillTip.L", "TailBarbTip"]));
+        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["AntennaMid.L", "CarapaceWingTip.R"]));
+        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["TailFin", "WhiskerTip.R"]));
     }
 }
 
@@ -13964,6 +14023,45 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "world", "variant", "nordic", "nordic_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "tng", "nordic_cuirass_1.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticExoticDraconicModPack_WritesExoticBodyArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticExoticDraconicModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "dragonscale", "revenant", "dragon_cuirass_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Draconic Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "draconic-humanoid", "dragon_cuirass_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Assert.True(Directory.Exists(sliderSetsDirectory));
+            Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

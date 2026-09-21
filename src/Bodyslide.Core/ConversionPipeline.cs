@@ -10640,6 +10640,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 }
             }
 
+            if (HasExtremeAppendageSignature(islandControl))
+            {
+                damping = Math.Min(damping, 0.86d);
+            }
+
             damping = Math.Min(damping, ComputeIslandTopologyDamping(islandControl));
             damping = Math.Min(damping, 1d - Math.Min(0.10d, islandControl.BoundaryDamping * 0.60d));
             damping = Math.Min(damping, 1d - Math.Min(0.08d, islandControl.RigidityBias * 0.50d));
@@ -10741,6 +10746,16 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 damping = Math.Min(damping, ownerCount == 1 ? 0.86d : 0.92d);
             }
 
+            if (owners.Any(HasExtremeAppendageSignature) || IsExtremeAppendageRegion(region))
+            {
+                damping = Math.Min(damping, ownerCount == 1 ? 0.80d : 0.88d);
+
+                if (owners.Any(control => control.EdgeNetworkSummary?.HasManifoldRisk == true))
+                {
+                    damping = Math.Min(damping, ownerCount == 1 ? 0.74d : 0.82d);
+                }
+            }
+
             if (damping < 0.999d)
             {
                 regionDamping[region] = Math.Clamp(damping, 0.72d, 0.96d);
@@ -10796,6 +10811,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 }
             }
 
+            if (HasExtremeAppendageSignature(islandControl))
+            {
+                damping = Math.Min(damping, 0.74d);
+            }
+
             if (islandControl.BoundaryLoops is { Count: > 0 } boundaryLoops)
             {
                 damping = Math.Min(damping, 1d - Math.Min(0.16d, boundaryLoops.Count * 0.04d));
@@ -10838,6 +10858,47 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         return regionDamping;
     }
+
+    private static bool HasExtremeAppendageSignature(CageIslandControl islandControl) =>
+        HasExtremeAppendageSemantic(islandControl.SemanticLabels) ||
+        islandControl.CageRegions.Any(IsExtremeAppendageRegion) ||
+        (islandControl.AuthoredRegions?.Any(static region => IsExtremeAppendageRegion(region.RegionName)) ?? false);
+
+    private static bool HasExtremeAppendageSemantic(IReadOnlyList<string>? labels)
+    {
+        if (labels is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        return labels.Any(static label =>
+            label.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("frill", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("fin", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("antenna", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("mandible", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("branch", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("vine", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("paw", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsExtremeAppendageRegion(string region) =>
+        region.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("frill", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("fin", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("antenna", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("mandible", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("branch", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("vine", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("mane", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("ear", StringComparison.OrdinalIgnoreCase) ||
+        region.Contains("paw", StringComparison.OrdinalIgnoreCase);
 
     private static double ComputeIslandTopologyDamping(CageIslandControl islandControl)
     {

@@ -78,23 +78,23 @@
   },
   {
     "label": "draconic-humanoid",
-    "bonePrefixes": ["WingFinger", "SpineFin", "TailBarb", "Frill", "Drake", "Wyvern"],
-    "boneTokens": ["WingFinger01", "WingFinger02", "WingFinger03", "SpineFinRoot", "SpineFinMid", "SpineFinTip", "TailBarb", "TailBarbTip", "Frill.L", "Frill.R", "Wyvern", "Drake"],
-    "distinctiveSignatures": ["WingFinger01.L", "WingFinger01.R", "SpineFinRoot", "TailBarbTip"],
+    "bonePrefixes": ["WingFinger", "SpineFin", "TailBarb", "Frill", "FrillTip", "Drake", "Wyvern"],
+    "boneTokens": ["WingFinger01", "WingFinger02", "WingFinger03", "SpineFinRoot", "SpineFinMid", "SpineFinTip", "TailBarb", "TailBarbTip", "Frill.L", "Frill.R", "FrillTip", "Wyvern", "Drake"],
+    "distinctiveSignatures": ["WingFinger01.L", "WingFinger01.R", "SpineFinRoot", "TailBarbTip", "FrillTip.L", "FrillTip.R"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "insectoid-humanoid",
-    "bonePrefixes": ["Antenna", "Mandible", "Abdomen", "CarapaceWing", "Chitin"],
-    "boneTokens": ["Antenna.L", "Antenna.R", "AntennaTip", "Mandible.L", "Mandible.R", "MandibleTip", "AbdomenRoot", "AbdomenMid", "AbdomenTip", "CarapaceWing.L", "CarapaceWing.R", "Chitin"],
-    "distinctiveSignatures": ["Antenna.L", "Antenna.R", "Mandible.L", "Mandible.R", "AbdomenTip"],
+    "bonePrefixes": ["Antenna", "Feeler", "Mandible", "Abdomen", "CarapaceWing", "Chitin"],
+    "boneTokens": ["Antenna.L", "Antenna.R", "AntennaMid", "AntennaTip", "Feeler", "Mandible.L", "Mandible.R", "MandibleMid", "MandibleTip", "AbdomenRoot", "AbdomenMid", "AbdomenTip", "CarapaceWing.L", "CarapaceWing.R", "CarapaceWingTip", "Chitin"],
+    "distinctiveSignatures": ["Antenna.L", "Antenna.R", "AntennaMid.L", "AntennaMid.R", "Mandible.L", "Mandible.R", "MandibleMid.L", "MandibleMid.R", "AbdomenTip", "CarapaceWingTip.L", "CarapaceWingTip.R"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "aquatic-humanoid",
-    "bonePrefixes": ["Fin", "Whisker", "Frill", "Dorsal", "Pectoral", "Ventral"],
-    "boneTokens": ["Fin.Dorsal", "Fin.DorsalTip", "PectoralFin.L", "PectoralFin.R", "VentralFin.L", "VentralFin.R", "Frill.L", "Frill.R", "Whisker.L", "Whisker.R", "GillFrill", "Siren", "Koi"],
-    "distinctiveSignatures": ["Fin.Dorsal", "PectoralFin.L", "PectoralFin.R", "Whisker.L", "Whisker.R"],
+    "bonePrefixes": ["Fin", "Whisker", "Frill", "GillFrill", "Dorsal", "Pectoral", "Ventral", "TailFin"],
+    "boneTokens": ["Fin.Dorsal", "Fin.DorsalTip", "PectoralFin.L", "PectoralFin.R", "PectoralFinTip", "VentralFin.L", "VentralFin.R", "TailFin", "TailFinTip", "Frill.L", "Frill.R", "FrillTip", "Whisker.L", "Whisker.R", "WhiskerTip", "GillFrill", "Siren", "Koi"],
+    "distinctiveSignatures": ["Fin.Dorsal", "PectoralFin.L", "PectoralFin.R", "Whisker.L", "Whisker.R", "WhiskerTip.L", "WhiskerTip.R", "TailFin", "FrillTip.L", "FrillTip.R"],
     "minimumSignatureMatches": 2
   }
 ]
