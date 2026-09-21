@@ -924,7 +924,7 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
-        PopulateReportsTab([], null);
+        PopulateReportsTab(Array.Empty<DesktopWorkflowReportMetric>());
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
         ConfigureOptionTooltips();
@@ -1977,103 +1977,11 @@ public sealed class MainForm : Form
 
     private void PopulateSummaryTab(IReadOnlyList<ConversionResult> results)
     {
+        var snapshot = DesktopWorkflowAutomation.BuildFromResults(results, _lastPreviewPath);
         _summaryListView.Items.Clear();
-
-        void Add(string property, string value) =>
-            _summaryListView.Items.Add(new ListViewItem([property, value]));
-
-        Add("Items converted", results.Count.ToString());
-
-        // Aggregate key steps across all results.
-        foreach (var result in results)
+        foreach (var row in snapshot.SummaryRows)
         {
-            if (results.Count > 1)
-            {
-                _summaryListView.Items.Add(new ListViewItem([string.Empty, string.Empty]));
-                Add("Output", result.OutputDirectory);
-            }
-
-            foreach (var step in result.Steps)
-            {
-                if (step.StartsWith("detected-body:", StringComparison.Ordinal))
-                    Add("Detected body", step["detected-body:".Length..]);
-                else if (step.StartsWith("source-body-override:", StringComparison.Ordinal))
-                    Add("Source body (override)", step["source-body-override:".Length..]);
-                else if (step.StartsWith("cross-gender-conversion:", StringComparison.Ordinal))
-                    Add("Cross-gender conversion", step["cross-gender-conversion:".Length..]);
-                else if (step.StartsWith("mesh-type:", StringComparison.Ordinal))
-                    Add("Mesh type", step["mesh-type:".Length..]);
-                else if (step.StartsWith("cage:", StringComparison.Ordinal))
-                    Add("Cage mode", step["cage:".Length..]);
-                else if (step.StartsWith("mesh-converted:", StringComparison.Ordinal))
-                    Add("Conversion strategy", step["mesh-converted:".Length..]);
-                else if (step.StartsWith("physics:", StringComparison.Ordinal))
-                    Add("Physics profile", step["physics:".Length..]);
-                else if (step.StartsWith("physics-override:", StringComparison.Ordinal))
-                    Add("Physics (override)", step["physics-override:".Length..]);
-                else if (step.StartsWith("world-mode-override:", StringComparison.Ordinal))
-                    Add("World drop mode (override)", step["world-mode-override:".Length..]);
-                else if (step.StartsWith("skeleton:", StringComparison.Ordinal))
-                    Add("Skeleton mapping", step["skeleton:".Length..]);
-                else if (step.StartsWith("skeleton-warnings:", StringComparison.Ordinal))
-                    Add("Skeleton warnings", step["skeleton-warnings:".Length..]);
-                else if (step.StartsWith("morphs:", StringComparison.Ordinal))
-                    Add("Morphs", step["morphs:".Length..]);
-                else if (step.StartsWith("clipping:", StringComparison.Ordinal))
-                    Add("Clipping", step["clipping:".Length..]);
-                else if (step.StartsWith("correction:", StringComparison.Ordinal))
-                    Add("Auto-correction", step["correction:".Length..]);
-                else if (step.StartsWith("correction-applied:", StringComparison.Ordinal))
-                    Add("Correction regions", step["correction-applied:".Length..]);
-                else if (step.StartsWith("voxel-collision:", StringComparison.Ordinal))
-                    Add("Voxel collision", step["voxel-collision:".Length..]);
-                else if (step.StartsWith("voxel-push-applied:", StringComparison.Ordinal))
-                    Add("Voxel push-out", step["voxel-push-applied:".Length..]);
-                else if (step.StartsWith("weights:", StringComparison.Ordinal))
-                    Add("Weight profile", step["weights:".Length..]);
-                else if (step.StartsWith("weight-solver:", StringComparison.Ordinal))
-                    Add("Weight solver", step["weight-solver:".Length..]);
-                else if (step.StartsWith("physics-injection:", StringComparison.Ordinal))
-                    Add("Physics bone injection", step["physics-injection:".Length..]);
-                else if (step.StartsWith("bodyslide:", StringComparison.Ordinal))
-                    Add("BodySlide project", step["bodyslide:".Length..]);
-                else if (step.StartsWith("regions:", StringComparison.Ordinal))
-                    Add("Armor regions", step["regions:".Length..]);
-                else if (step.StartsWith("rigid-islands:", StringComparison.Ordinal))
-                    Add("Rigid islands", step["rigid-islands:".Length..]);
-                else if (step.StartsWith("normals:", StringComparison.Ordinal))
-                    Add("Normal recalc", step["normals:".Length..]);
-                else if (step.StartsWith("partitions:", StringComparison.Ordinal))
-                    Add("Partitions", step["partitions:".Length..]);
-                else if (step.StartsWith("biped-slots-passthrough:", StringComparison.Ordinal))
-                    Add("Biped slots (plugin)", step["biped-slots-passthrough:".Length..]);
-                else if (step.StartsWith("pose-simulation:", StringComparison.Ordinal))
-                    Add("Pose simulation", step["pose-simulation:".Length..]);
-                else if (step.StartsWith("plugins:", StringComparison.Ordinal))
-                    Add("Plugins", step["plugins:".Length..]);
-                else if (step.StartsWith("vanilla-armor:", StringComparison.Ordinal))
-                    Add("Vanilla armor", step["vanilla-armor:".Length..]);
-                else if (step.StartsWith("vanilla-profile:", StringComparison.Ordinal))
-                    Add("Vanilla profile", step["vanilla-profile:".Length..]);
-                else if (step.StartsWith("weight-variants:", StringComparison.Ordinal))
-                    Add("Weight variants (_0/_1)", step["weight-variants:".Length..]);
-                else if (step.StartsWith("smp-bones:", StringComparison.Ordinal))
-                    Add("SMP bones", step["smp-bones:".Length..]);
-                else if (step.StartsWith("race-compat:", StringComparison.Ordinal))
-                    Add("Race compatibility", step["race-compat:".Length..]);
-                else if (step.StartsWith("learning-cache:", StringComparison.Ordinal))
-                    Add("Learning cache", step["learning-cache:".Length..]);
-                else if (step.StartsWith("conversion-delta:", StringComparison.Ordinal))
-                    Add("Conversion delta", step["conversion-delta:".Length..]);
-                else if (step.StartsWith("textures:", StringComparison.Ordinal))
-                    Add("Texture warnings", step["textures:".Length..]);
-                else if (step.StartsWith("imported:", StringComparison.Ordinal))
-                    Add("Imported assets", step["imported:".Length..]);
-                else if (step.StartsWith("exported:", StringComparison.Ordinal))
-                    Add("Output directory", step["exported:".Length..]);
-            }
-
-            Add("Output files", result.OutputFiles.Count.ToString());
+            _summaryListView.Items.Add(new ListViewItem([row.Property, row.Value]));
         }
     }
 
@@ -2600,13 +2508,13 @@ public sealed class MainForm : Form
         string? previewPath,
         bool requiresReview)
     {
-        var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
-        var summary = TryReadWorstValidationSummary(outputDirectories);
-        var effectiveStatus = summary?.Status
-            ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
+        var state = DesktopWorkflowAutomation.BuildValidationState(outputDirectories, previewPath);
+        var effectiveStatus = requiresReview && ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) < ConversionValidationPresentation.GetGateRank("needs-review")
+            ? "needs-review"
+            : state.EffectiveStatus;
         _previewTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", effectiveStatus);
         _guidanceTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", effectiveStatus);
-        _statusLabel.Text = ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, previewAvailable);
+        _statusLabel.Text = ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, state.PreviewAvailable);
     }
 
     private static string BuildValidationOutcomeLogMessage(
@@ -2614,15 +2522,16 @@ public sealed class MainForm : Form
         string? previewPath,
         bool requiresReview)
     {
-        var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
-        var summary = TryReadWorstValidationSummary(outputDirectories);
-        if (summary is not null)
+        var state = DesktopWorkflowAutomation.BuildValidationState(outputDirectories, previewPath);
+        if (!requiresReview)
         {
-            return ConversionValidationPresentation.BuildOutcomeSummary(summary, previewAvailable);
+            return state.OutcomeSummary;
         }
 
-        var fallbackStatus = requiresReview ? "needs-review" : previewAvailable ? "ready" : null;
-        return ConversionValidationPresentation.BuildOutcomeSummary(fallbackStatus, 0, 0, 0, previewAvailable);
+        var effectiveStatus = ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) >= ConversionValidationPresentation.GetGateRank("needs-review")
+            ? state.EffectiveStatus
+            : "needs-review";
+        return ConversionValidationPresentation.BuildOutcomeSummary(effectiveStatus, 0, 0, 0, state.PreviewAvailable);
     }
 
     private void UpdatePresetDetails()
@@ -3233,42 +3142,23 @@ public sealed class MainForm : Form
 
     private void PopulateArtifactsTab(IReadOnlyList<ConversionResult> results)
     {
-        var files = results
-            .SelectMany(result => result.OutputFiles)
-            .Where(File.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        PopulateArtifactsTab(files, FindCommonDirectory(results.Select(result => result.OutputDirectory)));
+        PopulateArtifactsTab(DesktopWorkflowAutomation.BuildFromResults(results, _lastPreviewPath).Artifacts);
     }
 
     private void PopulateArtifactsTab(string? outputDirectory)
     {
-        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
-        {
-            PopulateArtifactsTab([], null);
-            return;
-        }
-
-        var files = Directory
-            .EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        PopulateArtifactsTab(files, outputDirectory);
+        PopulateArtifactsTab(DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, _lastPreviewPath).Artifacts);
     }
 
-    private void PopulateArtifactsTab(IReadOnlyList<string> files, string? baseDirectory)
+    private void PopulateArtifactsTab(IReadOnlyList<DesktopWorkflowArtifact> artifacts)
     {
         _artifactsListView.BeginUpdate();
         try
         {
             _artifactsListView.Items.Clear();
-            foreach (var file in files)
+            foreach (var artifact in artifacts)
             {
-                var displayPath = !string.IsNullOrWhiteSpace(baseDirectory)
-                    ? Path.GetRelativePath(baseDirectory, file)
-                    : file;
-                var item = new ListViewItem([Path.GetFileName(file), displayPath]) { Tag = file };
+                var item = new ListViewItem([artifact.Name, artifact.DisplayPath]) { Tag = artifact.FullPath };
                 _artifactsListView.Items.Add(item);
             }
         }
@@ -3282,53 +3172,30 @@ public sealed class MainForm : Form
 
     private void PopulateReportsTab(IReadOnlyList<ConversionResult> results)
     {
-        var outputDirectories = results
-            .Select(result => result.OutputDirectory)
-            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var files = outputDirectories
-            .SelectMany(EnumerateKnownReportFiles)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        PopulateReportsTab(files, FindCommonDirectory(outputDirectories));
+        PopulateReportsTab(DesktopWorkflowAutomation.BuildFromResults(results, _lastPreviewPath).ReportMetrics);
     }
 
     private void PopulateReportsTab(string? outputDirectory)
     {
-        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
-        {
-            PopulateReportsTab([], null);
-            return;
-        }
-
-        PopulateReportsTab(
-            EnumerateKnownReportFiles(outputDirectory)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            outputDirectory);
+        PopulateReportsTab(DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, _lastPreviewPath).ReportMetrics);
     }
 
-    private void PopulateReportsTab(IReadOnlyList<string> files, string? baseDirectory)
+    private void PopulateReportsTab(IReadOnlyList<DesktopWorkflowReportMetric> metrics)
     {
         _reportsListView.BeginUpdate();
         try
         {
             _reportsListView.Items.Clear();
 
-            if (files.Count == 0)
+            if (metrics.Count == 0)
             {
                 _reportsListView.Items.Add(new ListViewItem(["Status", "Reports", "Run or load a conversion to inspect JSON diagnostics in-app."]));
                 return;
             }
 
-            foreach (var file in files)
+            foreach (var metric in metrics)
             {
-                var reportName = !string.IsNullOrWhiteSpace(baseDirectory)
-                    ? Path.GetRelativePath(baseDirectory, file)
-                    : Path.GetFileName(file);
-                AppendReportSummary(reportName, file);
+                _reportsListView.Items.Add(new ListViewItem([metric.ReportName, metric.Property, metric.Value]) { Tag = metric.FilePath });
             }
         }
         finally

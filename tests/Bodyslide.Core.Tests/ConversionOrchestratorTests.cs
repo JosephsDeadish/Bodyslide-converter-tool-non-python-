@@ -14920,6 +14920,81 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromResults_CapturesFullWorkflowSnapshot()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFemaleOralExpressiveModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "oracleexpressive", "oracle_expressive_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "UBE",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+            var snapshot = DesktopWorkflowAutomation.BuildFromResults([result], previewPath);
+
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Conversion strategy", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Physics profile", StringComparison.OrdinalIgnoreCase) ||
+                                                         row.Property.Equals("Physics (override)", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
+            Assert.True(snapshot.ValidationState.PreviewAvailable);
+            Assert.Contains("Preview", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Next actions", snapshot.ValidationState.GuidanceTabTitle, StringComparison.OrdinalIgnoreCase);
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.StatusLabel));
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.OutcomeSummary));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesLoadResultWorkflowSnapshot()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFelineBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "feline", "feline_regalia_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Feline Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.NotEmpty(snapshot.ReportMetrics);
+            Assert.NotEmpty(snapshot.Artifacts);
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Target body", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase) ||
+                                                             metric.Property.Equals("Checklist items", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
+            Assert.True(snapshot.ValidationState.PreviewAvailable);
+            Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.StatusLabel));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");
@@ -24183,6 +24258,173 @@ public sealed class OutputCompletenessTests
         Assert.Equal(result[0].X, result[2].X, 6);
         Assert.Equal(result[1].X, result[3].X, 6);
         Assert.NotEqual(Math.Round(result[0].X, 6), Math.Round(result[1].X, 6));
+    }
+
+    [Fact]
+    public void TryBlendRetargetedDelta_UsesIslandLocalOrderCorrespondenceForDivergentTopology()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        var islandProfileType = typeof(LocalExportService).GetNestedType("MorphTransferIslandProfile", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+        Assert.NotNull(islandProfileType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 4);
+        for (var index = 0; index < 4; index++)
+        {
+            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), index);
+        }
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision() => decisionCtor.Invoke(
+        [
+            0.5f,
+            1f,
+            1.8f,
+            1f,
+            0.82f,
+            0.26f,
+            0,
+            0,
+            false
+        ]);
+
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        for (var index = 0; index < 4; index++)
+        {
+            decisions.Add(CreateDecision());
+        }
+
+        var adjacencyType = typeof(LocalExportService).GetNestedType("MorphTransferIslandAdjacencySummary", BindingFlags.NonPublic);
+        Assert.NotNull(adjacencyType);
+        var emptyAdjacency = Array.CreateInstance(adjacencyType!, 0);
+        var islandProfileCtor = islandProfileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        object CreateIslandProfile(int islandId, MeshVertex centroid, int[] vertexIndexes, Dictionary<int, int> localOrderByVertex) => islandProfileCtor.Invoke(
+        [
+            islandId,
+            vertexIndexes.Length,
+            centroid,
+            vertexIndexes,
+            localOrderByVertex,
+            Array.Empty<int>(),
+            emptyAdjacency,
+            0f,
+            1f,
+            true
+        ]);
+
+        var islandProfileDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), islandProfileType);
+        var sourceIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        sourceIslandProfiles.Add(0, CreateIslandProfile(0, new MeshVertex(0.5f, 0f, 0.5f), [0, 1], new Dictionary<int, int> { [0] = 0, [1] = 1 }));
+        var targetIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        targetIslandProfiles.Add(0, CreateIslandProfile(0, new MeshVertex(0.5f, 0f, 0.5f), [0, 1, 2, 3], new Dictionary<int, int> { [0] = 0, [1] = 1, [2] = 2, [3] = 3 }));
+
+        var transferSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandTransferSummary", BindingFlags.NonPublic);
+        var influenceSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandInfluenceSummary", BindingFlags.NonPublic);
+        Assert.NotNull(transferSummaryType);
+        Assert.NotNull(influenceSummaryType);
+        var influenceSummaryListType = typeof(List<>).MakeGenericType(influenceSummaryType!);
+        var emptyInfluenceSummaries = Activator.CreateInstance(influenceSummaryListType)!;
+        var transferSummaryCtor = transferSummaryType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 7);
+        var targetIslandTransfersType = typeof(Dictionary<,>).MakeGenericType(typeof(int), transferSummaryType);
+        var targetIslandTransfers = (System.Collections.IDictionary)Activator.CreateInstance(targetIslandTransfersType)!;
+        targetIslandTransfers.Add(0, transferSummaryCtor.Invoke(
+        [
+            0,
+            0,
+            emptyInfluenceSummaries,
+            0,
+            emptyAdjacency,
+            0.08f,
+            true
+        ]));
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var sourceVertices = new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) };
+        var targetVertices = new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(0.33f, 0f, 0.33f), new MeshVertex(0.66f, 0f, 0.66f), new MeshVertex(1f, 0f, 1f) };
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            1f,
+            1f,
+            1f,
+            decisions,
+            sourceIslandProfiles,
+            targetIslandProfiles,
+            targetIslandTransfers,
+            null
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 19);
+        var context = contextCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            new[] { 0, 0, 0, 0 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0] },
+            new IReadOnlyList<int>[] { [1], [0, 2], [1, 3], [2] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 4) },
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 1, 1), Zone(0, 1, 1, 3), Zone(0, 1, 2, 4) },
+            new[] { 0, 0 },
+            new[] { 0, 0, 0, 0 },
+            new[] { 0 },
+            new[] { 0.35f, 0.35f, 0.35f, 0.35f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            decisionCache
+        ]);
+
+        var sourceDeltas = new (float X, float Y, float Z)[]
+        {
+            (0f, 0f, 0f),
+            (0.40f, 0f, 0f)
+        };
+
+        var blended = Enumerable.Range(0, 4)
+            .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, [sourceDeltas, context, index]))!.Value)
+            .ToArray();
+
+        Assert.Equal(0f, blended[0].X, 4);
+        Assert.True(blended[1].X > 0.04f, $"Expected second target vertex to inherit positive correspondence from island-local ordering, got {blended[1].X}.");
+        Assert.True(blended[2].X > blended[1].X, $"Expected correspondence to increase across target local order. second={blended[1].X}, third={blended[2].X}");
+        Assert.True(blended[3].X > 0.14f, $"Expected last target vertex to recover a meaningful portion of the far-end source delta, got {blended[3].X}.");
     }
 
     [Fact]

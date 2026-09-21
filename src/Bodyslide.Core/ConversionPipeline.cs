@@ -29727,9 +29727,145 @@ internal sealed class LocalExportService(
                 totalWeight += influence.Weight;
             }
 
-            return totalWeight <= 0.000001f
-                ? null
+            var influenceBlended = totalWeight <= 0.000001f
+                ? ((float X, float Y, float Z)?)null
                 : (x / totalWeight, y / totalWeight, z / totalWeight);
+            var islandCorresponded = TryBuildIslandCorrespondedDelta(sourceDeltas, morphTransferContext, targetIndex);
+            if (islandCorresponded is null)
+            {
+                return influenceBlended;
+            }
+
+            if (influenceBlended is null)
+            {
+                return islandCorresponded;
+            }
+
+            var correspondenceWeight = ComputeIslandCorrespondenceBlendWeight(morphTransferContext, targetIndex);
+            if (correspondenceWeight <= 0.01f)
+            {
+                return influenceBlended;
+            }
+
+            var baseDelta = influenceBlended.Value;
+            var islandDelta = islandCorresponded.Value;
+            return (
+                Lerp(baseDelta.X, islandDelta.X, correspondenceWeight),
+                Lerp(baseDelta.Y, islandDelta.Y, correspondenceWeight),
+                Lerp(baseDelta.Z, islandDelta.Z, correspondenceWeight));
+        }
+
+        private static (float X, float Y, float Z)? TryBuildIslandCorrespondedDelta(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            if (targetIndex < 0 ||
+                morphTransferContext.DecisionCache is not { } decisionCache ||
+                targetIndex >= decisionCache.TargetDecisions.Count)
+            {
+                return null;
+            }
+
+            var decision = decisionCache.TargetDecisions[targetIndex];
+            if (decision.TargetIsland < 0 ||
+                decision.PreferredSourceIsland < 0 ||
+                !decisionCache.TargetIslandProfiles.TryGetValue(decision.TargetIsland, out var targetIslandProfile) ||
+                !decisionCache.SourceIslandProfiles.TryGetValue(decision.PreferredSourceIsland, out var sourceIslandProfile) ||
+                targetIslandProfile.VertexIndexes.Count == 0 ||
+                sourceIslandProfile.VertexIndexes.Count == 0 ||
+                !targetIslandProfile.LocalOrderByVertex.TryGetValue(targetIndex, out var targetLocalOrder))
+            {
+                return null;
+            }
+
+            var targetPhase = targetIslandProfile.VertexIndexes.Count <= 1
+                ? 0f
+                : targetLocalOrder / (float)(targetIslandProfile.VertexIndexes.Count - 1);
+            var sourceVertexIndexes = sourceIslandProfile.VertexIndexes;
+            var sourcePosition = targetPhase * Math.Max(0, sourceVertexIndexes.Count - 1);
+            var lowerOrder = Math.Clamp((int)MathF.Floor(sourcePosition), 0, Math.Max(0, sourceVertexIndexes.Count - 1));
+            var upperOrder = Math.Clamp(lowerOrder + 1, 0, Math.Max(0, sourceVertexIndexes.Count - 1));
+            var lowerIndex = sourceVertexIndexes[lowerOrder];
+            var upperIndex = sourceVertexIndexes[upperOrder];
+            if (lowerIndex < 0 || lowerIndex >= sourceDeltas.Count ||
+                upperIndex < 0 || upperIndex >= sourceDeltas.Count)
+            {
+                return null;
+            }
+
+            var blend = sourceVertexIndexes.Count <= 1
+                ? 0f
+                : sourcePosition - lowerOrder;
+            var lower = sourceDeltas[lowerIndex];
+            var upper = sourceDeltas[upperIndex];
+            return (
+                Lerp(lower.X, upper.X, blend),
+                Lerp(lower.Y, upper.Y, blend),
+                Lerp(lower.Z, upper.Z, blend));
+        }
+
+        private static float ComputeIslandCorrespondenceBlendWeight(
+            MorphTransferContext morphTransferContext,
+            int targetIndex)
+        {
+            if (morphTransferContext.DecisionCache is not { } decisionCache ||
+                targetIndex < 0 ||
+                targetIndex >= decisionCache.TargetDecisions.Count)
+            {
+                return 0f;
+            }
+
+            var decision = decisionCache.TargetDecisions[targetIndex];
+            if (decision.TargetIsland < 0 ||
+                decision.PreferredSourceIsland < 0 ||
+                !decisionCache.TargetIslandProfiles.TryGetValue(decision.TargetIsland, out var targetIslandProfile) ||
+                !decisionCache.SourceIslandProfiles.TryGetValue(decision.PreferredSourceIsland, out var sourceIslandProfile))
+            {
+                return 0f;
+            }
+
+            var weight = 0f;
+            var vertexRatio = sourceIslandProfile.VertexCount <= 0 || targetIslandProfile.VertexCount <= 0
+                ? 1f
+                : MathF.Max(
+                    sourceIslandProfile.VertexCount / (float)targetIslandProfile.VertexCount,
+                    targetIslandProfile.VertexCount / (float)sourceIslandProfile.VertexCount);
+            if (vertexRatio > 1.15f)
+            {
+                weight += MathF.Min(0.22f, (vertexRatio - 1.15f) * 0.18f);
+            }
+
+            if (decision.StructuralDivergence >= 0.10f)
+            {
+                weight += MathF.Min(0.28f, (decision.StructuralDivergence - 0.10f) * 0.85f);
+            }
+
+            if (targetIndex < morphTransferContext.TargetTransferAmbiguity.Length)
+            {
+                weight += MathF.Min(0.18f, morphTransferContext.TargetTransferAmbiguity[targetIndex] * 0.28f);
+            }
+
+            if (sourceIslandProfile.UsesExplicitTopology && targetIslandProfile.UsesExplicitTopology)
+            {
+                weight += 0.08f;
+            }
+
+            if (decisionCache.TargetIslandTransfers.TryGetValue(decision.TargetIsland, out var transferSummary))
+            {
+                weight += MathF.Min(0.08f, transferSummary.BoundaryBlendBias * 0.60f);
+                if (transferSummary.SourceInfluences.Count > 1)
+                {
+                    weight += MathF.Min(0.10f, (1f - transferSummary.SourceInfluences[0].Weight) * 0.24f);
+                }
+            }
+
+            if (decision.BoundarySensitive)
+            {
+                weight += 0.06f;
+            }
+
+            return Math.Clamp(weight, 0f, 0.62f);
         }
 
         private static IReadOnlyList<(float X, float Y, float Z)> StabilizeRetargetedMorphPayload(

@@ -1,0 +1,474 @@
+using System.Text.Json;
+
+namespace Bodyslide.Core;
+
+internal sealed record DesktopWorkflowSummaryRow(string Property, string Value);
+internal sealed record DesktopWorkflowReportMetric(string ReportName, string Property, string Value, string FilePath);
+internal sealed record DesktopWorkflowArtifact(string Name, string DisplayPath, string FullPath);
+internal sealed record DesktopWorkflowValidationState(
+    string PreviewTabTitle,
+    string GuidanceTabTitle,
+    string StatusLabel,
+    string OutcomeSummary,
+    string? EffectiveStatus,
+    bool PreviewAvailable);
+internal sealed record DesktopWorkflowAutomationSnapshot(
+    IReadOnlyList<DesktopWorkflowSummaryRow> SummaryRows,
+    IReadOnlyList<DesktopWorkflowReportMetric> ReportMetrics,
+    IReadOnlyList<DesktopWorkflowArtifact> Artifacts,
+    DesktopWorkflowValidationState ValidationState);
+
+internal static class DesktopWorkflowAutomation
+{
+    public static DesktopWorkflowAutomationSnapshot BuildFromResults(
+        IReadOnlyList<ConversionResult> results,
+        string? previewPath)
+    {
+        var outputDirectories = results
+            .Select(result => result.OutputDirectory)
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var summaryRows = BuildSummaryRows(results);
+        var reportMetrics = BuildReportMetrics(outputDirectories, FindCommonDirectory(outputDirectories));
+        var artifacts = BuildArtifacts(
+            results.SelectMany(result => result.OutputFiles).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray(),
+            FindCommonDirectory(outputDirectories));
+        var validationState = BuildValidationState(outputDirectories, previewPath, reportMetrics);
+        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, validationState);
+    }
+
+    public static DesktopWorkflowAutomationSnapshot BuildFromOutputDirectory(
+        string? outputDirectory,
+        string? previewPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            var emptyValidationState = BuildValidationState([], previewPath, []);
+            return new DesktopWorkflowAutomationSnapshot([], [], [], emptyValidationState);
+        }
+
+        var files = Directory
+            .EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var reportMetrics = BuildReportMetrics([outputDirectory], outputDirectory);
+        var validationState = BuildValidationState([outputDirectory], previewPath, reportMetrics);
+        return new DesktopWorkflowAutomationSnapshot(
+            [],
+            reportMetrics,
+            BuildArtifacts(files, outputDirectory),
+            validationState);
+    }
+
+    public static DesktopWorkflowValidationState BuildValidationState(
+        IReadOnlyList<string> outputDirectories,
+        string? previewPath) =>
+        BuildValidationState(outputDirectories, previewPath, BuildReportMetrics(outputDirectories, FindCommonDirectory(outputDirectories)));
+
+    private static IReadOnlyList<DesktopWorkflowSummaryRow> BuildSummaryRows(IReadOnlyList<ConversionResult> results)
+    {
+        var rows = new List<DesktopWorkflowSummaryRow>
+        {
+            new("Items converted", results.Count.ToString())
+        };
+
+        foreach (var result in results)
+        {
+            if (results.Count > 1)
+            {
+                rows.Add(new(string.Empty, string.Empty));
+                rows.Add(new("Output", result.OutputDirectory));
+            }
+
+            foreach (var step in result.Steps)
+            {
+                if (TryMapSummaryStep(step, out var row))
+                {
+                    rows.Add(row);
+                }
+            }
+
+            rows.Add(new("Output files", result.OutputFiles.Count.ToString()));
+        }
+
+        return rows;
+    }
+
+    private static bool TryMapSummaryStep(string step, out DesktopWorkflowSummaryRow row)
+    {
+        static bool TryCreate(string stepValue, string prefix, string label, out DesktopWorkflowSummaryRow created)
+        {
+            if (stepValue.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                created = new DesktopWorkflowSummaryRow(label, stepValue[prefix.Length..]);
+                return true;
+            }
+
+            created = default!;
+            return false;
+        }
+
+        if (TryCreate(step, "detected-body:", "Detected body", out row) ||
+            TryCreate(step, "source-body-override:", "Source body (override)", out row) ||
+            TryCreate(step, "cross-gender-conversion:", "Cross-gender conversion", out row) ||
+            TryCreate(step, "mesh-type:", "Mesh type", out row) ||
+            TryCreate(step, "cage:", "Cage mode", out row) ||
+            TryCreate(step, "mesh-converted:", "Conversion strategy", out row) ||
+            TryCreate(step, "physics:", "Physics profile", out row) ||
+            TryCreate(step, "physics-override:", "Physics (override)", out row) ||
+            TryCreate(step, "world-mode-override:", "World drop mode (override)", out row) ||
+            TryCreate(step, "skeleton:", "Skeleton mapping", out row) ||
+            TryCreate(step, "skeleton-warnings:", "Skeleton warnings", out row) ||
+            TryCreate(step, "morphs:", "Morphs", out row) ||
+            TryCreate(step, "clipping:", "Clipping", out row) ||
+            TryCreate(step, "correction:", "Auto-correction", out row) ||
+            TryCreate(step, "correction-applied:", "Correction regions", out row) ||
+            TryCreate(step, "voxel-collision:", "Voxel collision", out row) ||
+            TryCreate(step, "voxel-push-applied:", "Voxel push-out", out row) ||
+            TryCreate(step, "weights:", "Weight profile", out row) ||
+            TryCreate(step, "weight-solver:", "Weight solver", out row) ||
+            TryCreate(step, "physics-injection:", "Physics bone injection", out row) ||
+            TryCreate(step, "bodyslide:", "BodySlide project", out row) ||
+            TryCreate(step, "regions:", "Armor regions", out row) ||
+            TryCreate(step, "rigid-islands:", "Rigid islands", out row) ||
+            TryCreate(step, "normals:", "Normal recalc", out row) ||
+            TryCreate(step, "partitions:", "Partitions", out row) ||
+            TryCreate(step, "biped-slots-passthrough:", "Biped slots (plugin)", out row) ||
+            TryCreate(step, "pose-simulation:", "Pose simulation", out row) ||
+            TryCreate(step, "plugins:", "Plugins", out row) ||
+            TryCreate(step, "vanilla-armor:", "Vanilla armor", out row) ||
+            TryCreate(step, "vanilla-profile:", "Vanilla profile", out row) ||
+            TryCreate(step, "weight-variants:", "Weight variants (_0/_1)", out row) ||
+            TryCreate(step, "smp-bones:", "SMP bones", out row) ||
+            TryCreate(step, "race-compat:", "Race compatibility", out row) ||
+            TryCreate(step, "learning-cache:", "Learning cache", out row) ||
+            TryCreate(step, "conversion-delta:", "Conversion delta", out row) ||
+            TryCreate(step, "textures:", "Texture warnings", out row) ||
+            TryCreate(step, "imported:", "Imported assets", out row) ||
+            TryCreate(step, "exported:", "Output directory", out row))
+        {
+            return true;
+        }
+
+        row = default!;
+        return false;
+    }
+
+    private static IReadOnlyList<DesktopWorkflowReportMetric> BuildReportMetrics(
+        IReadOnlyList<string> outputDirectories,
+        string? baseDirectory)
+    {
+        var metrics = new List<DesktopWorkflowReportMetric>();
+        foreach (var file in outputDirectories
+                     .SelectMany(EnumerateKnownReportFiles)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var reportName = !string.IsNullOrWhiteSpace(baseDirectory)
+                ? Path.GetRelativePath(baseDirectory, file)
+                : Path.GetFileName(file);
+            AppendReportMetrics(metrics, reportName, file);
+        }
+
+        return metrics;
+    }
+
+    private static IReadOnlyList<DesktopWorkflowArtifact> BuildArtifacts(IReadOnlyList<string> files, string? baseDirectory) =>
+        files
+            .Select(file => new DesktopWorkflowArtifact(
+                Path.GetFileName(file),
+                !string.IsNullOrWhiteSpace(baseDirectory) ? Path.GetRelativePath(baseDirectory, file) : file,
+                file))
+            .ToArray();
+
+    private static DesktopWorkflowValidationState BuildValidationState(
+        IReadOnlyList<string> outputDirectories,
+        string? previewPath,
+        IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics)
+    {
+        var previewAvailable = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath);
+        var summary = TryReadWorstValidationSummary(outputDirectories);
+        var requiresReview = reportMetrics.Any(metric =>
+            metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase) &&
+            !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase));
+        var effectiveStatus = summary?.Status
+            ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
+        return new DesktopWorkflowValidationState(
+            ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", effectiveStatus),
+            ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", effectiveStatus),
+            ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, previewAvailable),
+            summary is not null
+                ? ConversionValidationPresentation.BuildOutcomeSummary(summary, previewAvailable)
+                : ConversionValidationPresentation.BuildOutcomeSummary(requiresReview ? "needs-review" : previewAvailable ? "ready" : null, 0, 0, 0, previewAvailable),
+            effectiveStatus,
+            previewAvailable);
+    }
+
+    private static void AppendReportMetrics(
+        ICollection<DesktopWorkflowReportMetric> metrics,
+        string reportName,
+        string filePath)
+    {
+        try
+        {
+            using var document = OpenJsonDocument(filePath);
+            var root = document.RootElement;
+            switch (Path.GetFileName(filePath))
+            {
+                case "batch-report.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Conversion label", TryReadString(root, "ConversionLabel"), filePath);
+                    Add(metrics, reportName, "Total items", TryReadIntValue(root, "TotalCount"), filePath);
+                    Add(metrics, reportName, "Succeeded", TryReadIntValue(root, "SuccessCount"), filePath);
+                    Add(metrics, reportName, "Failed", TryReadIntValue(root, "FailedCount"), filePath);
+                    Add(metrics, reportName, "Pack status", TryReadString(root, "PackReadinessStatus"), filePath);
+                    Add(metrics, reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    break;
+                case "armor-pack-validation.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Conversion label", TryReadString(root, "ConversionLabel"), filePath);
+                    Add(metrics, reportName, "Pack status", TryReadString(root, "PackReadinessStatus"), filePath);
+                    Add(metrics, reportName, "Items", TryReadIntValue(root, "TotalCount"), filePath);
+                    Add(metrics, reportName, "Quality reports", TryReadIntValue(root, "QualityReportCount"), filePath);
+                    Add(metrics, reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    break;
+                case "conversion-quality.json":
+                    Add(metrics, reportName, "Source body", TryReadString(root, "DetectedSourceBody"), filePath);
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
+                    Add(metrics, reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
+                    Add(metrics, reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
+                    Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
+                    Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
+                    Add(metrics, reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
+                    break;
+                case "skeleton-compatibility.json":
+                    Add(metrics, reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
+                    Add(metrics, reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
+                    Add(metrics, reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
+                    Add(metrics, reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    break;
+                case "in-game-validation.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
+                    Add(metrics, reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    Add(metrics, reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
+                    Add(metrics, reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
+                    break;
+                case "pose-simulation-report.json":
+                    Add(metrics, reportName, "Tested poses", CountNestedArray(root, "TestedPoses"), filePath);
+                    Add(metrics, reportName, "At-risk poses", TryReadIntValue(root, "TotalPosesAtRisk"), filePath);
+                    Add(metrics, reportName, "High-risk regions", TryReadArray(root, "HighRiskRegions"), filePath);
+                    break;
+                case "world-physics.json":
+                    Add(metrics, reportName, "Mode", TryReadString(root, "Mode"), filePath);
+                    Add(metrics, reportName, "Ground mesh", FormatBool(TryReadBoolValue(root, "GroundMeshAvailable")), filePath);
+                    Add(metrics, reportName, "Recommendations", TryReadArray(root, "Recommendations"), filePath);
+                    break;
+                default:
+                    Add(metrics, reportName, "Status", "Open this report for full details.", filePath);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Add(metrics, reportName, "Status", $"Failed to read report: {ex.Message}", filePath);
+        }
+    }
+
+    private static void Add(ICollection<DesktopWorkflowReportMetric> metrics, string reportName, string property, object? value, string filePath)
+    {
+        var text = value switch
+        {
+            null => null,
+            string stringValue when string.IsNullOrWhiteSpace(stringValue) => null,
+            string stringValue => stringValue,
+            _ => value.ToString()
+        };
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            metrics.Add(new DesktopWorkflowReportMetric(reportName, property, text, filePath));
+        }
+    }
+
+    private static IEnumerable<string> EnumerateKnownReportFiles(string outputDirectory) =>
+        Directory
+            .EnumerateFiles(outputDirectory, "*.json", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+
+    private static JsonDocument OpenJsonDocument(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return JsonDocument.Parse(stream);
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value)
+            ? value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null
+            }
+            : null;
+
+    private static string? TryReadNestedString(JsonElement element, string objectPropertyName, string nestedPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? TryReadString(nested, nestedPropertyName)
+            : null;
+
+    private static string? TryReadArray(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? string.Join(", ", value.EnumerateArray().Select(static item => item.ToString()))
+            : null;
+
+    private static int? TryReadIntValue(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
+            ? result
+            : null;
+
+    private static int CountNestedArray(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.GetArrayLength()
+            : 0;
+
+    private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
+        TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
+            ? value.GetBoolean()
+            : null;
+
+    private static string? FormatBool(bool? value) =>
+        value is null ? null : value.Value ? "Yes" : "No";
+
+    private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.NameEquals(propertyName))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static ConversionValidationSummary? TryReadWorstValidationSummary(IReadOnlyList<string> outputDirectories)
+    {
+        return outputDirectories
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .SelectMany(EnumerateValidationSummaryCandidates)
+            .Select(TryReadValidationSummaryFromReport)
+            .Where(static summary => summary is not null)
+            .Cast<ConversionValidationSummary>()
+            .OrderByDescending(static summary => ConversionValidationPresentation.GetGateRank(summary.Status))
+            .ThenByDescending(static summary => summary.HighSeverityCount)
+            .ThenByDescending(static summary => summary.MediumSeverityCount)
+            .ThenByDescending(static summary => summary.LowSeverityCount)
+            .ThenBy(static summary => summary.Score)
+            .FirstOrDefault();
+    }
+
+    private static IEnumerable<string> EnumerateValidationSummaryCandidates(string outputDirectory)
+    {
+        var conversionQualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        if (File.Exists(conversionQualityPath))
+        {
+            yield return conversionQualityPath;
+        }
+
+        var batchReportPath = Path.Combine(outputDirectory, "batch-report.json");
+        if (File.Exists(batchReportPath))
+        {
+            yield return batchReportPath;
+        }
+    }
+
+    private static ConversionValidationSummary? TryReadValidationSummaryFromReport(string reportPath)
+    {
+        try
+        {
+            using var document = OpenJsonDocument(reportPath);
+            return TryReadValidationSummary(document.RootElement);
+        }
+        catch (Exception) when (File.Exists(reportPath))
+        {
+            return null;
+        }
+    }
+
+    private static ConversionValidationSummary? TryReadValidationSummary(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ValidationSummary", out var summary) || summary.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var status = TryReadString(summary, "Status");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        var issues = new List<ConversionValidationIssue>();
+        if (TryGetProperty(summary, "Issues", out var issuesValue) && issuesValue.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var issue in issuesValue.EnumerateArray())
+            {
+                var code = TryReadString(issue, "Code");
+                var severity = TryReadString(issue, "Severity");
+                var message = TryReadString(issue, "Message");
+                if (!string.IsNullOrWhiteSpace(code) &&
+                    !string.IsNullOrWhiteSpace(severity) &&
+                    !string.IsNullOrWhiteSpace(message))
+                {
+                    issues.Add(new ConversionValidationIssue(code, severity, message));
+                }
+            }
+        }
+
+        return new ConversionValidationSummary(
+            status,
+            TryReadIntValue(summary, "Score") ?? 0,
+            TryReadIntValue(summary, "HighSeverityCount") ?? 0,
+            TryReadIntValue(summary, "MediumSeverityCount") ?? 0,
+            TryReadIntValue(summary, "LowSeverityCount") ?? 0,
+            issues);
+    }
+
+    private static string? FindCommonDirectory(IEnumerable<string> directories)
+    {
+        var normalized = directories
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToArray();
+        if (normalized.Length == 0)
+        {
+            return null;
+        }
+
+        var candidate = normalized[0];
+        while (!string.IsNullOrWhiteSpace(candidate))
+        {
+            var matchPrefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var allMatch = normalized.All(path =>
+                string.Equals(path, candidate, StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase));
+            if (allMatch)
+            {
+                return candidate;
+            }
+
+            candidate = Path.GetDirectoryName(candidate);
+        }
+
+        return null;
+    }
+}
