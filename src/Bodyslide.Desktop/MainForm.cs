@@ -3150,9 +3150,13 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Quality warnings", TryReadArray(root, "QualityWarnings"), filePath);
                     AddReportMetric(reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
                     AddReportMetric(reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
+                    AddReportMetric(reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
+                    AddReportMetric(reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    AddReportMetric(reportName, "Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview")), filePath);
                     AddReportMetric(reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
                     AddReportMetric(reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
+                    AddReportMetric(reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
                     break;
                 case "dependency-map.json":
                     AddReportMetric(reportName, "Entries", CountElements(root), filePath);
@@ -3167,6 +3171,7 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
                     AddReportMetric(reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonInferenceReliability"), filePath);
                     AddReportMetric(reportName, "Source skeleton summary", TryReadString(root, "SourceSkeletonInferenceSummary"), filePath);
+                    AddReportMetric(reportName, "Source skeleton candidates", CountNestedArray(root, "SourceSkeletonCandidates"), filePath);
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
@@ -3200,6 +3205,9 @@ public sealed class MainForm : Form
                 case "runtime-validation-plan.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    AddReportMetric(reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
+                    AddReportMetric(reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
+                    AddReportMetric(reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
                     AddReportMetric(reportName, "Execution phases", DistinctNestedArrayValues(root, "Steps", "Phase"), filePath);
                     AddReportMetric(reportName, "Runtime steps", CountNestedArray(root, "Steps"), filePath);
                     AddReportMetric(reportName, "Blocking runtime steps", CountObjectsWithBool(root, "Steps", "BlocksRelease", expected: true), filePath);
@@ -3208,6 +3216,10 @@ public sealed class MainForm : Form
                 case "desktop-workflow-automation.json":
                     AddReportMetric(reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
                     AddReportMetric(reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
+                    AddReportMetric(reportName, "Desktop automation coverage", TryReadNestedString(root, "AutomationContract", "Coverage"), filePath);
+                    AddReportMetric(reportName, "Manual WinForms interaction", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresManualWinFormsInteraction")), filePath);
+                    AddReportMetric(reportName, "Embedded preview runtime dependency", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresWebViewRuntimeForEmbeddedPreview")), filePath);
+                    AddReportMetric(reportName, "True UI E2E automation", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "SupportsTrueUiEndToEndAutomation")), filePath);
                     AddReportMetric(reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
                     AddReportMetric(reportName, "Blocking GUI steps", CountObjectsWithBool(root, "SuggestedGuiFlow", "Blocking", expected: true), filePath);
                     AddReportMetric(reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);

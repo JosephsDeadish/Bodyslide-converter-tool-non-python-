@@ -6,6 +6,12 @@ internal sealed record DesktopWorkflowSummaryRow(string Property, string Value);
 internal sealed record DesktopWorkflowReportMetric(string ReportName, string Property, string Value, string FilePath);
 internal sealed record DesktopWorkflowArtifact(string Name, string DisplayPath, string FullPath);
 internal sealed record DesktopWorkflowAutomationStep(string Area, string Action, string ExpectedSignal, string? ArtifactPath, bool Blocking);
+internal sealed record DesktopAutomationContract(
+    string Coverage,
+    bool RequiresManualWinFormsInteraction,
+    bool RequiresWebViewRuntimeForEmbeddedPreview,
+    bool SupportsTrueUiEndToEndAutomation,
+    IReadOnlyList<string> LimitationNotes);
 internal sealed record DesktopWorkflowValidationState(
     string PreviewTabTitle,
     string GuidanceTabTitle,
@@ -18,7 +24,8 @@ internal sealed record DesktopWorkflowAutomationSnapshot(
     IReadOnlyList<DesktopWorkflowReportMetric> ReportMetrics,
     IReadOnlyList<DesktopWorkflowArtifact> Artifacts,
     IReadOnlyList<DesktopWorkflowAutomationStep> SuggestedGuiFlow,
-    DesktopWorkflowValidationState ValidationState);
+    DesktopWorkflowValidationState ValidationState,
+    DesktopAutomationContract AutomationContract);
 
 internal static class DesktopWorkflowAutomation
 {
@@ -37,7 +44,8 @@ internal static class DesktopWorkflowAutomation
             results.SelectMany(result => result.OutputFiles).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray(),
             FindCommonDirectory(outputDirectories));
         var validationState = BuildValidationState(outputDirectories, previewPath, reportMetrics);
-        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, BuildSuggestedGuiFlow(reportMetrics, validationState), validationState);
+        var automationContract = BuildAutomationContract(validationState);
+        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, BuildSuggestedGuiFlow(reportMetrics, validationState, automationContract), validationState, automationContract);
     }
 
     public static DesktopWorkflowAutomationSnapshot BuildFromOutputDirectory(
@@ -47,7 +55,8 @@ internal static class DesktopWorkflowAutomation
         if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
         {
             var emptyValidationState = BuildValidationState([], previewPath, []);
-            return new DesktopWorkflowAutomationSnapshot([], [], [], [], emptyValidationState);
+            var emptyContract = BuildAutomationContract(emptyValidationState);
+            return new DesktopWorkflowAutomationSnapshot([], [], [], [], emptyValidationState, emptyContract);
         }
 
         var files = Directory
@@ -56,12 +65,14 @@ internal static class DesktopWorkflowAutomation
             .ToArray();
         var reportMetrics = BuildReportMetrics([outputDirectory], outputDirectory);
         var validationState = BuildValidationState([outputDirectory], previewPath, reportMetrics);
+        var automationContract = BuildAutomationContract(validationState);
         return new DesktopWorkflowAutomationSnapshot(
             [],
             reportMetrics,
             BuildArtifacts(files, outputDirectory),
-            BuildSuggestedGuiFlow(reportMetrics, validationState),
-            validationState);
+            BuildSuggestedGuiFlow(reportMetrics, validationState, automationContract),
+            validationState,
+            automationContract);
     }
 
     public static DesktopWorkflowValidationState BuildValidationState(
@@ -257,9 +268,13 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
                     Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
                     Add(metrics, reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
+                    Add(metrics, reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
+                    Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    Add(metrics, reportName, "Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview")), filePath);
                     Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
                     Add(metrics, reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
+                    Add(metrics, reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
                     Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
                     Add(metrics, reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
                     break;
@@ -270,6 +285,8 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
                     Add(metrics, reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonInferenceReliability"), filePath);
                     Add(metrics, reportName, "Source skeleton summary", TryReadString(root, "SourceSkeletonInferenceSummary"), filePath);
+                    Add(metrics, reportName, "Source skeleton candidates", CountNestedArray(root, "SourceSkeletonCandidates"), filePath);
+                    Add(metrics, reportName, "Source skeleton alternatives", TryReadInferenceCandidateHighlights(root), filePath);
                     Add(metrics, reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     Add(metrics, reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     Add(metrics, reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
@@ -293,6 +310,10 @@ internal static class DesktopWorkflowAutomation
                 case "runtime-validation-plan.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
+                    Add(metrics, reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
+                    Add(metrics, reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
+                    Add(metrics, reportName, "Runtime limitation notes", TryReadArray(root, "LimitationNotes"), filePath);
                     Add(metrics, reportName, "Execution phases", TryReadExecutionPhases(root), filePath);
                     Add(metrics, reportName, "Blocking runtime steps", CountBlockingExecutionSteps(root), filePath);
                     Add(metrics, reportName, "Runtime execution highlights", TryReadExecutionHighlights(root), filePath);
@@ -300,6 +321,11 @@ internal static class DesktopWorkflowAutomation
                 case "desktop-workflow-automation.json":
                     Add(metrics, reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
                     Add(metrics, reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
+                    Add(metrics, reportName, "Desktop automation coverage", TryReadNestedString(root, "AutomationContract", "Coverage"), filePath);
+                    Add(metrics, reportName, "Manual WinForms interaction", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresManualWinFormsInteraction")), filePath);
+                    Add(metrics, reportName, "Embedded preview runtime dependency", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresWebViewRuntimeForEmbeddedPreview")), filePath);
+                    Add(metrics, reportName, "True UI E2E automation", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "SupportsTrueUiEndToEndAutomation")), filePath);
+                    Add(metrics, reportName, "Desktop automation limitation notes", TryReadNestedArray(root, "AutomationContract", "LimitationNotes"), filePath);
                     Add(metrics, reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
                     Add(metrics, reportName, "Blocking GUI steps", CountBlockingGuiSteps(root), filePath);
                     Add(metrics, reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
@@ -532,7 +558,8 @@ internal static class DesktopWorkflowAutomation
 
     private static IReadOnlyList<DesktopWorkflowAutomationStep> BuildSuggestedGuiFlow(
         IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
-        DesktopWorkflowValidationState validationState)
+        DesktopWorkflowValidationState validationState,
+        DesktopAutomationContract automationContract)
     {
         var steps = new List<DesktopWorkflowAutomationStep>
         {
@@ -550,6 +577,16 @@ internal static class DesktopWorkflowAutomation
                 Blocking: string.Equals(validationState.EffectiveStatus, "needs-review", StringComparison.OrdinalIgnoreCase) ||
                           string.Equals(validationState.EffectiveStatus, "high-risk", StringComparison.OrdinalIgnoreCase))
         };
+
+        if (!automationContract.SupportsTrueUiEndToEndAutomation)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Desktop contract",
+                "Treat the desktop automation snapshot as shared-output/contract coverage only; run a manual WinForms/WebView interaction pass before release.",
+                $"{automationContract.Coverage}; manual WinForms={automationContract.RequiresManualWinFormsInteraction}",
+                FindMetricFile(reportMetrics, "Desktop automation coverage"),
+                Blocking: false));
+        }
 
         var topologyMetric = FindMetric(reportMetrics, "Heuristic-heavy topology", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
                              ?? FindMetric(reportMetrics, "Topology correspondence", static value => !value.Equals("aligned", StringComparison.OrdinalIgnoreCase));
@@ -588,6 +625,39 @@ internal static class DesktopWorkflowAutomation
         }
 
         return steps;
+    }
+
+    private static DesktopAutomationContract BuildAutomationContract(DesktopWorkflowValidationState validationState) =>
+        new(
+            "shared-output-contract",
+            RequiresManualWinFormsInteraction: true,
+            RequiresWebViewRuntimeForEmbeddedPreview: true,
+            SupportsTrueUiEndToEndAutomation: false,
+            [
+                "Desktop workflow coverage is derived from shared output artifacts and validation state, not from real WinForms click-path automation.",
+                "Embedded preview behavior still depends on a local WebView2 runtime and should be validated manually on the host machine."
+            ]);
+
+    private static string? TryReadInferenceCandidateHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "SourceSkeletonCandidates", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static candidate => new
+            {
+                Label = TryReadString(candidate, "Label"),
+                Confidence = TryReadString(candidate, "Confidence")
+            })
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Label))
+            .Take(3)
+            .Select(static item => string.IsNullOrWhiteSpace(item.Confidence) ? item.Label! : $"{item.Label} ({item.Confidence})")
+            .ToArray();
+
+        return items.Length == 0 ? null : string.Join("; ", items);
     }
 
     private static DesktopWorkflowReportMetric? FindMetric(

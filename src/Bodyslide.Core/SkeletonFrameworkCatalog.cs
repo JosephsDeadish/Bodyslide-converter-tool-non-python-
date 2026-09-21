@@ -53,10 +53,16 @@ internal static class SkeletonFrameworkCatalog
         => DetectFrameworkDetails(boneNames).Label;
 
     public static SkeletonFrameworkDetectionResult DetectFrameworkDetails(IReadOnlyList<string> boneNames)
+        => RankFrameworkDetections(boneNames, maxCandidates: 1).FirstOrDefault()
+           ?? new SkeletonFrameworkDetectionResult(null, 0d, [], false);
+
+    public static IReadOnlyList<SkeletonFrameworkDetectionResult> RankFrameworkDetections(
+        IReadOnlyList<string> boneNames,
+        int maxCandidates = 3)
     {
         if (boneNames.Count == 0)
         {
-            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
+            return [];
         }
 
         var normalizedBoneNames = boneNames
@@ -66,7 +72,7 @@ internal static class SkeletonFrameworkCatalog
             .ToArray();
         if (normalizedBoneNames.Length == 0)
         {
-            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
+            return [];
         }
 
         var condensedBoneNames = normalizedBoneNames
@@ -76,11 +82,10 @@ internal static class SkeletonFrameworkCatalog
             .ToArray();
         if (condensedBoneNames.Length == 0)
         {
-            return new SkeletonFrameworkDetectionResult(null, 0d, [], false);
+            return [];
         }
 
-        SkeletonFrameworkDetectionResult? bestDetection = null;
-        var bestFallbackScore = 0d;
+        var detections = new List<(double Score, SkeletonFrameworkDetectionResult Detection)>();
         var observedSemanticKeys = ExtractSemanticKeys(normalizedBoneNames);
         var observedPhysicsGroups = PhysicsRepairCatalog.DetectGroups(normalizedBoneNames);
         foreach (var framework in All)
@@ -104,30 +109,35 @@ internal static class SkeletonFrameworkCatalog
                     .Select(signature => $"signature:{signature}")
                     .ToArray();
                 var confidence = Math.Min(1d, 0.7d + (matches / (double)Math.Max(signatures.Length, 1)));
-                return new SkeletonFrameworkDetectionResult(
+                detections.Add((100d + matches, new SkeletonFrameworkDetectionResult(
                     framework.Label,
                     Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
                     matchedSignatures,
-                    UsedSparseInference: false);
+                    UsedSparseInference: false)));
+                continue;
             }
 
             var fallbackEvidence = new List<string>();
             var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys, observedPhysicsGroups, fallbackEvidence);
-            if (fallbackScore > bestFallbackScore)
+            if (fallbackScore >= 2d)
             {
-                bestFallbackScore = fallbackScore;
                 var normalizedScore = Math.Min(0.89d, 0.25d + (fallbackScore / 5d));
-                bestDetection = new SkeletonFrameworkDetectionResult(
+                detections.Add((fallbackScore, new SkeletonFrameworkDetectionResult(
                     framework.Label,
                     Math.Round(normalizedScore, 2, MidpointRounding.AwayFromZero),
                     fallbackEvidence,
-                    UsedSparseInference: true);
+                    UsedSparseInference: true)));
             }
         }
 
-        return bestFallbackScore >= 2d && bestDetection is not null
-            ? bestDetection
-            : new SkeletonFrameworkDetectionResult(null, 0d, [], false);
+        return detections
+            .OrderByDescending(static entry => entry.Detection.Confidence)
+            .ThenBy(static entry => entry.Detection.UsedSparseInference)
+            .ThenByDescending(static entry => entry.Score)
+            .Select(static entry => entry.Detection)
+            .DistinctBy(static detection => detection.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, maxCandidates))
+            .ToArray();
     }
 
     private static IReadOnlyList<SkeletonFrameworkMetadata> LoadFrameworks()

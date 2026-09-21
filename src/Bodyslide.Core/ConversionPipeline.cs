@@ -226,6 +226,11 @@ public sealed record VoxelCollisionResult(
     IReadOnlyDictionary<string, double> PushOutMagnitudes,
     int GridResolution);
 public sealed record SkeletonBoneMapping(string SourceBone, string TargetBone, bool IsPhysicsBone);
+public sealed record SkeletonInferenceCandidate(
+    string Label,
+    double Confidence,
+    IReadOnlyList<string> Evidence,
+    bool UsedSparseInference);
 public sealed record SkeletonMappingResult(
     string SourceSkeleton,
     string TargetSkeleton,
@@ -233,7 +238,8 @@ public sealed record SkeletonMappingResult(
     IReadOnlyList<string> UnsupportedBones,
     double? SourceSkeletonConfidence = null,
     IReadOnlyList<string>? SourceSkeletonEvidence = null,
-    bool SourceSkeletonUsedSparseInference = false);
+    bool SourceSkeletonUsedSparseInference = false,
+    IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null);
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 public sealed record ConversionInspectionResult(
@@ -305,6 +311,10 @@ public sealed record RuntimeValidationExecutionPlan(
     bool ManualCleanupLikely,
     bool RuntimeVerificationRequired,
     IReadOnlyList<string> Caveats,
+    string ExecutionCoverage,
+    bool RequiresLiveGameExecution,
+    bool SupportsAutomatedGameExecution,
+    IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<RuntimeValidationExecutionStep> Steps);
 public sealed record InGameValidationReport(
     string TargetBody,
@@ -1010,6 +1020,7 @@ public sealed record ConversionQualityReport(
     double? SourceSkeletonConfidence = null,
     IReadOnlyList<string>? SourceSkeletonEvidence = null,
     bool SourceSkeletonUsedSparseInference = false,
+    IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null,
     bool TopologyMismatchRisk = false,
     bool ManualCleanupLikely = false,
     bool RuntimeVerificationRequired = false,
@@ -1038,8 +1049,13 @@ public sealed record TopologyCorrespondenceReport(
     string Classification,
     double Confidence,
     bool HeuristicHeavy,
+    string MatchingMode,
+    bool UsesTrueSemanticCorrespondence,
+    bool RequiresManualSemanticReview,
+    IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<string> Signals,
-    IReadOnlyList<string> FocusRegions);
+    IReadOnlyList<string> FocusRegions,
+    IReadOnlyList<string> Recommendations);
 
 public sealed record CageTopologyReport(
     int IslandCount,
@@ -12998,6 +13014,20 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
                 .Concat(parsedBones)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList());
+        var sourceFrameworkCandidates = SkeletonFrameworkCatalog
+            .RankFrameworkDetections(
+                sourcePhysicsBones
+                    .Concat(parsedBones)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+                maxCandidates: 3)
+            .Select(candidate => new SkeletonInferenceCandidate(
+                candidate.Label ?? string.Empty,
+                candidate.Confidence,
+                candidate.Evidence,
+                candidate.UsedSparseInference))
+            .Where(static candidate => !string.IsNullOrWhiteSpace(candidate.Label))
+            .ToArray();
         var sourceSkeleton = !string.IsNullOrWhiteSpace(sourceFrameworkDetection.Label)
             ? sourceFrameworkDetection.Label!
             : parsedSkeletonLabel;
@@ -13010,7 +13040,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             unsupportedBones,
             SourceSkeletonConfidence: sourceFrameworkDetection.Confidence > 0d ? sourceFrameworkDetection.Confidence : null,
             SourceSkeletonEvidence: sourceFrameworkDetection.Evidence,
-            SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference);
+            SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference,
+            SourceSkeletonCandidates: sourceFrameworkCandidates);
     }
 
     private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones, string? frameworkId)
@@ -17579,6 +17610,7 @@ internal sealed class LocalExportService(
                 skeletonMapping.SourceSkeletonConfidence,
                 skeletonMapping.SourceSkeletonEvidence,
                 skeletonMapping.SourceSkeletonUsedSparseInference,
+                skeletonMapping.SourceSkeletonCandidates,
                 SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
@@ -18267,6 +18299,7 @@ internal sealed class LocalExportService(
             SourceSkeletonConfidence:  skeletonMapping.SourceSkeletonConfidence,
             SourceSkeletonEvidence:    skeletonMapping.SourceSkeletonEvidence,
             SourceSkeletonUsedSparseInference: skeletonMapping.SourceSkeletonUsedSparseInference,
+            SourceSkeletonCandidates:  skeletonMapping.SourceSkeletonCandidates,
             TopologyMismatchRisk:      topologyMismatchRisk,
             ManualCleanupLikely:       manualCleanupLikely,
             RuntimeVerificationRequired: runtimeVerificationRequired,
@@ -27115,6 +27148,14 @@ internal sealed class LocalExportService(
             report.ManualCleanupLikely,
             report.RuntimeVerificationRequired,
             report.Caveats,
+            ExecutionCoverage: "plan-only",
+            RequiresLiveGameExecution: true,
+            SupportsAutomatedGameExecution: false,
+            LimitationNotes:
+            [
+                "Runtime validation is an execution plan and release gate only; the application does not drive live in-game automation or verify animation results directly.",
+                "Every blocking runtime step still requires a manual host-game pass on the final skeleton, body, and load-order combination."
+            ],
             steps);
     }
 
@@ -27238,13 +27279,21 @@ internal sealed class LocalExportService(
                 ? "review"
                 : "aligned";
         var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
+        var requiresManualSemanticReview = classification is not "aligned" || topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0;
+        var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse);
+        var recommendations = BuildTopologyCorrespondenceRecommendations(classification, focusRegions, requiresManualSemanticReview);
 
         return new TopologyCorrespondenceReport(
             classification,
             Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
             classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase),
+            MatchingMode: "heuristic-island-regional",
+            UsesTrueSemanticCorrespondence: false,
+            RequiresManualSemanticReview: requiresManualSemanticReview,
+            LimitationNotes: limitationNotes,
             signals,
-            focusRegions);
+            focusRegions,
+            recommendations);
     }
 
     private static IReadOnlyList<string> BuildTopologyCorrespondenceFocusRegions(
@@ -27282,15 +27331,87 @@ internal sealed class LocalExportService(
     private static string BuildSourceSkeletonInferenceSummary(SkeletonMappingResult skeletonMapping)
     {
         var reliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
+        var alternatives = BuildSourceSkeletonCandidateSummary(skeletonMapping.SourceSkeletonCandidates, skeletonMapping.SourceSkeleton);
         return reliability switch
         {
             "provisional" =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' still relies on sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}.",
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' still relies on sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.",
             "review" =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved with limited confidence and should be reviewed against the real rig{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}.",
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved with limited confidence and should be reviewed against the real rig{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.",
             _ =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved through direct framework evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}."
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved through direct framework evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}."
         };
+    }
+
+    private static IReadOnlyList<string> BuildTopologyCorrespondenceLimitationNotes(
+        string classification,
+        bool topologyMismatchRisk,
+        MorphPayloadReuseSummary? payloadReuse)
+    {
+        var notes = new List<string>
+        {
+            "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than true authored semantic vertex correspondence."
+        };
+
+        if (topologyMismatchRisk)
+        {
+            notes.Add("Source and target topology diverged enough that automatic correspondence should be treated as advisory only.");
+        }
+
+        if (payloadReuse?.ExtremelyAdaptedVariantCount > 0)
+        {
+            notes.Add($"Morph reuse required extreme adaptation for {payloadReuse.ExtremelyAdaptedVariantCount} slider variant(s).");
+        }
+
+        if (classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase))
+        {
+            notes.Add("Heuristic-heavy correspondence means radically different meshes still need manual Outfit Studio review before release.");
+        }
+
+        return notes;
+    }
+
+    private static IReadOnlyList<string> BuildTopologyCorrespondenceRecommendations(
+        string classification,
+        IReadOnlyList<string> focusRegions,
+        bool requiresManualSemanticReview)
+    {
+        var focusText = focusRegions.Count > 0 ? string.Join(", ", focusRegions.Take(4)) : "the flagged body regions";
+        var recommendations = new List<string>
+        {
+            $"Open preview-workbench.html and morphs.json, then compare {focusText} against the converted mesh before trusting automatic correspondence."
+        };
+
+        if (requiresManualSemanticReview)
+        {
+            recommendations.Add("Plan an Outfit Studio cleanup pass or closer source-body selection when radically different mesh semantics cannot be matched automatically.");
+        }
+
+        if (!classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
+        {
+            recommendations.Add("Treat the reported topology correspondence as review guidance, not proof of true semantic mesh alignment.");
+        }
+
+        return recommendations;
+    }
+
+    private static string BuildSourceSkeletonCandidateSummary(
+        IReadOnlyList<SkeletonInferenceCandidate>? candidates,
+        string chosenLabel)
+    {
+        if (candidates is not { Count: > 1 })
+        {
+            return string.Empty;
+        }
+
+        var alternatives = candidates
+            .Where(candidate => !candidate.Label.Equals(chosenLabel, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .Select(candidate => $"{candidate.Label} ({candidate.Confidence:0.##})")
+            .ToArray();
+        return alternatives.Length == 0
+            ? string.Empty
+            : $"; alternate candidate(s): {string.Join(", ", alternatives)}";
     }
 
     private static bool IsManualCleanupLikely(

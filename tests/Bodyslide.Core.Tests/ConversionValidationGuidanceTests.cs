@@ -413,8 +413,13 @@ public sealed class ConversionValidationGuidanceTests
                 "heuristic-heavy",
                 0.42,
                 true,
+                "heuristic-island-regional",
+                false,
+                true,
+                ["Topology matching remains heuristic."],
                 ["topology-mismatch-risk"],
-                ["belly", "thighs"]),
+                ["belly", "thighs"],
+                ["Open preview-workbench.html before trusting correspondence."]),
             ScenarioMatrix:
             [
                 new InGameValidationScenario(
