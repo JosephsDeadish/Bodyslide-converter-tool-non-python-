@@ -21684,6 +21684,26 @@ public sealed class CorrectionFeedbackLoopTests
         Assert.Equal(1.26d, result["chest"], 3);
     }
 
+    [Fact]
+    public void ApplyIncrementalIslandAwareCageTuning_DampsLearningCacheDeltaForIslandAwareCage()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIncrementalIslandAwareCageTuning", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
+
+        var previous = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.10d
+        };
+        var cacheMerged = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.28d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, cacheMerged, CreateForcedIslandAwareCage()]));
+
+        Assert.Equal(1.244d, result["chest"], 3);
+    }
+
     // Mesh conversion service that forces high regional morphing to trigger clipping.
     private sealed class ForcedClippingMeshConversionService : IMeshConversionService
     {

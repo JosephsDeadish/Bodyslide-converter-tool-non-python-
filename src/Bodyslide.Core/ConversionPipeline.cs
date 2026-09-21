@@ -6181,11 +6181,15 @@ public sealed class ConversionOrchestrator(
                         : cachedValue;
                 }
 
+                var routedMergedMorphing = StrategyMeshConversionService.ApplyIncrementalIslandAwareCageTuning(
+                    converted.RegionalMorphing,
+                    mergedMorphing,
+                    converted.DeformationCage);
                 converted = new ConvertedMesh(
                     converted.MeshType,
                     $"{converted.Strategy}+cache-reuse",
                     converted.MeshCount,
-                    mergedMorphing,
+                    routedMergedMorphing,
                     converted.DeformationCage);
                 steps.Add("learning-cache:reused");
             }
