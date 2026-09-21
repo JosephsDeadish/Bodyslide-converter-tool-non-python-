@@ -20771,6 +20771,12 @@ public sealed class OutputCompletenessTests
             var targetIslandTransfers = Assert.IsAssignableFrom<System.Collections.IDictionary>(
                 decisionCache.GetType().GetProperty("TargetIslandTransfers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decisionCache));
             Assert.True(targetIslandTransfers.Count > 0);
+            var islandDataLayer = decisionCache.GetType().GetProperty("IslandDataLayer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decisionCache);
+            Assert.NotNull(islandDataLayer);
+            var targetBoundaryBlendWeights = Assert.IsType<float[]>(
+                islandDataLayer!.GetType().GetProperty("TargetBoundaryBlendWeights", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(islandDataLayer));
+            Assert.Equal(12, targetBoundaryBlendWeights.Length);
+            Assert.Contains(targetBoundaryBlendWeights, weight => weight > 0.05f);
         }
         finally
         {
@@ -20838,7 +20844,7 @@ public sealed class OutputCompletenessTests
         decisions.Add(CreateDecision(0.52f, 0.66f, 1, -1, true));
 
         var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 9);
+            .Single(ctor => ctor.GetParameters().Length == 10);
         var decisionCache = decisionCacheCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
@@ -20847,6 +20853,7 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             decisions,
+            null,
             null,
             null,
             null

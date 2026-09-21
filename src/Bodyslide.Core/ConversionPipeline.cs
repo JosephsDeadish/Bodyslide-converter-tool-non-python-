@@ -24284,6 +24284,13 @@ internal sealed class LocalExportService(
             float BoundaryBlendBias,
             bool UsesExplicitBoundaryTracking);
 
+        private sealed record MorphTransferIslandDataLayer(
+            IReadOnlyDictionary<int, MorphTransferIslandProfile> SourceIslandProfiles,
+            IReadOnlyDictionary<int, MorphTransferIslandProfile> TargetIslandProfiles,
+            IReadOnlyDictionary<int, MorphTransferIslandTransferSummary> TargetIslandTransfers,
+            float[] SourceBoundaryBlendWeights,
+            float[] TargetBoundaryBlendWeights);
+
         private sealed record MorphTransferTargetDecision(
             float WeightedSourceHeight,
             float SourceCrossSectionSpan,
@@ -24304,7 +24311,8 @@ internal sealed class LocalExportService(
             IReadOnlyList<MorphTransferTargetDecision> TargetDecisions,
             IReadOnlyDictionary<int, MorphTransferIslandProfile> SourceIslandProfiles,
             IReadOnlyDictionary<int, MorphTransferIslandProfile> TargetIslandProfiles,
-            IReadOnlyDictionary<int, MorphTransferIslandTransferSummary> TargetIslandTransfers);
+            IReadOnlyDictionary<int, MorphTransferIslandTransferSummary> TargetIslandTransfers,
+            MorphTransferIslandDataLayer? IslandDataLayer);
 
         private sealed record MorphTransferContext(
             IReadOnlyList<MeshVertex> SourceVertices,
@@ -24851,7 +24859,9 @@ internal sealed class LocalExportService(
                 var edgeDrivenDamping = decision?.EdgeDrivenDamping ?? ComputeEdgeDrivenTopologyDamping(morphTransferContext, targetIndex);
                 var structuralDivergence = decision?.StructuralDivergence ?? 0f;
                 var divergenceDamping = 1f - MathF.Min(0.34f, structuralDivergence * 0.30f);
-                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping * edgeDrivenDamping * divergenceDamping);
+                var boundaryBlendWeight = GetMorphTransferBoundaryBlendWeight(morphTransferContext, targetIndex);
+                var boundaryDamping = 1f - MathF.Min(0.24f, boundaryBlendWeight * 0.32f);
+                combinedScale = 1f + ((combinedScale - 1f) * partAwareDamping * edgeDrivenDamping * divergenceDamping * boundaryDamping);
                 if (MathF.Abs(combinedScale - 1f) < 0.10f)
                 {
                     continue;
@@ -26187,6 +26197,15 @@ internal sealed class LocalExportService(
                     boundarySensitive);
             }
 
+            var islandDataLayer = BuildMorphTransferIslandDataLayer(
+                morphTransferContext.SourceVertices.Count,
+                morphTransferContext.TargetVertices.Count,
+                sourceIslandProfiles,
+                targetIslandProfiles,
+                targetIslandTransfers,
+                morphTransferContext.SourceEdgeNetworks,
+                morphTransferContext.TargetEdgeNetworks);
+
             return new MorphTransferDecisionCache(
                 normalizedSourceVertices,
                 normalizedTargetVertices,
@@ -26196,7 +26215,96 @@ internal sealed class LocalExportService(
                 decisions,
                 sourceIslandProfiles,
                 targetIslandProfiles,
-                targetIslandTransfers);
+                targetIslandTransfers,
+                islandDataLayer);
+        }
+
+        private static MorphTransferIslandDataLayer BuildMorphTransferIslandDataLayer(
+            int sourceVertexCount,
+            int targetVertexCount,
+            IReadOnlyDictionary<int, MorphTransferIslandProfile> sourceIslandProfiles,
+            IReadOnlyDictionary<int, MorphTransferIslandProfile> targetIslandProfiles,
+            IReadOnlyDictionary<int, MorphTransferIslandTransferSummary> targetIslandTransfers,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork> sourceEdgeNetworks,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork> targetEdgeNetworks)
+        {
+            var sourceBoundaryBlendWeights = BuildMorphTransferBoundaryBlendWeights(
+                sourceVertexCount,
+                sourceIslandProfiles,
+                null,
+                sourceEdgeNetworks);
+            var targetBoundaryBlendWeights = BuildMorphTransferBoundaryBlendWeights(
+                targetVertexCount,
+                targetIslandProfiles,
+                targetIslandTransfers,
+                targetEdgeNetworks);
+            return new MorphTransferIslandDataLayer(
+                sourceIslandProfiles,
+                targetIslandProfiles,
+                targetIslandTransfers,
+                sourceBoundaryBlendWeights,
+                targetBoundaryBlendWeights);
+        }
+
+        private static float[] BuildMorphTransferBoundaryBlendWeights(
+            int vertexCount,
+            IReadOnlyDictionary<int, MorphTransferIslandProfile> islandProfiles,
+            IReadOnlyDictionary<int, MorphTransferIslandTransferSummary>? islandTransfers,
+            IReadOnlyDictionary<int, TransferIslandEdgeNetwork> edgeNetworks)
+        {
+            if (vertexCount <= 0 || islandProfiles.Count == 0)
+            {
+                return [];
+            }
+
+            var weights = new float[vertexCount];
+            foreach (var islandProfile in islandProfiles.Values)
+            {
+                var transferSummary = islandTransfers is not null && islandTransfers.TryGetValue(islandProfile.IslandId, out var summary)
+                    ? summary
+                    : null;
+                var baseWeight = Math.Clamp(
+                    0.08f +
+                    (islandProfile.BoundaryCoverage * 0.30f) +
+                    (islandProfile.AdjacentIslands.Sum(static adjacency => adjacency.BlendWeight) * 0.20f) +
+                    (transferSummary?.BoundaryBlendBias ?? 0f),
+                    0f,
+                    0.72f);
+
+                foreach (var boundaryVertexIndex in islandProfile.BoundaryVertexIndexes)
+                {
+                    if (boundaryVertexIndex >= 0 && boundaryVertexIndex < weights.Length)
+                    {
+                        weights[boundaryVertexIndex] = MathF.Max(weights[boundaryVertexIndex], baseWeight);
+                    }
+                }
+
+                if (!edgeNetworks.TryGetValue(islandProfile.IslandId, out var edgeNetwork))
+                {
+                    continue;
+                }
+
+                foreach (var boundaryVertexIndex in islandProfile.BoundaryVertexIndexes)
+                {
+                    if (boundaryVertexIndex < 0 ||
+                        boundaryVertexIndex >= weights.Length ||
+                        !edgeNetwork.AdjacencyByVertex.TryGetValue(boundaryVertexIndex, out var adjacentVertices))
+                    {
+                        continue;
+                    }
+
+                    var neighborWeight = MathF.Max(0f, baseWeight * 0.55f);
+                    foreach (var adjacentVertexIndex in adjacentVertices)
+                    {
+                        if (adjacentVertexIndex >= 0 && adjacentVertexIndex < weights.Length)
+                        {
+                            weights[adjacentVertexIndex] = MathF.Max(weights[adjacentVertexIndex], neighborWeight);
+                        }
+                    }
+                }
+            }
+
+            return weights;
         }
 
         private static bool IsMorphTransferBoundarySensitive(
@@ -26536,7 +26644,22 @@ internal sealed class LocalExportService(
             }
 
             var edgePenalty = ComputeTransferIslandEdgePenalty(sourceEdgeNetwork, targetEdgeNetwork);
-            return Math.Clamp(1f - MathF.Min(0.30f, edgePenalty * 0.45f), 0.72f, 1f);
+            var boundaryBlendWeight = GetMorphTransferBoundaryBlendWeight(morphTransferContext, targetIndex);
+            var damping = 1f - MathF.Min(0.30f, edgePenalty * 0.45f);
+            damping -= MathF.Min(0.10f, boundaryBlendWeight * 0.12f);
+            return Math.Clamp(damping, 0.68f, 1f);
+        }
+
+        private static float GetMorphTransferBoundaryBlendWeight(MorphTransferContext morphTransferContext, int targetIndex)
+        {
+            if (targetIndex < 0 ||
+                morphTransferContext.DecisionCache?.IslandDataLayer?.TargetBoundaryBlendWeights is not { Length: > 0 } weights ||
+                targetIndex >= weights.Length)
+            {
+                return 0f;
+            }
+
+            return Math.Clamp(weights[targetIndex], 0f, 1f);
         }
 
         private static float ComputeWeightedSourceNeighborDistance(
@@ -26861,8 +26984,9 @@ internal sealed class LocalExportService(
                     ambiguity);
                 var structuralDivergence = decision?.StructuralDivergence ?? 0f;
                 var edgeDrivenDamping = decision?.EdgeDrivenDamping ?? 1f;
+                var boundaryBlendWeight = GetMorphTransferBoundaryBlendWeight(morphTransferContext, targetIndex);
                 var blendStrength = Math.Clamp(
-                    0.12f + (ambiguity * 0.48f) + ((1f - partAwareDamping) * 0.35f) + (structuralDivergence * 0.18f) + ((1f - edgeDrivenDamping) * 0.12f),
+                    0.12f + (ambiguity * 0.48f) + ((1f - partAwareDamping) * 0.35f) + (structuralDivergence * 0.18f) + ((1f - edgeDrivenDamping) * 0.12f) + (boundaryBlendWeight * 0.12f),
                     0.12f,
                     0.72f);
                 stabilized[targetIndex] = (
