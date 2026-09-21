@@ -2229,7 +2229,8 @@ public sealed class MainForm : Form
             _guidanceListView.SelectedItems[0].Tag is string selectedTargetPath &&
             (File.Exists(selectedTargetPath) || Directory.Exists(selectedTargetPath));
 
-        return requiresReview;
+        return requiresReview ||
+            gateRank >= ConversionValidationPresentation.GetGateRank("needs-review");
     }
 
     private void PopulateInspectionTab(ConversionInspectionResult inspection)
