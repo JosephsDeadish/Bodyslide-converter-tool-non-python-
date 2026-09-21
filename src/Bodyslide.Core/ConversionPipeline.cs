@@ -427,6 +427,8 @@ internal static class ConversionValidationGuidance
                 "Open conversion-quality.json and preview-workbench.html, compare the exported BSDismember partitions against the source mesh slot layout in Outfit Studio or NifSkope, then restore any missing source-driven partition blocks before shipping.",
             "missing-plugin-partitions" =>
                 "Open conversion-quality.json and plugin-patches.json, compare the exported BSDismember partitions against the source plugin BOD2/BODT slot hints and linked ARMA variants, then re-export once every required plugin-driven partition is restored.",
+            "topology-partition-review" =>
+                "Open conversion-quality.json and preview-workbench.html, compare the exported BSDismember partitions against the reported island/boundary topology, and verify split pieces, holes, windows, boots, and other isolated parts did not collapse into overly coarse slot coverage.",
             "plugin-rewrite-ambiguous-filename" =>
                 "Open plugin-patches.json and conversion-quality.json, compare each ambiguous plugin mesh path against the source folder family and linked ARMA context, then rename or relocate the winning source mesh so trailing path context resolves to one clear match before re-running.",
             "clipping-detected" or "voxel-penetration" or "pose-risk" =>
@@ -569,7 +571,7 @@ internal static class ConversionValidationGuidance
                 ["conversion-quality.json", "morphs.json", "preview-workbench.html", "CalienteTools/BodySlide/ShapeData/"],
             "topology-mismatch-risk" or "clipping-detected" or "voxel-penetration" or "pose-risk" or "auto-correction-applied" =>
                 ["conversion-quality.json", "preview-workbench.html", "pose-simulation-report.json"],
-            "missing-source-partitions" or "unknown-export-partitions" =>
+            "missing-source-partitions" or "unknown-export-partitions" or "topology-partition-review" =>
                 ["conversion-quality.json", "preview-workbench.html"],
             "missing-plugin-partitions" or "plugin-rewrite-ambiguous-filename" or
             "plugin-rewrite-missing-converted-match" or "plugin-rewrite-missing-staged-mesh" or
@@ -799,7 +801,12 @@ public sealed record PartitionSignalReport(
     IReadOnlyList<int>? MissingSourceSlots = null,
     IReadOnlyList<int>? MissingPluginSlots = null,
     IReadOnlyList<string>? UnknownFinalPartitions = null,
-    IReadOnlyList<string>? Warnings = null);
+    IReadOnlyList<string>? Warnings = null,
+    int TopologyIslandCount = 0,
+    int TopologyInteriorEdgeCount = 0,
+    int TopologyNonManifoldEdgeCount = 0,
+    IReadOnlyList<string>? TopologyLabels = null,
+    IReadOnlyList<string>? TopologyWarnings = null);
 
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
@@ -6298,6 +6305,31 @@ public sealed class ConversionOrchestrator(
                 steps.Add($"biped-slots-passthrough:{string.Join(',', pluginBipedSlots)}");
             }
 
+            var authoritativePartitionSlots = nifPartitionSlots
+                .Concat(pluginBipedSlots)
+                .Distinct()
+                .Order()
+                .ToList();
+            if (authoritativePartitionSlots.Count > 0)
+            {
+                var preserveSlotSet = new HashSet<int>();
+                if (ShouldPreserveGenitalsPartition(normalized.Request.TargetBody, analysis))
+                {
+                    preserveSlotSet.Add(56);
+                }
+
+                if (analysis.IsFootwear)
+                {
+                    preserveSlotSet.Add(37);
+                    preserveSlotSet.Add(38);
+                }
+
+                IReadOnlyList<int> preserveSlots = preserveSlotSet.Count > 0
+                    ? preserveSlotSet.Order().ToArray()
+                    : Array.Empty<int>();
+                partitions = ReconcilePartitionsWithAuthoritativeSlots(partitions, authoritativePartitionSlots, preserveSlots);
+            }
+
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
             ReportStage("Detecting clipping", 14);
@@ -6450,6 +6482,53 @@ public sealed class ConversionOrchestrator(
             ? new PartitionRebuildingResult(true, augmented, partitions.RemovedPartitions)
             : partitions;
     }
+
+    private static PartitionRebuildingResult ReconcilePartitionsWithAuthoritativeSlots(
+        PartitionRebuildingResult partitions,
+        IReadOnlyList<int> authoritativeSlots,
+        IReadOnlyList<int>? preserveSlots = null)
+    {
+        if (!partitions.Rebuilt || authoritativeSlots.Count == 0 || partitions.Partitions.Count == 0)
+        {
+            return partitions;
+        }
+
+        var allowedSlots = authoritativeSlots
+            .Concat(preserveSlots ?? [])
+            .Distinct()
+            .ToHashSet();
+        var reconciled = new List<string>(partitions.Partitions.Count);
+        var removed = partitions.RemovedPartitions.ToList();
+
+        foreach (var label in partitions.Partitions)
+        {
+            var separator = label.IndexOf(':');
+            var token = separator >= 0 ? label[..separator] : label;
+            var slot = int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedSlot)
+                ? parsedSlot
+                : (int?)null;
+            if (slot is int numericSlot && !allowedSlots.Contains(numericSlot))
+            {
+                removed.Add(label);
+                continue;
+            }
+
+            reconciled.Add(label);
+        }
+
+        return reconciled.Count != partitions.Partitions.Count
+            ? new PartitionRebuildingResult(true, reconciled, removed.Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+            : partitions;
+    }
+
+    private static bool ShouldPreserveGenitalsPartition(string targetBody, MeshAnalysis analysis) =>
+        !analysis.IsFootwear &&
+        !string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase) &&
+        analysis.HeadgearSubType is null &&
+        (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase));
 
     private static string ResolvePhysicsProfile(ConversionRequest request, ImportedArmor armor, ConversionPreset? preset)
     {
@@ -12159,7 +12238,12 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         // Select partitions based on mesh type and target body.
         var slots = new List<int>();
 
-        switch (analysis.MeshType)
+        if (analysis.IsFootwear)
+        {
+            slots.Add(37); // Feet
+            slots.Add(38); // Calves
+        }
+        else switch (analysis.MeshType)
         {
             case "headgear":
                 // Use the headgear sub-type to assign the correct Skyrim skin-partition IDs.
@@ -12208,6 +12292,7 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         bool isHeadgearPart = string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase)
             || analysis.HeadgearSubType is not null;
         if (!isHeadgearPart &&
+            !analysis.IsFootwear &&
             (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
@@ -12217,12 +12302,14 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         }
 
         var partitionLabels = slots
+            .Distinct()
             .Where(PartitionSlots.ContainsKey)
             .Select(s => $"{s}:{PartitionSlots[s]}")
             .ToList();
 
         // Report any slots that cannot be mapped to valid partition names as removed.
         var removedSlots = slots
+            .Distinct()
             .Where(s => !PartitionSlots.ContainsKey(s))
             .Select(s => s.ToString())
             .ToList();
@@ -19842,6 +19929,18 @@ internal sealed class LocalExportService(
                     "low",
                     $"Final exported partitions included nonstandard labels that need manual review: {string.Join(", ", unknownFinalPartitions.Take(6))}."));
             }
+
+            if (partitionSignals.TopologyWarnings is { Count: > 0 } topologyWarnings)
+            {
+                var severity = partitionSignals.TopologyIslandCount >= 3 ||
+                               partitionSignals.TopologyLabels?.Contains("explicit-boundary-tracking", StringComparer.OrdinalIgnoreCase) == true
+                    ? "high"
+                    : "medium";
+                issues.Add(new ConversionValidationIssue(
+                    "topology-partition-review",
+                    severity,
+                    string.Join(" ", topologyWarnings.Take(2))));
+            }
         }
 
         if (clipping.HasClipping)
@@ -22796,12 +22895,14 @@ internal sealed class LocalExportService(
             .ToList();
         var regions = ExtractRegions(steps);
         var regionBindingMethod = ExtractStepValue(steps, "region-binding:") ?? "unknown";
+        var topologyInfo = ParsePartitionTopologyStep(steps);
 
         if (sourceNifSlots.Count == 0 &&
             pluginSlots.Count == 0 &&
             finalSlots.Count == 0 &&
             unknownFinalPartitions.Count == 0 &&
-            regions.Count == 0)
+            regions.Count == 0 &&
+            topologyInfo is null)
         {
             return null;
         }
@@ -22824,6 +22925,39 @@ internal sealed class LocalExportService(
             warnings.Add($"manual review: exported partitions contain nonstandard labels {string.Join(", ", unknownFinalPartitions)}");
         }
 
+        var topologyWarnings = new List<string>();
+        if (topologyInfo is not null &&
+            finalSlots.Count <= 1 &&
+            topologyInfo.IslandCount >= 2)
+        {
+            var topologyLabelText = topologyInfo.Labels.Count > 0
+                ? $" ({string.Join(", ", topologyInfo.Labels.Take(4))})"
+                : string.Empty;
+            if (topologyInfo.Labels.Contains("explicit-boundary-tracking", StringComparer.OrdinalIgnoreCase) ||
+                topologyInfo.Labels.Contains("window-boundary-risk", StringComparer.OrdinalIgnoreCase) ||
+                topologyInfo.InteriorEdgeCount > 0)
+            {
+                topologyWarnings.Add(
+                    $"manual review: partition routing collapsed a {topologyInfo.IslandCount}-island topology{topologyLabelText} into coarse slot coverage {string.Join(", ", finalSlots)}.");
+            }
+            else if (sourceNifSlots.Count == 0 && pluginSlots.Count == 0)
+            {
+                topologyWarnings.Add(
+                    $"manual review: mesh topology suggests {topologyInfo.IslandCount} independent islands{topologyLabelText}, but exported partitions only resolved to {string.Join(", ", finalSlots)}.");
+            }
+        }
+
+        if (topologyInfo is not null && topologyInfo.NonManifoldEdgeCount > 0)
+        {
+            topologyWarnings.Add(
+                $"manual review: partition routing was built on topology with {topologyInfo.NonManifoldEdgeCount} non-manifold edge signal(s), so BSDismember coverage should be checked in NifSkope or Outfit Studio.");
+        }
+
+        if (topologyWarnings.Count > 0)
+        {
+            warnings.AddRange(topologyWarnings);
+        }
+
         return new PartitionSignalReport(
             SourceNifSlots: sourceNifSlots,
             PluginSlots: pluginSlots,
@@ -22833,7 +22967,69 @@ internal sealed class LocalExportService(
             MissingSourceSlots: missingSourceSlots,
             MissingPluginSlots: missingPluginSlots,
             UnknownFinalPartitions: unknownFinalPartitions,
-            Warnings: warnings);
+            Warnings: warnings,
+            TopologyIslandCount: topologyInfo?.IslandCount ?? 0,
+            TopologyInteriorEdgeCount: topologyInfo?.InteriorEdgeCount ?? 0,
+            TopologyNonManifoldEdgeCount: topologyInfo?.NonManifoldEdgeCount ?? 0,
+            TopologyLabels: topologyInfo?.Labels ?? [],
+            TopologyWarnings: topologyWarnings);
+    }
+
+    private sealed record PartitionTopologyStepInfo(
+        int IslandCount,
+        int InteriorEdgeCount,
+        int NonManifoldEdgeCount,
+        IReadOnlyList<string> Labels);
+
+    private static PartitionTopologyStepInfo? ParsePartitionTopologyStep(IReadOnlyList<string> steps)
+    {
+        var payload = ExtractStepValue(steps, "mesh-topology:");
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        var islandCount = 0;
+        var interiorEdgeCount = 0;
+        var nonManifoldEdgeCount = 0;
+        var labels = Array.Empty<string>();
+        foreach (var part in payload.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0 || separator >= part.Length - 1)
+            {
+                continue;
+            }
+
+            var key = part[..separator].Trim();
+            var value = part[(separator + 1)..].Trim();
+            if (key.Equals("islands", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(value, out var parsedIslands))
+            {
+                islandCount = Math.Max(0, parsedIslands);
+            }
+            else if (key.Equals("interior-edges", StringComparison.OrdinalIgnoreCase) &&
+                     int.TryParse(value, out var parsedInteriorEdges))
+            {
+                interiorEdgeCount = Math.Max(0, parsedInteriorEdges);
+            }
+            else if (key.Equals("non-manifold-edges", StringComparison.OrdinalIgnoreCase) &&
+                     int.TryParse(value, out var parsedNonManifoldEdges))
+            {
+                nonManifoldEdgeCount = Math.Max(0, parsedNonManifoldEdges);
+            }
+            else if (key.Equals("labels", StringComparison.OrdinalIgnoreCase))
+            {
+                labels = value.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(static label => label, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+        }
+
+        return islandCount == 0 && interiorEdgeCount == 0 && nonManifoldEdgeCount == 0 && labels.Length == 0
+            ? null
+            : new PartitionTopologyStepInfo(islandCount, interiorEdgeCount, nonManifoldEdgeCount, labels);
     }
 
     private static IReadOnlyList<int> ExtractNumericStepPayload(IReadOnlyList<string> steps, string prefix)

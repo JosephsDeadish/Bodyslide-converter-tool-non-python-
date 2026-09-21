@@ -7319,10 +7319,16 @@ public sealed class NifOutputAndSourceOverrideTests
             var result = await orchestrator.ConvertAsync(new ConversionRequest(inputRoot, "3BA", outputDirectory));
 
             Assert.True(result.Success);
+            var partitionsStep = Assert.Single(result.Steps, step => step.StartsWith("partitions:", StringComparison.Ordinal));
+            Assert.Contains("37:Feet", partitionsStep, StringComparison.Ordinal);
+            Assert.Contains("38:Calves", partitionsStep, StringComparison.Ordinal);
+            Assert.DoesNotContain("32:Body", partitionsStep, StringComparison.Ordinal);
+            Assert.DoesNotContain("33:Hands", partitionsStep, StringComparison.Ordinal);
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"HeelAnalysis\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("\"Profile\": \"high-heel\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("topology-partition-review", qualityJson, StringComparison.Ordinal);
 
             var worldPhysicsJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "world-physics.json"));
             Assert.Contains("\"HeelAnalysis\"", worldPhysicsJson, StringComparison.Ordinal);
@@ -17981,6 +17987,58 @@ public sealed class ConversionReadmeGeneratorTests
         var result = await service.RebuildAsync(mesh, analysis, "3BA", CancellationToken.None);
 
         Assert.DoesNotContain(result.Partitions, l => l.StartsWith("56:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildPartitionSignalReport_FlagsCoarseRoutingForComplexTopology()
+    {
+        var method = typeof(LocalExportService).GetMethod("BuildPartitionSignalReport", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var steps = new[]
+        {
+            "mesh-topology:islands=4,interior-edges=12,non-manifold-edges=0,labels=explicit-boundary-tracking+window-boundary-risk+independent-islands",
+            "partitions:32:Body"
+        };
+
+        var report = Assert.IsType<PartitionSignalReport>(method!.Invoke(null, [steps]));
+
+        Assert.Equal(4, report.TopologyIslandCount);
+        Assert.Equal(12, report.TopologyInteriorEdgeCount);
+        Assert.Contains("explicit-boundary-tracking", report.TopologyLabels ?? []);
+        Assert.NotNull(report.TopologyWarnings);
+        Assert.Contains(report.TopologyWarnings!, warning => warning.Contains("collapsed a 4-island topology", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithIndependentIslandTopology_AddsTopologyPartitionReviewIssue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputFile = Path.Combine(workingDirectory, "split_window_skirt_0.nif");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+
+        await SyntheticNifTestData.WriteAsync(inputFile,
+        [
+            (-20f, -2f, 0f), (-12f, -2f, 4f), (-4f, -2f, 8f), (4f, -2f, 12f), (12f, -2f, 16f), (20f, -2f, 20f),
+            (-20f, 2f, 0f), (-12f, 2f, 4f), (-4f, 2f, 8f), (4f, 2f, 12f), (12f, 2f, 16f), (20f, 2f, 20f),
+            (90f, -1f, 28f), (92f, -1f, 36f), (94f, -1f, 44f), (96f, -1f, 52f),
+            (90f, 1f, 28f), (92f, 1f, 36f), (94f, 1f, 44f), (96f, 1f, 52f)
+        ]);
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory));
+
+            Assert.True(result.Success);
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"topology-partition-review\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
     }
 
     [Fact]

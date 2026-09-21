@@ -4256,7 +4256,7 @@ public sealed class MainForm : Form
             return "BodySlide support";
         }
 
-        if (normalized is "missing-source-partitions" or "missing-plugin-partitions")
+        if (normalized is "missing-source-partitions" or "missing-plugin-partitions" or "topology-partition-review")
         {
             return "Partition review";
         }
@@ -4469,6 +4469,7 @@ public sealed class MainForm : Form
         code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-source-partitions", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-plugin-partitions", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("topology-partition-review", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("clipping-detected", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("voxel-penetration", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("pose-risk", StringComparison.OrdinalIgnoreCase) ||
