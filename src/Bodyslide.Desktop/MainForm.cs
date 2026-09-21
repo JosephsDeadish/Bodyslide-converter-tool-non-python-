@@ -88,6 +88,7 @@ public sealed class MainForm : Form
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
     private UiTheme _currentTheme;
+    private bool _suppressThemeSelectionChanged;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -927,7 +928,9 @@ public sealed class MainForm : Form
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
         ConfigureOptionTooltips();
         _currentTheme = LoadThemePreference();
+        _suppressThemeSelectionChanged = true;
         _themeComboBox.SelectedItem = _currentTheme.ToString();
+        _suppressThemeSelectionChanged = false;
         ApplyTheme(_currentTheme);
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
     }
@@ -961,8 +964,18 @@ public sealed class MainForm : Form
 
     private void OnThemeSelectionChanged()
     {
+        if (_suppressThemeSelectionChanged)
+        {
+            return;
+        }
+
         if (_themeComboBox.SelectedItem is not string selectedTheme ||
             !Enum.TryParse<UiTheme>(selectedTheme, ignoreCase: true, out var theme))
+        {
+            return;
+        }
+
+        if (theme == _currentTheme)
         {
             return;
         }
@@ -2208,12 +2221,12 @@ public sealed class MainForm : Form
                          .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
                          .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase))
             {
-                var item = new ListViewItem([entry.Area, entry.Priority, entry.Guidance])
+                var item = new ListViewItem([FormatGuidanceAreaLabel(entry.Area, entry.Priority), entry.Priority, entry.Guidance])
                 {
                     Tag = entry.TargetPath,
                     ToolTipText = string.IsNullOrWhiteSpace(entry.TargetPath)
-                        ? entry.Guidance
-                        : $"{entry.Guidance}{Environment.NewLine}{entry.TargetPath}"
+                        ? $"{entry.Priority}: {entry.Guidance}"
+                        : $"{entry.Priority}: {entry.Guidance}{Environment.NewLine}{entry.TargetPath}"
                 };
                 _guidanceListView.Items.Add(item);
             }
@@ -4536,11 +4549,17 @@ public sealed class MainForm : Form
         var highCount = entries.Count(static entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
         var warningCount = entries.Count(static entry => entry.Priority.Equals("Warning", StringComparison.OrdinalIgnoreCase));
         var actionCount = entries.Count(static entry => entry.Priority.Equals("Action", StringComparison.OrdinalIgnoreCase));
+        var actualGate = gateStatus is not null &&
+                         ConversionValidationPresentation.GetGateRank(gateStatus) >= ConversionValidationPresentation.GetGateRank("ready")
+            ? gateStatus
+            : null;
         var effectiveGate = ConversionValidationPresentation.GetGateRank(gateStatus) >= ConversionValidationPresentation.GetGateRank("high-risk")
             ? "high-risk"
             : (ConversionValidationPresentation.GetGateRank(gateStatus) >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview)
                 ? "needs-review"
-                : "ready";
+                : string.Equals(actualGate, "ready", StringComparison.OrdinalIgnoreCase)
+                    ? "ready"
+                    : "informational";
         if (string.Equals(effectiveGate, "high-risk", StringComparison.OrdinalIgnoreCase))
         {
             return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
@@ -4551,7 +4570,23 @@ public sealed class MainForm : Form
             return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — inspect Preview and linked reports before install/share: {warningCount} warning and {actionCount} action item(s).";
         }
 
+        if (!string.Equals(effectiveGate, "ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Guidance loaded — {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Review the linked reports as needed.";
+        }
+
         return $"{ConversionValidationPresentation.GetGateLabel("ready")} — install-ready after one final Preview pass and normal smoke testing.";
+    }
+
+    private static string FormatGuidanceAreaLabel(string area, string priority)
+    {
+        var severity = GetGuidancePriorityRank(priority);
+        var marker = severity >= 4 ? "[HIGH]"
+            : severity >= 3 ? "[WARN]"
+            : severity >= 2 ? "[ACTION]"
+            : severity >= 1 ? "[INFO]"
+            : "[NOTE]";
+        return $"{marker} {area}";
     }
 
     private static int GetGuidancePriorityRank(string priority) =>

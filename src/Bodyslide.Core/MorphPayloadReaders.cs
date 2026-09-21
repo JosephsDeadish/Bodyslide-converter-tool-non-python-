@@ -391,21 +391,18 @@ internal static class TriMorphReader
                 for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
                 {
                     var vertexIndex = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+                    if (vertexIndex < 0 || vertexIndex > 250_000)
+                    {
+                        payload = default;
+                        return false;
+                    }
+
                     offset += 2;
                     var x = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
                     var y = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
                     var z = BinaryPrimitives.ReadInt16LittleEndian(bytes[offset..(offset + 2)]) * multiplier; offset += 2;
                     sparse.Add((vertexIndex, x, y, z));
                     shapeVertexCount = Math.Max(shapeVertexCount, vertexIndex + 1);
-                }
-
-                var deltas = new (float X, float Y, float Z)[shapeVertexCount];
-                foreach (var (index, x, y, z) in sparse)
-                {
-                    if (index >= 0 && index < deltas.Length)
-                    {
-                        deltas[index] = (x, y, z);
-                    }
                 }
 
                 shapeMorphs.Add((morphName, sparse));
