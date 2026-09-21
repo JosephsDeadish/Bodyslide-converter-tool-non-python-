@@ -10259,6 +10259,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 }
             }
 
+            damping = Math.Min(damping, ComputeIslandTopologyDamping(islandControl));
             damping = Math.Min(damping, 1d - Math.Min(0.10d, islandControl.BoundaryDamping * 0.60d));
             damping = Math.Min(damping, 1d - Math.Min(0.08d, islandControl.RigidityBias * 0.50d));
             damping = Math.Min(
@@ -10290,6 +10291,37 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 ? 1d + ((pair.Value - 1d) * damping)
                 : pair.Value,
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static double ComputeIslandTopologyDamping(CageIslandControl islandControl)
+    {
+        var damping = 1d;
+        var boundaryLoopCount = islandControl.BoundaryLoops?.Count ?? 0;
+        if (boundaryLoopCount >= 2)
+        {
+            damping *= 0.92d;
+        }
+
+        if (islandControl.BoundaryLoops?.Any(static loop => loop.IsHole) == true)
+        {
+            damping *= 0.94d;
+        }
+
+        var edgeSummary = islandControl.EdgeNetworkSummary;
+        if (edgeSummary is not null)
+        {
+            if (edgeSummary.HasManifoldRisk)
+            {
+                damping *= 0.95d;
+            }
+
+            if (edgeSummary.InteriorEdgeCount > 0 && edgeSummary.BoundaryVertexCount > 0)
+            {
+                damping *= 0.97d;
+            }
+        }
+
+        return Math.Clamp(damping, 0.76d, 1d);
     }
 
     private static IReadOnlyDictionary<string, double> ApplySoftClothAmplification(IReadOnlyDictionary<string, double> field) =>
@@ -19158,12 +19190,55 @@ internal sealed class LocalExportService(
             widthScale = 1d + ((widthScale - 1d) * islandControl.WidthScaleBias);
             depthScale = 1d + ((depthScale - 1d) * islandControl.DepthScaleBias);
             heightScale = 1d + ((heightScale - 1d) * islandControl.HeightScaleBias);
+
+            var topologyDamping = ComputeIslandProjectionTopologyDamping(islandControl, boundaryLoopControl);
+            if (topologyDamping < 1d)
+            {
+                widthScale = 1d + ((widthScale - 1d) * topologyDamping);
+                depthScale = 1d + ((depthScale - 1d) * Math.Min(0.96d, topologyDamping + 0.04d));
+                heightScale = 1d + ((heightScale - 1d) * Math.Min(0.98d, topologyDamping + 0.08d));
+            }
         }
 
         return (
             widthScale,
             depthScale,
             heightScale);
+    }
+
+    private static double ComputeIslandProjectionTopologyDamping(
+        CageIslandControl islandControl,
+        CageIslandBoundaryLoopControl? boundaryLoopControl)
+    {
+        var damping = 1d;
+        var boundaryLoopCount = islandControl.BoundaryLoops?.Count ?? 0;
+        if (boundaryLoopCount >= 2)
+        {
+            damping *= 0.94d;
+        }
+
+        if (boundaryLoopControl?.IsHole == true)
+        {
+            damping *= 0.90d;
+        }
+
+        var edgeSummary = islandControl.EdgeNetworkSummary;
+        if (edgeSummary is not null)
+        {
+            if (edgeSummary.HasManifoldRisk)
+            {
+                damping *= 0.96d;
+            }
+
+            if (edgeSummary.InteriorEdgeCount > 0 &&
+                edgeSummary.BoundaryVertexCount > 0 &&
+                boundaryLoopControl is not null)
+            {
+                damping *= 0.97d;
+            }
+        }
+
+        return Math.Clamp(damping, 0.74d, 1d);
     }
 
     private static CageIslandControl? ResolveIslandCageControl(

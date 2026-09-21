@@ -3091,6 +3091,68 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_UsesExplicitTopologyMetadataToDampenMappedRegionsMoreStrongly()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.34d,
+            ["breasts"] = 1.30d,
+            ["waist"] = 0.74d,
+            ["belly"] = 0.80d,
+            ["arms"] = 1.10d
+        };
+        var baseCage = BasicCageGenerationService.CreatePresetCage("mixed");
+        var semanticOnlyCage = baseCage with
+        {
+            IslandControls =
+            [
+                new CageIslandControl(
+                    "armor",
+                    0,
+                    ["chest", "breasts", "waist", "belly"],
+                    SemanticLabels: ["window-frame-island"],
+                    WidthScaleBias: 0.80f,
+                    DepthScaleBias: 0.86f,
+                    HeightScaleBias: 0.90f)
+            ]
+        };
+        var topologyAwareCage = semanticOnlyCage with
+        {
+            IslandControls =
+            [
+                semanticOnlyCage.IslandControls![0] with
+                {
+                    BoundaryLoops =
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: false),
+                        new CageIslandBoundaryLoopControl(1, ["chest"], IsHole: true)
+                    ],
+                    EdgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
+                        0,
+                        BoundaryEdgeCount: 12,
+                        InteriorEdgeCount: 6,
+                        NonManifoldEdgeCount: 1,
+                        BoundaryVertexCount: 10,
+                        MaxVertexValence: 4,
+                        IsClosedManifold: false,
+                        HasManifoldRisk: true)
+                }
+            ]
+        };
+
+        var semanticOnly = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, semanticOnlyCage]));
+        var topologyAware = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [field, topologyAwareCage]));
+
+        Assert.True(topologyAware["chest"] < semanticOnly["chest"]);
+        Assert.True(topologyAware["breasts"] < semanticOnly["breasts"]);
+        Assert.True(Math.Abs(topologyAware["waist"] - 1d) < Math.Abs(semanticOnly["waist"] - 1d));
+        Assert.True(Math.Abs(topologyAware["belly"] - 1d) < Math.Abs(semanticOnly["belly"] - 1d));
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -7733,6 +7795,76 @@ public sealed class NifOutputAndSourceOverrideTests
 
         Assert.True(loopScales.WidthScale < broadScales.WidthScale, $"Expected loop-authored cage region to localize width deformation more tightly than the broad island region. broad={broadScales.WidthScale:F4}, loop={loopScales.WidthScale:F4}");
         Assert.True(loopScales.DepthScale <= broadScales.DepthScale);
+    }
+
+    [Fact]
+    public void ExportCageProjection_HoleAndEdgeTopologyDampenLoopScaleMoreStrongly()
+    {
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(scaleMethod);
+
+        var regionalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.72d
+        };
+        var cageRegions = new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = new(0.78f, 0.12f, 0.24f, 0.18f, 0.20f, 0.18f, 0.82f, 0.36f, 0.12f, 0.04f)
+        };
+
+        var authoredRegion = new CageIslandAuthoredRegion(
+            "chest",
+            new CageRegion(0.78f, 0.12f, 0.24f, 0.18f, 0.20f, 0.18f, 0.82f, 0.36f, 0.12f, 0.04f),
+            LoopIndex: 1,
+            IsHole: true);
+
+        var baseIsland = new CageIslandControl(
+            "loop_topology_projection",
+            0,
+            ["chest"],
+            BoundaryLoops:
+            [
+                new CageIslandBoundaryLoopControl(1, ["chest"], IsHole: true, InfluenceRadius: 0.16f, RigidityBias: 0.08f, BoundaryDamping: 0.10f)
+            ],
+            AuthoredRegions:
+            [
+                authoredRegion
+            ]);
+        var plainCage = new DeformationCage("test-cage", cageRegions, [baseIsland]);
+        var riskyCage = plainCage with
+        {
+            IslandControls =
+            [
+                baseIsland with
+                {
+                    BoundaryLoops =
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: false, InfluenceRadius: 0.18f),
+                        new CageIslandBoundaryLoopControl(1, ["chest"], IsHole: true, InfluenceRadius: 0.16f, RigidityBias: 0.08f, BoundaryDamping: 0.10f)
+                    ],
+                    EdgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(
+                        0,
+                        BoundaryEdgeCount: 14,
+                        InteriorEdgeCount: 8,
+                        NonManifoldEdgeCount: 1,
+                        BoundaryVertexCount: 12,
+                        MaxVertexValence: 4,
+                        IsClosedManifold: false,
+                        HasManifoldRisk: true)
+                }
+            ]
+        };
+
+        var plainIsland = Assert.Single(plainCage.IslandControls!);
+        var plainLoop = Assert.Single(plainIsland.BoundaryLoops!);
+        var riskyIsland = Assert.Single(riskyCage.IslandControls!);
+        var riskyLoop = riskyIsland.BoundaryLoops!.Single(loop => loop.IsHole);
+
+        var plainScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(null, [0.78f, 0.22f, 0.18f, regionalMorphing, plainCage, plainIsland, plainLoop])!;
+        var riskyScales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod.Invoke(null, [0.78f, 0.22f, 0.18f, regionalMorphing, riskyCage, riskyIsland, riskyLoop])!;
+
+        Assert.True(riskyScales.WidthScale < plainScales.WidthScale, $"Expected multi-loop + edge-risk topology to damp width scale more strongly. plain={plainScales.WidthScale:F4}, risky={riskyScales.WidthScale:F4}");
+        Assert.True(riskyScales.DepthScale < plainScales.DepthScale, $"Expected multi-loop + edge-risk topology to damp depth scale more strongly. plain={plainScales.DepthScale:F4}, risky={riskyScales.DepthScale:F4}");
     }
 
     // ── --source override ─────────────────────────────────────────────────────
