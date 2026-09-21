@@ -19445,6 +19445,10 @@ internal sealed class LocalExportService(
         var spanZ = MathF.Max(0.0001f, maxZ - minZ);
         var boundaryRatio = boundaryCount / (float)count;
         var outerBias = MathF.Max(MathF.Abs(centerX - 0.5f) * 2f, MathF.Abs(centerY - 0.5f) * 2f);
+        var centerlineBias = MathF.Max(MathF.Abs(centerX - 0.5f), MathF.Abs(centerY - 0.5f));
+        var crossSectionSpan = MathF.Min(spanX, spanY);
+        var tallColumn = spanZ >= 0.22f && spanZ >= (crossSectionSpan * 1.75f);
+        var slenderLateral = crossSectionSpan <= 0.16f;
         var labels = new List<string>();
         var rigidityBias = 0f;
         var boundaryDamping = 0f;
@@ -19493,6 +19497,36 @@ internal sealed class LocalExportService(
         else if (centerZ <= 0.52f)
         {
             labels.Add(outerBias >= 0.36f ? "lower-lateral-island" : "lower-core-island");
+        }
+
+        if (tallColumn && slenderLateral)
+        {
+            if (centerlineBias <= 0.12f && centerZ >= 0.66f)
+            {
+                labels.Add("upper-centerline-column-island");
+                rigidityBias += 0.04f;
+                boundaryDamping += 0.05f;
+                widthScaleBias = MathF.Min(widthScaleBias, 0.78f);
+                depthScaleBias = MathF.Min(depthScaleBias, 0.82f);
+                heightScaleBias = MathF.Min(heightScaleBias, 0.90f);
+            }
+            else if (centerlineBias <= 0.16f && centerZ >= 0.18f && centerZ <= 0.68f)
+            {
+                labels.Add("lower-centerline-column-island");
+                rigidityBias += 0.05f;
+                boundaryDamping += 0.06f;
+                widthScaleBias = MathF.Min(widthScaleBias, 0.74f);
+                depthScaleBias = MathF.Min(depthScaleBias, 0.80f);
+                heightScaleBias = MathF.Min(heightScaleBias, 0.90f);
+            }
+            else if (outerBias >= 0.34f)
+            {
+                labels.Add(centerZ >= 0.58f ? "upper-appendage-column-island" : "lower-appendage-column-island");
+                rigidityBias += 0.03f;
+                boundaryDamping += 0.04f;
+                widthScaleBias = MathF.Min(widthScaleBias, 0.82f);
+                depthScaleBias = MathF.Min(depthScaleBias, 0.86f);
+            }
         }
 
         return new CageIslandSemanticProfile(
@@ -19558,14 +19592,29 @@ internal sealed class LocalExportService(
                     break;
                 case "core-panel-island":
                 case "upper-core-island":
+                case "upper-centerline-column-island":
                     AddRegion("chest");
                     AddRegion("breasts");
                     AddRegion("waist");
+                    AddRegion("shoulders");
                     break;
                 case "lower-core-island":
+                case "lower-centerline-column-island":
                     AddRegion("belly");
                     AddRegion("pelvis");
                     AddRegion("butt");
+                    AddRegion("thighs");
+                    break;
+                case "upper-appendage-column-island":
+                    AddRegion("shoulders");
+                    AddRegion("arms");
+                    AddRegion("chest");
+                    break;
+                case "lower-appendage-column-island":
+                    AddRegion("thighs");
+                    AddRegion("calves");
+                    AddRegion("pelvis");
+                    AddRegion("feet");
                     break;
             }
         }
@@ -30558,6 +30607,16 @@ internal sealed class LocalExportService(
         var payload = BuildPreviewWorkbenchPayload(convertedMeshPaths, mesh.DeformationCage, armor.MeshFiles);
         var payloadJson = JsonSerializer.Serialize(payload);
         var validationPanelHtml = BuildValidationPreviewPanelHtml(validationSummary, request.TargetBody);
+        var automationModelJson = JsonSerializer.Serialize(new
+        {
+            ArmorName = armorName,
+            TargetBody = request.TargetBody,
+            MeshFile = payload.MeshFile,
+            VertexCount = payload.VertexCount,
+            Mode = payload.Mode,
+            HasCageTopology = payload.CageTopology is not null,
+            Artifacts = new[] { "preview-workbench.html", "preview.html", "conversion-quality.json" }
+        });
         var cageIslandItemsHtml = payload.CageTopology is { Islands.Count: > 0 }
             ? string.Join(Environment.NewLine, payload.CageTopology.Islands.Take(8).Select(static island =>
                 $"<li><strong>{HtmlEncode(island.MeshFile)} · island {island.IslandId}</strong>: {island.VertexCount} verts, {island.BoundaryVertexCount} boundary verts, {island.BoundaryLoopCount} boundary loops, {island.InteriorEdgeCount} interior edges, {island.NonManifoldEdgeCount} non-manifold edges{(island.UsesPropagatedEdgeNetwork ? ", propagated edge network" : string.Empty)}, regions {HtmlEncode(island.CageRegions.Count > 0 ? string.Join(", ", island.CageRegions) : "(none)")}, semantics {HtmlEncode(island.SemanticLabels is { Count: > 0 } ? string.Join(", ", island.SemanticLabels) : "(none)")}</li>"))
@@ -30601,22 +30660,23 @@ internal sealed class LocalExportService(
                 @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } canvas { height: 420px; } }
               </style>
             </head>
-            <body>
+            <body data-testid="preview-workbench-root">
+              <script id="preview-automation-model" type="application/json">{{automationModelJson}}</script>
               <h1>SlideSmith 3D Workbench</h1>
               <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} · {{HtmlEncode(analysis.MeshType)}} · {{mesh.MeshCount}} mesh item(s)</p>
-              <div class="layout">
-                <div class="panel">
-                  <canvas id="workbench-canvas" width="960" height="520"></canvas>
-                  <div class="controls">
-                    <label>Point size <input id="point-size" type="range" min="1" max="4" step="1" value="2"></label>
-                    <label>Zoom <input id="zoom-level" type="range" min="0.6" max="2.8" step="0.05" value="1.2"></label>
-                    <label><input id="auto-spin" type="checkbox" checked> Auto-spin</label>
-                    <button id="reset-view" type="button">Reset view</button>
+              <div class="layout" data-testid="preview-workbench-layout">
+                <div class="panel" data-testid="preview-workbench-canvas-panel">
+                  <canvas id="workbench-canvas" data-testid="workbench-canvas" width="960" height="520"></canvas>
+                  <div class="controls" data-testid="workbench-controls">
+                    <label>Point size <input id="point-size" data-testid="point-size-slider" type="range" min="1" max="4" step="1" value="2"></label>
+                    <label>Zoom <input id="zoom-level" data-testid="zoom-level-slider" type="range" min="0.6" max="2.8" step="0.05" value="1.2"></label>
+                    <label><input id="auto-spin" data-testid="auto-spin-checkbox" type="checkbox" checked> Auto-spin</label>
+                    <button id="reset-view" data-testid="reset-view-button" type="button">Reset view</button>
                   </div>
-                  <p id="workbench-status" class="subtitle" style="margin-top:10px"></p>
+                  <p id="workbench-status" data-testid="workbench-status" class="subtitle" style="margin-top:10px"></p>
                 </div>
-                <div style="display:flex;flex-direction:column;gap:18px">
-                  <div class="panel">
+                <div style="display:flex;flex-direction:column;gap:18px" data-testid="preview-workbench-sidepanels">
+                  <div class="panel" data-testid="preview-workbench-source-panel">
                     <h3 style="margin:0 0 8px;color:#9bb7f2">Mesh source</h3>
                     <ul class="kvs">
                       <li><strong>Mode:</strong> {{HtmlEncode(payload.Mode)}}</li>
@@ -31353,6 +31413,15 @@ internal sealed class LocalExportService(
         var baseFactorsJson = JsonSerializer.Serialize(baseRegionalFactors);
         var previewProfilesJson = JsonSerializer.Serialize(previewProfiles);
         var regionDomIdsJson = JsonSerializer.Serialize(regionDomIds);
+        var automationStateJson = JsonSerializer.Serialize(new
+        {
+            ArmorName = armorName,
+            TargetBody = request.TargetBody,
+            SelectedProfile = selectedProfile,
+            Regions = orderedRegions.Select(static pair => pair.Key).ToArray(),
+            Profiles = profileOptions.ToArray(),
+            Artifacts = new[] { "preview-workbench.html", "conversion-quality.json", "in-game-validation.json" }
+        });
 
         // Build SVG body regions.
         var svgParts = new System.Text.StringBuilder();
@@ -31373,7 +31442,7 @@ internal sealed class LocalExportService(
             var colour = MorphColour(factor);
             var opacity = Math.Clamp(0.45 + Math.Abs(factor - 1.0) * 1.2, 0.4, 0.85);
             var domId = regionDomIds[region];
-            svgParts.AppendLine($"""        <rect id="region-box-{domId}" data-region="{HtmlEncode(region)}" x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
+            svgParts.AppendLine($"""        <rect id="region-box-{domId}" data-testid="preview-region-box-{domId}" data-region="{HtmlEncode(region)}" x="{shape.X}" y="{shape.Y}" width="{shape.W}" height="{shape.H}" rx="4" fill="{colour}" opacity="{opacity:F2}" stroke="{colour}" stroke-width="0.5"/>""");
             svgParts.AppendLine($"""        <text id="region-label-{domId}" x="{shape.X + shape.W / 2}" y="{shape.Y + shape.H / 2 + 4}" text-anchor="middle" font-size="7" fill="#fff" font-family="system-ui">{shape.Label}</text>""");
         }
         svgParts.AppendLine("""      </g>""");
@@ -31488,7 +31557,7 @@ internal sealed class LocalExportService(
 
         // World / dropped-item physics panel.
         var worldPhysicsPanelHtml = new System.Text.StringBuilder();
-        worldPhysicsPanelHtml.AppendLine("""      <div class="panel">""");
+        worldPhysicsPanelHtml.AppendLine("""      <div class="panel" data-testid="preview-world-physics-panel">""");
         worldPhysicsPanelHtml.AppendLine("""        <h3 style="margin-top:0">World / Dropped-Item Physics</h3>""");
         worldPhysicsPanelHtml.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Drop mode:</strong> {HtmlEncode(worldPhysics.Mode)}</p>""");
         worldPhysicsPanelHtml.AppendLine($"""        <p style="font-size:.85rem;margin:0 0 6px"><strong>Collision shape:</strong> {HtmlEncode(worldPhysics.CollisionShape)}</p>""");
@@ -31538,14 +31607,15 @@ internal sealed class LocalExportService(
                 .panel button { background: #2a3a4a; color: #fff; border: 1px solid #3a4a5a; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
               </style>
             </head>
-            <body>
-              <h1>SlideSmith Preview</h1>
-              <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}}{{highRiskBadge}} &nbsp;·&nbsp; interactive preview controls enabled</p>
-              <div class="layout">
-                <div class="body-fig">
-                  <svg width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
+            <body data-testid="preview-workbench-root">
+              <script id="preview-automation-model" type="application/json">{{automationStateJson}}</script>
+            <h1>SlideSmith Preview</h1>
+            <p class="subtitle">{{HtmlEncode(armorName)}} → {{HtmlEncode(request.TargetBody)}} &nbsp;·&nbsp; {{HtmlEncode(analysis.MeshType)}} &nbsp;·&nbsp; {{HtmlEncode(poseRiskLabel)}}{{highRiskBadge}} &nbsp;·&nbsp; interactive preview controls enabled</p>
+            <div class="layout" data-testid="preview-layout">
+              <div class="body-fig" data-testid="preview-body-figure">
+                <svg id="preview-body-svg" data-testid="preview-body-svg" width="200" height="320" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
             {{svgParts}}
-                  </svg>
+                </svg>
                   <div class="legend">
                     <div class="legend-item"><div class="dot" style="background:#3a7bd5"></div><span>Compact</span></div>
                     <div class="legend-item"><div class="dot" style="background:#27ae60"></div><span>Normal</span></div>
@@ -31554,43 +31624,43 @@ internal sealed class LocalExportService(
                     <div class="legend-item"><div class="dot" style="background:#e74c3c"></div><span>High</span></div>
                   </div>
                 </div>
-                <div class="panels">
-                  <div class="panel">
+                <div class="panels" data-testid="preview-panels">
+                  <div class="panel" data-testid="preview-live-controls-panel">
                     <h3 style="margin-top:0">Live Controls</h3>
                     <div class="controls">
                       <label for="body-profile-select">Swap body</label>
-                      <select id="body-profile-select">{{profileOptionsHtml}}</select>
+                      <select id="body-profile-select" data-testid="body-profile-select">{{profileOptionsHtml}}</select>
                       <span class="mono" id="body-profile-value">{{HtmlEncode(selectedProfile)}}</span>
 
                       <label for="view-rotation-slider">Rotate view</label>
-                      <input id="view-rotation-slider" type="range" min="-45" max="45" step="1" value="0">
+                      <input id="view-rotation-slider" data-testid="view-rotation-slider" type="range" min="-45" max="45" step="1" value="0">
                       <span class="mono" id="view-rotation-value">0°</span>
 
                       <label for="global-scale-slider">Adjust sliders</label>
-                      <input id="global-scale-slider" type="range" min="0.70" max="1.30" step="0.01" value="1.00">
+                      <input id="global-scale-slider" data-testid="global-scale-slider" type="range" min="0.70" max="1.30" step="0.01" value="1.00">
                       <span class="mono" id="global-scale-value">1.00x</span>
                     </div>
                     <div style="margin-top:10px">
-                      <button id="reset-preview-controls" type="button">Reset controls</button>
+                      <button id="reset-preview-controls" data-testid="reset-preview-controls" type="button">Reset controls</button>
                     </div>
                   </div>
-                  <div class="panel">
+                  <div class="panel" data-testid="preview-regional-morphing-panel">
                     <h3 style="margin-top:0">Regional Morphing</h3>
-                    <table>
+                    <table data-testid="preview-regional-morphing-table">
                       <tr><th>Region</th><th>Factor</th></tr>
             {{regionRows}}        </table>
                   </div>
-                  <div class="panel">
+                  <div class="panel" data-testid="preview-region-tuning-panel">
                     <h3 style="margin-top:0">Per-Region Tuning</h3>
-                    <table class="slider-table">
+                    <table class="slider-table" data-testid="preview-region-tuning-table">
                       <tr><th>Region</th><th>Slider</th><th>Value</th></tr>
             {{sliderRows}}        </table>
                   </div>
-                  <div class="panel">
+                  <div class="panel" data-testid="preview-bodyslide-slider-panel">
                     <h3 style="margin-top:0">BodySlide Sliders</h3>
                     <p style="font-size:.85rem;margin:0">{{sliderList}}</p>
                   </div>
-                  <div class="panel">
+                  <div class="panel" data-testid="preview-physics-panel">
                     <h3 style="margin-top:0">Physics Nodes</h3>
                     {{physicsPanel}}
                   </div>

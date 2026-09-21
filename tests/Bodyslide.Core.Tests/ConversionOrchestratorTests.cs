@@ -2837,6 +2837,68 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BuildExportDeformationCage_InfersCenterlineSemanticCorrespondenceForSeparatedUpperAndLowerColumns()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "centerline_columns_0.nif");
+
+        var vertices = new List<(float X, float Y, float Z)>
+        {
+            (-0.03f, -0.01f, 0.18f), (0.03f, -0.01f, 0.18f), (-0.03f, 0.01f, 0.18f), (0.03f, 0.01f, 0.18f),
+            (-0.03f, -0.01f, 0.34f), (0.03f, -0.01f, 0.34f), (-0.03f, 0.01f, 0.34f), (0.03f, 0.01f, 0.34f),
+            (-0.03f, -0.01f, 0.50f), (0.03f, -0.01f, 0.50f), (-0.03f, 0.01f, 0.50f), (0.03f, 0.01f, 0.50f),
+
+            (-0.03f, -0.01f, 0.68f), (0.03f, -0.01f, 0.68f), (-0.03f, 0.01f, 0.68f), (0.03f, 0.01f, 0.68f),
+            (-0.03f, -0.01f, 0.84f), (0.03f, -0.01f, 0.84f), (-0.03f, 0.01f, 0.84f), (0.03f, 0.01f, 0.84f),
+            (-0.03f, -0.01f, 1.00f), (0.03f, -0.01f, 1.00f), (-0.03f, 0.01f, 1.00f), (0.03f, 0.01f, 1.00f),
+
+            (-0.75f, -0.02f, 0.56f), (-0.55f, -0.02f, 0.56f), (-0.75f, 0.02f, 0.92f), (-0.55f, 0.02f, 0.92f),
+            (0.55f, -0.02f, 0.56f), (0.75f, -0.02f, 0.56f), (0.55f, 0.02f, 0.92f), (0.75f, 0.02f, 0.92f)
+        };
+        var triangles = new List<(ushort A, ushort B, ushort C)>
+        {
+            (0, 2, 1), (1, 2, 3), (4, 6, 5), (5, 6, 7), (8, 10, 9), (9, 10, 11),
+            (0, 4, 1), (1, 4, 5), (2, 6, 3), (3, 6, 7), (4, 8, 5), (5, 8, 9), (6, 10, 7), (7, 10, 11),
+
+            (12, 14, 13), (13, 14, 15), (16, 18, 17), (17, 18, 19), (20, 22, 21), (21, 22, 23),
+            (12, 16, 13), (13, 16, 17), (14, 18, 15), (15, 18, 19), (16, 20, 17), (17, 20, 21), (18, 22, 19), (19, 22, 23),
+
+            (24, 26, 25), (25, 26, 27),
+            (28, 30, 29), (29, 30, 31)
+        };
+
+        await SyntheticNifTestData.WriteBsTriShapeStyleAsync(inputFile, vertices, triangles);
+
+        try
+        {
+            var buildCageMethod = typeof(LocalExportService).GetMethod("BuildExportDeformationCage", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(buildCageMethod);
+
+            var cage = BasicCageGenerationService.CreatePresetCage("mixed");
+            var result = Assert.IsType<DeformationCage>(buildCageMethod!.Invoke(null, [new[] { inputFile }, cage]));
+            Assert.NotNull(result.IslandControls);
+            Assert.True(result.IslandControls!.Count >= 4);
+            var semanticLabels = result.IslandControls
+                .SelectMany(static control => control.SemanticLabels ?? [])
+                .ToArray();
+
+            Assert.Contains("upper-centerline-column-island", semanticLabels, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("lower-centerline-column-island", semanticLabels, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(result.IslandControls, control =>
+                (control.SemanticLabels ?? []).Contains("upper-centerline-column-island", StringComparer.OrdinalIgnoreCase) &&
+                control.CageRegions.Contains("chest", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(result.IslandControls, control =>
+                (control.SemanticLabels ?? []).Contains("lower-centerline-column-island", StringComparer.OrdinalIgnoreCase) &&
+                control.CageRegions.Contains("pelvis", StringComparer.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BuildExportDeformationCage_EnrichesExistingIslandControlsWithAuthoredTopologyData()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -16366,6 +16428,12 @@ public sealed class RealisticModPackFixtureTests
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
             Assert.Contains("Alien Hybrid", inGameJson, StringComparison.Ordinal);
+
+            var previewHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
+            Assert.Contains("data-testid=\"preview-workbench-root\"", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("preview-automation-model", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("data-testid=\"workbench-canvas\"", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("data-testid=\"reset-view-button\"", previewHtml, StringComparison.Ordinal);
         }
         finally
         {
