@@ -12652,6 +12652,26 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 static group => group.Key,
                 static group => group.Select(static entry => entry.Owner).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                 StringComparer.OrdinalIgnoreCase);
+        static bool ContainsIslandSemantic(IReadOnlySet<string> semanticSet, params string[] tokens) =>
+            semanticSet.Any(label => tokens.Any(token =>
+                !string.IsNullOrWhiteSpace(token) &&
+                label.Contains(token, StringComparison.OrdinalIgnoreCase)));
+
+        static bool HasBoundaryOwnedRegion(CageIslandControl islandControl, params string[] regionNames) =>
+            islandControl.BoundaryLoops?.Any(loop => regionNames.Any(regionName =>
+                loop.CageRegions.Contains(regionName, StringComparer.OrdinalIgnoreCase))) == true ||
+            islandControl.AuthoredRegions?.Any(authored => regionNames.Any(regionName =>
+                authored.RegionName.Equals(regionName, StringComparison.OrdinalIgnoreCase))) == true;
+
+        static bool HasUniqueRegionOwnership(
+            IReadOnlySet<string> regionSet,
+            IReadOnlyDictionary<string, int> ownershipCounts,
+            params string[] regionNames) =>
+            regionNames.Any(regionName =>
+                regionSet.Contains(regionName) &&
+                ownershipCounts.TryGetValue(regionName, out var ownerCount) &&
+                ownerCount == 1);
+
         foreach (var islandControl in islandControls)
         {
             var regionSet = islandControl.CageRegions
@@ -12661,16 +12681,12 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 ?.Where(static label => !string.IsNullOrWhiteSpace(label))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)
                 ?? [];
-            var hasBoundaryOwnedArmRegion =
-                islandControl.BoundaryLoops?.Any(loop => loop.CageRegions.Contains("arms", StringComparer.OrdinalIgnoreCase)) == true ||
-                islandControl.AuthoredRegions?.Any(region => region.RegionName.Equals("arms", StringComparison.OrdinalIgnoreCase)) == true;
-            var hasUniqueArmOwnership =
-                (regionSet.Contains("arms") &&
-                 ownershipCountsByRegion.TryGetValue("arms", out var armOwnerCount) &&
-                 armOwnerCount == 1) ||
-                (regionSet.Contains("shoulders") &&
-                 ownershipCountsByRegion.TryGetValue("shoulders", out var shoulderOwnerCount) &&
-                 shoulderOwnerCount == 1);
+            var hasBoundaryOwnedArmRegion = HasBoundaryOwnedRegion(islandControl, "arms", "shoulders");
+            var hasUniqueArmOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "arms", "shoulders");
+            var hasBoundaryOwnedTailRegion = HasBoundaryOwnedRegion(islandControl, "tail", "tails");
+            var hasUniqueTailOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "tail", "tails");
+            var hasBoundaryOwnedEarRegion = HasBoundaryOwnedRegion(islandControl, "ear", "ears");
+            var hasUniqueEarOwnership = HasUniqueRegionOwnership(regionSet, ownershipCountsByRegion, "ear", "ears");
 
             if (!analysis.IsFootwear &&
                 (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
@@ -12686,6 +12702,20 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                  semanticSet.Contains("upper-lateral-island")))
             {
                 slots.Add(34);
+            }
+
+            if (!analysis.IsFootwear &&
+                hasUniqueTailOwnership &&
+                (hasBoundaryOwnedTailRegion || ContainsIslandSemantic(semanticSet, "tail", "serpent", "lamia", "naga")))
+            {
+                slots.Add(40);
+            }
+
+            if (!analysis.IsFootwear &&
+                hasUniqueEarOwnership &&
+                (hasBoundaryOwnedEarRegion || ContainsIslandSemantic(semanticSet, "ear", "lynx", "wolf", "fox", "feline", "canine")))
+            {
+                slots.Add(43);
             }
 
             if (regionSet.Contains("feet"))
@@ -13538,6 +13568,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         string PluginName,
         byte[] Bytes,
         PluginTypeClassification Classification,
+        IReadOnlyList<string> DirectMasterFileNames,
         IReadOnlyList<PluginArmorAddon> Addons,
         IReadOnlyList<PluginArmorRecord> Records,
         bool IsUnreadable = false);
@@ -13657,12 +13688,12 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     masterFileNames))
                 .ToList();
 
-            return new ScannedPluginContext(pluginPath, pluginName, bytes, pluginKind, addons, records);
+            return new ScannedPluginContext(pluginPath, pluginName, bytes, pluginKind, masterFileNames, addons, records);
         }
         catch (IOException)
         {
             var fallback = Path.GetFileName(pluginPath) ?? pluginPath;
-            return new ScannedPluginContext(pluginPath, fallback, [], new PluginTypeClassification("UNKNOWN", 0d, []), [], [], true);
+            return new ScannedPluginContext(pluginPath, fallback, [], new PluginTypeClassification("UNKNOWN", 0d, []), [], [], [], true);
         }
     }
 
@@ -13718,10 +13749,100 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
         }
 
+        var transitiveMastersByPlugin = BuildPluginMasterClosureLookup(scannedPlugins);
+        foreach (var scannedPlugin in scannedPlugins)
+        {
+            if (!runtimeFormIdsByPlugin.TryGetValue(scannedPlugin.PluginName, out var runtimeFormIds) ||
+                runtimeFormIds.Count == 0 ||
+                !transitiveMastersByPlugin.TryGetValue(scannedPlugin.PluginName, out var transitiveMasters) ||
+                transitiveMasters.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var transitiveMaster in transitiveMasters)
+            {
+                if (!runtimeFormIdsByPlugin.TryGetValue(transitiveMaster, out var inheritedRuntimeFormIds))
+                {
+                    inheritedRuntimeFormIds = new HashSet<uint>();
+                    runtimeFormIdsByPlugin[transitiveMaster] = inheritedRuntimeFormIds;
+                }
+
+                inheritedRuntimeFormIds.UnionWith(runtimeFormIds);
+            }
+        }
+
         return runtimeFormIdsByPlugin.ToDictionary(
             static pair => pair.Key,
             static pair => (IReadOnlyList<uint>)pair.Value.OrderBy(static formId => formId).ToArray(),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildPluginMasterClosureLookup(
+        IReadOnlyList<ScannedPluginContext> scannedPlugins)
+    {
+        var directMastersByPlugin = scannedPlugins.ToDictionary(
+            static plugin => plugin.PluginName,
+            static plugin => NormalizeDirectMasterFileNames(plugin.DirectMasterFileNames),
+            StringComparer.OrdinalIgnoreCase);
+        var closureByPlugin = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlySet<string> BuildClosure(string pluginName, HashSet<string> active)
+        {
+            if (closureByPlugin.TryGetValue(pluginName, out var cachedClosure))
+            {
+                return cachedClosure;
+            }
+
+            if (!directMastersByPlugin.TryGetValue(pluginName, out var directMasters) || directMasters.Count == 0)
+            {
+                return closureByPlugin[pluginName] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var closure = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var directMaster in directMasters)
+            {
+                if (string.IsNullOrWhiteSpace(directMaster) ||
+                    !closure.Add(directMaster) ||
+                    !active.Add(directMaster))
+                {
+                    continue;
+                }
+
+                foreach (var transitiveMaster in BuildClosure(directMaster, active))
+                {
+                    closure.Add(transitiveMaster);
+                }
+
+                active.Remove(directMaster);
+            }
+
+            return closureByPlugin[pluginName] = closure;
+        }
+
+        foreach (var scannedPlugin in scannedPlugins)
+        {
+            BuildClosure(
+                scannedPlugin.PluginName,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scannedPlugin.PluginName });
+        }
+
+        return closureByPlugin;
+    }
+
+    private static IReadOnlySet<string> NormalizeDirectMasterFileNames(IReadOnlyList<string>? masterFileNames)
+    {
+        var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var masterFileName in masterFileNames ?? [])
+        {
+            var normalizedMasterFileName = Path.GetFileName(masterFileName?.Trim());
+            if (!string.IsNullOrWhiteSpace(normalizedMasterFileName))
+            {
+                normalized.Add(normalizedMasterFileName);
+            }
+        }
+
+        return normalized;
     }
 
     private static void AddContextualOwningPluginEvidence(
@@ -22819,6 +22940,7 @@ internal sealed class LocalExportService(
         var remaining = addons
             .Distinct()
             .ToList();
+        var transitiveMastersByPlugin = BuildTransitiveAddonMasterClosure(remaining);
         var components = new List<IReadOnlyList<PluginArmorAddon>>();
         while (remaining.Count > 0)
         {
@@ -22833,7 +22955,7 @@ internal sealed class LocalExportService(
                 var current = queue.Dequeue();
                 for (var index = remaining.Count - 1; index >= 0; index--)
                 {
-                    if (!AreStandaloneArmorAddonFamiliesRelated(current, remaining[index]))
+                    if (!AreStandaloneArmorAddonFamiliesRelated(current, remaining[index], transitiveMastersByPlugin))
                     {
                         continue;
                     }
@@ -22854,7 +22976,10 @@ internal sealed class LocalExportService(
         return components;
     }
 
-    private static bool AreStandaloneArmorAddonFamiliesRelated(PluginArmorAddon left, PluginArmorAddon right)
+    private static bool AreStandaloneArmorAddonFamiliesRelated(
+        PluginArmorAddon left,
+        PluginArmorAddon right,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> transitiveMastersByPlugin)
     {
         var leftOwner = NormalizeResolvedPluginFileNameOrNull(left.OwningPluginFileName);
         var rightOwner = NormalizeResolvedPluginFileNameOrNull(right.OwningPluginFileName);
@@ -22868,10 +22993,74 @@ internal sealed class LocalExportService(
             return true;
         }
 
-        var leftMasters = NormalizeDeclaredMasterFileNames(left.DeclaredMasterFileNames);
-        var rightMasters = NormalizeDeclaredMasterFileNames(right.DeclaredMasterFileNames);
+        var leftMasters = transitiveMastersByPlugin.TryGetValue(leftOwner, out var leftTransitiveMasters)
+            ? leftTransitiveMasters
+            : NormalizeDeclaredMasterFileNames(left.DeclaredMasterFileNames);
+        var rightMasters = transitiveMastersByPlugin.TryGetValue(rightOwner, out var rightTransitiveMasters)
+            ? rightTransitiveMasters
+            : NormalizeDeclaredMasterFileNames(right.DeclaredMasterFileNames);
         return leftMasters.Contains(rightOwner)
             || rightMasters.Contains(leftOwner);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildTransitiveAddonMasterClosure(
+        IReadOnlyList<PluginArmorAddon> addons)
+    {
+        var directMastersByPlugin = addons
+            .Select(static addon => new
+            {
+                Owner = NormalizeResolvedPluginFileNameOrNull(addon.OwningPluginFileName),
+                Masters = NormalizeDeclaredMasterFileNames(addon.DeclaredMasterFileNames)
+            })
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.Owner))
+            .GroupBy(static entry => entry.Owner!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => (IReadOnlySet<string>)group
+                    .SelectMany(static entry => entry.Masters)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+        var closureByPlugin = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        IReadOnlySet<string> BuildClosure(string pluginName, HashSet<string> active)
+        {
+            if (closureByPlugin.TryGetValue(pluginName, out var cachedClosure))
+            {
+                return cachedClosure;
+            }
+
+            if (!directMastersByPlugin.TryGetValue(pluginName, out var directMasters) || directMasters.Count == 0)
+            {
+                return closureByPlugin[pluginName] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var closure = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var directMaster in directMasters)
+            {
+                if (string.IsNullOrWhiteSpace(directMaster) ||
+                    !closure.Add(directMaster) ||
+                    !active.Add(directMaster))
+                {
+                    continue;
+                }
+
+                foreach (var transitiveMaster in BuildClosure(directMaster, active))
+                {
+                    closure.Add(transitiveMaster);
+                }
+
+                active.Remove(directMaster);
+            }
+
+            return closureByPlugin[pluginName] = closure;
+        }
+
+        foreach (var pluginName in directMastersByPlugin.Keys)
+        {
+            BuildClosure(pluginName, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { pluginName });
+        }
+
+        return closureByPlugin;
     }
 
     private static IReadOnlySet<string> NormalizeDeclaredMasterFileNames(IReadOnlyList<string>? masterFileNames)
