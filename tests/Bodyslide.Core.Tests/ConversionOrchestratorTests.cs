@@ -3487,6 +3487,63 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void BuildMorphTransferIslandTransferSummaries_AggregatesBoundaryAndAdjacencyMetadata()
+    {
+        var profilesMethod = typeof(LocalExportService).GetMethod("BuildMorphTransferIslandProfiles", BindingFlags.NonPublic | BindingFlags.Static);
+        var summariesMethod = typeof(LocalExportService).GetMethod("BuildMorphTransferIslandTransferSummaries", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(profilesMethod);
+        Assert.NotNull(summariesMethod);
+
+        var sourceVertices = new[]
+        {
+            new MeshVertex(0.10f, 0.50f, 0.10f),
+            new MeshVertex(0.14f, 0.52f, 0.12f),
+            new MeshVertex(0.18f, 0.48f, 0.14f),
+            new MeshVertex(0.58f, 0.50f, 0.10f),
+            new MeshVertex(0.62f, 0.52f, 0.12f),
+            new MeshVertex(0.66f, 0.48f, 0.14f)
+        };
+        var targetVertices = new[]
+        {
+            new MeshVertex(0.12f, 0.50f, 0.10f),
+            new MeshVertex(0.16f, 0.52f, 0.12f),
+            new MeshVertex(0.20f, 0.48f, 0.14f),
+            new MeshVertex(0.34f, 0.50f, 0.11f),
+            new MeshVertex(0.38f, 0.52f, 0.13f),
+            new MeshVertex(0.42f, 0.48f, 0.15f)
+        };
+
+        var sourceIslands = new[] { 0, 0, 0, 1, 1, 1 };
+        var targetIslands = new[] { 0, 0, 0, 1, 1, 1 };
+        var sourceZones = Enumerable.Repeat(17, sourceVertices.Length).ToArray();
+        var targetZones = Enumerable.Repeat(17, targetVertices.Length).ToArray();
+        var sourceBoundaryFlags = new[] { true, false, true, true, false, true };
+        var targetBoundaryFlags = new[] { true, false, true, true, false, true };
+
+        var sourceProfiles = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            profilesMethod!.Invoke(null, [sourceVertices, sourceZones, sourceIslands, sourceBoundaryFlags, null, false]));
+        var targetProfiles = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            profilesMethod.Invoke(null, [targetVertices, targetZones, targetIslands, targetBoundaryFlags, null, false]));
+
+        var summaries = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            summariesMethod!.Invoke(null, [sourceVertices, targetVertices, sourceIslands, targetIslands, null, null, sourceProfiles, targetProfiles]));
+
+        Assert.Equal(2, summaries.Count);
+        var firstSummary = summaries[0]!;
+        var preferredSourceIsland = (int)(firstSummary.GetType().GetProperty("PreferredSourceIslandId")?.GetValue(firstSummary) ?? -1);
+        var boundaryBlendBias = (float)(firstSummary.GetType().GetProperty("BoundaryBlendBias")?.GetValue(firstSummary) ?? 0f);
+        var adjacentTargetIslands = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+            firstSummary.GetType().GetProperty("AdjacentTargetIslands")!.GetValue(firstSummary));
+        var sourceInfluences = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+            firstSummary.GetType().GetProperty("SourceInfluences")!.GetValue(firstSummary));
+
+        Assert.Equal(0, preferredSourceIsland);
+        Assert.True(boundaryBlendBias > 0f);
+        Assert.True(adjacentTargetIslands.Cast<object>().Any());
+        Assert.True(sourceInfluences.Cast<object>().Count() >= 2);
+    }
+
+    [Fact]
     public async Task BuildTopologyTransformContext_GivesInnerBoundaryLoopsStrongerPreservationWeight()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -20577,7 +20634,7 @@ public sealed class OutputCompletenessTests
         var targetIslands = new[] { 1 };
         var islandMatches = new[] { 2, 0 };
 
-        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones, sourceIslands, targetIslands, islandMatches, null, null]);
+        var result = method!.Invoke(null, [sourceVertices, targetVertices, sourceZones, targetZones, sourceIslands, targetIslands, islandMatches, null, null, null]);
         var influences = Assert.IsAssignableFrom<System.Collections.IEnumerable>(result);
         var firstInfluenceList = Assert.Single(influences.Cast<object>());
         var rankedInfluences = ((System.Collections.IEnumerable)firstInfluenceList).Cast<object>().ToArray();
@@ -20649,6 +20706,11 @@ public sealed class OutputCompletenessTests
             var targetTransferIslands = Assert.IsType<int[]>(context!.GetType().GetProperty("TargetTransferIslands", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(context));
             Assert.Equal(vertices.Count, targetTransferIslands.Length);
             Assert.Equal(2, targetTransferIslands.Distinct().Count());
+            var decisionCache = context.GetType().GetProperty("DecisionCache", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(context);
+            Assert.NotNull(decisionCache);
+            var targetIslandTransfers = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+                decisionCache!.GetType().GetProperty("TargetIslandTransfers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decisionCache));
+            Assert.Equal(2, targetIslandTransfers.Count);
         }
         finally
         {
@@ -20706,6 +20768,9 @@ public sealed class OutputCompletenessTests
                 .Select(decision => (float)(decision.GetType().GetProperty("StructuralDivergence", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decision) ?? 0f))
                 .ToArray();
             Assert.Contains(divergenceScores, score => score >= 0.30f);
+            var targetIslandTransfers = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+                decisionCache.GetType().GetProperty("TargetIslandTransfers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(decisionCache));
+            Assert.True(targetIslandTransfers.Count > 0);
         }
         finally
         {
@@ -20773,7 +20838,7 @@ public sealed class OutputCompletenessTests
         decisions.Add(CreateDecision(0.52f, 0.66f, 1, -1, true));
 
         var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 6);
+            .Single(ctor => ctor.GetParameters().Length == 9);
         var decisionCache = decisionCacheCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
@@ -20781,7 +20846,10 @@ public sealed class OutputCompletenessTests
             1f,
             1f,
             1f,
-            decisions
+            decisions,
+            null,
+            null,
+            null
         ]);
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
