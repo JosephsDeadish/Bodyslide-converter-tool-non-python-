@@ -227,6 +227,20 @@ internal static class TriMorphReader
         }
 
         var morphs = new List<TriMorphEntry>(morphCount);
+        var densePayloadBytes = counts.Sum(count => checked(count * (usesQuantizedInt16 ? 6 : 12)));
+        var indexedPayloadBytes = counts.Sum(count => checked(count * (usesQuantizedInt16 ? 8 : 14)));
+        var remainingBytes = bytes.Length - offset;
+        var usesExplicitIndexes = remainingBytes switch
+        {
+            var value when value == indexedPayloadBytes => true,
+            var value when value == densePayloadBytes => false,
+            _ => (bool?)null
+        };
+        if (usesExplicitIndexes is null)
+        {
+            return false;
+        }
+
         for (var i = 0; i < morphCount; i++)
         {
             var deltaCount = counts[i];
@@ -235,7 +249,9 @@ internal static class TriMorphReader
                 return false;
             }
 
-            var expectedBytes = checked(deltaCount * (usesQuantizedInt16 ? 6 : 12));
+            var expectedBytes = checked(deltaCount * (usesQuantizedInt16
+                ? (usesExplicitIndexes.Value ? 8 : 6)
+                : (usesExplicitIndexes.Value ? 14 : 12)));
             if (offset + expectedBytes > bytes.Length)
             {
                 return false;
@@ -244,6 +260,14 @@ internal static class TriMorphReader
             var deltas = new (float X, float Y, float Z)[vertexCount];
             for (var j = 0; j < deltaCount; j++)
             {
+                var vertexIndex = usesExplicitIndexes.Value
+                    ? BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)])
+                    : j;
+                if (usesExplicitIndexes.Value)
+                {
+                    offset += 2;
+                }
+
                 float x;
                 float y;
                 float z;
@@ -260,7 +284,12 @@ internal static class TriMorphReader
                     z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)])); offset += 4;
                 }
 
-                deltas[j] = (x, y, z);
+                if (vertexIndex >= vertexCount)
+                {
+                    return false;
+                }
+
+                deltas[vertexIndex] = (x, y, z);
             }
 
             morphs.Add(new TriMorphEntry(names[i], deltas));

@@ -10049,6 +10049,24 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_WithIndexedSparseDeltaCount_IsAccepted()
+        {
+            var bytes = BuildIndexedTriPayload(
+                vertexCount: 3,
+                ("BreastLift", [(2, 0.125f, 0f, -0.25f)]));
+
+            var ok = TriMorphReader.TryRead(bytes, out var payload);
+
+            Assert.True(ok);
+            Assert.NotNull(payload);
+            Assert.Equal(3, payload!.VertexCount);
+            Assert.Single(payload.Morphs);
+            Assert.Equal(0f, payload.Morphs[0].Deltas[0].X, 3);
+            Assert.Equal(0f, payload.Morphs[0].Deltas[1].X, 3);
+            Assert.Equal(0.125f, payload.Morphs[0].Deltas[2].X, 3);
+        }
+
+        [Fact]
         public async Task ConvertAsync_WithDefaultModules_WritesTriMorphFiles()
         {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10178,6 +10196,36 @@ public sealed class BsdSliderDataTests
         {
             foreach (var (x, y, z) in morph.Deltas)
             {
+                writer.Write((short)Math.Round(x * 2048f));
+                writer.Write((short)Math.Round(y * 2048f));
+                writer.Write((short)Math.Round(z * 2048f));
+            }
+        }
+
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildIndexedTriPayload(int vertexCount, params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("FRTRI003"));
+        writer.Write((uint)vertexCount);
+        writer.Write((uint)morphs.Length);
+
+        foreach (var morph in morphs)
+        {
+            var nameBytes = System.Text.Encoding.UTF8.GetBytes(morph.Name);
+            writer.Write((ushort)nameBytes.Length);
+            writer.Write(nameBytes);
+            writer.Write((uint)morph.Deltas.Count);
+        }
+
+        foreach (var morph in morphs)
+        {
+            foreach (var (index, x, y, z) in morph.Deltas)
+            {
+                writer.Write((ushort)index);
                 writer.Write((short)Math.Round(x * 2048f));
                 writer.Write((short)Math.Round(y * 2048f));
                 writer.Write((short)Math.Round(z * 2048f));
