@@ -113,6 +113,20 @@
     "whisker",
     "mane"
   ],
+  "mane": [
+    "mane",
+    "forelock",
+    "manetip",
+    "crest"
+  ],
+  "branch": [
+    "branch",
+    "vine",
+    "tendril",
+    "briar",
+    "rootclaw",
+    "twig"
+  ],
   "antenna": [
     "antenna",
     "feeler",

@@ -1760,7 +1760,11 @@
       "Hoof.L",
       "Hoof.R",
       "ManeRoot",
-      "Forelock"
+      "ManeTip",
+      "Forelock",
+      "TailTip",
+      "Fetlock.L",
+      "Fetlock.R"
     ],
     "referenceTokens": [
       "horse",
@@ -1777,7 +1781,8 @@
       "Thighs",
       "Calves",
       "TailBase",
-      "NeckLength"
+      "NeckLength",
+      "ManeLength"
     ],
     "transformationField": {
       "chest": 1.01,
@@ -1854,7 +1859,13 @@
       "WingTip.L",
       "WingTip.R",
       "Feather01.L",
-      "Feather01.R"
+      "Feather01.R",
+      "Feather02.L",
+      "Feather02.R",
+      "Feather03.L",
+      "Feather03.R",
+      "Talon.L",
+      "Talon.R"
     ],
     "referenceTokens": [
       "avian",
@@ -2178,7 +2189,10 @@
       "scaled",
       "tail",
       "wing",
-      "horn"
+      "horn",
+      "frill",
+      "spinefin",
+      "barb"
     ],
     "sliderNames": [
       "Belly",
@@ -2187,7 +2201,8 @@
       "Shoulders",
       "Arms",
       "TailBase",
-      "WingSpan"
+      "WingSpan",
+      "FrillWidth"
     ],
     "transformationField": {
       "chest": 1.03,
@@ -2265,6 +2280,10 @@
       "Antenna.R",
       "Mandible.L",
       "Mandible.R",
+      "AntennaTip.L",
+      "AntennaTip.R",
+      "MandibleTip.L",
+      "MandibleTip.R",
       "CarapaceWing.L",
       "CarapaceWing.R"
     ],
@@ -2286,6 +2305,7 @@
       "Shoulders",
       "Arms",
       "AbdomenLength",
+      "AntennaLength",
       "MandibleSpread",
       "WingSpan"
     ],
@@ -2366,8 +2386,12 @@
       "NPC Tail",
       "Tail1",
       "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
       "TailFin",
       "Fin.Dorsal",
+      "Fin.DorsalTip",
       "PectoralFin.L",
       "PectoralFin.R",
       "VentralFin.L",

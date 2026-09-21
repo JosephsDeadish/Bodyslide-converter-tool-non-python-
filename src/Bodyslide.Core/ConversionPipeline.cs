@@ -10990,6 +10990,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ["Spriggan"] = CreateTuning(("chest", 1.05d), ("breasts", 1.08d), ("waist", 1.07d), ("shoulders", 1.05d), ("arms", 1.06d)),
             ["Equine Humanoid"] = CreateTuning(("pelvis", 1.05d), ("legs", 1.07d), ("thighs", 1.07d), ("calves", 1.09d)),
             ["Avian Humanoid"] = CreateTuning(("shoulders", 1.09d), ("arms", 1.09d), ("chest", 1.03d), ("waist", 0.96d)),
+            ["Feline Humanoid"] = CreateTuning(("waist", 0.96d), ("pelvis", 1.04d), ("legs", 1.04d), ("thighs", 1.05d), ("calves", 1.06d)),
+            ["Canine Humanoid"] = CreateTuning(("waist", 0.96d), ("pelvis", 1.05d), ("legs", 1.05d), ("thighs", 1.06d), ("calves", 1.07d)),
+            ["Draconic Humanoid"] = CreateTuning(("waist", 0.94d), ("pelvis", 1.04d), ("shoulders", 1.08d), ("arms", 1.06d), ("belly", 1.02d)),
+            ["Insectoid Humanoid"] = CreateTuning(("waist", 0.93d), ("shoulders", 1.06d), ("arms", 1.04d), ("belly", 1.08d), ("breasts", 0.90d)),
+            ["Aquatic Humanoid"] = CreateTuning(("waist", 0.94d), ("pelvis", 1.04d), ("shoulders", 1.04d), ("belly", 1.05d), ("breasts", 0.94d)),
         };
 
     private static IReadOnlyDictionary<string, double> CreateTuning(params (string Region, double Scale)[] entries) =>
@@ -12036,6 +12041,8 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
                 "wing" => "WingPhysics",
                 "fin" => "FinPhysics",
                 "frill" => "FrillPhysics",
+                "mane" => "ManePhysics",
+                "branch" => "BranchPhysics",
                 "antenna" => "AntennaPhysics",
                 "mandible" => "MandiblePhysics",
                 "horn" => "HornPhysics",
@@ -12058,6 +12065,8 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
                 "wing" => (0.93d, 0.70d, 0.01d, 0.04d),
                 "fin" => (0.89d, 0.67d, 0.01d, 0.05d),
                 "frill" => (0.86d, 0.61d, 0.02d, 0.05d),
+                "mane" => (0.78d, 0.53d, 0.02d, 0.07d),
+                "branch" => (0.92d, 0.76d, 0.02d, 0.04d),
                 "antenna" => (0.79d, 0.52d, 0.01d, 0.07d),
                 "mandible" => (0.94d, 0.74d, 0.01d, 0.03d),
                 "horn" => (0.97d, 0.84d, 0.01d, 0.03d),
@@ -12167,6 +12176,16 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             return "frill";
         }
 
+        if (MatchesSemanticAlias(lowered, "mane"))
+        {
+            return "mane";
+        }
+
+        if (MatchesSemanticAlias(lowered, "branch"))
+        {
+            return "branch";
+        }
+
         if (MatchesSemanticAlias(lowered, "antenna"))
         {
             return "antenna";
@@ -12250,6 +12269,8 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             "wing" => (1.55d, 0.83d, 0.63d, 12d, 0.10d),
             "fin" => (1.25d, 0.84d, 0.66d, 14d, 0.10d),
             "frill" => (0.98d, 0.80d, 0.64d, 10d, 0.08d),
+            "mane" => (0.82d, 0.70d, 0.52d, 18d, 0.07d),
+            "branch" => (1.05d, 0.90d, 0.74d, 8d, 0.08d),
             "antenna" => (0.68d, 0.64d, 0.45d, 26d, 0.06d),
             "mandible" => (0.92d, 0.93d, 0.80d, 8d, 0.06d),
             "hair" => (0.72d, 0.68d, 0.48d, 24d, 0.08d),
@@ -22690,8 +22711,12 @@ internal sealed class LocalExportService(
         var loweredSignalText = signalText.ToLowerInvariant();
         AddSliderIfMatched("TailBase", SignalMatchesSemanticAlias(loweredSignalText, "tail"));
         AddSliderIfMatched("WingSpan", SignalMatchesSemanticAlias(loweredSignalText, "wing"));
+        AddSliderIfMatched("FeatherSpread", loweredSignalText.Contains("feather", StringComparison.Ordinal) ||
+                                            loweredSignalText.Contains("pinion", StringComparison.Ordinal));
         AddSliderIfMatched("FinSpread", SignalMatchesSemanticAlias(loweredSignalText, "fin"));
         AddSliderIfMatched("FrillWidth", SignalMatchesSemanticAlias(loweredSignalText, "frill"));
+        AddSliderIfMatched("ManeLength", SignalMatchesSemanticAlias(loweredSignalText, "mane"));
+        AddSliderIfMatched("BranchSpread", SignalMatchesSemanticAlias(loweredSignalText, "branch"));
         AddSliderIfMatched("AbdomenLength", loweredSignalText.Contains("abdomen", StringComparison.Ordinal) ||
                                            loweredSignalText.Contains("thorax", StringComparison.Ordinal) ||
                                            loweredSignalText.Contains("insect", StringComparison.Ordinal));

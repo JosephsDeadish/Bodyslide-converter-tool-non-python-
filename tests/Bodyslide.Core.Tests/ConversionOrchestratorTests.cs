@@ -9518,6 +9518,26 @@ public sealed class PhysicsXmlTests
     }
 
     [Fact]
+    public async Task BuildAsync_ExoticBranchAndManeBones_GenerateDedicatedPhysicsGroups()
+    {
+        var service = new BasicPhysicsSupportService();
+        var mesh = new WeightedMesh(
+            "creature",
+            "exotic",
+            true,
+            TargetPhysicsBones: ["Branch.L", "BranchTip.R", "ManeRoot", "Forelock"]);
+
+        var config = await service.BuildAsync(mesh, "Spriggan", "smp+cbpc", CancellationToken.None);
+
+        Assert.NotNull(config.CbpcConfigXml);
+        Assert.Contains("<BranchPhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.Contains("<ManePhysics>", config.CbpcConfigXml, StringComparison.Ordinal);
+        Assert.NotNull(config.SmpConfigXml);
+        Assert.Contains("Branch.L", config.SmpConfigXml, StringComparison.Ordinal);
+        Assert.Contains("ManeRoot", config.SmpConfigXml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BuildAsync_ExplicitlyEmptyTargetPhysicsBones_DoesNotGenerateFallbackPhysicsXml()
     {
         var service = new BasicPhysicsSupportService();
@@ -12637,6 +12657,18 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Draconic Humanoid", out var draconic));
         Assert.Contains("Wing.L", draconic.AvailablePhysicsBones);
         Assert.Contains("TailBarb", draconic.AvailablePhysicsBones);
+        Assert.Contains("FrillWidth", draconic.SliderNames);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Insectoid Humanoid", out var insectoid));
+        Assert.Contains("AntennaTip.L", insectoid.AvailablePhysicsBones);
+        Assert.Contains("AntennaLength", insectoid.SliderNames);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Aquatic Humanoid", out var aquatic));
+        Assert.Contains("Fin.DorsalTip", aquatic.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Equine Humanoid", out var equine));
+        Assert.Contains("ManeTip", equine.AvailablePhysicsBones);
+        Assert.Contains("ManeLength", equine.SliderNames);
     }
 
     [Fact]
@@ -12724,11 +12756,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TailBarbSwing02", out var draconicTailGroup));
         Assert.Equal("tail", draconicTailGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("AntennaChainL", out var insectHornGroup));
-        Assert.Equal("horn", insectHornGroup);
+        Assert.Equal("antenna", insectHornGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("PectoralFinPhysics01", out var aquaticWingGroup));
-        Assert.Equal("wing", aquaticWingGroup);
+        Assert.Equal("fin", aquaticWingGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("GillFrillSwing", out var aquaticManeGroup));
-        Assert.Equal("mane", aquaticManeGroup);
+        Assert.Equal("frill", aquaticManeGroup);
         var longTailToken = $"{new string('X', 384)}TailChain";
         Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
         Assert.Equal("tail", longTokenGroup);
@@ -21966,6 +21998,60 @@ public sealed class OutputCompletenessTests
             Assert.Contains("MandibleSpread", templateJson, StringComparison.Ordinal);
             Assert.Contains("AntennaLength", templateJson, StringComparison.Ordinal);
             Assert.Contains("AbdomenLength", templateJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CustomDetection_EquineFrameworkAddsManeStarterHints()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDir = Path.Combine(tmpDir, "meshes", "actors", "character", "horse assets");
+        Directory.CreateDirectory(meshDir);
+        var nifPath = Path.Combine(meshDir, "horse_follower_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+        var bodyRefPath = Path.Combine(meshDir, "marebody_0.nif");
+        await File.WriteAllBytesAsync(bodyRefPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bodyRefPath]);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp", SmpConfigXml: "<system><bone name=\"ManeRoot\" /><bone name=\"Forelock\" /><bone name=\"TailTip\" /></system>");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("HorseFollower", "CBBE", ["Belly", "TailBase"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CUSTOM", 1.0, ["fallback:signature-threshold"]);
+            var skel = new SkeletonMappingResult("equine-humanoid", "xpmsse", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var templatePath = Path.Combine(outputDir, "detected-source-body-template.slidesmith-body.json");
+            Assert.True(File.Exists(templatePath));
+            var templateJson = await File.ReadAllTextAsync(templatePath);
+            Assert.Contains("\"skeletonFramework\": \"equine-humanoid\"", templateJson, StringComparison.Ordinal);
+            Assert.Contains("ManeLength", templateJson, StringComparison.Ordinal);
+            Assert.Contains("TailBase", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"bodyOutputPath\":", templateJson, StringComparison.Ordinal);
         }
         finally
         {
