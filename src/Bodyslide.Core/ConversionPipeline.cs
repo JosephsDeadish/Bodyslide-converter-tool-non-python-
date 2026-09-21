@@ -13500,6 +13500,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     private static readonly IReadOnlyList<string> PluginExtensions = [".esp", ".esm", ".esl"];
     private const uint PluginFlagMaster = 0x00000001u;
     private const uint PluginFlagLight = 0x00000200u;
+    private sealed record ScannedPluginContext(
+        string PluginPath,
+        string PluginName,
+        byte[] Bytes,
+        PluginTypeClassification Classification,
+        IReadOnlyList<PluginArmorAddon> Addons,
+        IReadOnlyList<PluginArmorRecord> Records,
+        bool IsUnreadable = false);
 
     public async Task<PluginAnalysisResult> AnalyzeAsync(ImportedArmor armor, string targetBody, CancellationToken cancellationToken)
     {
@@ -13519,19 +13527,39 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         var armorAddons         = new List<PluginArmorAddon>();
         var armorRecords        = new List<PluginArmorRecord>();
         var ambiguousPlugins    = new List<string>();
+        var scannedPlugins      = new List<ScannedPluginContext>();
 
         foreach (var pluginFile in pluginFiles)
         {
-            var (displayName, plainName, pluginType, addons, records) = await ScanPluginAsync(pluginFile, cancellationToken);
-            scannedPluginLabels.Add(displayName);
-            armorAddons.AddRange(addons);
-            armorRecords.AddRange(records);
+            scannedPlugins.Add(await ScanPluginAsync(pluginFile, cancellationToken));
+        }
 
-            // Track plugins whose type could not be determined with certainty so callers can
-            // flag them for manual recheck rather than silently treating them as a known type.
-            // Store the plain filename (not the label) so callers can match against file paths.
-            if (pluginType == "AMBIGUOUS")
-                ambiguousPlugins.Add(plainName);
+        var contextualRuntimeFormIds = BuildContextualLightRuntimeFormIdEvidence(scannedPlugins);
+        foreach (var scannedPlugin in scannedPlugins)
+        {
+            if (scannedPlugin.IsUnreadable)
+            {
+                scannedPluginLabels.Add($"{scannedPlugin.PluginName} [unreadable]");
+                continue;
+            }
+
+            var classification = scannedPlugin.Classification;
+            if (classification.Type == "AMBIGUOUS" &&
+                contextualRuntimeFormIds.TryGetValue(scannedPlugin.PluginName, out var resolvedRuntimeFormIds) &&
+                resolvedRuntimeFormIds.Count > 0)
+            {
+                classification = ClassifyPluginKind(scannedPlugin.PluginPath, scannedPlugin.Bytes, resolvedRuntimeFormIds);
+            }
+
+            var pluginLabel = $"{scannedPlugin.PluginName} [{classification.Type}; confidence={classification.Confidence:0.00}]";
+            scannedPluginLabels.Add(pluginLabel);
+            armorAddons.AddRange(scannedPlugin.Addons.Select(addon => addon with { RecordType = pluginLabel }));
+            armorRecords.AddRange(scannedPlugin.Records.Select(record => record with { RecordType = pluginLabel }));
+
+            if (classification.Type == "AMBIGUOUS")
+            {
+                ambiguousPlugins.Add(scannedPlugin.PluginName);
+            }
         }
 
         var guidance = BuildPatchGuidance(armorAddons, targetBody, pluginFiles.Count, ambiguousPlugins);
@@ -13543,7 +13571,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             ambiguousPlugins.Count > 0 ? ambiguousPlugins : null);
     }
 
-    private static async Task<(string DisplayName, string PlainName, string PluginType, IReadOnlyList<PluginArmorAddon> Addons, IReadOnlyList<PluginArmorRecord> Records)>
+    private static async Task<ScannedPluginContext>
         ScanPluginAsync(string pluginPath, CancellationToken cancellationToken)
     {
         try
@@ -13551,7 +13579,6 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             var bytes      = await File.ReadAllBytesAsync(pluginPath, cancellationToken);
             var pluginKind = ClassifyPluginKind(pluginPath, bytes);
             var pluginName = Path.GetFileName(pluginPath) ?? pluginPath;
-            var pluginLabel = $"{pluginName} [{pluginKind.Type}; confidence={pluginKind.Confidence:0.00}]";
             var masterFileNames = BinaryArmaParser.ExtractMasterFileNames(bytes);
 
             // ── ARMA records (ArmorAddon) ──────────────────────────────────────
@@ -13562,7 +13589,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             {
                 addons = armaDescriptors
                     .Select(d => new PluginArmorAddon(
-                        pluginLabel,
+                        pluginName,
                         d.MeshPaths,
                         d.FormId,
                         d.EditorId,
@@ -13576,14 +13603,14 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             else
             {
                 // Fallback: regex scan when no structured ARMA records found.
-                addons = RegexScanForNifPaths(bytes, pluginLabel).ToList();
+                addons = RegexScanForNifPaths(bytes, pluginName).ToList();
             }
 
             // ── ARMO records (Armor — world/inventory models) ──────────────────
             var armoDescriptors = BinaryArmaParser.ExtractArmoRecords(bytes, pluginName);
             var records = armoDescriptors
                 .Select(d => new PluginArmorRecord(
-                    pluginLabel,
+                    pluginName,
                     d.MeshPaths,
                     d.FormId,
                     d.EditorId,
@@ -13597,13 +13624,50 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
                     masterFileNames))
                 .ToList();
 
-            return (pluginLabel, pluginName, pluginKind.Type, addons, records);
+            return new ScannedPluginContext(pluginPath, pluginName, bytes, pluginKind, addons, records);
         }
         catch (IOException)
         {
             var fallback = Path.GetFileName(pluginPath) ?? pluginPath;
-            return ($"{fallback} [unreadable]", fallback, "UNKNOWN", [], []);
+            return new ScannedPluginContext(pluginPath, fallback, [], new PluginTypeClassification("UNKNOWN", 0d, []), [], [], true);
         }
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<uint>> BuildContextualLightRuntimeFormIdEvidence(
+        IReadOnlyList<ScannedPluginContext> scannedPlugins)
+    {
+        if (scannedPlugins.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<uint>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var runtimeFormIdsByPlugin = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var record in scannedPlugins.SelectMany(static plugin => plugin.Records))
+        {
+            foreach (var linkedReference in record.LinkedArmorAddonReferences ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(linkedReference.OwningPluginFileName) ||
+                    (!IsRuntimeFeLightFormId(linkedReference.RawFormId) &&
+                     !IsFeLightFormId(linkedReference.RawFormId)))
+                {
+                    continue;
+                }
+
+                var owningPlugin = Path.GetFileName(linkedReference.OwningPluginFileName) ?? linkedReference.OwningPluginFileName;
+                if (!runtimeFormIdsByPlugin.TryGetValue(owningPlugin, out var runtimeFormIds))
+                {
+                    runtimeFormIds = new HashSet<uint>();
+                    runtimeFormIdsByPlugin[owningPlugin] = runtimeFormIds;
+                }
+
+                runtimeFormIds.Add(linkedReference.RawFormId);
+            }
+        }
+
+        return runtimeFormIdsByPlugin.ToDictionary(
+            static pair => pair.Key,
+            static pair => (IReadOnlyList<uint>)pair.Value.OrderBy(static formId => formId).ToArray(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     internal static string DetectPluginKind(string pluginPath, byte[] bytes) =>
@@ -13685,7 +13749,7 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
     {
         if (resolvedRuntimeFormIds is { Count: > 0 })
         {
-            return resolvedRuntimeFormIds.Any(static formId => IsFeLightFormId(formId));
+            return resolvedRuntimeFormIds.Any(static formId => IsRuntimeFeLightFormId(formId) || IsFeLightFormId(formId));
         }
 
         try
@@ -13769,6 +13833,9 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
         var maskedFormId = formId & 0x00FFFFFFu;
         return maskedFormId is >= 0x000FE000u and <= 0x000FEFFFu;
     }
+
+    private static bool IsRuntimeFeLightFormId(uint formId) =>
+        ((formId >> 24) & 0xFF) == 0xFE;
 
     private static string ResolvePluginTypeFromHierarchy(
         string extension,

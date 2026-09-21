@@ -16329,6 +16329,70 @@ public sealed class BinaryPluginRewriteServiceTests
         Assert.Equal("UNKNOWN", BasicPluginAnalysisService.DetectPluginKind("Test.mod", bytes));
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_AmbiguousEspWithFeReferencedMasterChain_ReclassifiesAsEspfe()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            static byte[] BuildRecord(string tag, byte[] data, uint formId = 0u)
+            {
+                var header = new byte[24 + data.Length];
+                System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]).CopyTo(header, 0);
+                BitConverter.TryWriteBytes(header.AsSpan(4), (uint)data.Length);
+                BitConverter.TryWriteBytes(header.AsSpan(12), formId);
+                data.CopyTo(header, 24);
+                return header;
+            }
+
+            static byte[] BuildPluginWithMastersForContext(IReadOnlyList<string> masters, params byte[][] records)
+            {
+                using var ms = new MemoryStream();
+                ms.Write(BuildSubrecord("HEDR", new byte[12]));
+                ms.Write(BuildSubrecord("CNAM", [0x00]));
+                foreach (var master in masters)
+                {
+                    ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+                    ms.Write(BuildSubrecord("DATA", new byte[8]));
+                }
+
+                var plugin = new List<byte>(BuildRecord("TES4", ms.ToArray()));
+                plugin.AddRange(records.SelectMany(static record => record));
+                return [.. plugin];
+            }
+
+            var sourcePluginPath = Path.Combine(dir, "ContextualLightParent.esp");
+            var childPluginPath = Path.Combine(dir, "ContextualLightChild.esp");
+
+            await File.WriteAllBytesAsync(
+                sourcePluginPath,
+                BuildPluginWithArmaFormId(0x00000200u, 0x00000801u));
+
+            var childArmoData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("ContextualLightArmor\0"))
+                .Concat(BuildSubrecord("ARMA", BitConverter.GetBytes(0xFE000801u)))
+                .ToArray();
+            var childArmo = BuildRecord("ARMO", childArmoData, formId: 0x00001234u);
+            await File.WriteAllBytesAsync(childPluginPath, BuildPluginWithMastersForContext(["ContextualLightParent.esp"], childArmo));
+
+            var service = new BasicPluginAnalysisService();
+            var analysis = await service.AnalyzeAsync(
+                new ImportedArmor(dir, [], [], [], []),
+                "CBBE",
+                CancellationToken.None);
+
+            Assert.DoesNotContain("ContextualLightParent.esp", analysis.AmbiguousPlugins ?? []);
+            Assert.Contains(analysis.ScannedPlugins, plugin => plugin.Contains("ContextualLightParent.esp [ESPFE;", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("AMBIGUOUS", string.Join('\n', analysis.ScannedPlugins), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("AMBIGUOUS", analysis.PatchGuidance, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ── ARMA subrecord rewrite ────────────────────────────────────────────────
 
     [Fact]
