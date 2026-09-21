@@ -12034,6 +12034,10 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
                 "tail" => "TailPhysics",
                 "hair" => "HairPhysics",
                 "wing" => "WingPhysics",
+                "fin" => "FinPhysics",
+                "frill" => "FrillPhysics",
+                "antenna" => "AntennaPhysics",
+                "mandible" => "MandiblePhysics",
                 "horn" => "HornPhysics",
                 "mouth" => "MouthPhysics",
                 "head" => "HeadPhysics",
@@ -12052,6 +12056,10 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
                 "tail" => (0.84d, 0.62d, 0.02d, 0.05d),
                 "hair" => (0.74d, 0.48d, 0.02d, 0.07d),
                 "wing" => (0.93d, 0.70d, 0.01d, 0.04d),
+                "fin" => (0.89d, 0.67d, 0.01d, 0.05d),
+                "frill" => (0.86d, 0.61d, 0.02d, 0.05d),
+                "antenna" => (0.79d, 0.52d, 0.01d, 0.07d),
+                "mandible" => (0.94d, 0.74d, 0.01d, 0.03d),
                 "horn" => (0.97d, 0.84d, 0.01d, 0.03d),
                 "mouth" => (0.91d, 0.76d, 0.02d, 0.03d),
                 "head" => (0.95d, 0.82d, 0.01d, 0.03d),
@@ -12149,6 +12157,26 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             return "wing";
         }
 
+        if (MatchesSemanticAlias(lowered, "fin"))
+        {
+            return "fin";
+        }
+
+        if (MatchesSemanticAlias(lowered, "frill"))
+        {
+            return "frill";
+        }
+
+        if (MatchesSemanticAlias(lowered, "antenna"))
+        {
+            return "antenna";
+        }
+
+        if (MatchesSemanticAlias(lowered, "mandible"))
+        {
+            return "mandible";
+        }
+
         if (MatchesSemanticAlias(lowered, "hair"))
         {
             return "hair";
@@ -12220,6 +12248,10 @@ internal sealed class BasicPhysicsSupportService : IPhysicsSupportService
             "genitals" => (1.25d, 0.72d, 0.62d, 12d, 0.12d),
             "tail" => (1.35d, 0.81d, 0.64d, 18d, 0.12d),
             "wing" => (1.55d, 0.83d, 0.63d, 12d, 0.10d),
+            "fin" => (1.25d, 0.84d, 0.66d, 14d, 0.10d),
+            "frill" => (0.98d, 0.80d, 0.64d, 10d, 0.08d),
+            "antenna" => (0.68d, 0.64d, 0.45d, 26d, 0.06d),
+            "mandible" => (0.92d, 0.93d, 0.80d, 8d, 0.06d),
             "hair" => (0.72d, 0.68d, 0.48d, 24d, 0.08d),
             "horn" => (0.90d, 0.96d, 0.84d, 4d, 0.05d),
             "mouth" => (0.85d, 0.92d, 0.78d, 6d, 0.06d),
@@ -22194,36 +22226,51 @@ internal sealed class LocalExportService(
         var requestedPhysicsProfile = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedPhysicsProfile)
             ? normalizedPhysicsProfile
             : physics.Profile;
+        var inferredMetadata = InferSuggestedBuiltInBodyMetadata(targetBody, armor, inferredSkeletonFramework: null, sourceNifSupport, requestedPhysicsProfile);
         var inferredReferenceTokens = profile?.ReferenceTokens is { Count: > 0 } existingReferenceTokens
             ? existingReferenceTokens
-            : BuildSuggestedReferenceTokens(targetBody, armor.BodyReferenceFiles, bodySlideProject.ProjectName);
+            : MergeSuggestedTokens(
+                inferredMetadata?.ReferenceTokens,
+                BuildSuggestedReferenceTokens(targetBody, armor.BodyReferenceFiles, bodySlideProject.ProjectName),
+                limit: 10);
         var inferredDetectionTokens = profile?.DetectionTokens.Count > 0
             ? profile.DetectionTokens
-            : BuildSuggestedNameTokens(targetBody, profile?.Aliases, bodySlideProject.ProjectName);
+            : MergeSuggestedTokens(
+                inferredMetadata?.DetectionTokens,
+                BuildSuggestedNameTokens(targetBody, profile?.Aliases, bodySlideProject.ProjectName),
+                limit: 10);
         var inferredTextureTokens = profile?.TextureTokens.Count > 0
             ? profile.TextureTokens
-            : inferredReferenceTokens.Take(4).ToArray();
+            : MergeSuggestedTokens(
+                inferredMetadata?.TextureTokens,
+                inferredReferenceTokens.Take(4).ToArray(),
+                limit: 8);
         var inferredPhysicsTokens = profile?.PhysicsTokens.Count > 0
             ? profile.PhysicsTokens
-            : BuildSuggestedPhysicsTokens(requestedPhysicsProfile, physics);
+            : MergeSuggestedTokens(
+                inferredMetadata?.PhysicsTokens,
+                BuildSuggestedPhysicsTokens(requestedPhysicsProfile, physics),
+                limit: 8);
         var inferredSkeletonFoundation = !string.IsNullOrWhiteSpace(profile?.SkeletonFoundation)
             ? profile!.SkeletonFoundation
-            : NormalizeSuggestedSkeletonFoundation(skeletonMapping.TargetSkeleton);
+            : NormalizeSuggestedSkeletonFoundation(skeletonMapping.TargetSkeleton, inferredMetadata?.SkeletonFoundation);
         var inferredSkeletonFramework = !string.IsNullOrWhiteSpace(profile?.SkeletonFramework)
             ? profile!.SkeletonFramework
-            : NormalizeSuggestedSkeletonFramework(skeletonMapping.TargetSkeleton);
+            : NormalizeSuggestedSkeletonFramework(skeletonMapping.TargetSkeleton, inferredMetadata?.SkeletonFramework);
+        inferredMetadata ??= InferSuggestedBuiltInBodyMetadata(targetBody, armor, inferredSkeletonFramework, sourceNifSupport, requestedPhysicsProfile);
         var inferredPhysicsBones = profile?.PhysicsBones is { Count: > 0 }
             ? profile.PhysicsBones
-            : ExtractSuggestedPhysicsBones(physics);
+            : MergeSuggestedTokens(
+                inferredMetadata?.AvailablePhysicsBones,
+                ExtractSuggestedPhysicsBones(physics),
+                limit: 18);
         var inferredSliderNames = profile?.SliderNames is { Count: > 0 }
             ? profile.SliderNames
-            : bodySlideProject.Sliders;
+            : BuildSuggestedSliderNames(bodySlideProject.Sliders, inferredMetadata, inferredSkeletonFramework, inferredPhysicsBones, targetBody);
         var (vertexCountMin, vertexCountMax) = GetSuggestedVertexRange(sourceNifSupport);
         var bodyOutputPath = !string.IsNullOrWhiteSpace(profile?.BodyOutputPath)
             ? profile!.BodyOutputPath
-            : targetGender.Equals("male", StringComparison.OrdinalIgnoreCase)
-                ? @"meshes\actors\character\character assets male\"
-                : @"meshes\actors\character\character assets\";
+            : InferSuggestedBodyOutputPath(armor, targetGender, inferredMetadata);
 
         var template = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -22243,11 +22290,11 @@ internal sealed class LocalExportService(
             ["bodyOutputPath"] = bodyOutputPath,
             ["skeletonFoundation"] = inferredSkeletonFoundation,
             ["skeletonFramework"] = inferredSkeletonFramework,
-            ["transformationField"] = profile?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField(),
-            ["heightToWidthRatioMin"] = profile?.HeightToWidthRatioMin ?? 3.0,
-            ["heightToWidthRatioMax"] = profile?.HeightToWidthRatioMax ?? 8.5,
-            ["depthToWidthRatioMin"] = profile?.DepthToWidthRatioMin ?? 0.25,
-            ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? 1.20
+            ["transformationField"] = profile?.TransformationField ?? inferredMetadata?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField(),
+            ["heightToWidthRatioMin"] = profile?.HeightToWidthRatioMin ?? inferredMetadata?.HeightToWidthRatioMin ?? 3.0,
+            ["heightToWidthRatioMax"] = profile?.HeightToWidthRatioMax ?? inferredMetadata?.HeightToWidthRatioMax ?? 8.5,
+            ["depthToWidthRatioMin"] = profile?.DepthToWidthRatioMin ?? inferredMetadata?.DepthToWidthRatioMin ?? 0.25,
+            ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? inferredMetadata?.DepthToWidthRatioMax ?? 1.20
         };
 
         json = JsonSerializer.Serialize(
@@ -22280,27 +22327,53 @@ internal sealed class LocalExportService(
         var suggestedName = detectedBody.Body is "CUSTOM" or "UNKNOWN"
             ? InferSuggestedProfileName(armor.SourcePath, armor.MeshFiles)
             : detectedBody.Body;
+        var inferredSkeletonFramework = NormalizeSuggestedSkeletonFramework(skeletonMapping.SourceSkeleton);
+        var inferredMetadata = InferSuggestedBuiltInBodyMetadata(suggestedName, armor, inferredSkeletonFramework, sourceNifSupport, physics.Profile);
         var (vertexCountMin, vertexCountMax) = GetSuggestedVertexRange(sourceNifSupport);
+        var inferredGender = BodyTypeCatalog.TryGetGender(detectedBody.Body, out var detectedGender)
+            ? detectedGender
+            : inferredMetadata?.Gender ?? "female";
         var template = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["name"] = suggestedName,
-            ["detectionTokens"] = BuildSuggestedNameTokens(suggestedName, aliases: null, Path.GetFileNameWithoutExtension(armor.SourcePath)),
-            ["textureTokens"] = BuildSuggestedReferenceTokens(suggestedName, armor.TextureFiles, null),
-            ["physicsTokens"] = BuildSuggestedPhysicsTokens(physics.Profile, physics),
-            ["referenceTokens"] = BuildSuggestedReferenceTokens(suggestedName, armor.BodyReferenceFiles, Path.GetFileNameWithoutExtension(armor.SourcePath)),
+            ["detectionTokens"] = MergeSuggestedTokens(
+                inferredMetadata?.DetectionTokens,
+                BuildSuggestedNameTokens(suggestedName, aliases: null, Path.GetFileNameWithoutExtension(armor.SourcePath)),
+                limit: 10),
+            ["textureTokens"] = MergeSuggestedTokens(
+                inferredMetadata?.TextureTokens,
+                BuildSuggestedReferenceTokens(suggestedName, armor.TextureFiles, null),
+                limit: 8),
+            ["physicsTokens"] = MergeSuggestedTokens(
+                inferredMetadata?.PhysicsTokens,
+                BuildSuggestedPhysicsTokens(physics.Profile, physics),
+                limit: 8),
+            ["referenceTokens"] = MergeSuggestedTokens(
+                inferredMetadata?.ReferenceTokens,
+                BuildSuggestedReferenceTokens(suggestedName, armor.BodyReferenceFiles, Path.GetFileNameWithoutExtension(armor.SourcePath)),
+                limit: 10),
             ["vertexCountMin"] = vertexCountMin,
             ["vertexCountMax"] = vertexCountMax,
-            ["sliderNames"] = DefaultSlidersForSuggestedProfile(detectedBody.Body),
-            ["physicsBones"] = ExtractSuggestedPhysicsBones(physics),
+            ["sliderNames"] = BuildSuggestedSliderNames(
+                DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                inferredMetadata,
+                inferredSkeletonFramework,
+                ExtractSuggestedPhysicsBones(physics),
+                suggestedName),
+            ["physicsBones"] = MergeSuggestedTokens(
+                inferredMetadata?.AvailablePhysicsBones,
+                ExtractSuggestedPhysicsBones(physics),
+                limit: 18),
             ["physicsProfile"] = PhysicsProfileCatalog.TryNormalize(physics.Profile, out var normalizedProfile) ? normalizedProfile : physics.Profile,
-            ["gender"] = BodyTypeCatalog.TryGetGender(detectedBody.Body, out var detectedGender) ? detectedGender : "female",
-            ["skeletonFoundation"] = NormalizeSuggestedSkeletonFoundation(skeletonMapping.SourceSkeleton),
-            ["skeletonFramework"] = NormalizeSuggestedSkeletonFramework(skeletonMapping.SourceSkeleton),
-            ["transformationField"] = BodyTransformationFieldCatalog.CreateFallbackField(),
-            ["heightToWidthRatioMin"] = 3.0,
-            ["heightToWidthRatioMax"] = 8.5,
-            ["depthToWidthRatioMin"] = 0.25,
-            ["depthToWidthRatioMax"] = 1.20
+            ["gender"] = inferredGender,
+            ["bodyOutputPath"] = InferSuggestedBodyOutputPath(armor, inferredGender, inferredMetadata),
+            ["skeletonFoundation"] = NormalizeSuggestedSkeletonFoundation(skeletonMapping.SourceSkeleton, inferredMetadata?.SkeletonFoundation),
+            ["skeletonFramework"] = inferredSkeletonFramework,
+            ["transformationField"] = inferredMetadata?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField(),
+            ["heightToWidthRatioMin"] = inferredMetadata?.HeightToWidthRatioMin ?? 3.0,
+            ["heightToWidthRatioMax"] = inferredMetadata?.HeightToWidthRatioMax ?? 8.5,
+            ["depthToWidthRatioMin"] = inferredMetadata?.DepthToWidthRatioMin ?? 0.25,
+            ["depthToWidthRatioMax"] = inferredMetadata?.DepthToWidthRatioMax ?? 1.20
         };
 
         json = JsonSerializer.Serialize(
@@ -22428,13 +22501,16 @@ internal sealed class LocalExportService(
         return counts.Length == 0 ? (0, 0) : (counts[0], counts[^1]);
     }
 
-    private static string NormalizeSuggestedSkeletonFoundation(string skeletonLabel) =>
-        skeletonLabel.EndsWith("-physics", StringComparison.OrdinalIgnoreCase)
+    private static string NormalizeSuggestedSkeletonFoundation(string skeletonLabel, string? fallback = null)
+    {
+        var normalized = skeletonLabel.EndsWith("-physics", StringComparison.OrdinalIgnoreCase)
             ? skeletonLabel[..^"-physics".Length]
             : skeletonLabel;
+        return string.IsNullOrWhiteSpace(normalized) ? fallback ?? string.Empty : normalized;
+    }
 
-    private static string NormalizeSuggestedSkeletonFramework(string skeletonLabel) =>
-        NormalizeSuggestedSkeletonFoundation(skeletonLabel);
+    private static string NormalizeSuggestedSkeletonFramework(string skeletonLabel, string? fallback = null) =>
+        NormalizeSuggestedSkeletonFoundation(skeletonLabel, fallback);
 
     private static string InferSuggestedProfileName(string sourcePath, IReadOnlyList<string> meshFiles)
     {
@@ -22478,6 +22554,220 @@ internal sealed class LocalExportService(
             .Where(static token => token is not "mesh" and not "meshes" and not "armor" and not "outfit" and not "body" and not "bodies" and not "female" and not "male" and not "character" and not "assets")
             .ToArray();
         return tokens;
+    }
+
+    private static IReadOnlyList<string> MergeSuggestedTokens(
+        IEnumerable<string>? preferred,
+        IEnumerable<string>? fallback,
+        int limit)
+    {
+        return (preferred ?? [])
+            .Concat(fallback ?? [])
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .Select(static token => token.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToArray();
+    }
+
+    private static BuiltInBodyMetadata? InferSuggestedBuiltInBodyMetadata(
+        string suggestedName,
+        ImportedArmor armor,
+        string? inferredSkeletonFramework,
+        IReadOnlyList<NifSupportReport> sourceNifSupport,
+        string? requestedPhysicsProfile)
+    {
+        var signalTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in BuildSuggestedNameTokens(suggestedName, aliases: null, Path.GetFileNameWithoutExtension(armor.SourcePath)))
+        {
+            signalTokens.Add(token);
+        }
+
+        foreach (var path in armor.MeshFiles.Concat(armor.BodyReferenceFiles).Concat(armor.TextureFiles))
+        {
+            foreach (var token in ExtractSuggestedTokens(path))
+            {
+                signalTokens.Add(token);
+            }
+        }
+
+        foreach (var token in ExtractSuggestedTokens(inferredSkeletonFramework))
+        {
+            signalTokens.Add(token);
+        }
+
+        foreach (var token in ExtractSuggestedTokens(requestedPhysicsProfile))
+        {
+            signalTokens.Add(token);
+        }
+
+        var vertexCounts = sourceNifSupport
+            .Select(static report => report.VertexCount)
+            .Where(static count => count is > 0)
+            .Select(static count => count!.Value)
+            .ToArray();
+
+        BuiltInBodyMetadata? bestMatch = null;
+        var bestScore = 0;
+        foreach (var metadata in BuiltInBodyMetadataCatalog.All)
+        {
+            var score = 0;
+            score += CountTokenOverlaps(signalTokens, ExtractSuggestedTokens(metadata.Name));
+            score += CountTokenOverlaps(signalTokens, metadata.Aliases);
+            score += CountTokenOverlaps(signalTokens, metadata.DetectionTokens) * 2;
+            score += CountTokenOverlaps(signalTokens, metadata.ReferenceTokens) * 2;
+            score += CountTokenOverlaps(signalTokens, metadata.TextureTokens);
+            score += CountTokenOverlaps(signalTokens, metadata.PhysicsTokens);
+
+            if (!string.IsNullOrWhiteSpace(inferredSkeletonFramework) &&
+                !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) &&
+                inferredSkeletonFramework.Equals(metadata.SkeletonFramework, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 6;
+            }
+
+            if (vertexCounts.Length > 0 &&
+                metadata.VertexCountMin > 0 &&
+                metadata.VertexCountMax >= metadata.VertexCountMin &&
+                vertexCounts.Any(count => count >= metadata.VertexCountMin && count <= metadata.VertexCountMax))
+            {
+                score += 3;
+            }
+
+            if (score <= bestScore)
+            {
+                continue;
+            }
+
+            bestScore = score;
+            bestMatch = metadata;
+        }
+
+        return bestScore >= 4 ? bestMatch : null;
+    }
+
+    private static int CountTokenOverlaps(ISet<string> signalTokens, IEnumerable<string>? candidates)
+    {
+        if (candidates is null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var candidate in candidates)
+        {
+            foreach (var token in ExtractSuggestedTokens(candidate))
+            {
+                if (signalTokens.Contains(token))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static IReadOnlyList<string> BuildSuggestedSliderNames(
+        IReadOnlyList<string> existingSliders,
+        BuiltInBodyMetadata? inferredMetadata,
+        string? skeletonFramework,
+        IReadOnlyList<string>? physicsBones,
+        string profileName)
+    {
+        var sliders = new List<string>();
+        sliders.AddRange(inferredMetadata?.SliderNames ?? []);
+        sliders.AddRange(existingSliders);
+
+        var signalText = string.Join(' ', new[]
+        {
+            skeletonFramework ?? string.Empty,
+            profileName,
+            string.Join(' ', physicsBones ?? [])
+        });
+
+        var loweredSignalText = signalText.ToLowerInvariant();
+        AddSliderIfMatched("TailBase", SignalMatchesSemanticAlias(loweredSignalText, "tail"));
+        AddSliderIfMatched("WingSpan", SignalMatchesSemanticAlias(loweredSignalText, "wing"));
+        AddSliderIfMatched("FinSpread", SignalMatchesSemanticAlias(loweredSignalText, "fin"));
+        AddSliderIfMatched("FrillWidth", SignalMatchesSemanticAlias(loweredSignalText, "frill"));
+        AddSliderIfMatched("AbdomenLength", loweredSignalText.Contains("abdomen", StringComparison.Ordinal) ||
+                                           loweredSignalText.Contains("thorax", StringComparison.Ordinal) ||
+                                           loweredSignalText.Contains("insect", StringComparison.Ordinal));
+        AddSliderIfMatched("MandibleSpread", SignalMatchesSemanticAlias(loweredSignalText, "mandible"));
+        AddSliderIfMatched("AntennaLength", SignalMatchesSemanticAlias(loweredSignalText, "antenna"));
+        AddSliderIfMatched("HornSpread", loweredSignalText.Contains("horn", StringComparison.Ordinal));
+        AddSliderIfMatched("PawWidth", loweredSignalText.Contains("paw", StringComparison.Ordinal) ||
+                                     loweredSignalText.Contains("hoof", StringComparison.Ordinal) ||
+                                     loweredSignalText.Contains("digitigrade", StringComparison.Ordinal));
+
+        return sliders
+            .Where(static slider => !string.IsNullOrWhiteSpace(slider))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToArray();
+
+        void AddSliderIfMatched(string sliderName, bool matches)
+        {
+            if (matches)
+            {
+                sliders.Add(sliderName);
+            }
+        }
+    }
+
+    private static bool SignalMatchesSemanticAlias(string loweredSignalText, string semanticKey) =>
+        SemanticBoneAliasCatalog.All.TryGetValue(semanticKey, out var aliases) &&
+        aliases.Any(loweredSignalText.Contains);
+
+    private static string InferSuggestedBodyOutputPath(
+        ImportedArmor armor,
+        string gender,
+        BuiltInBodyMetadata? inferredMetadata)
+    {
+        var candidates = armor.BodyReferenceFiles.Concat(armor.MeshFiles)
+            .Select(TryExtractSuggestedBodyOutputPath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path!)
+            .GroupBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(static group => group.Count())
+            .ThenByDescending(static group => group.Key.Contains("character assets", StringComparison.OrdinalIgnoreCase))
+            .Select(static group => group.Key)
+            .ToArray();
+
+        if (candidates.Length > 0)
+        {
+            return candidates[0];
+        }
+
+        return inferredMetadata?.Gender.Equals("male", StringComparison.OrdinalIgnoreCase) == true ||
+               gender.Equals("male", StringComparison.OrdinalIgnoreCase)
+            ? @"meshes\actors\character\character assets male\"
+            : @"meshes\actors\character\character assets\";
+    }
+
+    private static string? TryExtractSuggestedBodyOutputPath(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            return null;
+        }
+
+        var normalized = sourcePath.Replace('/', '\\');
+        var index = normalized.IndexOf(@"meshes\", StringComparison.OrdinalIgnoreCase);
+        if (index >= 0)
+        {
+            normalized = normalized[index..];
+        }
+
+        var directory = Path.GetDirectoryName(normalized)?.Replace('/', '\\');
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return null;
+        }
+
+        return directory.EndsWith(@"\", StringComparison.Ordinal) ? directory : $"{directory}\\";
     }
 
     private static IReadOnlyList<string> DefaultSlidersForSuggestedProfile(string detectedBody) =>

@@ -21919,9 +21919,12 @@ public sealed class OutputCompletenessTests
     public async Task ExportAsync_CustomDetection_WritesDetectedSourceStarterTemplate()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmpDir);
-        var nifPath = Path.Combine(tmpDir, "mantis_shell_0.nif");
+        var meshDir = Path.Combine(tmpDir, "meshes", "actors", "character", "arthropod assets");
+        Directory.CreateDirectory(meshDir);
+        var nifPath = Path.Combine(meshDir, "mantis_shell_0.nif");
         await File.WriteAllBytesAsync(nifPath, new byte[128]);
+        var bodyRefPath = Path.Combine(meshDir, "mantisbody_0.nif");
+        await File.WriteAllBytesAsync(bodyRefPath, new byte[128]);
 
         try
         {
@@ -21930,7 +21933,7 @@ public sealed class OutputCompletenessTests
             Directory.CreateDirectory(outputDir);
 
             var request = new ConversionRequest(nifPath, "CBBE", OutputDirectory: outputDir);
-            var armor = new ImportedArmor(nifPath, [nifPath], [], [], []);
+            var armor = new ImportedArmor(nifPath, [nifPath], [], [], [bodyRefPath]);
             var analysis = new MeshAnalysis("plate", false, 1);
             var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
             var morphs = new MorphSet("low", "high", true);
@@ -21959,6 +21962,10 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"physicsBones\": [", templateJson, StringComparison.Ordinal);
             Assert.Contains("Antenna.L", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"skeletonFramework\": \"insectoid-humanoid\"", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"bodyOutputPath\":", templateJson, StringComparison.Ordinal);
+            Assert.Contains("MandibleSpread", templateJson, StringComparison.Ordinal);
+            Assert.Contains("AntennaLength", templateJson, StringComparison.Ordinal);
+            Assert.Contains("AbdomenLength", templateJson, StringComparison.Ordinal);
         }
         finally
         {

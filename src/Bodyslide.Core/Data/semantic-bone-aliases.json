@@ -96,5 +96,31 @@
     "feather",
     "pinion",
     "vane"
+  ],
+  "fin": [
+    "fin",
+    "dorsalfin",
+    "pectoralfin",
+    "ventralfin",
+    "tailfin",
+    "spinefin",
+    "webfin"
+  ],
+  "frill": [
+    "frill",
+    "gillfrill",
+    "crest",
+    "whisker",
+    "mane"
+  ],
+  "antenna": [
+    "antenna",
+    "feeler",
+    "tendril"
+  ],
+  "mandible": [
+    "mandible",
+    "fang",
+    "pincer"
   ]
 }
