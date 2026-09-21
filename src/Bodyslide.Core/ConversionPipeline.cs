@@ -12638,6 +12638,20 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         }
 
         var slots = new HashSet<int>();
+        var ownershipCountsByRegion = islandControls
+            .SelectMany(control => control.CageRegions
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(region => new
+                {
+                    Region = region,
+                    Owner = $"{control.MeshKey}\u001f{control.IslandId}"
+                }))
+            .GroupBy(static entry => entry.Region, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group => group.Select(static entry => entry.Owner).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                StringComparer.OrdinalIgnoreCase);
         foreach (var islandControl in islandControls)
         {
             var regionSet = islandControl.CageRegions
@@ -12647,12 +12661,31 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
                 ?.Where(static label => !string.IsNullOrWhiteSpace(label))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)
                 ?? [];
+            var hasBoundaryOwnedArmRegion =
+                islandControl.BoundaryLoops?.Any(loop => loop.CageRegions.Contains("arms", StringComparer.OrdinalIgnoreCase)) == true ||
+                islandControl.AuthoredRegions?.Any(region => region.RegionName.Equals("arms", StringComparison.OrdinalIgnoreCase)) == true;
+            var hasUniqueArmOwnership =
+                (regionSet.Contains("arms") &&
+                 ownershipCountsByRegion.TryGetValue("arms", out var armOwnerCount) &&
+                 armOwnerCount == 1) ||
+                (regionSet.Contains("shoulders") &&
+                 ownershipCountsByRegion.TryGetValue("shoulders", out var shoulderOwnerCount) &&
+                 shoulderOwnerCount == 1);
 
             if (!analysis.IsFootwear &&
                 (regionSet.Contains("arms") || regionSet.Contains("shoulders") ||
                  semanticSet.Contains("upper-lateral-island") || semanticSet.Contains("bridge-strap-island")))
             {
                 slots.Add(33);
+            }
+
+            if (!analysis.IsFootwear &&
+                hasUniqueArmOwnership &&
+                (hasBoundaryOwnedArmRegion ||
+                 semanticSet.Contains("bridge-strap-island") ||
+                 semanticSet.Contains("upper-lateral-island")))
+            {
+                slots.Add(34);
             }
 
             if (regionSet.Contains("feet"))
@@ -13664,10 +13697,63 @@ internal sealed class BasicPluginAnalysisService : IPluginAnalysisService
             }
         }
 
+        foreach (var scannedPlugin in scannedPlugins)
+        {
+            foreach (var addon in scannedPlugin.Addons)
+            {
+                AddContextualOwningPluginEvidence(
+                    runtimeFormIdsByPlugin,
+                    scannedPlugin.PluginName,
+                    addon.OwningPluginFileName,
+                    addon.FormId);
+            }
+
+            foreach (var record in scannedPlugin.Records)
+            {
+                AddContextualOwningPluginEvidence(
+                    runtimeFormIdsByPlugin,
+                    scannedPlugin.PluginName,
+                    record.OwningPluginFileName,
+                    record.FormId);
+            }
+        }
+
         return runtimeFormIdsByPlugin.ToDictionary(
             static pair => pair.Key,
             static pair => (IReadOnlyList<uint>)pair.Value.OrderBy(static formId => formId).ToArray(),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void AddContextualOwningPluginEvidence(
+        IDictionary<string, HashSet<uint>> runtimeFormIdsByPlugin,
+        string scannedPluginName,
+        string? owningPluginFileName,
+        uint formId)
+    {
+        static string NormalizePluginName(string value)
+        {
+            var trimmed = value.Trim();
+            var fileName = Path.GetFileName(trimmed);
+            return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+        }
+
+        if (string.IsNullOrWhiteSpace(owningPluginFileName) ||
+            !IsRuntimeFeLightFormId(formId) ||
+            NormalizePluginName(owningPluginFileName).Equals(
+                NormalizePluginName(scannedPluginName),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var owningPlugin = NormalizePluginName(owningPluginFileName);
+        if (!runtimeFormIdsByPlugin.TryGetValue(owningPlugin, out var runtimeFormIds))
+        {
+            runtimeFormIds = new HashSet<uint>();
+            runtimeFormIdsByPlugin[owningPlugin] = runtimeFormIds;
+        }
+
+        runtimeFormIds.Add(formId);
     }
 
     internal static string DetectPluginKind(string pluginPath, byte[] bytes) =>

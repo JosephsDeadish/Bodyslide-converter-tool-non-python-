@@ -14697,6 +14697,89 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void BuildPluginRewritePlan_MixedLightMasterPluginFamilyFixture_UsesCrossChainFamilyContext()
+    {
+        var fixtureDirectory = GetFixtureDirectory("RealisticMixedLightMasterPluginFamilyModPack");
+        var sourceMeshPaths = Directory.GetFiles(
+            Path.Combine(fixtureDirectory, "meshes"),
+            "*.nif",
+            SearchOption.AllDirectories);
+        var pluginAnalysis = new PluginAnalysisResult(
+            ScannedPlugins: ["MixedHarnessChild.esp", "MixedHarnessAddon.esl", "MixedHarnessMaster.esm"],
+            ArmorAddons:
+            [
+                new PluginArmorAddon(
+                    "MixedHarnessMaster.esm",
+                    ["meshes/devious/devices/devious_panel_0.nif"],
+                    FormId: 0x00000800u,
+                    EditorId: "MixedHarnessPanelAA",
+                    OwningPluginFileName: "MixedHarnessMaster.esm",
+                    LocalFormId: 0x00000800u),
+                new PluginArmorAddon(
+                    "MixedHarnessAddon.esl",
+                    [
+                        "meshes/devious/devices/restraint_0.nif",
+                        "meshes/devious/devices/restraint_1.nif"
+                    ],
+                    FormId: 0xFE000801u,
+                    EditorId: "MixedHarnessRestraintAA",
+                    OwningPluginFileName: "MixedHarnessAddon.esl",
+                    LocalFormId: 0x00000801u,
+                    DeclaredMasterFileNames: ["MixedHarnessMaster.esm"])
+            ],
+            PatchGuidance: string.Empty,
+            ArmorRecords:
+            [
+                new PluginArmorRecord(
+                    "MixedHarnessChild.esp",
+                    ["meshes/devious/devices/restraint_ground.nif"],
+                    FormId: 0x02000810u,
+                    EditorId: "MixedHarnessArmor",
+                    LinkedArmorAddonReferences:
+                    [
+                        new PluginLinkedFormReference(0x00000800u, "MixedHarnessMaster.esm", 0x00000800u),
+                        new PluginLinkedFormReference(0xFE000801u, "MixedHarnessAddon.esl", 0x00000801u)
+                    ],
+                    OwningPluginFileName: "MixedHarnessChild.esp",
+                    LocalFormId: 0x00000810u,
+                    DeclaredMasterFileNames: ["MixedHarnessMaster.esm", "MixedHarnessAddon.esl"])
+            ]);
+
+        var exportServiceType = typeof(ConversionOrchestrator).Assembly.GetType("Bodyslide.Core.LocalExportService");
+        Assert.NotNull(exportServiceType);
+
+        var method = exportServiceType!.GetMethod(
+            "BuildPluginRewritePlan",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var plan = method!.Invoke(null, [pluginAnalysis, sourceMeshPaths, "3BA"]);
+        Assert.NotNull(plan);
+
+        var sourceMeshMap = Assert.IsAssignableFrom<IReadOnlyDictionary<string, string>>(
+            plan!.GetType().GetProperty("SourceMeshMap")!.GetValue(plan));
+        var ambiguousMatches = Assert.IsAssignableFrom<IReadOnlyList<string>>(
+            plan.GetType().GetProperty("AmbiguousConvertedMatches")!.GetValue(plan));
+        var unresolvedTieGroups = Assert.IsAssignableFrom<IReadOnlyList<object>>(
+            plan.GetType().GetProperty("UnresolvedTieGroups")!.GetValue(plan));
+
+        Assert.Empty(ambiguousMatches);
+        Assert.Empty(unresolvedTieGroups);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "armbinder", "devious_panel_0.nif"),
+            sourceMeshMap["meshes/devious/devices/devious_panel_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_0.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_0.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "gag", "restraint_1.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_1.nif"]);
+        Assert.Equal(
+            Path.Combine(fixtureDirectory, "meshes", "devious", "ebonite", "world", "restraint_ground.nif"),
+            sourceMeshMap["meshes/devious/devices/restraint_ground.nif"]);
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticLinkedModularFrameworkModPackDirectory_ResolvesCrossPluginFamilyContext()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticLinkedModularFrameworkModPack");
@@ -16386,6 +16469,83 @@ public sealed class BinaryPluginRewriteServiceTests
             Assert.Contains(analysis.ScannedPlugins, plugin => plugin.Contains("ContextualLightParent.esp [ESPFE;", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("AMBIGUOUS", string.Join('\n', analysis.ScannedPlugins), StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("AMBIGUOUS", analysis.PatchGuidance, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_AmbiguousEspWithFeOwnedOverrideContext_ReclassifiesAsEspfe()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            byte[] BuildRecord(string tag, byte[] data, uint formId = 0u)
+            {
+                var header = new byte[24 + data.Length];
+                System.Text.Encoding.ASCII.GetBytes(tag.PadRight(4)[..4]).CopyTo(header, 0);
+                BitConverter.TryWriteBytes(header.AsSpan(4), (uint)data.Length);
+                BitConverter.TryWriteBytes(header.AsSpan(12), formId);
+                data.CopyTo(header, 24);
+                return header;
+            }
+
+            byte[] BuildPluginWithMastersForContext(IReadOnlyList<string> masters, params byte[][] records)
+            {
+                using var ms = new MemoryStream();
+                ms.Write(BuildSubrecord("HEDR", new byte[12]));
+                ms.Write(BuildSubrecord("CNAM", [0x00]));
+                foreach (var master in masters)
+                {
+                    ms.Write(BuildSubrecord("MAST", System.Text.Encoding.ASCII.GetBytes(master + "\0")));
+                    ms.Write(BuildSubrecord("DATA", new byte[8]));
+                }
+
+                var plugin = new List<byte>(BuildRecord("TES4", ms.ToArray()));
+                plugin.AddRange(records.SelectMany(static record => record));
+                return [.. plugin];
+            }
+
+            byte[] BuildLightFlagPluginWithArma(uint tes4Flags, uint armaFormId)
+            {
+                using var ms = new MemoryStream();
+                ms.Write(BuildSubrecord("HEDR", new byte[12]));
+                ms.Write(BuildSubrecord("CNAM", [0x00]));
+                var tes4 = BuildRecord("TES4", ms.ToArray());
+                WriteUInt32Le(tes4, 8, tes4Flags);
+                var armaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("OwnedArmor\0"));
+                var arma = BuildRecord("ARMA", armaData, armaFormId);
+                return [.. tes4, .. arma];
+            }
+
+            var sourcePluginPath = Path.Combine(dir, "ContextualLightOwnedParent.esp");
+            var childPluginPath = Path.Combine(dir, "ContextualLightOverrideChild.esp");
+
+            await File.WriteAllBytesAsync(
+                sourcePluginPath,
+                BuildLightFlagPluginWithArma(0x00000200u, 0x00000801u));
+
+            var childArmaData = BuildSubrecord("EDID", System.Text.Encoding.ASCII.GetBytes("OwnedArmorOverride\0"))
+                .Concat(BuildSubrecord("MOD2", System.Text.Encoding.ASCII.GetBytes("meshes/armor/contextual/owned_0.nif\0")))
+                .ToArray();
+            var childArma = BuildRecord("ARMA", childArmaData, formId: 0xFE000801u);
+            await File.WriteAllBytesAsync(
+                childPluginPath,
+                BuildPluginWithMastersForContext(["ContextualLightOwnedParent.esp"], childArma));
+
+            var service = new BasicPluginAnalysisService();
+            var analysis = await service.AnalyzeAsync(
+                new ImportedArmor(dir, [], [], [], []),
+                "CBBE",
+                CancellationToken.None);
+
+            Assert.DoesNotContain("ContextualLightOwnedParent.esp", analysis.AmbiguousPlugins ?? []);
+            Assert.Contains(analysis.ScannedPlugins, plugin => plugin.Contains("ContextualLightOwnedParent.esp [ESPFE;", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("AMBIGUOUS", string.Join('\n', analysis.ScannedPlugins), StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -19304,6 +19464,42 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("32:Body", result.Partitions, StringComparer.Ordinal);
         Assert.Contains("33:Hands", result.Partitions, StringComparer.Ordinal);
         Assert.Contains("38:Calves", result.Partitions, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_UsesUniqueIslandArmOwnershipToAugmentForearmSlot()
+    {
+        var mesh = new WeightedMesh(
+            "cloth",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "smooth-adaptive-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "ownership_window_top",
+                        IslandId: 0,
+                        CageRegions: ["arms"],
+                        SemanticLabels: ["bridge-strap-island"],
+                        BoundaryLoops:
+                        [
+                            new CageIslandBoundaryLoopControl(0, ["arms"])
+                        ]),
+                    new CageIslandControl(
+                        MeshKey: "ownership_window_top",
+                        IslandId: 1,
+                        CageRegions: ["chest"],
+                        SemanticLabels: ["window-frame-island"])
+                ]));
+        var analysis = new MeshAnalysis("cloth", false, 1, HasSplitMeshes: true);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.Contains("33:Hands", result.Partitions, StringComparer.Ordinal);
+        Assert.Contains("34:Forearms", result.Partitions, StringComparer.Ordinal);
     }
 
     [Fact]
