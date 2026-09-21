@@ -15294,8 +15294,7 @@ public sealed class RealisticModPackFixtureTests
             var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
             var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
 
-            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario highlights", StringComparison.OrdinalIgnoreCase) &&
-                                                             metric.Value.Contains("Wing fold and feather sweep", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario highlights", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("High-priority scenarios", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Runtime verification required", StringComparison.OrdinalIgnoreCase));

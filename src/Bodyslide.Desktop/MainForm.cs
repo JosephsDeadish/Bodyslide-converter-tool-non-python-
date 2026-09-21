@@ -4585,15 +4585,16 @@ public sealed class MainForm : Form
 
         var items = value
             .EnumerateArray()
-            .Select(static scenario =>
+            .Select(static scenario => new
             {
-                var name = TryReadString(scenario, "Name");
-                var priority = TryReadString(scenario, "Priority");
-                return string.IsNullOrWhiteSpace(name)
-                    ? null
-                    : string.IsNullOrWhiteSpace(priority) ? name : $"{name} [{priority}]";
+                Name = TryReadString(scenario, "Name"),
+                Priority = TryReadString(scenario, "Priority")
             })
-            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Name))
+            .OrderByDescending(static item => GetScenarioPriorityRank(item.Priority))
+            .ThenBy(static item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(static item =>
+                string.IsNullOrWhiteSpace(item.Priority) ? item.Name : $"{item.Name} [{item.Priority}]")
             .Take(4)
             .ToArray();
 
@@ -4690,12 +4691,23 @@ public sealed class MainForm : Form
             .EnumerateArray()
             .Select(item => TryReadString(item, nestedPropertyName))
             .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+            .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return values.Length == 0 ? "None" : JoinReportValues(values);
+        return values.Length == 0 ? "None" : BuildListPreview(values);
     }
+
+    private static int GetScenarioPriorityRank(string? priority) =>
+        priority?.Trim() switch
+        {
+            var value when string.Equals(value, "high", StringComparison.OrdinalIgnoreCase) => 3,
+            var value when string.Equals(value, "action", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "info", StringComparison.OrdinalIgnoreCase) => 1,
+            _ => 0
+        };
 
     private static string CountElements(JsonElement element) => element.ValueKind switch
     {

@@ -403,15 +403,16 @@ internal static class DesktopWorkflowAutomation
         return string.Join(
             "; ",
             value.EnumerateArray()
-                .Select(static scenario =>
+                .Select(static scenario => new
                 {
-                    var name = TryReadString(scenario, "Name");
-                    var priority = TryReadString(scenario, "Priority");
-                    return string.IsNullOrWhiteSpace(name)
-                        ? null
-                        : string.IsNullOrWhiteSpace(priority) ? name : $"{name} [{priority}]";
+                    Name = TryReadString(scenario, "Name"),
+                    Priority = TryReadString(scenario, "Priority")
                 })
-                .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Name))
+                .OrderByDescending(static entry => GetPriorityRank(entry.Priority))
+                .ThenBy(static entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(static entry =>
+                    string.IsNullOrWhiteSpace(entry.Priority) ? entry.Name : $"{entry.Name} [{entry.Priority}]")
                 .Take(4)!);
     }
 
@@ -518,6 +519,16 @@ internal static class DesktopWorkflowAutomation
 
     private static string? FormatBool(bool? value) =>
         value is null ? null : value.Value ? "Yes" : "No";
+
+    private static int GetPriorityRank(string? priority) =>
+        priority?.Trim() switch
+        {
+            var value when string.Equals(value, "high", StringComparison.OrdinalIgnoreCase) => 3,
+            var value when string.Equals(value, "action", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "info", StringComparison.OrdinalIgnoreCase) => 1,
+            _ => 0
+        };
 
     private static IReadOnlyList<DesktopWorkflowAutomationStep> BuildSuggestedGuiFlow(
         IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
