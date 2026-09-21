@@ -95,6 +95,7 @@ public sealed class MainForm : Form
         "batch-report.json",
         "conversion-quality.json",
         "dependency-map.json",
+        "in-game-validation.json",
         "skeleton-compatibility.json",
         "race-compatibility.json",
         "texture-summary.json",
@@ -2186,6 +2187,7 @@ public sealed class MainForm : Form
                 AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
             }
 
             if (entries.Count > 0)
@@ -2602,9 +2604,9 @@ public sealed class MainForm : Form
         var summary = TryReadWorstValidationSummary(outputDirectories);
         var effectiveStatus = summary?.Status
             ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
-        _previewTabPage.Text = BuildResultTabTitle("Preview", effectiveStatus);
-        _guidanceTabPage.Text = BuildResultTabTitle("Next actions", effectiveStatus);
-        _statusLabel.Text = BuildValidationStatusLabel(effectiveStatus, previewAvailable);
+        _previewTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", effectiveStatus);
+        _guidanceTabPage.Text = ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", effectiveStatus);
+        _statusLabel.Text = ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, previewAvailable);
     }
 
     private static string BuildValidationOutcomeLogMessage(
@@ -2621,46 +2623,6 @@ public sealed class MainForm : Form
 
         var fallbackStatus = requiresReview ? "needs-review" : previewAvailable ? "ready" : null;
         return ConversionValidationPresentation.BuildOutcomeSummary(fallbackStatus, 0, 0, 0, previewAvailable);
-    }
-
-    private static string BuildResultTabTitle(string baseTitle, string? status)
-    {
-        if (ConversionValidationPresentation.GetGateRank(status) <= 0)
-        {
-            return baseTitle;
-        }
-
-        var gate = ConversionValidationPresentation.GetGateLabel(status);
-        return $"{baseTitle} ({gate})";
-    }
-
-    private static string BuildValidationStatusLabel(string? status, bool previewAvailable)
-    {
-        var gate = ConversionValidationPresentation.GetGateLabel(status);
-        if (gate.Equals("FAIL", StringComparison.OrdinalIgnoreCase))
-        {
-            return previewAvailable
-                ? "FAIL — blocking conversion issues found. Start with Preview, then Next actions."
-                : "FAIL — blocking conversion issues found. Open Next actions and reports before install/share.";
-        }
-
-        if (gate.Equals("REVIEW REQUIRED", StringComparison.OrdinalIgnoreCase))
-        {
-            return previewAvailable
-                ? "REVIEW REQUIRED — inspect Preview and Next actions before install/share."
-                : "REVIEW REQUIRED — preview missing; open Next actions and reports before install/share.";
-        }
-
-        if (gate.Equals("PASS", StringComparison.OrdinalIgnoreCase))
-        {
-            return previewAvailable
-                ? "PASS — install-ready after one final Preview pass and smoke test."
-                : "PASS — install-ready, but preview files are missing so open the reports first.";
-        }
-
-        return previewAvailable
-            ? "Conversion complete. Open Preview and Next actions before install/share."
-            : "Conversion complete. Open Next actions and reports before install/share.";
     }
 
     private void UpdatePresetDetails()
@@ -3446,6 +3408,13 @@ public sealed class MainForm : Form
                         AddReportMetric(reportName, "Missing physics bones", TryReadArray(physicsCompatibility, "MissingBones"), filePath);
                         AddReportMetric(reportName, "Remapped physics bones", TryReadArray(physicsCompatibility, "RemappedBones"), filePath);
                     }
+                    break;
+                case "in-game-validation.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    AddReportMetric(reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
+                    AddReportMetric(reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    AddReportMetric(reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
                 case "race-compatibility.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -4237,6 +4206,69 @@ public sealed class MainForm : Form
         {
             requiresReview = true;
             add("World / ground mesh", "Warning", $"Could not read world-physics.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromInGameValidation(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "in-game-validation.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = OpenJsonDocument(reportPath);
+            var root = document.RootElement;
+            var gate = TryReadString(root, "ValidationGate");
+            var coreRegions = TryReadArray(root, "CoreBodyRegions");
+            var sensitiveRegions = TryReadArray(root, "SensitiveRegions");
+            if (!string.IsNullOrWhiteSpace(gate) || !string.IsNullOrWhiteSpace(coreRegions))
+            {
+                var priority = string.Equals(gate, "PASS", StringComparison.OrdinalIgnoreCase) ? "Info" : "Action";
+                if (!string.Equals(priority, "Info", StringComparison.OrdinalIgnoreCase))
+                {
+                    requiresReview = true;
+                }
+
+                add(
+                    "In-game validation",
+                    priority,
+                    $"Runtime smoke-test gate: {gate ?? "CHECK"}. Core regions: {coreRegions ?? "not listed"}. Sensitive regions: {sensitiveRegions ?? "none"}.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "pose-risk", reportPath));
+            }
+
+            if (TryGetProperty(root, "Checklist", out var checklist) && checklist.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var checkpoint in checklist.EnumerateArray().Take(3))
+                {
+                    var name = TryReadString(checkpoint, "Name");
+                    var details = TryReadString(checkpoint, "Details");
+                    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(details))
+                    {
+                        continue;
+                    }
+
+                    var priority = TryReadString(checkpoint, "Priority");
+                    if (string.Equals(priority, "High", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(priority, "Action", StringComparison.OrdinalIgnoreCase))
+                    {
+                        requiresReview = true;
+                    }
+
+                    add("In-game validation", priority ?? "Info", $"{name}: {details}", reportPath);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("In-game validation", "Warning", $"Could not read in-game-validation.json: {ex.Message}", reportPath);
         }
     }
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="OracleTopology">
+  <bone name="HDT JawLower" />
+  <bone name="HDT TongueMid" />
+  <bone name="HDT ThroatLower" />
+  <bone name="ButtLower" />
+</system>

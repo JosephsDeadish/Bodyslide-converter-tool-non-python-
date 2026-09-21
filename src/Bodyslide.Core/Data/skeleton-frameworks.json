@@ -9,8 +9,8 @@
   {
     "label": "ube-extended",
     "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "HDT ", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
-    "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower", "HDT Mouth", "HDT Jaw", "HDT Tongue", "HDT TongueTip", "HDT Throat", "VaginaDeep", "Labia", "AnusOuter"],
-    "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "VaginaDeep", "Anus", "AnusOuter", "HDT Mouth", "HDT Jaw", "HDT Tongue", "HDT Throat"],
+    "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower", "HDT Mouth", "HDT Jaw", "HDT JawLower", "HDT JawUpper", "HDT Tongue", "HDT TongueMid", "HDT TongueTip", "HDT Throat", "HDT ThroatLower", "VaginaDeep", "Labia", "AnusOuter"],
+    "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "VaginaDeep", "Anus", "AnusOuter", "HDT Mouth", "HDT Jaw", "HDT JawLower", "HDT Tongue", "HDT TongueMid", "HDT Throat", "HDT ThroatLower"],
     "minimumSignatureMatches": 2
   },
   {
@@ -58,15 +58,15 @@
   {
     "label": "digitigrade-beast",
     "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe"],
-    "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe", "Lykaios", "Canine", "Lupine", "Vulpine", "TailSheath", "BeastForeskin", "BeastGlans", "BeastScrotum", "BeastVagina", "BeastAnus", "JawLower", "TongueTip"],
-    "distinctiveSignatures": ["Hock.L", "Hock.R", "DigitigradeFoot.L", "DigitigradeFoot.R", "PawFront.L", "PawFront.R", "DigitigradeToe.L", "DigitigradeToe.R", "TailSheath", "BeastVagina", "BeastAnus"],
+    "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe", "Lykaios", "Canine", "Lupine", "Vulpine", "TailSheath", "BeastForeskin", "BeastGlans", "BeastKnot", "BeastScrotum", "BeastVagina", "BeastAnus", "JawLower", "TongueMid", "TongueTip"],
+    "distinctiveSignatures": ["Hock.L", "Hock.R", "DigitigradeFoot.L", "DigitigradeFoot.R", "PawFront.L", "PawFront.R", "DigitigradeToe.L", "DigitigradeToe.R", "TailSheath", "BeastKnot", "BeastVagina", "BeastAnus", "TongueMid"],
     "minimumSignatureMatches": 2
   },
   {
     "label": "equine-humanoid",
-    "bonePrefixes": ["Mane", "Forelock", "Tail", "Fetlock"],
-    "boneTokens": ["Tail4", "Tail5", "TailTip", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Fetlock", "Mane", "Forelock", "Equus", "Mare"],
-    "distinctiveSignatures": ["Tail4", "Tail5", "TailTip", "ManeRoot", "ManeTip", "Forelock"],
+    "bonePrefixes": ["Mane", "Forelock", "Tail", "Fetlock", "Beast"],
+    "boneTokens": ["Tail4", "Tail5", "TailTip", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Fetlock", "Mane", "Forelock", "Equus", "Mare", "TailSheath", "BeastForeskin", "BeastGlans", "BeastKnot", "BeastScrotum", "BeastVagina", "BeastAnus", "TongueMid", "TongueTip"],
+    "distinctiveSignatures": ["Tail4", "Tail5", "TailTip", "ManeRoot", "ManeTip", "Forelock", "TailSheath", "BeastKnot", "TongueMid"],
     "minimumSignatureMatches": 2
   },
   {

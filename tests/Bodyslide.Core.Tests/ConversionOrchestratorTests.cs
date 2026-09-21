@@ -10688,6 +10688,40 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedFemaleOralTopologyPack_ResolvesDeepOralPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticFemaleOralTopologyModPack", Path.Combine("meshes", "armor", "oracledeep", "oracle_topology_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "UBE", CancellationToken.None);
+
+        Assert.Contains("TongueMidLength", resolved.Sliders);
+        Assert.Contains("JawDepth", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedEquineBeastShapeDataPack_ResolvesNonCanineBeastPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticEquineBeastFrameworkModPack", Path.Combine("meshes", "beast", "equine", "equine_harness_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Equine Humanoid", CancellationToken.None);
+
+        Assert.Contains("SheathLength", resolved.Sliders);
+        Assert.Contains("KnotSize", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedHimboShapeDataPack_ResolvesMaleBodyPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticHimboModPack", Path.Combine("meshes", "male", "himbo", "variant", "himbo_raider_0.nif"));
@@ -13052,9 +13086,14 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("AnusOuter", ube.AvailablePhysicsBones);
         Assert.Contains("HDT Mouth", ube.AvailablePhysicsBones);
         Assert.Contains("HDT Jaw", ube.AvailablePhysicsBones);
+        Assert.Contains("HDT JawLower", ube.AvailablePhysicsBones);
         Assert.Contains("HDT Tongue", ube.AvailablePhysicsBones);
+        Assert.Contains("HDT TongueMid", ube.AvailablePhysicsBones);
         Assert.Contains("HDT Throat", ube.AvailablePhysicsBones);
+        Assert.Contains("HDT ThroatLower", ube.AvailablePhysicsBones);
         Assert.Contains("BellyLower", ube.AvailablePhysicsBones);
+        Assert.Contains("Butt", ube.SliderNames);
+        Assert.Contains("Thighs", ube.SliderNames);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
         Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
@@ -13077,6 +13116,13 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("TNG", tngAlias.Name);
 
         Assert.Contains("SAM Foreskin", samLight.AvailablePhysicsBones);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Equine Humanoid", out var equine));
+        Assert.Contains("TailSheath", equine.AvailablePhysicsBones);
+        Assert.Contains("BeastKnot", equine.AvailablePhysicsBones);
+        Assert.Contains("TongueMid", equine.AvailablePhysicsBones);
+        Assert.Contains("Butt", equine.SliderNames);
+        Assert.Contains("Thighs", equine.SliderNames);
     }
 
     [Fact]
@@ -13087,12 +13133,18 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("PawRear.L", feline.AvailablePhysicsBones);
         Assert.Contains("TailSheath", feline.AvailablePhysicsBones);
         Assert.Contains("BeastVagina", feline.AvailablePhysicsBones);
+        Assert.Contains("BeastKnot", feline.AvailablePhysicsBones);
+        Assert.Contains("TongueMid", feline.AvailablePhysicsBones);
+        Assert.Contains("Butt", feline.SliderNames);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Canine Humanoid", out var canine));
         Assert.Contains("PawFront.L", canine.AvailablePhysicsBones);
         Assert.Contains("Hock.L", canine.AvailablePhysicsBones);
         Assert.Contains("TailSheath", canine.AvailablePhysicsBones);
         Assert.Contains("BeastForeskin", canine.AvailablePhysicsBones);
+        Assert.Contains("BeastKnot", canine.AvailablePhysicsBones);
+        Assert.Contains("TongueMid", canine.AvailablePhysicsBones);
+        Assert.Contains("Butt", canine.SliderNames);
         Assert.Contains("TongueTipLength", canine.SliderNames);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Goat Humanoid", out var goat));
@@ -13131,7 +13183,9 @@ public sealed class PhysicsMeshTypeTuningTests
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Equine Humanoid", out var equine));
         Assert.Contains("ManeTip", equine.AvailablePhysicsBones);
+        Assert.Contains("BeastKnot", equine.AvailablePhysicsBones);
         Assert.Contains("ManeLength", equine.SliderNames);
+        Assert.Contains("KnotSize", equine.SliderNames);
     }
 
     [Fact]
@@ -13268,6 +13322,12 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("belly", bellyGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("UpperThighSwing", out var thighGroup));
         Assert.Equal("thigh", thighGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("RearCheekSwing", out var buttGroup));
+        Assert.Equal("butt", buttGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("TongueMidRig", out var tongueMidGroup));
+        Assert.Equal("mouth", tongueMidGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("BeastKnotRig", out var knotGroup));
+        Assert.Equal("genitals", knotGroup);
         var longTailToken = $"{new string('X', 384)}TailChain";
         Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
         Assert.Equal("tail", longTokenGroup);
@@ -13288,6 +13348,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("tng-extended", SkeletonFrameworkCatalog.DetectFramework(["tng_shaft_ctrl", "tng_glans_ctrl"]));
         Assert.Equal("sam-light", SkeletonFrameworkCatalog.DetectFramework(["samfskin_ctrl", "sam_genitalswing"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdtTongue_ctrl", "hdtThroat_ctrl"]));
+        Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdt_jawlower_ctrl", "hdt_tonguemid_ctrl"]));
+        Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["beastknot_ctrl", "fetlock_ctrl", "tailsheath_ctrl"]));
     }
 }
 
@@ -14664,6 +14726,7 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "ube", "oracle_vestment_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
@@ -14675,6 +14738,40 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticFemaleOralTopologyModPack_WritesDeepOralAndBodyAreaValidationArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFemaleOralTopologyModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "oracledeep", "oracle_topology_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "UBE",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "ube", "oracle_topology_0.nif")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
+            Assert.Contains("\"CoreBodyRegions\"", inGameJson, StringComparison.Ordinal);
+            Assert.Contains("breasts", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("belly", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("butt", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("thighs", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mouth", inGameJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -14701,12 +14798,42 @@ public sealed class RealisticModPackFixtureTests
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "lykaios", "beast_harness_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "equine", "equine_harness_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Equine Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "equine-humanoid", "equine_harness_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
+            var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
+            Assert.Contains("TailSheath", smpXml, StringComparison.Ordinal);
+            Assert.Contains("BeastKnot", smpXml, StringComparison.Ordinal);
         }
         finally
         {

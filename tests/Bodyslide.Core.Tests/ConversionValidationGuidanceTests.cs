@@ -355,4 +355,40 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains("FAIL", failHtml, StringComparison.Ordinal);
         Assert.Contains("Do not install/share yet", failHtml, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void ConversionValidationPresentation_BuildDesktopUiLabels_ReflectGateAndPreviewState()
+    {
+        Assert.Equal("Preview (REVIEW REQUIRED)", ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", "needs-review"));
+        Assert.Equal("Next actions", ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", null));
+        Assert.Contains("Preview", ConversionValidationPresentation.BuildDesktopStatusLabel("needs-review", previewAvailable: true), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preview missing", ConversionValidationPresentation.BuildDesktopStatusLabel("needs-review", previewAvailable: false), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("smoke test", ConversionValidationPresentation.BuildDesktopStatusLabel("ready", previewAvailable: true), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("blocking conversion issues", ConversionValidationPresentation.BuildDesktopStatusLabel("high-risk", previewAvailable: false), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildReviewArtifacts_AndActions_IncludeInGameValidationForRuntimeSensitiveIssues()
+    {
+        var summary = new ConversionValidationSummary(
+            "needs-review",
+            44,
+            2,
+            2,
+            0,
+            [
+                new ConversionValidationIssue("pose-risk", "high", "Combat poses still clip."),
+                new ConversionValidationIssue("physics-bone-missing", "high", "A target physics chain is missing."),
+                new ConversionValidationIssue("race-compatibility-warning", "medium", "Custom beast race needs review."),
+                new ConversionValidationIssue("heel-offset-review", "medium", "Heel placement needs review."),
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Equine Humanoid", maxActions: 8);
+        var artifacts = ConversionValidationGuidance.BuildReviewArtifacts(summary, maxArtifacts: 10);
+
+        Assert.Contains(actions, action => action.Contains("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
+    }
 }

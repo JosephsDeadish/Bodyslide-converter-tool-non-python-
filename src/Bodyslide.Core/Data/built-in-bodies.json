@@ -1059,9 +1059,13 @@
       "AnusOuter",
       "HDT Mouth",
       "HDT Jaw",
+      "HDT JawLower",
+      "HDT JawUpper",
       "HDT Tongue",
+      "HDT TongueMid",
       "HDT TongueTip",
-      "HDT Throat"
+      "HDT Throat",
+      "HDT ThroatLower"
     ],
     "referenceTokens": [
       "ube",
@@ -1130,9 +1134,13 @@
       "AnusOuter",
       "HDT Mouth",
       "HDT Jaw",
+      "HDT JawLower",
+      "HDT JawUpper",
       "HDT Tongue",
+      "HDT TongueMid",
       "HDT TongueTip",
       "HDT Throat",
+      "HDT ThroatLower",
       "NPC L Breast01",
       "NPC R Breast01",
       "NPC Belly",
@@ -1826,7 +1834,17 @@
       "Forelock",
       "TailTip",
       "Fetlock.L",
-      "Fetlock.R"
+      "Fetlock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastKnot",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueMid",
+      "TongueTip"
     ],
     "referenceTokens": [
       "horse",
@@ -1844,7 +1862,10 @@
       "Calves",
       "TailBase",
       "NeckLength",
-      "ManeLength"
+      "ManeLength",
+      "SheathLength",
+      "KnotSize",
+      "TongueTipLength"
     ],
     "transformationField": {
       "chest": 1.01,
@@ -2028,10 +2049,12 @@
       "TailSheath",
       "BeastForeskin",
       "BeastGlans",
+      "BeastKnot",
       "BeastScrotum",
       "BeastVagina",
       "BeastAnus",
       "JawLower",
+      "TongueMid",
       "TongueTip"
     ],
     "referenceTokens": [
@@ -2057,6 +2080,7 @@
       "TailBase",
       "PawWidth",
       "SheathLength",
+      "KnotSize",
       "TongueTipLength"
     ],
     "transformationField": {
@@ -2150,10 +2174,12 @@
       "TailSheath",
       "BeastForeskin",
       "BeastGlans",
+      "BeastKnot",
       "BeastScrotum",
       "BeastVagina",
       "BeastAnus",
       "JawLower",
+      "TongueMid",
       "TongueTip"
     ],
     "referenceTokens": [
@@ -2178,6 +2204,7 @@
       "TailBase",
       "PawWidth",
       "SheathLength",
+      "KnotSize",
       "TongueTipLength"
     ],
     "transformationField": {

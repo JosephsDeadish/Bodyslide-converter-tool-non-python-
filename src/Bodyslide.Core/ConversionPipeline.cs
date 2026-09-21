@@ -270,6 +270,20 @@ public sealed record ConversionValidationSummary(
     int MediumSeverityCount,
     int LowSeverityCount,
     IReadOnlyList<ConversionValidationIssue> Issues);
+public sealed record InGameValidationCheckpoint(
+    string Name,
+    string Priority,
+    string Details,
+    IReadOnlyList<string> FocusRegions,
+    IReadOnlyList<string> RelatedArtifacts);
+public sealed record InGameValidationReport(
+    string TargetBody,
+    string ValidationStatus,
+    string ValidationGate,
+    IReadOnlyList<string> CoreBodyRegions,
+    IReadOnlyList<string> SensitiveRegions,
+    IReadOnlyList<string> ReviewArtifacts,
+    IReadOnlyList<InGameValidationCheckpoint> Checklist);
 
 public static class ConversionValidationPresentation
 {
@@ -325,6 +339,45 @@ public static class ConversionValidationPresentation
             ? "Open Preview for the final visual pass."
             : "Preview files are missing, so open the generated reports first.";
         return $"{GetGateLabel(status)} — {GetDispositionMessage(status)} {previewMessage} Validation issues: {highSeverityCount} high, {mediumSeverityCount} medium, {lowSeverityCount} low.";
+    }
+
+    public static string BuildDesktopResultTabTitle(string baseTitle, string? status)
+    {
+        if (GetGateRank(status) <= 0)
+        {
+            return baseTitle;
+        }
+
+        return $"{baseTitle} ({GetGateLabel(status)})";
+    }
+
+    public static string BuildDesktopStatusLabel(string? status, bool previewAvailable)
+    {
+        var gate = GetGateLabel(status);
+        if (gate.Equals("FAIL", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "FAIL — blocking conversion issues found. Start with Preview, then Next actions."
+                : "FAIL — blocking conversion issues found. Open Next actions and reports before install/share.";
+        }
+
+        if (gate.Equals("REVIEW REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "REVIEW REQUIRED — inspect Preview and Next actions before install/share."
+                : "REVIEW REQUIRED — preview missing; open Next actions and reports before install/share.";
+        }
+
+        if (gate.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+        {
+            return previewAvailable
+                ? "PASS — install-ready after one final Preview pass and smoke test."
+                : "PASS — install-ready, but preview files are missing so open the reports first.";
+        }
+
+        return previewAvailable
+            ? "Conversion complete. Open Preview and Next actions before install/share."
+            : "Conversion complete. Open Next actions and reports before install/share.";
     }
 }
 
@@ -439,19 +492,19 @@ internal static class ConversionValidationGuidance
             "plugin-rewrite-ambiguous-filename" =>
                 "Open plugin-patches.json and conversion-quality.json, compare each ambiguous plugin mesh path against the source folder family and linked ARMA context, then rename or relocate the winning source mesh so trailing path context resolves to one clear match before re-running.",
             "clipping-detected" or "voxel-penetration" or "pose-risk" =>
-                $"Review preview-workbench.html and pose-simulation-report.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
+                $"Review preview-workbench.html, pose-simulation-report.json, and in-game-validation.json, then test the output on the {targetBody} body in Outfit Studio and in-game using the flagged regions and stressed animation poses.",
             "auto-correction-applied" =>
                 "Open preview-workbench.html and pose-simulation-report.json, compare the corrected regions against the source mesh, and confirm the automatic push-out did not bloat seams, straps, or rigid details before shipping.",
             "heel-offset-review" =>
-                "Open world-physics.json and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
+                "Open world-physics.json, in-game-validation.json, and preview-workbench.html, then check ankle height, toe angle, heel offset, and ground contact on the converted footwear during idle and walk animations.",
             "unsupported-bones" =>
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
             "physics-profile-unsupported" =>
                 "Open skeleton-compatibility.json, compare the requested physics profile against the target body's advertised capability and generated runtime configs, then switch to a physics-capable body/skeleton or set Physics to None before release.",
             "physics-config-mismatch" =>
-                "Open skeleton-compatibility.json and world-physics.json, restore the missing runtime config outputs or switch to a compatible physics profile before packaging the result.",
+                "Open skeleton-compatibility.json, world-physics.json, and in-game-validation.json, restore the missing runtime config outputs or switch to a compatible physics profile before packaging the result.",
             "physics-bone-missing" =>
-                "Open skeleton-compatibility.json, compare the requested physics profile against the expected and missing target bones, then switch to a compatible body/skeleton or disable the unsupported physics chains before release.",
+                "Open skeleton-compatibility.json and in-game-validation.json, compare the requested physics profile against the expected and missing target bones, then switch to a compatible body/skeleton or disable the unsupported physics chains before release.",
             "physics-bone-remap" =>
                 "Open skeleton-compatibility.json and review the remapped physics chains so SMP/CBPC bones still land on the intended target-body regions before release.",
             "unknown-export-partitions" =>
@@ -459,7 +512,7 @@ internal static class ConversionValidationGuidance
             "missing-normal-maps" =>
                 "Open texture-summary.json, restore or generate the missing normal maps in the staged texture paths, and verify the converted outfit no longer ships with flat or mismatched lighting.",
             "race-compatibility-warning" =>
-                "Review race-compatibility.json and plugin-patches.json, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
+                "Review race-compatibility.json, in-game-validation.json, and plugin-patches.json, then confirm follower/custom/vampire/child/beast variants have matching body meshes, skeleton variants, tail or paw support where needed, and dedicated addon records before release.",
             "plugin-rewrite-missing-converted-match" or
             "plugin-rewrite-missing-staged-mesh" or
             "plugin-rewrite-verification-warning" or
@@ -579,7 +632,7 @@ internal static class ConversionValidationGuidance
             "extreme-topology-adaptation" =>
                 ["conversion-quality.json", "morphs.json", "preview-workbench.html", "CalienteTools/BodySlide/ShapeData/"],
             "topology-mismatch-risk" or "clipping-detected" or "voxel-penetration" or "pose-risk" or "auto-correction-applied" =>
-                ["conversion-quality.json", "preview-workbench.html", "pose-simulation-report.json"],
+                ["conversion-quality.json", "preview-workbench.html", "pose-simulation-report.json", "in-game-validation.json"],
             "missing-source-partitions" or "unknown-export-partitions" or "topology-partition-review" =>
                 ["conversion-quality.json", "preview-workbench.html"],
             "missing-plugin-partitions" or "plugin-rewrite-ambiguous-filename" or
@@ -593,11 +646,11 @@ internal static class ConversionValidationGuidance
             "plugin-link-unsupported-nif-layout" =>
                 ["plugin-patches.json", "conversion-quality.json", "preview-workbench.html"],
             "heel-offset-review" =>
-                ["world-physics.json", "preview-workbench.html"],
+                ["world-physics.json", "preview-workbench.html", "in-game-validation.json"],
             "unsupported-bones" or "race-compatibility-warning" =>
-                ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json"],
+                ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json", "in-game-validation.json"],
             "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-remap" =>
-                ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json"],
+                ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json", "in-game-validation.json"],
             "missing-normal-maps" =>
                 ["texture-summary.json", "conversion-quality.json"],
             "missing-conversion-quality-report" =>
@@ -687,14 +740,14 @@ internal static class ConversionValidationGuidance
             code.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("world", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Open world-physics.json and preview-workbench.html, then validate world-drop placement, footwear offsets, and ground contact on the converted {targetBody} output.{detailsSuffix}";
+            return $"Open world-physics.json, in-game-validation.json, and preview-workbench.html, then validate world-drop placement, footwear offsets, and ground contact on the converted {targetBody} output.{detailsSuffix}";
         }
 
         if (code.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("rig", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Open skeleton-compatibility.json and conversion-quality.json, then patch the target skeleton or outfit bone names before release.{detailsSuffix}";
+            return $"Open skeleton-compatibility.json, in-game-validation.json, and conversion-quality.json, then patch the target skeleton or outfit bone names before release.{detailsSuffix}";
         }
 
         if (code.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
@@ -703,7 +756,7 @@ internal static class ConversionValidationGuidance
             code.Contains("voxel", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("pose", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Review preview-workbench.html, pose-simulation-report.json, and conversion-quality.json, then manually inspect the converted {targetBody} mesh for deformation cleanup before release.{detailsSuffix}";
+            return $"Review preview-workbench.html, pose-simulation-report.json, in-game-validation.json, and conversion-quality.json, then manually inspect the converted {targetBody} mesh for deformation cleanup before release.{detailsSuffix}";
         }
 
         return string.IsNullOrWhiteSpace(message)
@@ -747,14 +800,14 @@ internal static class ConversionValidationGuidance
             code.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("world", StringComparison.OrdinalIgnoreCase))
         {
-            return ["world-physics.json", "preview-workbench.html"];
+            return ["world-physics.json", "preview-workbench.html", "in-game-validation.json"];
         }
 
         if (code.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("rig", StringComparison.OrdinalIgnoreCase))
         {
-            return ["skeleton-compatibility.json", "conversion-quality.json"];
+            return ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"];
         }
 
         if (code.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
@@ -763,7 +816,7 @@ internal static class ConversionValidationGuidance
             code.Contains("voxel", StringComparison.OrdinalIgnoreCase) ||
             code.Contains("pose", StringComparison.OrdinalIgnoreCase))
         {
-            return ["preview-workbench.html", "pose-simulation-report.json", "conversion-quality.json"];
+            return ["preview-workbench.html", "pose-simulation-report.json", "conversion-quality.json", "in-game-validation.json"];
         }
 
         return ["conversion-quality.json"];
@@ -17762,6 +17815,23 @@ internal sealed class LocalExportService(
                 validationSummary),
             cancellationToken);
 
+        var inGameValidationPath = Path.Combine(outputDirectory, "in-game-validation.json");
+        var inGameValidation = BuildInGameValidationReport(
+            request.TargetBody,
+            validationSummary,
+            mesh,
+            clipping,
+            voxelResult,
+            skeletonMapping,
+            physics,
+            poseSimulation,
+            worldPhysics);
+        await File.WriteAllTextAsync(
+            inGameValidationPath,
+            JsonSerializer.Serialize(inGameValidation, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(inGameValidationPath);
+
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
             if (File.Exists(zipPath))
@@ -26333,6 +26403,7 @@ internal sealed class LocalExportService(
             "README.txt",
             "dependency-map.json",
             "conversion-quality.json",
+            "in-game-validation.json",
             "skeleton-compatibility.json",
             "pose-simulation-report.json",
             "world-physics.json",
@@ -26361,14 +26432,184 @@ internal sealed class LocalExportService(
          fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+        fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("pose-simulation-report.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+
+    private static InGameValidationReport BuildInGameValidationReport(
+        string targetBody,
+        ConversionValidationSummary validationSummary,
+        ConvertedMesh mesh,
+        ClippingReport clipping,
+        VoxelCollisionResult voxelResult,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
+        PoseSimulationResult poseSimulation,
+        WorldObjectPhysicsReport worldPhysics)
+    {
+        var coreRegions = BuildInGameCoreRegions(targetBody, mesh.RegionalMorphing);
+        var sensitiveRegions = BuildInGameSensitiveRegions(targetBody, skeletonMapping.UnsupportedBones);
+        var hotspotRegions = clipping.Regions
+           .Concat(voxelResult.AffectedRegions)
+           .Concat(poseSimulation.HighRiskRegions)
+           .Select(NormalizeInGameRegion)
+           .Where(static region => !string.IsNullOrWhiteSpace(region))
+           .Distinct(StringComparer.OrdinalIgnoreCase)
+           .ToArray();
+        var reviewArtifacts = ConversionValidationGuidance.BuildReviewArtifacts(validationSummary, maxArtifacts: 10);
+        var checklist = new List<InGameValidationCheckpoint>
+        {
+           new(
+               "Body fit smoke test",
+               ConversionValidationPresentation.GetGateRank(validationSummary.Status) >= ConversionValidationPresentation.GetGateRank("needs-review") ? "Action" : "Info",
+               $"Equip the converted outfit on {targetBody}, then verify idle, walk, and turn animations for the main fit regions: {string.Join(", ", coreRegions)}.",
+               coreRegions,
+               ["preview-workbench.html", "conversion-quality.json"]),
+        };
+
+        if (hotspotRegions.Length > 0)
+        {
+           checklist.Add(new InGameValidationCheckpoint(
+               "Animation stress test",
+               poseSimulation.TotalPosesAtRisk > 0 || clipping.HasClipping || voxelResult.HasPenetrations ? "High" : "Info",
+               $"Re-test crouch, sprint, jump, and combat poses for the flagged hotspot regions: {string.Join(", ", hotspotRegions)}.",
+               hotspotRegions,
+               ["pose-simulation-report.json", "preview-workbench.html", "conversion-quality.json"]));
+        }
+
+        if (sensitiveRegions.Length > 0)
+        {
+           checklist.Add(new InGameValidationCheckpoint(
+               "Sensitive topology pass",
+               "Action",
+               $"Inspect oral/genital/beast-specific motion and collision for: {string.Join(", ", sensitiveRegions)}.",
+               sensitiveRegions,
+               ["skeleton-compatibility.json", "preview-workbench.html"]));
+        }
+
+        if (!string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) ||
+           worldPhysics.RuntimePhysicsProfileGenerated)
+        {
+           checklist.Add(new InGameValidationCheckpoint(
+               "Physics runtime pass",
+               "Action",
+               $"Verify runtime physics chains, bounce, damping, and collision in-game. Generated configs: {string.Join(", ", worldPhysics.Recommendations.Take(2))}.",
+               sensitiveRegions.Length > 0 ? sensitiveRegions : coreRegions,
+               ["skeleton-compatibility.json", "world-physics.json"]));
+        }
+
+        if (worldPhysics.GroundMeshAvailable || worldPhysics.HeelAnalysis is not null)
+        {
+           checklist.Add(new InGameValidationCheckpoint(
+               "Ground contact and drop test",
+               worldPhysics.HeelAnalysis is null ? "Info" : "Action",
+               $"Drop the item, verify world collision mode '{worldPhysics.Mode}', and confirm ground contact / heel placement remain stable.",
+               ["feet", "ground"],
+               ["world-physics.json", "preview-workbench.html"]));
+        }
+
+        return new InGameValidationReport(
+           targetBody,
+           validationSummary.Status,
+           ConversionValidationPresentation.GetGateLabel(validationSummary.Status),
+           coreRegions,
+           sensitiveRegions,
+           reviewArtifacts,
+           checklist);
+    }
+
+    private static string[] BuildInGameCoreRegions(
+        string targetBody,
+        IReadOnlyDictionary<string, double> regionalMorphing)
+    {
+        var regions = regionalMorphing.Keys
+           .Select(NormalizeInGameRegion)
+           .Where(static region => !string.IsNullOrWhiteSpace(region))
+           .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+           foreach (var slider in metadata.SliderNames)
+           {
+               var normalized = NormalizeInGameRegion(slider);
+               if (!string.IsNullOrWhiteSpace(normalized))
+               {
+                   regions.Add(normalized);
+               }
+           }
+        }
+
+        foreach (var required in new[] { "breasts", "belly", "butt", "thighs" })
+        {
+           regions.Add(required);
+        }
+
+        return regions
+           .Where(static region => region is "breasts" or "belly" or "butt" or "thighs" or "waist" or "pelvis" or "chest" or "calves")
+           .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+           .ToArray();
+    }
+
+    private static string[] BuildInGameSensitiveRegions(string targetBody, IReadOnlyList<string> unsupportedBones)
+    {
+        var candidates = new List<string>(unsupportedBones);
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+           candidates.AddRange(metadata.AvailablePhysicsBones);
+        }
+
+        return candidates
+           .SelectMany(MapSensitiveRegionsFromToken)
+           .Distinct(StringComparer.OrdinalIgnoreCase)
+           .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+           .ToArray();
+    }
+
+    private static IEnumerable<string> MapSensitiveRegionsFromToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+           yield break;
+        }
+
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
+        {
+           if (aliases.Any(alias => token.Contains(alias, StringComparison.OrdinalIgnoreCase)) ||
+               token.Contains(key, StringComparison.OrdinalIgnoreCase))
+           {
+               var normalized = NormalizeInGameRegion(key);
+               if (!string.IsNullOrWhiteSpace(normalized) &&
+                   normalized is not "breasts" and not "belly" and not "butt" and not "thighs")
+               {
+                   yield return normalized;
+               }
+           }
+        }
+    }
+
+    private static string NormalizeInGameRegion(string value) =>
+        value.Trim() switch
+        {
+           var v when v.Contains("breast", StringComparison.OrdinalIgnoreCase) || v.Contains("pec", StringComparison.OrdinalIgnoreCase) => "breasts",
+           var v when v.Contains("belly", StringComparison.OrdinalIgnoreCase) || v.Contains("abdomen", StringComparison.OrdinalIgnoreCase) || v.Contains("waist", StringComparison.OrdinalIgnoreCase) => "belly",
+           var v when v.Contains("butt", StringComparison.OrdinalIgnoreCase) || v.Contains("glute", StringComparison.OrdinalIgnoreCase) || v.Contains("hip", StringComparison.OrdinalIgnoreCase) => "butt",
+           var v when v.Contains("thigh", StringComparison.OrdinalIgnoreCase) || v.Contains("upperleg", StringComparison.OrdinalIgnoreCase) => "thighs",
+           var v when v.Contains("jaw", StringComparison.OrdinalIgnoreCase) || v.Contains("tongue", StringComparison.OrdinalIgnoreCase) || v.Contains("mouth", StringComparison.OrdinalIgnoreCase) || v.Contains("throat", StringComparison.OrdinalIgnoreCase) => "mouth",
+           var v when v.Contains("vagina", StringComparison.OrdinalIgnoreCase) || v.Contains("labia", StringComparison.OrdinalIgnoreCase) || v.Contains("anus", StringComparison.OrdinalIgnoreCase) || v.Contains("genital", StringComparison.OrdinalIgnoreCase) || v.Contains("shaft", StringComparison.OrdinalIgnoreCase) || v.Contains("glans", StringComparison.OrdinalIgnoreCase) || v.Contains("foreskin", StringComparison.OrdinalIgnoreCase) || v.Contains("sheath", StringComparison.OrdinalIgnoreCase) || v.Contains("scrot", StringComparison.OrdinalIgnoreCase) || v.Contains("knot", StringComparison.OrdinalIgnoreCase) => "genitals",
+           var v when v.Contains("tail", StringComparison.OrdinalIgnoreCase) => "tail",
+           var v when v.Contains("paw", StringComparison.OrdinalIgnoreCase) || v.Contains("hoof", StringComparison.OrdinalIgnoreCase) || v.Contains("hock", StringComparison.OrdinalIgnoreCase) || v.Contains("foot", StringComparison.OrdinalIgnoreCase) => "feet",
+           var v when v.Contains("wing", StringComparison.OrdinalIgnoreCase) => "wing",
+           var v when v.Contains("mane", StringComparison.OrdinalIgnoreCase) || v.Contains("forelock", StringComparison.OrdinalIgnoreCase) => "mane",
+           var v when v.Contains("chest", StringComparison.OrdinalIgnoreCase) => "chest",
+           var v when v.Contains("pelvis", StringComparison.OrdinalIgnoreCase) => "pelvis",
+           var v when v.Contains("calf", StringComparison.OrdinalIgnoreCase) => "calves",
+           _ => string.Empty
+        };
 
     /// <summary>
     /// Builds a BSD (BodySlide Data) binary payload for a single slider.

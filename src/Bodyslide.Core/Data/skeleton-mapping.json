@@ -200,20 +200,28 @@
         "AnusOuter",
         "HDT Mouth",
         "HDT Jaw",
+        "HDT JawLower",
+        "HDT JawUpper",
         "HDT Tongue",
+        "HDT TongueMid",
         "HDT TongueTip",
-        "HDT Throat"
+        "HDT Throat",
+        "HDT ThroatLower"
       ],
       "fallbackMappings": {
         "HDT Mouth": ["NPC Head"],
         "HDT Jaw": ["HDT Mouth", "NPC Head"],
+        "HDT JawLower": ["HDT Jaw", "HDT Mouth", "NPC Head"],
+        "HDT JawUpper": ["HDT Jaw", "HDT Mouth", "NPC Head"],
         "HDT Tongue": ["HDT Mouth", "NPC Head"],
+        "HDT TongueMid": ["HDT Tongue", "HDT Mouth", "NPC Head"],
         "HDT TongueTip": ["HDT Tongue", "HDT Mouth", "NPC Head"],
         "VaginaDeep": ["Vagina", "NPC Pelvis"],
         "Labia.L": ["Vagina", "NPC Pelvis"],
         "Labia.R": ["Vagina", "NPC Pelvis"],
         "AnusOuter": ["Anus", "NPC Pelvis"],
-        "HDT Throat": ["HDT Mouth", "NPC Head"]
+        "HDT Throat": ["HDT Mouth", "NPC Head"],
+        "HDT ThroatLower": ["HDT Throat", "HDT Mouth", "NPC Head"]
       }
     },
     {
@@ -229,9 +237,13 @@
         "TNG Balls",
         "HDT Mouth",
         "HDT Jaw",
+        "HDT JawLower",
+        "HDT JawUpper",
         "HDT Tongue",
+        "HDT TongueMid",
         "HDT TongueTip",
-        "HDT Throat"
+        "HDT Throat",
+        "HDT ThroatLower"
       ],
       "fallbackMappings": {
         "NPC L Lat": ["NPC L Pec"],
@@ -244,9 +256,13 @@
         "SOS Scrotum": ["TNG Balls", "NPC Pelvis"],
         "HDT Mouth": ["NPC Head"],
         "HDT Jaw": ["HDT Mouth", "NPC Head"],
+        "HDT JawLower": ["HDT Jaw", "HDT Mouth", "NPC Head"],
+        "HDT JawUpper": ["HDT Jaw", "HDT Mouth", "NPC Head"],
         "HDT Tongue": ["HDT Mouth", "NPC Head"],
+        "HDT TongueMid": ["HDT Tongue", "HDT Mouth", "NPC Head"],
         "HDT TongueTip": ["HDT Tongue", "HDT Mouth", "NPC Head"],
-        "HDT Throat": ["HDT Mouth", "NPC Head"]
+        "HDT Throat": ["HDT Mouth", "NPC Head"],
+        "HDT ThroatLower": ["HDT Throat", "HDT Mouth", "NPC Head"]
       }
     },
     {
@@ -263,20 +279,24 @@
         "TailSheath",
         "BeastForeskin",
         "BeastGlans",
+        "BeastKnot",
         "BeastScrotum",
         "BeastVagina",
         "BeastAnus",
         "JawLower",
+        "TongueMid",
         "TongueTip"
       ],
       "fallbackMappings": {
         "TailSheath": ["NPC Tail", "Tail1"],
         "BeastForeskin": ["NPC Pelvis", "NPC Tail"],
         "BeastGlans": ["BeastForeskin", "NPC Pelvis"],
+        "BeastKnot": ["BeastGlans", "BeastForeskin", "NPC Pelvis"],
         "BeastScrotum": ["NPC Pelvis", "TailSheath"],
         "BeastVagina": ["NPC Pelvis", "NPC Tail"],
         "BeastAnus": ["NPC Pelvis", "NPC Tail"],
         "JawLower": ["NPC Head"],
+        "TongueMid": ["JawLower", "NPC Head"],
         "TongueTip": ["JawLower", "NPC Head"]
       }
     },
@@ -432,14 +452,34 @@
         "Forelock",
         "TailTip",
         "Fetlock.L",
-        "Fetlock.R"
+        "Fetlock.R",
+        "TailSheath",
+        "BeastForeskin",
+        "BeastGlans",
+        "BeastKnot",
+        "BeastScrotum",
+        "BeastVagina",
+        "BeastAnus",
+        "JawLower",
+        "TongueMid",
+        "TongueTip"
       ],
       "fallbackMappings": {
         "TailTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
         "ManeTip": ["ManeRoot", "Forelock", "NPC Head"],
         "ForelockTip": ["Forelock", "ManeRoot", "NPC Head"],
         "Fetlock.L": ["Hoof.L", "Hock.L", "NPC L Foot"],
-        "Fetlock.R": ["Hoof.R", "Hock.R", "NPC R Foot"]
+        "Fetlock.R": ["Hoof.R", "Hock.R", "NPC R Foot"],
+        "TailSheath": ["NPC Tail", "Tail1", "Tail2"],
+        "BeastForeskin": ["NPC Pelvis", "NPC Tail", "TailSheath"],
+        "BeastGlans": ["BeastForeskin", "NPC Pelvis"],
+        "BeastKnot": ["BeastGlans", "BeastForeskin", "NPC Pelvis"],
+        "BeastScrotum": ["NPC Pelvis", "TailSheath"],
+        "BeastVagina": ["NPC Pelvis", "NPC Tail"],
+        "BeastAnus": ["NPC Pelvis", "NPC Tail"],
+        "JawLower": ["NPC Head"],
+        "TongueMid": ["JawLower", "NPC Head"],
+        "TongueTip": ["TongueMid", "JawLower", "NPC Head"]
       }
     },
     {
