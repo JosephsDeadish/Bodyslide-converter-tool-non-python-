@@ -30319,7 +30319,7 @@ internal sealed class LocalExportService(
                 : sourcePosition - lowerOrder;
             var lower = sourceDeltas[lowerIndex];
             var upper = sourceDeltas[upperIndex];
-            var localOrderDelta = (
+            (float X, float Y, float Z) localOrderDelta = (
                 Lerp(lower.X, upper.X, blend),
                 Lerp(lower.Y, upper.Y, blend),
                 Lerp(lower.Z, upper.Z, blend));

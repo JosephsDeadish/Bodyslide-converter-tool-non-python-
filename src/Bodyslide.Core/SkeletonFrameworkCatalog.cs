@@ -205,10 +205,10 @@ internal static class SkeletonFrameworkCatalog
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
             var frameworkSemanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
-            var frameworkPhysicsGroups = ExtractPhysicsGroups(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+            var sparseFrameworkPhysicsGroups = ExtractPhysicsGroups(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
             if (observedSemanticKeys.Count == 0 || frameworkSemanticKeys.Count == 0)
             {
-                if (observedPhysicsGroups.Count == 0 || frameworkPhysicsGroups.Count == 0)
+                if (observedPhysicsGroups.Count == 0 || sparseFrameworkPhysicsGroups.Count == 0)
                 {
                     return 0d;
                 }
@@ -219,19 +219,19 @@ internal static class SkeletonFrameworkCatalog
             {
                 evidence.Add($"semantic-overlap:{semanticMatches}");
             }
-            var physicsMatches = observedPhysicsGroups.Count == 0 || frameworkPhysicsGroups.Count == 0
+            var physicsMatches = observedPhysicsGroups.Count == 0 || sparseFrameworkPhysicsGroups.Count == 0
                 ? 0
-                : observedPhysicsGroups.Intersect(frameworkPhysicsGroups, StringComparer.OrdinalIgnoreCase).Count();
+                : observedPhysicsGroups.Intersect(sparseFrameworkPhysicsGroups, StringComparer.OrdinalIgnoreCase).Count();
             if (physicsMatches > 0)
             {
                 evidence.Add($"group-overlap:{physicsMatches}");
             }
 
             var semanticScore = semanticMatches >= framework.MinimumSignatureMatches
-                ? semanticMatches * 0.9d
+                ? semanticMatches * 1.05d
                 : 0d;
             var physicsScore = physicsMatches >= framework.MinimumSignatureMatches
-                ? physicsMatches * 0.85d
+                ? physicsMatches * 1d
                 : 0d;
             return Math.Max(semanticScore, physicsScore);
         }

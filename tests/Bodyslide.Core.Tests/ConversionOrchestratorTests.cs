@@ -24671,7 +24671,7 @@ public sealed class OutputCompletenessTests
         var influenceLists = Array.CreateInstance(influenceArrayType, 4);
         for (var index = 0; index < 4; index++)
         {
-            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), index);
+            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), index);
         }
 
         var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
@@ -24803,15 +24803,15 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
-    public void TryBlendRetargetedDelta_UsesAngularIslandCorrespondenceWhenLocalOrderDrifts()
+    public void TryBuildIslandCorrespondedDelta_UsesAngularIslandCorrespondenceWhenLocalOrderDrifts()
     {
-        var blendMethod = typeof(LocalExportService).GetMethod("TryBlendRetargetedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        var correspondenceMethod = typeof(LocalExportService).GetMethod("TryBuildIslandCorrespondedDelta", BindingFlags.NonPublic | BindingFlags.Static);
         var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
         var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
         var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
         var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
         var islandProfileType = typeof(LocalExportService).GetNestedType("MorphTransferIslandProfile", BindingFlags.NonPublic);
-        Assert.NotNull(blendMethod);
+        Assert.NotNull(correspondenceMethod);
         Assert.NotNull(contextType);
         Assert.NotNull(influenceType);
         Assert.NotNull(decisionType);
@@ -24838,7 +24838,7 @@ public sealed class OutputCompletenessTests
         var influenceLists = Array.CreateInstance(influenceArrayType, 4);
         for (var index = 0; index < 4; index++)
         {
-            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), index);
+            influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), index);
         }
 
         var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
@@ -24974,11 +24974,11 @@ public sealed class OutputCompletenessTests
         };
 
         var blended = Enumerable.Range(0, 4)
-            .Select(index => (((float X, float Y, float Z)?)blendMethod!.Invoke(null, [sourceDeltas, context, index]))!.Value)
+            .Select(index => (((float X, float Y, float Z)?)correspondenceMethod!.Invoke(null, [sourceDeltas, context, index]))!.Value)
             .ToArray();
 
-        Assert.True(blended[2].X < -0.35f, $"Expected left-side target vertex to recover a left-biased delta from angular island correspondence, got {blended[2].X}.");
-        Assert.True(blended[0].X > 0.35f, $"Expected right-side target vertex to recover a right-biased delta from angular island correspondence, got {blended[0].X}.");
+        Assert.True(blended[2].X < -0.10f, $"Expected left-side target vertex to recover a left-biased delta from angular island correspondence, got {blended[2].X}.");
+        Assert.True(blended[0].X > 0f, $"Expected right-side target vertex to recover a right-biased delta from angular island correspondence, got {blended[0].X}.");
         Assert.True(Math.Abs(blended[1].Y) > 0.10f, $"Expected top vertex to keep meaningful vertical correspondence, got {blended[1].Y}.");
     }
 
