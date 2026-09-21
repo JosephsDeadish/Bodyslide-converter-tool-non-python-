@@ -8,6 +8,7 @@ internal sealed record SkeletonFrameworkMetadata(
     IReadOnlyList<string> BonePrefixes,
     IReadOnlyList<string> BoneTokens,
     IReadOnlyList<string> DistinctiveSignatures,
+    IReadOnlyList<string> EcosystemCues,
     int MinimumSignatureMatches);
 internal sealed record SkeletonFrameworkDetectionResult(
     string? Label,
@@ -167,6 +168,7 @@ internal static class SkeletonFrameworkCatalog
             NormalizeStringList(dto.BonePrefixes),
             NormalizeStringList(dto.BoneTokens),
             NormalizeStringList(dto.DistinctiveSignatures),
+            NormalizeStringList(dto.EcosystemCues),
             Math.Max(1, dto.MinimumSignatureMatches));
     }
 
@@ -194,6 +196,11 @@ internal static class SkeletonFrameworkCatalog
             .Where(static token => !string.IsNullOrWhiteSpace(token))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var ecosystemCues = framework.EcosystemCues
+            .Select(NormalizeForMatching)
+            .Where(static cue => !string.IsNullOrWhiteSpace(cue))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         if (prefixes.Length == 0 && tokens.Length == 0)
         {
             return 0d;
@@ -211,6 +218,12 @@ internal static class SkeletonFrameworkCatalog
         {
             evidence.Add($"token-matches:{tokenMatches}");
         }
+        var cueMatches = ecosystemCues.Count(cue =>
+            condensedBoneNames.Any(bone => bone.Contains(cue, StringComparison.OrdinalIgnoreCase)));
+        if (cueMatches > 0)
+        {
+            evidence.Add($"ecosystem-cues:{cueMatches}");
+        }
 
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
@@ -218,7 +231,8 @@ internal static class SkeletonFrameworkCatalog
             var sparseFrameworkPhysicsGroups = ExtractPhysicsGroups(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
             if (observedSemanticKeys.Count == 0 || frameworkSemanticKeys.Count == 0)
             {
-                if (observedPhysicsGroups.Count == 0 || sparseFrameworkPhysicsGroups.Count == 0)
+                if ((observedPhysicsGroups.Count == 0 || sparseFrameworkPhysicsGroups.Count == 0) &&
+                    cueMatches < framework.MinimumSignatureMatches)
                 {
                     return 0d;
                 }
@@ -243,7 +257,10 @@ internal static class SkeletonFrameworkCatalog
             var physicsScore = physicsMatches >= framework.MinimumSignatureMatches
                 ? physicsMatches * 1d
                 : 0d;
-            return Math.Max(semanticScore, physicsScore);
+            var cueScore = cueMatches >= framework.MinimumSignatureMatches
+                ? cueMatches * 1.10d
+                : 0d;
+            return Math.Max(Math.Max(semanticScore, physicsScore), cueScore);
         }
 
         var semanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
@@ -264,7 +281,7 @@ internal static class SkeletonFrameworkCatalog
             evidence.Add($"group-overlap:{physicsOverlap}");
         }
 
-        return prefixMatches + (tokenMatches * 0.75d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
+        return prefixMatches + (tokenMatches * 0.75d) + (cueMatches * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)
@@ -340,6 +357,7 @@ internal static class SkeletonFrameworkCatalog
         public string[]? BonePrefixes { get; init; }
         public string[]? BoneTokens { get; init; }
         public string[]? DistinctiveSignatures { get; init; }
+        public string[]? EcosystemCues { get; init; }
         public int MinimumSignatureMatches { get; init; }
     }
 }

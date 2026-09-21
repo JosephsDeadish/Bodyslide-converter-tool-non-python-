@@ -13569,11 +13569,13 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(sparse.UsedSparseInference);
         Assert.True(sparse.Confidence > 0d);
         Assert.Contains(sparse.Evidence, evidence => evidence.StartsWith("semantic-overlap:", StringComparison.Ordinal));
+        Assert.Contains(sparse.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
 
         var sparseDigitigrade = SkeletonFrameworkCatalog.DetectFrameworkDetails(["TailNub", "PawPad.L", "SheathNode"]);
         Assert.Equal("digitigrade-beast", sparseDigitigrade.Label);
         Assert.True(sparseDigitigrade.UsedSparseInference);
         Assert.Contains(sparseDigitigrade.Evidence, evidence => evidence.StartsWith("group-overlap:", StringComparison.Ordinal));
+        Assert.Contains(sparseDigitigrade.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
     }
 }
 
@@ -15115,6 +15117,9 @@ public sealed class RealisticModPackFixtureTests
             using var inGameJson = JsonDocument.Parse(inGameJsonText);
             Assert.True(inGameJson.RootElement.TryGetProperty("ScenarioMatrix", out var scenarioMatrix));
             Assert.True(scenarioMatrix.GetArrayLength() >= 3);
+            Assert.Equal("topology-semantic-anchors+heuristic", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("MatchingMode").GetString());
+            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.Equal("UBE", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
             Assert.Contains(scenarioMatrix.EnumerateArray(), scenario =>
                 scenario.TryGetProperty("Name", out var name) &&
                 name.GetString()!.Contains("Oral articulation", StringComparison.OrdinalIgnoreCase));
@@ -15222,6 +15227,7 @@ public sealed class RealisticModPackFixtureTests
                                                          row.Property.Equals("Physics (override)", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("True semantic correspondence", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Preview", StringComparison.OrdinalIgnoreCase));
@@ -15265,6 +15271,7 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Property.Equals("Checklist items", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Desktop automation coverage", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("shared-output-contract", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Windows host required", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(snapshot.ValidationState.PreviewAvailable);
@@ -15411,6 +15418,9 @@ public sealed class RealisticModPackFixtureTests
                     "HeuristicHeavy": true,
                     "MatchingMode": "heuristic-island-regional",
                     "UsesTrueSemanticCorrespondence": false,
+                    "SemanticAnchorProfile": "Serpentine Humanoid",
+                    "SemanticAnchorCoverage": 1,
+                    "SemanticAnchorEvidence": ["tail:Tail4"],
                     "RequiresManualSemanticReview": true,
                     "LimitationNotes": ["Topology matching remains heuristic."],
                     "Signals": ["topology-mismatch-risk", "boundary-warning"],
@@ -15436,6 +15446,9 @@ public sealed class RealisticModPackFixtureTests
                     "HeuristicHeavy": true,
                     "MatchingMode": "heuristic-island-regional",
                     "UsesTrueSemanticCorrespondence": false,
+                    "SemanticAnchorProfile": "Serpentine Humanoid",
+                    "SemanticAnchorCoverage": 1,
+                    "SemanticAnchorEvidence": ["tail:Tail4"],
                     "RequiresManualSemanticReview": true,
                     "LimitationNotes": ["Topology matching remains heuristic."],
                     "Signals": ["topology-mismatch-risk", "boundary-warning"],
@@ -15457,9 +15470,13 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Value.Equals("heuristic-island-regional", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("True semantic correspondence", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Semantic anchor profile", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("Serpentine Humanoid", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Topology focus regions", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("tail", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Topology review", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Semantic anchor review", StringComparison.OrdinalIgnoreCase) &&
                                                                step.Blocking);
             Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
         }
@@ -16809,6 +16826,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("preview-automation-model", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"workbench-canvas\"", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"reset-view-button\"", previewHtml, StringComparison.Ordinal);
+            Assert.Contains("\"RequiresExternalGameHarness\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"RequiresModdedTestEnvironment\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"RequiresWindowsHost\": true", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"SupportsAutomatedWebViewInteraction\": false", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

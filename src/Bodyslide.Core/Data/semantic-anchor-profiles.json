@@ -1,0 +1,87 @@
+[
+  {
+    "name": "UBE",
+    "aliases": ["Ultimate Body Enhancer", "UBE 2", "Ultimate Body Enhancer 2"],
+    "anchors": {
+      "breasts": ["BreastUpper", "BreastOuter", "BreastInner", "NPC L Breast01", "NPC R Breast01"],
+      "belly": ["BellyLower", "NPC Belly", "BellyPhysics"],
+      "butt": ["ButtUpper", "ButtLower", "NPC L Butt", "NPC R Butt"],
+      "thighs": ["Thighs"],
+      "mouth": ["HDT Jaw", "HDT JawLower", "HDT JawUpper", "HDT Tongue", "HDT TongueMid", "HDT TongueTip", "HDT Throat", "HDT ThroatLower"],
+      "genitals": ["Vagina", "VaginaDeep", "Labia", "Anus", "AnusOuter"]
+    }
+  },
+  {
+    "name": "TNG",
+    "aliases": ["The New Gentleman", "The New Gentleman 2", "TNG 2"],
+    "anchors": {
+      "breasts": ["NPC L Pec", "NPC R Pec", "Pecs"],
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs"],
+      "mouth": ["HDT Jaw", "HDT Tongue", "HDT TongueTip", "HDT Throat"],
+      "genitals": ["TNG Genitals", "TNG Foreskin", "TNG Shaft", "TNG Glans", "TNG Balls"]
+    }
+  },
+  {
+    "name": "SOS",
+    "aliases": ["Schlongs of Skyrim"],
+    "anchors": {
+      "breasts": ["NPC L Pec", "NPC R Pec", "Pecs"],
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs"],
+      "genitals": ["SOS GenitalsBase", "SOS Foreskin", "SOS Shaft", "SOS Glans", "SOS Scrotum"]
+    }
+  },
+  {
+    "name": "HIMBO",
+    "aliases": ["Nordic HIMBO"],
+    "anchors": {
+      "breasts": ["NPC L Pec", "NPC R Pec", "Pecs"],
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs"]
+    }
+  },
+  {
+    "name": "Feline Humanoid",
+    "aliases": ["Cathay Reborn", "Pantherfolk", "Leonin"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs", "PawWidth"],
+      "tail": ["NPC Tail", "Tail1", "Tail2", "TailSheath"],
+      "feet": ["PawFront.L", "PawFront.R", "PawRear.L", "PawRear.R"],
+      "mouth": ["JawLower", "TongueMid", "TongueTip"],
+      "genitals": ["BeastForeskin", "BeastGlans", "BeastKnot", "BeastVagina", "BeastAnus"]
+    }
+  },
+  {
+    "name": "Equine Humanoid",
+    "aliases": ["Mareform", "Centaur Humanoid"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs", "Hock.L", "Hock.R"],
+      "tail": ["Tail4", "Tail5", "TailTip", "TailSheath"],
+      "feet": ["Hoof.L", "Hoof.R", "Fetlock"],
+      "mouth": ["JawLower", "TongueMid", "TongueTip"],
+      "genitals": ["BeastForeskin", "BeastGlans", "BeastKnot", "BeastVagina", "BeastAnus"]
+    }
+  },
+  {
+    "name": "Avian Humanoid",
+    "aliases": ["Harpy Reforged", "Ravenwing"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "wing": ["Wing.L", "Wing.R", "WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "Feather01.L", "Feather01.R"],
+      "feet": ["Talon.L", "Talon.R"]
+    }
+  },
+  {
+    "name": "Aquatic Humanoid",
+    "aliases": ["Mermaid", "Siren"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "tail": ["TailFin", "TailFinTip"],
+      "wing": ["PectoralFin.L", "PectoralFin.R", "PectoralFinMid.L", "PectoralFinMid.R"],
+      "mouth": ["Whisker.L", "Whisker.R", "FrillMid.L", "FrillMid.R"]
+    }
+  }
+]

@@ -4,6 +4,7 @@
     "bonePrefixes": ["SAM ", "SOS "],
     "boneTokens": ["Genitals", "Schlong", "Scrotum", "Foreskin", "Fskin"],
     "distinctiveSignatures": ["SAM Genitals", "SAM Foreskin", "SOS GenitalsBase", "SOS Scrotum"],
+    "ecosystemCues": ["samfskin", "samgenital", "sosgenitalsbase", "schlong"],
     "minimumSignatureMatches": 2
   },
   {
@@ -11,6 +12,7 @@
     "bonePrefixes": ["Breast", "Butt", "Belly", "Vagina", "Anus", "HDT ", "LeftBreast", "RightBreast", "LeftButt", "RightButt"],
     "boneTokens": ["BreastUpper", "BreastOuter", "BreastInner", "ButtUpper", "ButtLower", "BellyLower", "HDT Mouth", "HDT Jaw", "HDT JawLower", "HDT JawUpper", "HDT Tongue", "HDT TongueMid", "HDT TongueTip", "HDT Throat", "HDT ThroatLower", "VaginaDeep", "Labia", "AnusOuter"],
     "distinctiveSignatures": ["BreastUpper", "BreastOuter", "BellyLower", "Vagina", "VaginaDeep", "Anus", "AnusOuter", "HDT Mouth", "HDT Jaw", "HDT JawLower", "HDT Tongue", "HDT TongueMid", "HDT Throat", "HDT ThroatLower"],
+    "ecosystemCues": ["mawlatch", "tongueblade", "wombcore", "hdtjaw", "hdtthroat", "tonguemid"],
     "minimumSignatureMatches": 2
   },
   {
@@ -18,6 +20,7 @@
     "bonePrefixes": ["TNG "],
     "boneTokens": ["Genitals", "Foreskin", "Glans", "Shaft", "Balls"],
     "distinctiveSignatures": ["TNG Genitals", "TNG Foreskin", "TNG Shaft", "TNG Glans", "TNG Balls"],
+    "ecosystemCues": ["tngshaft", "tngglans", "tngballs", "tngforeskin"],
     "minimumSignatureMatches": 2
   },
   {
@@ -60,6 +63,7 @@
     "bonePrefixes": ["Hock", "Hoof", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe"],
     "boneTokens": ["Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Digitigrade", "Paw", "Claw", "DewClaw", "Toe", "Lykaios", "Canine", "Lupine", "Vulpine", "TailSheath", "BeastForeskin", "BeastGlans", "BeastKnot", "BeastScrotum", "BeastVagina", "BeastAnus", "JawLower", "TongueMid", "TongueTip"],
     "distinctiveSignatures": ["Hock.L", "Hock.R", "DigitigradeFoot.L", "DigitigradeFoot.R", "PawFront.L", "PawFront.R", "DigitigradeToe.L", "DigitigradeToe.R", "TailSheath", "BeastKnot", "BeastVagina", "BeastAnus", "TongueMid"],
+    "ecosystemCues": ["tailnub", "pawpad", "sheathnode", "muzzletongue", "clawpad", "lykaios"],
     "minimumSignatureMatches": 2
   },
   {
@@ -67,6 +71,7 @@
     "bonePrefixes": ["Mane", "Forelock", "Tail", "Fetlock", "Beast"],
     "boneTokens": ["Tail4", "Tail5", "TailTip", "Hock.L", "Hock.R", "Hoof.L", "Hoof.R", "Fetlock", "Mane", "Forelock", "Equus", "Mare", "TailSheath", "BeastForeskin", "BeastGlans", "BeastKnot", "BeastScrotum", "BeastVagina", "BeastAnus", "TongueMid", "TongueTip"],
     "distinctiveSignatures": ["Tail4", "Tail5", "TailTip", "ManeRoot", "ManeTip", "Forelock", "TailSheath", "BeastKnot", "TongueMid"],
+    "ecosystemCues": ["maneroot", "manetip", "fetlock", "equus", "mare"],
     "minimumSignatureMatches": 2
   },
   {
@@ -74,6 +79,7 @@
     "bonePrefixes": ["WingMid", "WingTip", "WingMembrane", "Feather"],
     "boneTokens": ["WingMid.L", "WingMid.R", "WingTip.L", "WingTip.R", "WingMembrane", "Feather01", "Feather02", "Feather03", "Pinion", "Talon"],
     "distinctiveSignatures": ["WingMid.L", "WingMid.R", "WingMembrane.L", "WingMembrane.R", "Feather01.L", "Feather01.R", "Feather03.L", "Feather03.R"],
+    "ecosystemCues": ["pinion", "talon", "featherfolk", "wingmid", "wingmembrane"],
     "minimumSignatureMatches": 2
   },
   {
@@ -81,6 +87,7 @@
     "bonePrefixes": ["WingFinger", "SpineFin", "TailBarb", "Frill", "FrillTip", "Drake", "Wyvern"],
     "boneTokens": ["WingFinger01", "WingFinger02", "WingFinger03", "SpineFinRoot", "SpineFinMid", "SpineFinTip", "TailBarb", "TailBarbTip", "Frill.L", "Frill.R", "FrillTip", "Wyvern", "Drake"],
     "distinctiveSignatures": ["WingFinger01.L", "WingFinger01.R", "SpineFinRoot", "TailBarbTip", "FrillTip.L", "FrillTip.R"],
+    "ecosystemCues": ["wingfinger", "spinefin", "tailbarb", "wyvern", "drake"],
     "minimumSignatureMatches": 2
   },
   {
@@ -88,6 +95,7 @@
     "bonePrefixes": ["Antenna", "Feeler", "Mandible", "Abdomen", "CarapaceWing", "Chitin"],
     "boneTokens": ["Antenna.L", "Antenna.R", "AntennaMid", "AntennaTip", "Feeler", "Mandible.L", "Mandible.R", "MandibleMid", "MandibleTip", "AbdomenRoot", "AbdomenMid", "AbdomenTip", "CarapaceWing.L", "CarapaceWing.R", "CarapaceWingMid", "CarapaceWingTip", "Chitin"],
     "distinctiveSignatures": ["Antenna.L", "Antenna.R", "AntennaMid.L", "AntennaMid.R", "Mandible.L", "Mandible.R", "MandibleMid.L", "MandibleMid.R", "AbdomenTip", "CarapaceWingMid.L", "CarapaceWingMid.R", "CarapaceWingTip.L", "CarapaceWingTip.R"],
+    "ecosystemCues": ["antennamid", "mandiblemid", "carapacewing", "abdomentip", "chitin"],
     "minimumSignatureMatches": 2
   },
   {
@@ -95,6 +103,7 @@
     "bonePrefixes": ["Fin", "Whisker", "Frill", "GillFrill", "Dorsal", "Pectoral", "Ventral", "TailFin"],
     "boneTokens": ["Fin.Dorsal", "Fin.DorsalTip", "PectoralFin.L", "PectoralFin.R", "PectoralFinMid", "PectoralFinTip", "VentralFin.L", "VentralFin.R", "TailFin", "TailFinTip", "Frill.L", "Frill.R", "FrillMid", "FrillTip", "Whisker.L", "Whisker.R", "WhiskerMid", "WhiskerTip", "GillFrill", "Siren", "Koi"],
     "distinctiveSignatures": ["Fin.Dorsal", "PectoralFin.L", "PectoralFin.R", "PectoralFinMid.L", "PectoralFinMid.R", "Whisker.L", "Whisker.R", "WhiskerMid.L", "WhiskerMid.R", "WhiskerTip.L", "WhiskerTip.R", "TailFin", "FrillMid.L", "FrillMid.R", "FrillTip.L", "FrillTip.R"],
+    "ecosystemCues": ["tailfin", "whiskertip", "frillmid", "pectoralfin", "gillfrill", "siren", "koi"],
     "minimumSignatureMatches": 2
   }
 ]

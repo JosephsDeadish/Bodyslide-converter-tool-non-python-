@@ -9,7 +9,9 @@ internal sealed record DesktopWorkflowAutomationStep(string Area, string Action,
 internal sealed record DesktopAutomationContract(
     string Coverage,
     bool RequiresManualWinFormsInteraction,
+    bool RequiresWindowsHost,
     bool RequiresWebViewRuntimeForEmbeddedPreview,
+    bool SupportsAutomatedWebViewInteraction,
     bool SupportsTrueUiEndToEndAutomation,
     IReadOnlyList<string> LimitationNotes);
 internal sealed record DesktopWorkflowValidationState(
@@ -300,6 +302,10 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
                     Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
                     Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
+                    Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    Add(metrics, reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
+                    Add(metrics, reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
+                    Add(metrics, reportName, "Semantic anchor evidence", TryReadNestedArray(root, "TopologyCorrespondence", "SemanticAnchorEvidence"), filePath);
                     Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
                     Add(metrics, reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     Add(metrics, reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
@@ -313,6 +319,8 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
                     Add(metrics, reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     Add(metrics, reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
+                    Add(metrics, reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
+                    Add(metrics, reportName, "Modded test environment", FormatBool(TryReadBoolValue(root, "RequiresModdedTestEnvironment")), filePath);
                     Add(metrics, reportName, "Runtime limitation notes", TryReadArray(root, "LimitationNotes"), filePath);
                     Add(metrics, reportName, "Execution phases", TryReadExecutionPhases(root), filePath);
                     Add(metrics, reportName, "Blocking runtime steps", CountBlockingExecutionSteps(root), filePath);
@@ -323,7 +331,9 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
                     Add(metrics, reportName, "Desktop automation coverage", TryReadNestedString(root, "AutomationContract", "Coverage"), filePath);
                     Add(metrics, reportName, "Manual WinForms interaction", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresManualWinFormsInteraction")), filePath);
+                    Add(metrics, reportName, "Windows host required", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresWindowsHost")), filePath);
                     Add(metrics, reportName, "Embedded preview runtime dependency", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "RequiresWebViewRuntimeForEmbeddedPreview")), filePath);
+                    Add(metrics, reportName, "Automated WebView interaction", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "SupportsAutomatedWebViewInteraction")), filePath);
                     Add(metrics, reportName, "True UI E2E automation", FormatBool(TryReadNestedBoolValue(root, "AutomationContract", "SupportsTrueUiEndToEndAutomation")), filePath);
                     Add(metrics, reportName, "Desktop automation limitation notes", TryReadNestedArray(root, "AutomationContract", "LimitationNotes"), filePath);
                     Add(metrics, reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
@@ -588,6 +598,16 @@ internal static class DesktopWorkflowAutomation
                 Blocking: false));
         }
 
+        if (automationContract.RequiresWindowsHost)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Windows host",
+                "Run any real Desktop E2E pass on a Windows host with WebView2 available; Linux/macOS runs only validate the shared automation contract.",
+                $"Windows host required={automationContract.RequiresWindowsHost}; automated WebView={automationContract.SupportsAutomatedWebViewInteraction}",
+                FindMetricFile(reportMetrics, "Windows host required") ?? FindMetricFile(reportMetrics, "Automated WebView interaction"),
+                Blocking: false));
+        }
+
         var topologyMetric = FindMetric(reportMetrics, "Heuristic-heavy topology", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
                              ?? FindMetric(reportMetrics, "Topology correspondence", static value => !value.Equals("aligned", StringComparison.OrdinalIgnoreCase));
         if (topologyMetric is not null)
@@ -597,6 +617,17 @@ internal static class DesktopWorkflowAutomation
                 "Open the topology correspondence artifacts and compare the preview against the converted mesh for manual cleanup risk.",
                 $"{topologyMetric.Property}: {topologyMetric.Value}",
                 topologyMetric.FilePath,
+                Blocking: true));
+        }
+
+        var semanticMetric = FindMetric(reportMetrics, "True semantic correspondence", static value => value.Equals("No", StringComparison.OrdinalIgnoreCase));
+        if (semanticMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Semantic anchor review",
+                "Open the topology correspondence details and verify whether authored semantic anchors truly cover the flagged body regions before trusting the transfer.",
+                $"{semanticMetric.Property}: {semanticMetric.Value}",
+                semanticMetric.FilePath,
                 Blocking: true));
         }
 
@@ -624,6 +655,18 @@ internal static class DesktopWorkflowAutomation
                 Blocking: true));
         }
 
+        var harnessMetric = FindMetric(reportMetrics, "External game harness", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                            ?? FindMetric(reportMetrics, "Modded test environment", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
+        if (harnessMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Runtime harness",
+                "Prepare an external modded test environment before treating the runtime validation plan as executable.",
+                $"{harnessMetric.Property}: {harnessMetric.Value}",
+                harnessMetric.FilePath,
+                Blocking: false));
+        }
+
         return steps;
     }
 
@@ -631,10 +674,13 @@ internal static class DesktopWorkflowAutomation
         new(
             "shared-output-contract",
             RequiresManualWinFormsInteraction: true,
+            RequiresWindowsHost: true,
             RequiresWebViewRuntimeForEmbeddedPreview: true,
+            SupportsAutomatedWebViewInteraction: false,
             SupportsTrueUiEndToEndAutomation: false,
             [
                 "Desktop workflow coverage is derived from shared output artifacts and validation state, not from real WinForms click-path automation.",
+                "A true Desktop end-to-end run still requires a Windows host with WebView2 and an external UI automation harness.",
                 "Embedded preview behavior still depends on a local WebView2 runtime and should be validated manually on the host machine."
             ]);
 

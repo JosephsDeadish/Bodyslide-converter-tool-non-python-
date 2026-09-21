@@ -314,6 +314,8 @@ public sealed record RuntimeValidationExecutionPlan(
     string ExecutionCoverage,
     bool RequiresLiveGameExecution,
     bool SupportsAutomatedGameExecution,
+    bool RequiresExternalGameHarness,
+    bool RequiresModdedTestEnvironment,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<RuntimeValidationExecutionStep> Steps);
 public sealed record InGameValidationReport(
@@ -1051,6 +1053,9 @@ public sealed record TopologyCorrespondenceReport(
     bool HeuristicHeavy,
     string MatchingMode,
     bool UsesTrueSemanticCorrespondence,
+    string? SemanticAnchorProfile,
+    int SemanticAnchorCoverage,
+    IReadOnlyList<string> SemanticAnchorEvidence,
     bool RequiresManualSemanticReview,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<string> Signals,
@@ -18232,6 +18237,7 @@ internal sealed class LocalExportService(
         var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
         var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
         var topologyCorrespondence = BuildTopologyCorrespondenceReport(
+            request.TargetBody,
             topologyMismatchRisk,
             qualityWarnings,
             payloadReuse,
@@ -27151,9 +27157,12 @@ internal sealed class LocalExportService(
             ExecutionCoverage: "plan-only",
             RequiresLiveGameExecution: true,
             SupportsAutomatedGameExecution: false,
+            RequiresExternalGameHarness: true,
+            RequiresModdedTestEnvironment: true,
             LimitationNotes:
             [
                 "Runtime validation is an execution plan and release gate only; the application does not drive live in-game automation or verify animation results directly.",
+                "A real runtime pass still requires an external harness or scripted test environment in the final modded game install.",
                 "Every blocking runtime step still requires a manual host-game pass on the final skeleton, body, and load-order combination."
             ],
             steps);
@@ -27189,6 +27198,7 @@ internal sealed class LocalExportService(
         report.ManualCleanupLikely && scenario.Name.Contains("cleanup", StringComparison.OrdinalIgnoreCase);
 
     private static TopologyCorrespondenceReport BuildTopologyCorrespondenceReport(
+        string targetBody,
         bool topologyMismatchRisk,
         IReadOnlyList<string> qualityWarnings,
         MorphPayloadReuseSummary? payloadReuse,
@@ -27271,6 +27281,19 @@ internal sealed class LocalExportService(
             penalty += 0.04d;
         }
 
+        var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
+        var semanticAnchors = BuildSemanticAnchorAssessment(targetBody, focusRegions, cageTopology);
+        if (semanticAnchors.UsesTrueSemanticCorrespondence)
+        {
+            signals.Add($"semantic-anchor-coverage:{semanticAnchors.Coverage}");
+            penalty = Math.Max(0d, penalty - 0.10d);
+        }
+        else if (!string.IsNullOrWhiteSpace(semanticAnchors.ProfileName) && semanticAnchors.Coverage > 0)
+        {
+            signals.Add($"partial-semantic-anchor-coverage:{semanticAnchors.Coverage}");
+            penalty = Math.Max(0d, penalty - 0.04d);
+        }
+
         signals = [.. signals.Distinct(StringComparer.OrdinalIgnoreCase)];
         var confidence = Math.Max(0.15d, Math.Min(0.99d, 1d - penalty));
         var classification = confidence < 0.60d || topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0
@@ -27278,17 +27301,22 @@ internal sealed class LocalExportService(
             : confidence < 0.82d || signals.Count >= 3
                 ? "review"
                 : "aligned";
-        var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
-        var requiresManualSemanticReview = classification is not "aligned" || topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0;
-        var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse);
+        var requiresManualSemanticReview = classification is not "aligned" ||
+                                           topologyMismatchRisk ||
+                                           payloadReuse?.ExtremelyAdaptedVariantCount > 0 ||
+                                           !semanticAnchors.UsesTrueSemanticCorrespondence;
+        var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse, semanticAnchors);
         var recommendations = BuildTopologyCorrespondenceRecommendations(classification, focusRegions, requiresManualSemanticReview);
 
         return new TopologyCorrespondenceReport(
             classification,
             Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
             classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase),
-            MatchingMode: "heuristic-island-regional",
-            UsesTrueSemanticCorrespondence: false,
+            MatchingMode: semanticAnchors.UsesTrueSemanticCorrespondence ? "topology-semantic-anchors+heuristic" : "heuristic-island-regional",
+            UsesTrueSemanticCorrespondence: semanticAnchors.UsesTrueSemanticCorrespondence,
+            SemanticAnchorProfile: semanticAnchors.ProfileName,
+            SemanticAnchorCoverage: semanticAnchors.Coverage,
+            SemanticAnchorEvidence: semanticAnchors.Evidence,
             RequiresManualSemanticReview: requiresManualSemanticReview,
             LimitationNotes: limitationNotes,
             signals,
@@ -27311,6 +27339,77 @@ internal sealed class LocalExportService(
             .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
             .Take(8)
             .ToArray();
+
+    private sealed record SemanticAnchorAssessment(
+        string? ProfileName,
+        int Coverage,
+        bool UsesTrueSemanticCorrespondence,
+        IReadOnlyList<string> Evidence);
+
+    private static SemanticAnchorAssessment BuildSemanticAnchorAssessment(
+        string targetBody,
+        IReadOnlyList<string> focusRegions,
+        CageTopologyReport? cageTopology)
+    {
+        if (!SemanticAnchorCatalog.TryGet(targetBody, out var profile))
+        {
+            return new SemanticAnchorAssessment(null, 0, false, []);
+        }
+
+        var observedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            foreach (var token in metadata.AvailablePhysicsBones
+                         .Concat(metadata.SliderNames)
+                         .Concat(metadata.ReferenceTokens)
+                         .Concat(metadata.PhysicsBoneSignatures))
+            {
+                observedTokens.Add(token);
+            }
+        }
+
+        if (cageTopology is not null)
+        {
+            foreach (var label in cageTopology.Islands
+                         .SelectMany(static island => island.SemanticLabels ?? [])
+                         .Where(static label => !string.IsNullOrWhiteSpace(label)))
+            {
+                observedTokens.Add(label);
+            }
+        }
+
+        var evidence = new List<string>();
+        var coveredRegions = 0;
+        foreach (var region in focusRegions)
+        {
+            if (!profile.Anchors.TryGetValue(region, out var anchors) || anchors.Count == 0)
+            {
+                continue;
+            }
+
+            var matchedAnchor = anchors.FirstOrDefault(anchor =>
+                observedTokens.Any(token =>
+                    token.Contains(anchor, StringComparison.OrdinalIgnoreCase) ||
+                    anchor.Contains(token, StringComparison.OrdinalIgnoreCase)));
+            if (string.IsNullOrWhiteSpace(matchedAnchor))
+            {
+                continue;
+            }
+
+            coveredRegions++;
+            evidence.Add($"{region}:{matchedAnchor}");
+        }
+
+        var coveredFocusRegions = focusRegions.Count(region => profile.Anchors.ContainsKey(region));
+        var usesTrueSemanticCorrespondence = coveredRegions >= 2 &&
+                                             coveredFocusRegions >= 2 &&
+                                             coveredRegions >= Math.Max(2, coveredFocusRegions / 2);
+        return new SemanticAnchorAssessment(
+            profile.Name,
+            coveredRegions,
+            usesTrueSemanticCorrespondence,
+            evidence);
+    }
 
     private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping)
     {
@@ -27346,11 +27445,14 @@ internal sealed class LocalExportService(
     private static IReadOnlyList<string> BuildTopologyCorrespondenceLimitationNotes(
         string classification,
         bool topologyMismatchRisk,
-        MorphPayloadReuseSummary? payloadReuse)
+        MorphPayloadReuseSummary? payloadReuse,
+        SemanticAnchorAssessment semanticAnchors)
     {
         var notes = new List<string>
         {
-            "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than true authored semantic vertex correspondence."
+            semanticAnchors.UsesTrueSemanticCorrespondence
+                ? $"Topology correspondence now uses the authored semantic anchor profile '{semanticAnchors.ProfileName}' alongside heuristic island and regional matching."
+                : "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than full authored semantic vertex correspondence."
         };
 
         if (topologyMismatchRisk)
@@ -27366,6 +27468,18 @@ internal sealed class LocalExportService(
         if (classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase))
         {
             notes.Add("Heuristic-heavy correspondence means radically different meshes still need manual Outfit Studio review before release.");
+        }
+
+        if (!semanticAnchors.UsesTrueSemanticCorrespondence)
+        {
+            if (string.IsNullOrWhiteSpace(semanticAnchors.ProfileName))
+            {
+                notes.Add("No authored semantic anchor profile was available for this target body, so true landmark-backed correspondence is still unavailable.");
+            }
+            else
+            {
+                notes.Add($"Semantic anchor profile '{semanticAnchors.ProfileName}' only covered {semanticAnchors.Coverage} focus region(s), so landmark-backed correspondence is still partial.");
+            }
         }
 
         return notes;
