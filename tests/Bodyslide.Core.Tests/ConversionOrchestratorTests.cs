@@ -3292,6 +3292,54 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_DampsUniquelyOwnedRegionsAcrossMultipleIslands()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.30d,
+            ["arms"] = 1.30d
+        };
+
+        var cage = new DeformationCage(
+            "hybrid-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = new(0.78f, 0.24f),
+                ["arms"] = new(0.92f, 0.10f, 0.92f, 0.18f, 0.50f, 0.58f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "ownership-mesh",
+                    IslandId: 0,
+                    CageRegions: ["chest"],
+                    SemanticLabels: ["window-frame-island"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: true)
+                    ],
+                    AuthoredRegions:
+                    [
+                        new CageIslandAuthoredRegion("chest", new CageRegion(0.78f, 0.18f), LoopIndex: 0, IsHole: true)
+                    ]),
+                new CageIslandControl(
+                    MeshKey: "ownership-mesh",
+                    IslandId: 1,
+                    CageRegions: ["arms"],
+                    WidthScaleBias: 0.94f,
+                    DepthScaleBias: 0.94f,
+                    HeightScaleBias: 0.94f)
+            ]);
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, cage]));
+
+        Assert.True(result["chest"] < result["arms"]);
+        Assert.True(result["chest"] < 1.24d);
+    }
+
+    [Fact]
     public async Task ResolveBoundaryLoopCageControl_SelectsHoleLoopForInnerBoundaryVertices()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -22455,6 +22503,29 @@ public sealed class CorrectionFeedbackLoopTests
         Assert.Equal(semanticOnly["arms"], piecewise["arms"], 6);
     }
 
+    [Fact]
+    public void ApplyIncrementalIslandAwareCageTuning_DampsUniquelyOwnedRegionsAcrossMultipleIslands()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIncrementalIslandAwareCageTuning", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
+        Assert.NotNull(method);
+
+        var previous = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.10d,
+            ["arms"] = 1.10d
+        };
+        var updated = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.30d,
+            ["arms"] = 1.30d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [previous, updated, CreateMultiIslandOwnershipCage()]));
+
+        Assert.True(result["chest"] < result["arms"]);
+        Assert.True(result["chest"] < 1.24d);
+    }
+
     // Mesh conversion service that forces high regional morphing to trigger clipping.
     private sealed class ForcedClippingMeshConversionService : IMeshConversionService
     {
@@ -22494,6 +22565,37 @@ public sealed class CorrectionFeedbackLoopTests
                     WidthScaleBias: 0.80f,
                     DepthScaleBias: 0.80f,
                     HeightScaleBias: 0.80f)
+            ]);
+
+    private static DeformationCage CreateMultiIslandOwnershipCage() =>
+        new(
+            "hybrid-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = new(0.78f, 0.24f),
+                ["arms"] = new(0.92f, 0.10f, 0.92f, 0.18f, 0.50f, 0.58f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "ownership-mesh",
+                    IslandId: 0,
+                    CageRegions: ["chest"],
+                    SemanticLabels: ["window-frame-island"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: true)
+                    ],
+                    AuthoredRegions:
+                    [
+                        new CageIslandAuthoredRegion("chest", new CageRegion(0.78f, 0.18f), LoopIndex: 0, IsHole: true)
+                    ]),
+                new CageIslandControl(
+                    MeshKey: "ownership-mesh",
+                    IslandId: 1,
+                    CageRegions: ["arms"],
+                    WidthScaleBias: 0.94f,
+                    DepthScaleBias: 0.94f,
+                    HeightScaleBias: 0.94f)
             ]);
 
     // Voxel service that always reports penetrations in the chest region.

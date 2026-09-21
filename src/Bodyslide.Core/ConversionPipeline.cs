@@ -10314,7 +10314,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
     {
         var regionDamping = BuildIslandAwareRegionDamping(field.Keys, deformationCage);
         var piecewiseDamping = BuildPiecewiseReconstructionDamping(field.Keys, deformationCage);
-        if (field.Count == 0 || (regionDamping.Count == 0 && piecewiseDamping.Count == 0))
+        var ownershipDamping = BuildIslandOwnershipRoutingDamping(field.Keys, deformationCage);
+        if (field.Count == 0 || (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0))
         {
             return field;
         }
@@ -10326,6 +10327,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 var damping = regionDamping.TryGetValue(pair.Key, out var regional)
                     ? regional
                     : 1d;
+                if (ownershipDamping.TryGetValue(pair.Key, out var ownership))
+                {
+                    damping = Math.Min(damping, ownership);
+                }
+
                 if (Math.Abs(pair.Value - 1d) >= 0.18d &&
                     piecewiseDamping.TryGetValue(pair.Key, out var piecewise))
                 {
@@ -10351,7 +10357,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
         var regionDamping = BuildIslandAwareRegionDamping(updatedField.Keys, deformationCage);
         var piecewiseDamping = BuildPiecewiseReconstructionDamping(updatedField.Keys, deformationCage);
-        if (regionDamping.Count == 0 && piecewiseDamping.Count == 0)
+        var ownershipDamping = BuildIslandOwnershipRoutingDamping(updatedField.Keys, deformationCage);
+        if (regionDamping.Count == 0 && piecewiseDamping.Count == 0 && ownershipDamping.Count == 0)
         {
             return updatedField;
         }
@@ -10363,6 +10370,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 if (!regionDamping.TryGetValue(pair.Key, out var damping))
                 {
                     damping = 1d;
+                }
+
+                if (ownershipDamping.TryGetValue(pair.Key, out var ownership))
+                {
+                    damping = Math.Min(damping, ownership);
                 }
 
                 var previous = previousField.GetValueOrDefault(pair.Key, 1d);
@@ -10448,6 +10460,92 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 regionDamping[region] = regionDamping.TryGetValue(region, out var existing)
                     ? Math.Min(existing, damping)
                     : damping;
+            }
+        }
+
+        return regionDamping;
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildIslandOwnershipRoutingDamping(
+        IEnumerable<string> regions,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 1 } islandControls)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var targetRegions = regions
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (targetRegions.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var totalIslandCount = islandControls
+            .Select(static control => $"{control.MeshKey}\u001f{control.IslandId}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        if (totalIslandCount < 2)
+        {
+            return new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var regionDamping = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var region in targetRegions)
+        {
+            var owners = islandControls
+                .Where(control =>
+                    control.CageRegions.Contains(region, StringComparer.OrdinalIgnoreCase) ||
+                    (control.AuthoredRegions?.Any(authored => authored.RegionName.Equals(region, StringComparison.OrdinalIgnoreCase)) ?? false))
+                .ToArray();
+            if (owners.Length == 0)
+            {
+                continue;
+            }
+
+            var ownerCount = owners
+                .Select(static control => $"{control.MeshKey}\u001f{control.IslandId}")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var damping = 1d;
+            if (ownerCount == 1)
+            {
+                damping = Math.Min(damping, totalIslandCount >= 3 ? 0.88d : 0.92d);
+            }
+            else if (ownerCount <= Math.Max(1, totalIslandCount / 3))
+            {
+                damping = Math.Min(damping, 0.95d);
+            }
+
+            if (owners.Any(control =>
+                    control.SemanticLabels?.Contains("window-frame-island", StringComparer.OrdinalIgnoreCase) == true ||
+                    control.SemanticLabels?.Contains("bridge-strap-island", StringComparer.OrdinalIgnoreCase) == true))
+            {
+                damping = Math.Min(damping, ownerCount == 1 ? 0.84d : 0.90d);
+            }
+
+            if (owners.Any(control =>
+                    control.BoundaryLoops?.Any(loop =>
+                        loop.CageRegions.Contains(region, StringComparer.OrdinalIgnoreCase) &&
+                        loop.IsHole) == true ||
+                    control.AuthoredRegions?.Any(authored =>
+                        authored.RegionName.Equals(region, StringComparison.OrdinalIgnoreCase) &&
+                        authored.IsHole) == true))
+            {
+                damping = Math.Min(damping, ownerCount == 1 ? 0.76d : 0.84d);
+            }
+            else if (owners.Any(control =>
+                         control.BoundaryLoops?.Any(loop => loop.CageRegions.Contains(region, StringComparer.OrdinalIgnoreCase)) == true))
+            {
+                damping = Math.Min(damping, ownerCount == 1 ? 0.86d : 0.92d);
+            }
+
+            if (damping < 0.999d)
+            {
+                regionDamping[region] = Math.Clamp(damping, 0.72d, 0.96d);
             }
         }
 
