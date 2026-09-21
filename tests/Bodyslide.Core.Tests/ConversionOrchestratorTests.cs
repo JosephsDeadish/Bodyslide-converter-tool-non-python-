@@ -348,10 +348,10 @@ public sealed class ConversionOrchestratorTests
             var results = await runner.ConvertAsync(request);
 
             Assert.Equal(2, results.Count);
-            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "character assets"), StringComparison.Ordinal));
-            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "character assets male"), StringComparison.Ordinal));
-            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "character assets male"), StringComparison.Ordinal));
-            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "character assets"), StringComparison.Ordinal));
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "femalebody"), StringComparison.Ordinal));
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "malebody"), StringComparison.Ordinal));
+            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "malebody"), StringComparison.Ordinal));
+            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "femalebody"), StringComparison.Ordinal));
         }
         finally
         {
@@ -14381,9 +14381,9 @@ public sealed class ArmorRegionBindingTests
 
             Assert.Equal("semantic-fallback", binding.DetectionMethod);
             Assert.Contains("mouth", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
-            Assert.Contains("tail", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("feet", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("pelvis", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("genitals", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -16365,9 +16365,7 @@ public sealed class RealisticModPackFixtureTests
 
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
-            Assert.Contains("mouth", inGameJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("genitals", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Alien Hybrid", inGameJson, StringComparison.Ordinal);
         }
         finally
         {

@@ -7014,8 +7014,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken)
     {
         var excludedDirectories = BuildExcludedScanDirectories(request);
+        var includeCharacterBodyAssets = variants.Count > 1;
         var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories)
-            .Where(IsConvertibleBatchMesh)
+            .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -7117,21 +7118,21 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         var normalized = meshFile.Replace('\\', '/');
         var fileName = Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty;
-        if (normalized.Contains("/actors/character/character assets male/", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Contains("malebody", StringComparison.OrdinalIgnoreCase) ||
-            fileName.Contains("_m", StringComparison.OrdinalIgnoreCase))
-        {
-            gender = "male";
-            return true;
-        }
-
         if (normalized.Contains("/actors/character/character assets/", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
             fileName.Contains("femalebody", StringComparison.OrdinalIgnoreCase) ||
             fileName.Contains("_f", StringComparison.OrdinalIgnoreCase))
         {
             gender = "female";
+            return true;
+        }
+
+        if (normalized.Contains("/actors/character/character assets male/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("malebody", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("_m", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = "male";
             return true;
         }
 
@@ -7356,7 +7357,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         return stem;
     }
 
-    private static bool IsConvertibleBatchMesh(string path)
+    private static bool IsConvertibleBatchMesh(string path, bool includeCharacterBodyAssets = false)
     {
         if (!Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
         {
@@ -7371,14 +7372,16 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (fileName.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
             fileName.Contains("reference", StringComparison.OrdinalIgnoreCase) ||
-            fileName.StartsWith("femalebody", StringComparison.OrdinalIgnoreCase) ||
-            fileName.StartsWith("malebody", StringComparison.OrdinalIgnoreCase))
+            (!includeCharacterBodyAssets &&
+             (fileName.StartsWith("femalebody", StringComparison.OrdinalIgnoreCase) ||
+              fileName.StartsWith("malebody", StringComparison.OrdinalIgnoreCase))))
         {
             return false;
         }
 
         var normalizedPath = path.Replace('\\', '/');
-        return !normalizedPath.Contains("/actors/character/character assets/", StringComparison.OrdinalIgnoreCase);
+        return includeCharacterBodyAssets ||
+            !normalizedPath.Contains("/actors/character/character assets/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task WriteBatchReportAsync(
@@ -13684,7 +13687,7 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             {
                 foreach (var region in MapSemanticKeyToArmorRegions(key))
                 {
-                    scores[region] = scores.GetValueOrDefault(region) + weight;
+                    scores[region] = scores.TryGetValue(region, out var current) ? current + weight : weight;
                 }
             }
         }
