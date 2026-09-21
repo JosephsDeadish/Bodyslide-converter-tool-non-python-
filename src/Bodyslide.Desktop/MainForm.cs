@@ -3182,6 +3182,8 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     AddReportMetric(reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     AddReportMetric(reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
+                    AddReportMetric(reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
+                    AddReportMetric(reportName, "High-priority scenarios", CountScenarioPriorities(root, "High", "Action"), filePath);
                     AddReportMetric(reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
                 case "race-compatibility.json":
@@ -4537,6 +4539,48 @@ public sealed class MainForm : Form
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.GetArrayLength().ToString()
             : "0";
+
+    private static string? TryReadScenarioHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ScenarioMatrix", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static scenario =>
+            {
+                var name = TryReadString(scenario, "Name");
+                var priority = TryReadString(scenario, "Priority");
+                return string.IsNullOrWhiteSpace(name)
+                    ? null
+                    : string.IsNullOrWhiteSpace(priority) ? name : $"{name} [{priority}]";
+            })
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
+
+        return items.Length == 0 ? null : string.Join("; ", items);
+    }
+
+    private static string CountScenarioPriorities(JsonElement element, params string[] priorities)
+    {
+        if (!TryGetProperty(element, "ScenarioMatrix", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return "0";
+        }
+
+        return value
+            .EnumerateArray()
+            .Count(scenario =>
+            {
+                var priority = TryReadString(scenario, "Priority");
+                return !string.IsNullOrWhiteSpace(priority) &&
+                       priorities.Contains(priority, StringComparer.OrdinalIgnoreCase);
+            })
+            .ToString();
+    }
 
     private static string CountElements(JsonElement element) => element.ValueKind switch
     {

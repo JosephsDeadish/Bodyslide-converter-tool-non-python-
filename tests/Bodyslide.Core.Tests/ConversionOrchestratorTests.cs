@@ -10859,6 +10859,24 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedAvianBeastShapeDataPack_ResolvesWingedPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticAvianBeastFrameworkModPack", Path.Combine("meshes", "beast", "avian", "avian_regalia_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Avian Humanoid", CancellationToken.None);
+
+        Assert.Contains("WingSpan", resolved.Sliders);
+        Assert.Contains("FeatherSpread", resolved.Sliders);
+        Assert.Contains("TalonWidth", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedHimboShapeDataPack_ResolvesMaleBodyPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticHimboModPack", Path.Combine("meshes", "male", "himbo", "variant", "himbo_raider_0.nif"));
@@ -15192,6 +15210,38 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesAvianScenarioHighlights()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAvianBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "avian", "avian_regalia_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Avian Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario highlights", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("Wing fold and feather sweep", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("High-priority scenarios", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Runtime verification required", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");
@@ -15213,6 +15263,38 @@ public sealed class RealisticModPackFixtureTests
             var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
             Assert.Contains("TailSheath", smpXml, StringComparison.Ordinal);
             Assert.Contains("BeastKnot", smpXml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticAvianBeastFrameworkModPack_WritesWingedBeastArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAvianBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "avian", "avian_regalia_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Avian Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "avian-humanoid", "avian_regalia_0.nif")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
+            Assert.Contains("Wing fold and feather sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("wing", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("feather", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

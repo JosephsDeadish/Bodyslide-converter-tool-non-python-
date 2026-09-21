@@ -252,9 +252,14 @@ internal static class DesktopWorkflowAutomation
                 case "in-game-validation.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
+                    Add(metrics, reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     Add(metrics, reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
                     Add(metrics, reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    Add(metrics, reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     Add(metrics, reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
+                    Add(metrics, reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
+                    Add(metrics, reportName, "High-priority scenarios", CountScenarioPriorities(root, "High", "Action"), filePath);
                     Add(metrics, reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
                 case "pose-simulation-report.json":
@@ -335,6 +340,43 @@ internal static class DesktopWorkflowAutomation
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.GetArrayLength()
             : 0;
+
+    private static string? TryReadScenarioHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ScenarioMatrix", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "; ",
+            value.EnumerateArray()
+                .Select(static scenario =>
+                {
+                    var name = TryReadString(scenario, "Name");
+                    var priority = TryReadString(scenario, "Priority");
+                    return string.IsNullOrWhiteSpace(name)
+                        ? null
+                        : string.IsNullOrWhiteSpace(priority) ? name : $"{name} [{priority}]";
+                })
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+                .Take(4)!);
+    }
+
+    private static int CountScenarioPriorities(JsonElement element, params string[] priorities)
+    {
+        if (!TryGetProperty(element, "ScenarioMatrix", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        return value.EnumerateArray().Count(scenario =>
+        {
+            var priority = TryReadString(scenario, "Priority");
+            return !string.IsNullOrWhiteSpace(priority) &&
+                   priorities.Contains(priority, StringComparer.OrdinalIgnoreCase);
+        });
+    }
 
     private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)

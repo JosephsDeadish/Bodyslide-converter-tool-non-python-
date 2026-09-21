@@ -1,0 +1,46 @@
+{
+  "name": "Avian Beast Framework",
+  "aliases": [
+    "Harpy Raider",
+    "Featherfolk Regalia",
+    "Talon Wingframe"
+  ],
+  "referenceTokens": [
+    "avian",
+    "harpy",
+    "feather",
+    "talon",
+    "wing"
+  ],
+  "sliderNames": [
+    "Belly",
+    "WingSpan",
+    "FeatherSpread",
+    "Shoulders",
+    "Arms"
+  ],
+  "physicsBones": [
+    "NPC Belly",
+    "Wing.L",
+    "Wing.R",
+    "WingMid.L",
+    "WingMid.R",
+    "WingTip.L",
+    "WingTip.R",
+    "WingMembrane.L",
+    "WingMembrane.R",
+    "Feather01.L",
+    "Feather01.R",
+    "Feather02.L",
+    "Feather02.R",
+    "Feather03.L",
+    "Feather03.R",
+    "Talon.L",
+    "Talon.R"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Avian winged-humanoid skeleton",
+  "skeletonFramework": "avian-humanoid",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

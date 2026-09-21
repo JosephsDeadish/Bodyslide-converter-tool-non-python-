@@ -26891,6 +26891,7 @@ internal sealed class LocalExportService(
         var lowerBodyRegions = IntersectInGameRegions(coreRegions.Concat(hotspotRegions), "belly", "butt", "thighs", "waist", "pelvis", "calves", "feet");
         var oralRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "mouth", "jaw", "tongue", "throat");
         var beastRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "tail", "paw", "hock", "hoof", "wing", "feather", "talon", "sheath", "genitals", "vagina", "anus");
+        var wingRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "wing", "feather", "talon");
         var checklist = new List<InGameValidationCheckpoint>
         {
            new(
@@ -26951,6 +26952,7 @@ internal sealed class LocalExportService(
            lowerBodyRegions,
            oralRegions,
            beastRegions,
+           wingRegions,
            manualCleanupLikely,
            skeletonMapping,
            physics,
@@ -27100,6 +27102,7 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> lowerBodyRegions,
         IReadOnlyList<string> oralRegions,
         IReadOnlyList<string> beastRegions,
+        IReadOnlyList<string> wingRegions,
         bool manualCleanupLikely,
         SkeletonMappingResult skeletonMapping,
         PhysicsConfig physics,
@@ -27137,6 +27140,17 @@ internal sealed class LocalExportService(
                ["talk / phoneme", "open mouth", "combat yell", "stagger"],
                oralRegions,
                ["skeleton-compatibility.json", "preview-workbench.html", "in-game-validation.json"]));
+        }
+
+        if (wingRegions.Count > 0 || targetBody.Contains("avian", StringComparison.OrdinalIgnoreCase))
+        {
+            scenarios.Add(new InGameValidationScenario(
+               "Wing fold and feather sweep",
+               wingRegions.Count > 0 ? "Action" : "Info",
+               $"Winged topology coverage was detected for {targetBody}{(wingRegions.Count > 0 ? $": {string.Join(", ", wingRegions)}" : string.Empty)}",
+               ["turn in place", "jump", "sprint", "landing / stagger"],
+               wingRegions.Count > 0 ? wingRegions : coreRegions,
+               ["preview-workbench.html", "skeleton-compatibility.json", "in-game-validation.json"]));
         }
 
         if (beastRegions.Count > 0 || IsBeastOrExoticTarget(targetBody))
