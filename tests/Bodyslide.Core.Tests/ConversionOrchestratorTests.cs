@@ -9600,6 +9600,38 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void OsdMorphReader_ReadsFixtureBackedLegacyAndOutfitStudioPayloads()
+    {
+        var legacyPath = GetFixtureFilePath("SampledOsdPayloads", "traveler-legacy.osd");
+        var outfitStudioPath = GetFixtureFilePath("SampledOsdPayloads", "traveler-outfitstudio-v1.osd");
+
+        Assert.True(OsdMorphReader.TryRead(legacyPath, out var legacyPayload));
+        Assert.NotNull(legacyPayload);
+        Assert.Equal(2, legacyPayload!.Morphs.Count);
+        Assert.Equal("TravelerWaist", legacyPayload.Morphs[0].Name);
+        Assert.Equal(3, legacyPayload.InferredVertexCount);
+
+        Assert.True(OsdMorphReader.TryRead(outfitStudioPath, out var outfitStudioPayload));
+        Assert.NotNull(outfitStudioPayload);
+        Assert.Equal(2, outfitStudioPayload!.Morphs.Count);
+        Assert.Equal("TravelerWaist_1", outfitStudioPayload.Morphs[1].Name);
+        Assert.Equal(0.375f, outfitStudioPayload.Morphs[1].SparseDeltas[0].X, 3);
+    }
+
+    [Fact]
+    public void OsdMorphReader_AllowsTrailingZeroPaddingInFixturePayload()
+    {
+        var paddedFixturePath = GetFixtureFilePath("SampledOsdPayloads", "traveler-outfitstudio-v3-padded.osd");
+
+        Assert.True(OsdMorphReader.TryRead(paddedFixturePath, out var payload));
+        Assert.NotNull(payload);
+        Assert.Equal(3, payload!.Morphs.Count);
+        Assert.Equal("UnusedMorph", payload.Morphs[1].Name);
+        Assert.Empty(payload.Morphs[1].SparseDeltas);
+        Assert.Equal("HideCape_1", payload.Morphs[2].Name);
+    }
+
+    [Fact]
     public void OsdMorphReader_WithTruncatedOutfitStudioPayload_IsRejected()
     {
         var bytes = BuildOutfitStudioOsdPayload(
@@ -9900,6 +9932,68 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedOsd_DoesNotMarkMorphPayloadsMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+        var osdPath = Path.Combine(shapeDataDirectory, "TravelerProject.osd");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        await SyntheticNifTestData.WriteAsync(meshPath,
+        [
+            (0f, 0f, 0f),
+            (2f, 0f, 0f),
+            (4f, 0f, 0f)
+        ]);
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+        File.Copy(GetFixtureFilePath("SampledOsdPayloads", "traveler-outfitstudio-v3-padded.osd"), osdPath);
+        await File.WriteAllBytesAsync(referencePath, new byte[64]);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("TravelerWaist", resolved.Sliders);
+            Assert.NotNull(resolved.SourceAssetSupport);
+            Assert.True(resolved.SourceAssetSupport!.HasOsp);
+            Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+            Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+            Assert.NotNull(resolved.ReusableMorphPayloads);
+            Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerWaist", out var osdPayloads));
+            Assert.NotNull(osdPayloads.LowWeight);
+            Assert.Equal("osd", osdPayloads.LowWeight!.PayloadKind);
+            Assert.Equal(3, osdPayloads.LowWeight.VertexCount);
+            Assert.Equal(0.125f, osdPayloads.LowWeight.Deltas[0].X, 3);
+            Assert.Equal(-0.25f, osdPayloads.LowWeight.Deltas[0].Y, 3);
+            Assert.Contains("HideCape", resolved.ZapSliders ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_WritesBsdSliderFiles()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -10004,6 +10098,15 @@ public sealed class BsdSliderDataTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    private static string GetFixtureFilePath(string fixtureName, string relativeFilePath, [CallerFilePath] string currentFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(currentFilePath)!,
+            "Fixtures",
+            fixtureName,
+            relativeFilePath);
     }
 
     private static byte[] BuildBsdPayload(string sliderName, bool isHighWeight, IReadOnlyList<(float X, float Y, float Z)> deltas)
@@ -14775,6 +14878,15 @@ public sealed class RealisticModPackFixtureTests
             Path.GetDirectoryName(currentFilePath)!,
             "Fixtures",
             fixtureName);
+    }
+
+    private static string GetFixtureFilePath(string fixtureName, string relativeFilePath, [CallerFilePath] string currentFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(currentFilePath)!,
+            "Fixtures",
+            fixtureName,
+            relativeFilePath);
     }
 
     private static void CopyDirectory(string sourceDirectory, string destinationDirectory)

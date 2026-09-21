@@ -552,12 +552,25 @@ internal static class OsdMorphReader
             morphs.Add(new OsdMorphEntry(morphName, sparseDeltas));
         }
 
-        if (offset != bytes.Length || morphs.Count == 0)
+        if ((offset != bytes.Length && !HasOnlyTrailingZeroPadding(bytes[offset..])) || morphs.Count == 0)
         {
             return false;
         }
 
         payload = new OsdMorphPayload(inferredVertexCount, morphs);
         return true;
+    }
+
+    private static bool HasOnlyTrailingZeroPadding(ReadOnlySpan<byte> trailingBytes)
+    {
+        foreach (var value in trailingBytes)
+        {
+            if (value != 0)
+            {
+                return false;
+            }
+        }
+
+        return trailingBytes.Length > 0;
     }
 }
