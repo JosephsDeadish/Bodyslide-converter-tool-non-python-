@@ -14910,6 +14910,15 @@ public sealed class RealisticModPackFixtureTests
             var root = patchReport.RootElement;
             Assert.Equal(0, root.GetProperty("UnresolvedTieGroups").GetArrayLength());
             Assert.Equal(0, root.GetProperty("LinkedArmorFamilyReviewSteps").GetArrayLength());
+            var installHint = root.GetProperty("PluginInstallHints")
+                .EnumerateArray()
+                .Single(element => string.Equals(element.GetProperty("SourcePlugin").GetString(), "MasterChainStandaloneChild.esp", StringComparison.Ordinal));
+            Assert.Equal(
+                ["MasterChainStandaloneRoot.esp", "MasterChainStandaloneBridge.esp"],
+                installHint.GetProperty("InheritedMasters").EnumerateArray().Select(element => element.GetString() ?? string.Empty).ToArray());
+            Assert.Equal(
+                ["MasterChainStandaloneRoot.esp", "MasterChainStandaloneBridge.esp", "MasterChainStandaloneChild.esp"],
+                installHint.GetProperty("RecommendedPluginLoadAfter").EnumerateArray().Select(element => element.GetString() ?? string.Empty).ToArray());
 
             var rewriteMappings = root.GetProperty("RewriteMappings").EnumerateArray().ToList();
             Assert.Contains(rewriteMappings, mapping =>
@@ -14921,6 +14930,12 @@ public sealed class RealisticModPackFixtureTests
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+
+            var patchMasters = BinaryArmaParser.ExtractMasterFileNames(
+                await File.ReadAllBytesAsync(Path.Combine(outputDirectory, "MasterChainStandaloneChild_SlidesmithPatch.esp")));
+            Assert.Equal(
+                ["MasterChainStandaloneRoot.esp", "MasterChainStandaloneBridge.esp", "MasterChainStandaloneChild.esp"],
+                patchMasters);
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "ebonite", "devious_panel_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
