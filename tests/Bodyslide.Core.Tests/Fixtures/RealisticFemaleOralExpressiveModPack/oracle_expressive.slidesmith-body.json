@@ -1,0 +1,42 @@
+{
+  "name": "Oracle Expressive",
+  "aliases": [
+    "Oracle Expressive",
+    "Deep Oracle Mouth"
+  ],
+  "referenceTokens": [
+    "oracle",
+    "expressive",
+    "mouth",
+    "throat"
+  ],
+  "sliderNames": [
+    "BreastsShape",
+    "Belly",
+    "Thighs",
+    "JawDepth",
+    "JawWidth",
+    "TongueMidLength",
+    "TongueTipLength",
+    "ThroatDepth"
+  ],
+  "physicsBones": [
+    "BreastUpper",
+    "BreastOuter",
+    "BellyLower",
+    "HDT Mouth",
+    "HDT Jaw",
+    "HDT JawLower",
+    "HDT JawUpper",
+    "HDT Tongue",
+    "HDT TongueMid",
+    "HDT TongueTip",
+    "HDT Throat",
+    "HDT ThroatLower"
+  ],
+  "physicsProfile": "smp+cbpc",
+  "gender": "female",
+  "skeletonFoundation": "XPMSSE + custom UBE bones",
+  "skeletonFramework": "ube-extended",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

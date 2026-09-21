@@ -391,4 +391,54 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(artifacts, artifact => artifact.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void InGameValidationGuidance_BuildDesktopGuidanceEntries_IncludeChecklistAndScenarioHighlights()
+    {
+        var report = new InGameValidationReport(
+            "UBE",
+            "needs-review",
+            "REVIEW REQUIRED",
+            ["breasts", "belly", "thighs"],
+            ["mouth", "tongue", "throat"],
+            ["preview-workbench.html", "in-game-validation.json"],
+            [
+                new InGameValidationScenario(
+                    "Oral articulation sweep",
+                    "Action",
+                    "Extended oral/throat topology requires articulation checks for mouth, tongue, throat",
+                    ["talk / phoneme", "open mouth"],
+                    ["mouth", "tongue", "throat"],
+                    ["preview-workbench.html"]),
+                new InGameValidationScenario(
+                    "Lower-body compression sweep",
+                    "High",
+                    "Lower-body morphing or hotspot evidence was detected for belly, thighs",
+                    ["crouch", "sit"],
+                    ["belly", "thighs"],
+                    ["pose-simulation-report.json"])
+            ],
+            [
+                new InGameValidationCheckpoint(
+                    "Body fit smoke test",
+                    "Action",
+                    "Equip the converted outfit and validate core fit.",
+                    ["breasts", "belly", "thighs"],
+                    ["conversion-quality.json"]),
+                new InGameValidationCheckpoint(
+                    "Sensitive topology pass",
+                    "Action",
+                    "Inspect oral motion and collision.",
+                    ["mouth", "tongue"],
+                    ["skeleton-compatibility.json"])
+            ]);
+
+        var entries = InGameValidationGuidance.BuildDesktopGuidanceEntries(report, maxChecklistItems: 2, maxScenarioItems: 2);
+
+        Assert.Contains(entries, entry => entry.Details.Contains("Runtime smoke-test gate", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Details.Contains("Body fit smoke test", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Details.Contains("Oral articulation sweep", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Details.Contains("Lower-body compression sweep", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Priority.Equals("High", StringComparison.OrdinalIgnoreCase));
+    }
 }

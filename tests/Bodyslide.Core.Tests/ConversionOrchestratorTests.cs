@@ -10705,6 +10705,24 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedFemaleOralExpressivePack_ResolvesExpressiveOralPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticFemaleOralExpressiveModPack", Path.Combine("meshes", "armor", "oracleexpressive", "oracle_expressive_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "UBE", CancellationToken.None);
+
+        Assert.Contains("JawDepth", resolved.Sliders);
+        Assert.Contains("TongueTipLength", resolved.Sliders);
+        Assert.Contains("ThroatDepth", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedEquineBeastShapeDataPack_ResolvesNonCanineBeastPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticEquineBeastFrameworkModPack", Path.Combine("meshes", "beast", "equine", "equine_harness_0.nif"));
@@ -10714,6 +10732,24 @@ public sealed class BsdSliderDataTests
 
         Assert.Contains("SheathLength", resolved.Sliders);
         Assert.Contains("KnotSize", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedFelineBeastShapeDataPack_ResolvesNonCanineDigitigradePayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticFelineBeastFrameworkModPack", Path.Combine("meshes", "beast", "feline", "feline_regalia_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Feline Humanoid", CancellationToken.None);
+
+        Assert.Contains("SheathLength", resolved.Sliders);
+        Assert.Contains("KnotSize", resolved.Sliders);
+        Assert.Contains("TongueTipLength", resolved.Sliders);
         Assert.NotNull(resolved.SourceAssetSupport);
         Assert.True(resolved.SourceAssetSupport!.HasOsp);
         Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
@@ -14780,6 +14816,45 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task ConvertAsync_RealisticFemaleOralExpressiveModPack_WritesScenarioRichOralValidationArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFemaleOralExpressiveModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "oracleexpressive", "oracle_expressive_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "UBE",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "ube", "oracle_expressive_0.nif")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            var inGameJsonText = await File.ReadAllTextAsync(inGameJsonPath);
+            using var inGameJson = JsonDocument.Parse(inGameJsonText);
+            Assert.True(inGameJson.RootElement.TryGetProperty("ScenarioMatrix", out var scenarioMatrix));
+            Assert.True(scenarioMatrix.GetArrayLength() >= 3);
+            Assert.Contains(scenarioMatrix.EnumerateArray(), scenario =>
+                scenario.TryGetProperty("Name", out var name) &&
+                name.GetString()!.Contains("Oral articulation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("breasts", inGameJsonText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("belly", inGameJsonText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("thighs", inGameJsonText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mouth", inGameJsonText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("talk / phoneme", inGameJsonText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticBeastGenitalFrameworkModPack_WritesBeastFrameworkArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticBeastGenitalFrameworkModPack");
@@ -14805,6 +14880,38 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticFelineBeastFrameworkModPack_WritesNonCanineDigitigradeArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFelineBeastFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "feline", "feline_regalia_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Feline Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "feline-humanoid", "feline_regalia_0.nif")));
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
+            Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("genitals", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Beast locomotion sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
         }
         finally
         {

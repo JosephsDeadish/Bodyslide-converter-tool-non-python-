@@ -3414,6 +3414,7 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
                     AddReportMetric(reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
                     AddReportMetric(reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
+                    AddReportMetric(reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     AddReportMetric(reportName, "Checklist items", CountNestedArray(root, "Checklist"), filePath);
                     break;
                 case "race-compatibility.json":
@@ -4223,46 +4224,23 @@ public sealed class MainForm : Form
 
         try
         {
-            using var document = OpenJsonDocument(reportPath);
-            var root = document.RootElement;
-            var gate = TryReadString(root, "ValidationGate");
-            var coreRegions = TryReadArray(root, "CoreBodyRegions");
-            var sensitiveRegions = TryReadArray(root, "SensitiveRegions");
-            if (!string.IsNullOrWhiteSpace(gate) || !string.IsNullOrWhiteSpace(coreRegions))
+            using var stream = File.OpenRead(reportPath);
+            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream);
+            foreach (var entry in InGameValidationGuidance.BuildDesktopGuidanceEntries(report))
             {
-                var priority = string.Equals(gate, "PASS", StringComparison.OrdinalIgnoreCase) ? "Info" : "Action";
-                if (!string.Equals(priority, "Info", StringComparison.OrdinalIgnoreCase))
+                var priority = entry.Priority;
+                if (string.Equals(priority, "High", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(priority, "Action", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(priority, "Warning", StringComparison.OrdinalIgnoreCase))
                 {
                     requiresReview = true;
                 }
 
                 add(
-                    "In-game validation",
-                    priority,
-                    $"Runtime smoke-test gate: {gate ?? "CHECK"}. Core regions: {coreRegions ?? "not listed"}. Sensitive regions: {sensitiveRegions ?? "none"}.",
-                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "pose-risk", reportPath));
-            }
-
-            if (TryGetProperty(root, "Checklist", out var checklist) && checklist.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var checkpoint in checklist.EnumerateArray().Take(3))
-                {
-                    var name = TryReadString(checkpoint, "Name");
-                    var details = TryReadString(checkpoint, "Details");
-                    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(details))
-                    {
-                        continue;
-                    }
-
-                    var priority = TryReadString(checkpoint, "Priority");
-                    if (string.Equals(priority, "High", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(priority, "Action", StringComparison.OrdinalIgnoreCase))
-                    {
-                        requiresReview = true;
-                    }
-
-                    add("In-game validation", priority ?? "Info", $"{name}: {details}", reportPath);
-                }
+                    entry.Area,
+                    string.IsNullOrWhiteSpace(priority) ? "Info" : priority,
+                    entry.Details,
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "pose-risk", entry.ArtifactPath ?? reportPath));
             }
         }
         catch (Exception ex)

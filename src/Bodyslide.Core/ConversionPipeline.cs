@@ -276,6 +276,13 @@ public sealed record InGameValidationCheckpoint(
     string Details,
     IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts);
+public sealed record InGameValidationScenario(
+    string Name,
+    string Priority,
+    string Trigger,
+    IReadOnlyList<string> SuggestedAnimations,
+    IReadOnlyList<string> FocusRegions,
+    IReadOnlyList<string> RelatedArtifacts);
 public sealed record InGameValidationReport(
     string TargetBody,
     string ValidationStatus,
@@ -283,7 +290,74 @@ public sealed record InGameValidationReport(
     IReadOnlyList<string> CoreBodyRegions,
     IReadOnlyList<string> SensitiveRegions,
     IReadOnlyList<string> ReviewArtifacts,
+    IReadOnlyList<InGameValidationScenario> ScenarioMatrix,
     IReadOnlyList<InGameValidationCheckpoint> Checklist);
+
+public sealed record InGameValidationGuidanceEntry(
+    string Area,
+    string Priority,
+    string Details,
+    string? ArtifactPath);
+
+internal static class InGameValidationGuidance
+{
+    public static IReadOnlyList<InGameValidationGuidanceEntry> BuildDesktopGuidanceEntries(
+        InGameValidationReport? report,
+        int maxChecklistItems = 3,
+        int maxScenarioItems = 2)
+    {
+        if (report is null)
+        {
+            return [];
+        }
+
+        var entries = new List<InGameValidationGuidanceEntry>();
+        var coreRegions = report.CoreBodyRegions.Count > 0 ? string.Join(", ", report.CoreBodyRegions) : "not listed";
+        var sensitiveRegions = report.SensitiveRegions.Count > 0 ? string.Join(", ", report.SensitiveRegions) : "none";
+        var summaryPriority = string.Equals(report.ValidationGate, "PASS", StringComparison.OrdinalIgnoreCase) ? "Info" : "Action";
+        entries.Add(new InGameValidationGuidanceEntry(
+            "In-game validation",
+            summaryPriority,
+            $"Runtime smoke-test gate: {report.ValidationGate}. Core regions: {coreRegions}. Sensitive regions: {sensitiveRegions}.",
+            report.ReviewArtifacts.FirstOrDefault()));
+
+        foreach (var checkpoint in report.Checklist.Take(Math.Max(0, maxChecklistItems)))
+        {
+            entries.Add(new InGameValidationGuidanceEntry(
+                "In-game validation",
+                checkpoint.Priority,
+                $"{checkpoint.Name}: {checkpoint.Details}",
+                checkpoint.RelatedArtifacts.FirstOrDefault()));
+        }
+
+        foreach (var scenario in report.ScenarioMatrix
+                     .OrderByDescending(static scenario => GetPriorityRank(scenario.Priority))
+                     .ThenBy(static scenario => scenario.Name, StringComparer.OrdinalIgnoreCase)
+                     .Take(Math.Max(0, maxScenarioItems)))
+        {
+            var animationSummary = scenario.SuggestedAnimations.Count > 0
+                ? $" Suggested animations: {string.Join(", ", scenario.SuggestedAnimations)}."
+                : string.Empty;
+            entries.Add(new InGameValidationGuidanceEntry(
+                "In-game scenario",
+                scenario.Priority,
+                $"{scenario.Name}: {scenario.Trigger}.{animationSummary}",
+                scenario.RelatedArtifacts.FirstOrDefault()));
+        }
+
+        return entries;
+    }
+
+    private static int GetPriorityRank(string? priority) =>
+        priority?.Trim() switch
+        {
+            var value when string.Equals(value, "high", StringComparison.OrdinalIgnoreCase) => 3,
+            var value when string.Equals(value, "action", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "warning", StringComparison.OrdinalIgnoreCase) => 2,
+            var value when string.Equals(value, "info", StringComparison.OrdinalIgnoreCase) => 1,
+            _ => 0
+        };
+}
 
 public static class ConversionValidationPresentation
 {
@@ -26463,6 +26537,9 @@ internal sealed class LocalExportService(
            .Distinct(StringComparer.OrdinalIgnoreCase)
            .ToArray();
         var reviewArtifacts = ConversionValidationGuidance.BuildReviewArtifacts(validationSummary, maxArtifacts: 10);
+        var lowerBodyRegions = IntersectInGameRegions(coreRegions.Concat(hotspotRegions), "belly", "butt", "thighs", "waist", "pelvis", "calves", "feet");
+        var oralRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "mouth", "jaw", "tongue", "throat");
+        var beastRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "tail", "paw", "hock", "hoof", "wing", "feather", "talon", "sheath", "genitals", "vagina", "anus");
         var checklist = new List<InGameValidationCheckpoint>
         {
            new(
@@ -26514,6 +26591,20 @@ internal sealed class LocalExportService(
                ["world-physics.json", "preview-workbench.html"]));
         }
 
+        var scenarioMatrix = BuildInGameScenarioMatrix(
+           targetBody,
+           validationSummary,
+           coreRegions,
+           sensitiveRegions,
+           hotspotRegions,
+           lowerBodyRegions,
+           oralRegions,
+           beastRegions,
+           skeletonMapping,
+           physics,
+           poseSimulation,
+           worldPhysics);
+
         return new InGameValidationReport(
            targetBody,
            validationSummary.Status,
@@ -26521,6 +26612,7 @@ internal sealed class LocalExportService(
            coreRegions,
            sensitiveRegions,
            reviewArtifacts,
+           scenarioMatrix,
            checklist);
     }
 
@@ -26569,6 +26661,119 @@ internal sealed class LocalExportService(
            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
            .ToArray();
     }
+
+    private static IReadOnlyList<InGameValidationScenario> BuildInGameScenarioMatrix(
+        string targetBody,
+        ConversionValidationSummary validationSummary,
+        IReadOnlyList<string> coreRegions,
+        IReadOnlyList<string> sensitiveRegions,
+        IReadOnlyList<string> hotspotRegions,
+        IReadOnlyList<string> lowerBodyRegions,
+        IReadOnlyList<string> oralRegions,
+        IReadOnlyList<string> beastRegions,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsConfig physics,
+        PoseSimulationResult poseSimulation,
+        WorldObjectPhysicsReport worldPhysics)
+    {
+        var scenarios = new List<InGameValidationScenario>
+        {
+           new(
+               "Core fit sweep",
+               ConversionValidationPresentation.GetGateRank(validationSummary.Status) >= ConversionValidationPresentation.GetGateRank("needs-review") ? "Action" : "Info",
+               $"Baseline body-fit validation for {targetBody} using the core regions: {string.Join(", ", coreRegions)}",
+               ["idle", "walk", "turn", "draw weapon"],
+               coreRegions,
+               ["preview-workbench.html", "conversion-quality.json"])
+        };
+
+        if (lowerBodyRegions.Count > 0)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Lower-body compression sweep",
+               poseSimulation.TotalPosesAtRisk > 0 ? "High" : "Action",
+               $"Lower-body morphing or hotspot evidence was detected for: {string.Join(", ", lowerBodyRegions)}",
+               ["crouch", "sit", "sprint", "jump"],
+               lowerBodyRegions,
+               ["pose-simulation-report.json", "preview-workbench.html", "in-game-validation.json"]));
+        }
+
+        if (oralRegions.Count > 0)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Oral articulation sweep",
+               "Action",
+               $"Extended oral/throat topology requires articulation checks for: {string.Join(", ", oralRegions)}",
+               ["talk / phoneme", "open mouth", "combat yell", "stagger"],
+               oralRegions,
+               ["skeleton-compatibility.json", "preview-workbench.html", "in-game-validation.json"]));
+        }
+
+        if (beastRegions.Count > 0 || IsBeastOrExoticTarget(targetBody))
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Beast locomotion sweep",
+               beastRegions.Count > 0 ? "Action" : "Info",
+               $"Custom race or appendage-sensitive coverage detected for {targetBody}{(beastRegions.Count > 0 ? $": {string.Join(", ", beastRegions)}" : string.Empty)}",
+               ["walk", "turn in place", "sprint", "jump"],
+               beastRegions.Count > 0 ? beastRegions : coreRegions,
+               ["race-compatibility.json", "skeleton-compatibility.json", "preview-workbench.html"]));
+        }
+
+        if (skeletonMapping.UnsupportedBones.Count > 0)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Custom skeleton remap sweep",
+               "High",
+               $"Unsupported or sparsely inferred bones still need live verification: {string.Join(", ", skeletonMapping.UnsupportedBones.Take(6))}",
+               ["idle", "walk", "combat"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : hotspotRegions,
+               ["skeleton-compatibility.json", "conversion-quality.json"]));
+        }
+
+        if (!string.Equals(physics.Profile, "none", StringComparison.OrdinalIgnoreCase) ||
+           worldPhysics.RuntimePhysicsProfileGenerated)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Physics collision sweep",
+               "Action",
+               $"Runtime physics output is active for profile '{physics.Profile}'. Verify live collision, damping, and bounce follow-through.",
+               ["idle", "walk", "jump", "ragdoll / hit react"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : coreRegions,
+               ["world-physics.json", "skeleton-compatibility.json", "preview-workbench.html"]));
+        }
+
+        if (worldPhysics.GroundMeshAvailable || worldPhysics.HeelAnalysis is not null)
+        {
+           scenarios.Add(new InGameValidationScenario(
+               "Ground and drop sweep",
+               worldPhysics.HeelAnalysis is null ? "Info" : "Action",
+               $"World/drop validation is required for collision mode '{worldPhysics.Mode}' and heel profile '{worldPhysics.HeelAnalysis?.Profile ?? "flat"}'",
+               ["drop to ground", "idle", "walk"],
+               ["feet", "ground"],
+               ["world-physics.json", "preview-workbench.html"]));
+        }
+
+        return scenarios;
+    }
+
+    private static IReadOnlyList<string> IntersectInGameRegions(IEnumerable<string> candidates, params string[] expectedRegions) =>
+        candidates
+           .Where(static region => !string.IsNullOrWhiteSpace(region))
+           .Distinct(StringComparer.OrdinalIgnoreCase)
+           .Where(region => expectedRegions.Contains(region, StringComparer.OrdinalIgnoreCase))
+           .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+           .ToArray();
+
+    private static bool IsBeastOrExoticTarget(string targetBody) =>
+        targetBody.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("equine", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("canine", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("draconic", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("aquatic", StringComparison.OrdinalIgnoreCase) ||
+        targetBody.Contains("insectoid", StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<string> MapSensitiveRegionsFromToken(string token)
     {

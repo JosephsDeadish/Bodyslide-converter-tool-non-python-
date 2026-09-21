@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="FelineFramework" set="Feline Humanoid">
+    <OutputPath>meshes\beast\feline\</OutputPath>
+    <OutputFile gender="f" use="true">feline_regalia_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">feline_regalia_1.nif</OutputFile>
+    <Slider name="SheathLength" />
+    <Slider name="KnotSize" />
+    <Slider name="TongueTipLength" />
+    <Slider name="TailBase" />
+    <Slider name="PawWidth" />
+  </SliderSet>
+</SliderSetInfo>
