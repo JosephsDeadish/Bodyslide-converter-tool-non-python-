@@ -325,6 +325,45 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BatchRunner_MixedGenderTargets_FilterObviousCharacterBodyMeshesPerGender()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var femaleBodyPath = Path.Combine(inputDirectory, "meshes", "actors", "character", "character assets", "femalebody_0.nif");
+        var maleBodyPath = Path.Combine(inputDirectory, "meshes", "actors", "character", "character assets male", "malebody_0.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(femaleBodyPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(maleBodyPath)!);
+        await File.WriteAllTextAsync(femaleBodyPath, "female");
+        await File.WriteAllTextAsync(maleBodyPath, "male");
+
+        try
+        {
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            var request = new ConversionRequest(
+                InputPath: inputDirectory,
+                TargetBody: "3BA",
+                OutputDirectory: outputDirectory,
+                TargetBodies: ["3BA", "HIMBO"]);
+
+            var results = await runner.ConvertAsync(request);
+
+            Assert.Equal(2, results.Count);
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "character assets"), StringComparison.Ordinal));
+            Assert.Contains(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "character assets male"), StringComparison.Ordinal));
+            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("3BA", "character assets male"), StringComparison.Ordinal));
+            Assert.DoesNotContain(results, result => result.OutputDirectory.EndsWith(Path.Combine("HIMBO", "character assets"), StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(inputDirectory, recursive: true);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsSingleNifToMultiplePresetsIntoSeparateFolders()
     {
         var inputFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
@@ -13386,6 +13425,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdtTongue_ctrl", "hdtThroat_ctrl"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdt_jawlower_ctrl", "hdt_tonguemid_ctrl"]));
         Assert.Equal("equine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["maneroot_ctrl", "forelock_ctrl"]));
+        Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["MawLatch", "TongueBlade", "WombCore"]));
+        Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["TailNub", "PawPad.L", "SheathNode"]));
     }
 }
 
@@ -13911,6 +13952,55 @@ public sealed class RuntimeReadinessReporterTests
     }
 }
 
+public sealed class DesktopWorkflowSupportTests
+{
+    [Fact]
+    public void DesktopWorkflowSupport_ParseDelimitedValues_TrimmedAndDeduplicated()
+    {
+        var values = DesktopWorkflowSupport.ParseDelimitedValues(" 3BA, HIMBO,3BA ,, TNG ");
+
+        Assert.Equal(["3BA", "HIMBO", "TNG"], values);
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_CombineSelections_PreservesPrimaryAndDeduplicates()
+    {
+        var values = DesktopWorkflowSupport.CombineSelections("3BA", ["HIMBO", "3BA"]);
+
+        Assert.Equal(["3BA", "HIMBO"], values);
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_ReadOptionalSelection_TreatsAutoAsNull()
+    {
+        Assert.Null(DesktopWorkflowSupport.ReadOptionalSelection("(auto)"));
+        Assert.Null(DesktopWorkflowSupport.ReadOptionalSelection(" "));
+        Assert.Equal("HIMBO", DesktopWorkflowSupport.ReadOptionalSelection(" HIMBO "));
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_FindCommonDirectory_ReturnsSharedAncestor()
+    {
+        var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var first = Path.Combine(root, "a", "one");
+        var second = Path.Combine(root, "a", "two");
+
+        var common = DesktopWorkflowSupport.FindCommonDirectory([first, second]);
+
+        Assert.True(string.Equals(Path.Combine(root, "a"), common, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TryDetectBatchMeshGender_RecognizesCharacterAssetBodies()
+    {
+        Assert.True(BatchConversionRunner.TryDetectBatchMeshGender(@"meshes\actors\character\character assets\femalebody_0.nif", out var femaleGender));
+        Assert.Equal("female", femaleGender);
+
+        Assert.True(BatchConversionRunner.TryDetectBatchMeshGender(@"meshes\actors\character\character assets male\malebody_0.nif", out var maleGender));
+        Assert.Equal("male", maleGender);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Vanilla profile auto-apply tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14255,6 +14345,45 @@ public sealed class ArmorRegionBindingTests
             Assert.Equal("spatial-geometry", binding.DetectionMethod);
             Assert.Contains("chest", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("arms", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BasicArmorRegionBindingService_SemanticFallbackDetectsAlienSparseRegions()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var physicsPath = Path.Combine(workingDirectory, "alien_sparse.xml");
+        await File.WriteAllTextAsync(
+            physicsPath,
+            """
+            <system>
+              <bone name="MawLatch" />
+              <bone name="TongueBlade" />
+              <bone name="TailNub" />
+              <bone name="PawPad.L" />
+              <bone name="SheathNode" />
+              <bone name="WombCore" />
+            </system>
+            """);
+
+        try
+        {
+            var service = new BasicArmorRegionBindingService();
+            var armor = new ImportedArmor("alien_sparse.nif", ["alien_sparse.nif"], [], [physicsPath], []);
+            var analysis = new MeshAnalysis("mixed", false, 1);
+
+            var binding = await service.BindAsync(armor, analysis, CancellationToken.None);
+
+            Assert.Equal("semantic-fallback", binding.DetectionMethod);
+            Assert.Contains("mouth", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("tail", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("feet", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("pelvis", binding.CoveredRegions, StringComparer.OrdinalIgnoreCase);
         }
         finally
         {
@@ -16207,6 +16336,38 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_1.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_ground.nif")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticAlienSparseCustomPluginModPackDirectory_UsesSparseSemanticFallbackAndPluginContext()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAlienSparseCustomPluginModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousMaster.esp", patchJson, StringComparison.Ordinal);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+
+            var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
+            Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
+            Assert.Contains("mouth", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("genitals", inGameJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

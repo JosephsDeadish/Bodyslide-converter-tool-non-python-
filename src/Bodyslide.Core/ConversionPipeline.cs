@@ -7045,15 +7045,25 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             return resultsWithPaths.Select(x => x.Result).ToList();
         }
 
-        var total = processableMeshFiles.Count * variants.Count;
+        var variantMeshSets = variants
+            .Select(variant => new
+            {
+                Variant = variant,
+                MeshFiles = FilterMeshFilesForVariant(processableMeshFiles, variant)
+            })
+            .Where(static entry => entry.MeshFiles.Count > 0)
+            .ToList();
+
+        var total = variantMeshSets.Sum(static entry => entry.MeshFiles.Count);
         var completed = 0;
         var allResults = new List<ConversionResult>(total);
 
-        foreach (var variant in variants)
+        foreach (var entry in variantMeshSets)
         {
+            var variant = entry.Variant;
             var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
             var resultsWithPaths = await ConvertMeshSetAsync(
-                processableMeshFiles,
+                entry.MeshFiles,
                 variant.Request,
                 variantRootOutput,
                 total,
@@ -7067,6 +7077,65 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         }
 
         return allResults;
+    }
+
+    private static IReadOnlyList<string> FilterMeshFilesForVariant(
+        IReadOnlyList<string> meshFiles,
+        NormalizedConversionRequest variant)
+    {
+        var variantTarget = !string.IsNullOrWhiteSpace(variant.Request.TargetBody)
+            ? variant.Request.TargetBody
+            : variant.Preset?.TargetBody;
+        if (string.IsNullOrWhiteSpace(variantTarget) ||
+            !BodyTypeCatalog.TryGetGender(variantTarget, out var variantGender))
+        {
+            return meshFiles;
+        }
+
+        var hasMixedGenderTargets = meshFiles.Count > 0;
+        if (!hasMixedGenderTargets)
+        {
+            return meshFiles;
+        }
+
+        var filtered = meshFiles
+            .Where(meshFile =>
+                !TryDetectBatchMeshGender(meshFile, out var meshGender) ||
+                string.Equals(meshGender, variantGender, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return filtered.Length == 0 ? meshFiles : filtered;
+    }
+
+    internal static bool TryDetectBatchMeshGender(string meshFile, out string gender)
+    {
+        gender = string.Empty;
+        if (string.IsNullOrWhiteSpace(meshFile))
+        {
+            return false;
+        }
+
+        var normalized = meshFile.Replace('\\', '/');
+        var fileName = Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty;
+        if (normalized.Contains("/actors/character/character assets male/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("malebody", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("_m", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = "male";
+            return true;
+        }
+
+        if (normalized.Contains("/actors/character/character assets/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("femalebody", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Contains("_f", StringComparison.OrdinalIgnoreCase))
+        {
+            gender = "female";
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<IReadOnlyList<(string MeshFile, ConversionResult Result)>> ConvertMeshSetAsync(
@@ -13473,6 +13542,12 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             return Task.FromResult(new ArmorRegionBinding(regions, "bone-names"));
         }
 
+        var semanticBinding = TryBindFromSemanticSignals(armor);
+        if (semanticBinding is not null)
+        {
+            return Task.FromResult(semanticBinding);
+        }
+
         // Phase 2: use parsed NIF skin partition slots when available.
         var partitionBinding = TryBindFromPartitions(armor.MeshFiles);
         if (partitionBinding is not null)
@@ -13551,6 +13626,91 @@ internal sealed class BasicArmorRegionBindingService : IArmorRegionBindingServic
             ? null
             : new ArmorRegionBinding(resolved, "nif-partitions");
     }
+
+    private static ArmorRegionBinding? TryBindFromSemanticSignals(ImportedArmor armor)
+    {
+        var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var physicsFile in armor.PhysicsFiles)
+        {
+            if (!physicsFile.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) || !File.Exists(physicsFile))
+            {
+                continue;
+            }
+
+            try
+            {
+                ApplySemanticSignalScores(scores, File.ReadAllText(physicsFile), weight: 3);
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            ApplySemanticSignalScores(scores, meshFile.Replace('\\', ' ').Replace('/', ' '), weight: 1);
+        }
+
+        if (scores.Count == 0)
+        {
+            return null;
+        }
+
+        var regions = scores
+            .OrderByDescending(static pair => pair.Value)
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(static pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToArray();
+
+        return regions.Length == 0
+            ? null
+            : new ArmorRegionBinding(regions, "semantic-fallback");
+    }
+
+    private static void ApplySemanticSignalScores(IDictionary<string, int> scores, string sourceText, int weight)
+    {
+        if (string.IsNullOrWhiteSpace(sourceText))
+        {
+            return;
+        }
+
+        foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
+        {
+            if (aliases.Any(alias => sourceText.Contains(alias, StringComparison.OrdinalIgnoreCase)) ||
+                sourceText.Contains(key, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var region in MapSemanticKeyToArmorRegions(key))
+                {
+                    scores[region] = scores.GetValueOrDefault(region) + weight;
+                }
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> MapSemanticKeyToArmorRegions(string semanticKey) =>
+        semanticKey.Trim().ToLowerInvariant() switch
+        {
+            "breast" => ["breasts", "chest"],
+            "belly" => ["belly", "waist"],
+            "butt" => ["pelvis", "butt"],
+            "thigh" => ["thighs", "legs"],
+            "genitals" => ["pelvis", "genitals"],
+            "mouth" => ["mouth", "shoulders"],
+            "head" => ["shoulders", "head"],
+            "heel" => ["feet", "calves"],
+            "tail" => ["tail", "pelvis"],
+            "wing" => ["wing", "shoulders"],
+            "fin" => ["wing", "tail"],
+            "frill" => ["head", "shoulders"],
+            "mane" => ["head", "shoulders"],
+            "branch" => ["arms", "shoulders"],
+            "antenna" => ["head"],
+            "mandible" => ["mouth", "head"],
+            _ => []
+        };
 
     private static ArmorRegionBinding? TryBindFromGeometry(IReadOnlyList<string> meshFiles)
     {

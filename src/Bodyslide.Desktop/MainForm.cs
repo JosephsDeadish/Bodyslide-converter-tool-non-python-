@@ -2381,115 +2381,26 @@ public sealed class MainForm : Form
 
     private static string? ReadOptionalComboValue(ComboBox comboBox)
     {
-        var selected = comboBox.SelectedItem?.ToString();
-        if (string.IsNullOrWhiteSpace(selected) || selected.Equals("(auto)", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return selected;
+        return DesktopWorkflowSupport.ReadOptionalSelection(comboBox.SelectedItem?.ToString());
     }
 
     private static string? ReadOptionalPathValue(string? path) =>
-        string.IsNullOrWhiteSpace(path) ? null : path.Trim();
+        DesktopWorkflowSupport.ReadOptionalPath(path);
 
     private static string? GetBestOutputDirectory(IReadOnlyList<ConversionResult> results)
-    {
-        if (results.Count == 0)
-        {
-            return null;
-        }
-
-        var first = results[0].OutputDirectory;
-        if (results.All(r => string.Equals(r.OutputDirectory, first, StringComparison.OrdinalIgnoreCase)))
-        {
-            return first;
-        }
-
-        var commonRoot = FindCommonDirectory(results.Select(r => r.OutputDirectory));
-        if (!string.IsNullOrWhiteSpace(commonRoot) && Directory.Exists(commonRoot))
-        {
-            return commonRoot;
-        }
-
-        return Directory.Exists(first) ? first : Path.GetDirectoryName(first);
-    }
+        => DesktopWorkflowSupport.GetBestOutputDirectory(results);
 
     private static string? GetFirstExistingOutputFile(IReadOnlyList<ConversionResult> results, params string[] fileNames)
-    {
-        if (fileNames.Length == 0)
-        {
-            return null;
-        }
-
-        return results
-            .SelectMany(r => r.OutputFiles)
-            .Where(File.Exists)
-            .OrderBy(path => GetPreviewCandidateRank(Path.GetFileName(path), fileNames))
-            .FirstOrDefault(path =>
-                fileNames.Any(fileName => Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase)));
-    }
+        => DesktopWorkflowSupport.GetFirstExistingOutputFile(results, fileNames);
 
     private static int GetPreviewCandidateRank(string? fileName, IReadOnlyList<string> fileNames)
-    {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            return int.MaxValue;
-        }
-
-        for (var index = 0; index < fileNames.Count; index++)
-        {
-            if (fileName.Equals(fileNames[index], StringComparison.OrdinalIgnoreCase))
-            {
-                return index;
-            }
-        }
-
-        return int.MaxValue;
-    }
+        => DesktopWorkflowSupport.GetPreviewCandidateRank(fileName, fileNames);
 
     private static string? ResolvePreviewPath(string folder)
-    {
-        foreach (var candidate in PreviewFileCandidates)
-        {
-            var path = Path.Combine(folder, candidate);
-            if (File.Exists(path))
-            {
-                return path;
-            }
-        }
-
-        return null;
-    }
+        => DesktopWorkflowSupport.ResolvePreviewPath(folder, PreviewFileCandidates);
 
     private static string? FindCommonDirectory(IEnumerable<string> directories)
-    {
-        var normalized = directories
-            .Where(static path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .ToArray();
-        if (normalized.Length == 0)
-        {
-            return null;
-        }
-
-        var candidate = normalized[0];
-        while (!string.IsNullOrWhiteSpace(candidate))
-        {
-            var matchPrefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var allMatch = normalized.All(path =>
-                string.Equals(path, candidate, StringComparison.OrdinalIgnoreCase) ||
-                path.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase));
-            if (allMatch)
-            {
-                return candidate;
-            }
-
-            candidate = Path.GetDirectoryName(candidate);
-        }
-
-        return null;
-    }
+        => DesktopWorkflowSupport.FindCommonDirectory(directories);
 
     private void AppendLog(string message)
     {
@@ -2612,7 +2523,8 @@ public sealed class MainForm : Form
         _optionToolTip.SetToolTip(_targetComboBox,
             "The body you want the converted armor to fit. This is the destination/output body.");
         _optionToolTip.SetToolTip(_targetBatchTextBox,
-            "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.");
+            "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.\n" +
+            "For mixed male/female packs you can enter targets like 3BA, HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
         _optionToolTip.SetToolTip(_profileComboBox,
             "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
         _optionToolTip.SetToolTip(_sourceComboBox,
@@ -2716,12 +2628,7 @@ public sealed class MainForm : Form
     }
 
     private static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
-        string.IsNullOrWhiteSpace(value)
-            ? []
-            : value
-                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+        DesktopWorkflowSupport.ParseDelimitedValues(value);
 
     private async Task InspectLearningCacheAsync()
     {
@@ -3126,19 +3033,7 @@ public sealed class MainForm : Form
         BodyTypeCatalog.IsMaleBody(targetBody);
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
-    {
-        var combined = new List<string>();
-        if (!string.IsNullOrWhiteSpace(selectedValue))
-        {
-            combined.Add(selectedValue);
-        }
-
-        combined.AddRange(enteredValues);
-        return combined
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-    }
+        => DesktopWorkflowSupport.CombineSelections(selectedValue, enteredValues);
 
     private void PopulateArtifactsTab(IReadOnlyList<ConversionResult> results)
     {

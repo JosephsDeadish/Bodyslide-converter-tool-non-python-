@@ -73,6 +73,7 @@ internal static class SkeletonFrameworkCatalog
 
         string? bestFramework = null;
         var bestFallbackScore = 0d;
+        var observedSemanticKeys = ExtractSemanticKeys(normalizedBoneNames);
         foreach (var framework in All)
         {
             var signatures = framework.DistinctiveSignatures
@@ -91,7 +92,7 @@ internal static class SkeletonFrameworkCatalog
                 return framework.Label;
             }
 
-            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames);
+            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys);
             if (fallbackScore > bestFallbackScore)
             {
                 bestFallbackScore = fallbackScore;
@@ -139,7 +140,10 @@ internal static class SkeletonFrameworkCatalog
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray() ?? [];
 
-    private static double ComputeFallbackScore(SkeletonFrameworkMetadata framework, IReadOnlyList<string> condensedBoneNames)
+    private static double ComputeFallbackScore(
+        SkeletonFrameworkMetadata framework,
+        IReadOnlyList<string> condensedBoneNames,
+        IReadOnlySet<string> observedSemanticKeys)
     {
         var prefixes = framework.BonePrefixes
             .Select(NormalizeForMatching)
@@ -163,10 +167,24 @@ internal static class SkeletonFrameworkCatalog
 
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
-            return 0d;
+            var frameworkSemanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+            if (observedSemanticKeys.Count == 0 || frameworkSemanticKeys.Count == 0)
+            {
+                return 0d;
+            }
+
+            var semanticMatches = observedSemanticKeys.Intersect(frameworkSemanticKeys, StringComparer.OrdinalIgnoreCase).Count();
+            return semanticMatches >= framework.MinimumSignatureMatches
+                ? semanticMatches * 0.9d
+                : 0d;
         }
 
-        return prefixMatches + (tokenMatches * 0.75d);
+        var semanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+        var semanticOverlap = semanticKeys.Count == 0 || observedSemanticKeys.Count == 0
+            ? 0
+            : observedSemanticKeys.Intersect(semanticKeys, StringComparer.OrdinalIgnoreCase).Count();
+
+        return prefixMatches + (tokenMatches * 0.75d) + (semanticOverlap * 0.65d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)
@@ -196,6 +214,30 @@ internal static class SkeletonFrameworkCatalog
         }
 
         return new string(buffer[..length]);
+    }
+
+    private static IReadOnlySet<string> ExtractSemanticKeys(IEnumerable<string> values)
+    {
+        var semanticKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var normalized = value.Trim();
+            foreach (var (key, aliases) in SemanticBoneAliasCatalog.All)
+            {
+                if (aliases.Any(alias => normalized.Contains(alias, StringComparison.OrdinalIgnoreCase)) ||
+                    normalized.Contains(key, StringComparison.OrdinalIgnoreCase))
+                {
+                    semanticKeys.Add(key);
+                }
+            }
+        }
+
+        return semanticKeys;
     }
 
     private sealed class SkeletonFrameworkMetadataDto

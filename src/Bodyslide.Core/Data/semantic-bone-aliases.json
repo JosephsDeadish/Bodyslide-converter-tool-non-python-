@@ -34,6 +34,9 @@
     "stomach",
     "tummy",
     "gut",
+    "womb",
+    "uterus",
+    "ovum",
     "navel",
     "torsofront"
   ],
@@ -66,10 +69,16 @@
     "anal",
     "groin",
     "crotch",
-    "pubic"
+    "pubic",
+    "ovipositor",
+    "seed",
+    "sheathnode"
   ],
   "mouth": [
     "mouth",
+    "maw",
+    "muzzle",
+    "snout",
     "lip",
     "jaw",
     "jawlower",
@@ -77,7 +86,9 @@
     "tongue",
     "tonguemid",
     "tonguetip",
+    "tongueblade",
     "teeth",
+    "palate",
     "throat",
     "throatlower",
     "pharynx",
@@ -93,7 +104,10 @@
   "heel": [
     "heel",
     "ankle",
-    "foot"
+    "foot",
+    "pawpad",
+    "digitpad",
+    "pad"
   ],
   "hair": [
     "hair",
@@ -110,6 +124,9 @@
   "tail": [
     "tail",
     "tails",
+    "tailnub",
+    "nubtail",
+    "caudal",
     "pony",
     "tassel",
     "tentacle",

@@ -2,11 +2,11 @@
   "groups": [
     { "name": "breast", "tokens": ["breast", "breast01", "breast02", "breastupper", "breastlower"] },
     { "name": "butt", "tokens": ["butt", "glute", "gluteupper", "glutelower", "rearcheek"] },
-    { "name": "belly", "tokens": ["belly", "waist"] },
+    { "name": "belly", "tokens": ["belly", "waist", "abdomen", "womb", "uterus", "ovum"] },
     { "name": "pec", "tokens": ["pec", "chest"] },
     { "name": "lat", "tokens": ["lat"] },
-    { "name": "genitals", "tokens": ["genital", "schlong", "balls", "ball", "scrot", "scrotum", "penis", "shaft", "foreskin", "sheath", "sheathtip", "glans", "knot", "testicle", "beastvagina", "beastanus", "sos", "tng"] },
-    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailfur", "tailfluff", "tailbarb", "tailspike", "tailblade", "coil", "serpenttail", "serpentine", "snake", "cobra", "viper", "tentacle"] },
+    { "name": "genitals", "tokens": ["genital", "schlong", "balls", "ball", "scrot", "scrotum", "penis", "shaft", "foreskin", "sheath", "sheathtip", "sheathnode", "glans", "knot", "testicle", "beastvagina", "beastanus", "ovipositor", "seed", "sos", "tng"] },
+    { "name": "tail", "tokens": ["tail", "tailbase", "tailtip", "tailnub", "nubtail", "caudal", "tailfur", "tailfluff", "tailbarb", "tailspike", "tailblade", "coil", "serpenttail", "serpentine", "snake", "cobra", "viper", "tentacle"] },
     { "name": "thigh", "tokens": ["thigh"] },
     { "name": "wing", "tokens": ["wing", "wingtip", "wingmid", "wingmembrane", "wingfinger", "feather", "pinion", "plume", "talon", "carapacewing", "webwing"] },
     { "name": "fin", "tokens": ["fin", "tailfin", "dorsalfin", "pectoralfin", "ventralfin", "webfin", "spinefin"] },
@@ -14,11 +14,11 @@
     { "name": "horn", "tokens": ["horn", "goathorn", "ramhorn"] },
     { "name": "antenna", "tokens": ["antenna", "feeler"] },
     { "name": "mandible", "tokens": ["mandible", "pincer", "fang"] },
-    { "name": "hoof", "tokens": ["hoof", "hock", "digitigrade", "paw", "claw", "dewclaw", "fetlock", "talon"] },
+    { "name": "hoof", "tokens": ["hoof", "hock", "digitigrade", "paw", "pawpad", "digitpad", "pad", "claw", "dewclaw", "fetlock", "talon"] },
     { "name": "mane", "tokens": ["mane", "forelock", "manetip"] },
     { "name": "frill", "tokens": ["frill", "gillfrill", "crest", "whisker"] },
     { "name": "abdomen", "tokens": ["abdomen", "thorax", "carapace", "segment"] },
-    { "name": "mouth", "tokens": ["mouth", "jaw", "jawlower", "jawupper", "tongue", "tonguemid", "tonguetip", "lip", "throat", "throatlower", "pharynx", "gullet"] },
+    { "name": "mouth", "tokens": ["mouth", "maw", "muzzle", "snout", "jaw", "jawlower", "jawupper", "tongue", "tonguemid", "tonguetip", "tongueblade", "lip", "palate", "throat", "throatlower", "pharynx", "gullet"] },
     { "name": "vagina", "tokens": ["vagina", "labia"] },
     { "name": "anus", "tokens": ["anus"] }
   ]
