@@ -1,0 +1,11 @@
+<SliderSetInfo version="1">
+  <SliderSet name="TravelerProject" set="3BA">
+    <OutputPath>meshes\armor\traveler\</OutputPath>
+    <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+    <Slider name="TravelerWaist" />
+    <Slider name="TravelerBust" />
+    <Slider name="TravelerHip" />
+    <Slider name="TravelerBack" />
+    <Slider name="HideCape" />
+  </SliderSet>
+</SliderSetInfo>

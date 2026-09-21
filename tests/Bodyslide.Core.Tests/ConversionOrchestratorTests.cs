@@ -9632,6 +9632,20 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void OsdMorphReader_RecoversFixtureWithUnnamedMorphEntries()
+    {
+        var malformedFixturePath = GetFixtureFilePath("SampledOsdPayloads", "traveler-outfitstudio-empty-name.osd");
+
+        Assert.True(OsdMorphReader.TryRead(malformedFixturePath, out var payload));
+        Assert.NotNull(payload);
+        Assert.Equal(2, payload!.Morphs.Count);
+        Assert.Equal(string.Empty, payload.Morphs[0].Name);
+        Assert.Single(payload.Morphs[0].SparseDeltas);
+        Assert.Equal("TravelerWaist", payload.Morphs[1].Name);
+        Assert.Equal(4, payload.InferredVertexCount);
+    }
+
+    [Fact]
     public void OsdMorphReader_WithTruncatedOutfitStudioPayload_IsRejected()
     {
         var bytes = BuildOutfitStudioOsdPayload(
@@ -9986,6 +10000,83 @@ public sealed class BsdSliderDataTests
             Assert.Equal(0.125f, osdPayloads.LowWeight.Deltas[0].X, 3);
             Assert.Equal(-0.25f, osdPayloads.LowWeight.Deltas[0].Y, 3);
             Assert.Contains("HideCape", resolved.ZapSliders ?? []);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedShapeDataPack_ResolvesLargerSampledPayloads()
+    {
+        var meshPath = GetFixtureFilePath("SampledBodySlideShapeDataPack", Path.Combine("meshes", "armor", "traveler", "traveler_armor_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+        Assert.Contains("TravelerWaist", resolved.Sliders);
+        Assert.Contains("TravelerBust", resolved.Sliders);
+        Assert.Contains("TravelerHip", resolved.Sliders);
+        Assert.Contains("TravelerBack", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasReferenceAssets);
+        Assert.DoesNotContain("morph-payloads", resolved.SourceAssetSupport.MissingAssets ?? []);
+        Assert.NotNull(resolved.ReusableMorphPayloads);
+        Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("TravelerWaist", out var waistPayloads));
+        Assert.NotNull(waistPayloads.LowWeight);
+        Assert.NotNull(waistPayloads.HighWeight);
+        Assert.Equal(16, waistPayloads.LowWeight!.VertexCount);
+        Assert.Equal(0.125f, waistPayloads.LowWeight.Deltas[0].X, 3);
+        Assert.Equal(0.22f, waistPayloads.HighWeight!.Deltas[1].X, 3);
+        Assert.True(resolved.ReusableMorphPayloads.TryGetValue("TravelerBust", out var bustPayloads));
+        Assert.NotNull(bustPayloads.HighWeight);
+        Assert.Equal(0.34f, bustPayloads.HighWeight!.Deltas[9].X, 3);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithMalformedUnnamedMorphFixture_IgnoresUnnamedEntriesAndKeepsValidPayloads()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var meshDirectory = Path.Combine(workingDirectory, "meshes", "armor", "traveler");
+        var sliderSetDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var shapeDataDirectory = Path.Combine(workingDirectory, "CalienteTools", "BodySlide", "ShapeData", "TravelerProject");
+        Directory.CreateDirectory(meshDirectory);
+        Directory.CreateDirectory(sliderSetDirectory);
+        Directory.CreateDirectory(shapeDataDirectory);
+
+        var meshPath = Path.Combine(meshDirectory, "traveler_armor_0.nif");
+        var ospPath = Path.Combine(sliderSetDirectory, "traveler_pack.osp");
+        var osdPath = Path.Combine(shapeDataDirectory, "TravelerProject.osd");
+        var referencePath = Path.Combine(shapeDataDirectory, "reference_body.nif");
+
+        File.Copy(GetFixtureFilePath("SampledBodySlideShapeDataPack", Path.Combine("meshes", "armor", "traveler", "traveler_armor_0.nif")), meshPath);
+        File.Copy(GetFixtureFilePath("SampledOsdPayloads", "traveler-outfitstudio-empty-name.osd"), osdPath);
+        File.Copy(GetFixtureFilePath("SampledBodySlideShapeDataPack", Path.Combine("CalienteTools", "BodySlide", "ShapeData", "TravelerProject", "reference_body.nif")), referencePath);
+        await File.WriteAllTextAsync(
+            ospPath,
+            """
+            <SliderSetInfo version="1">
+              <SliderSet name="TravelerProject" set="3BA">
+                <OutputPath>meshes\armor\traveler\</OutputPath>
+                <OutputFile gender="f" use="true">traveler_armor_0.nif</OutputFile>
+                <Slider name="TravelerWaist" />
+              </SliderSet>
+            </SliderSetInfo>
+            """);
+
+        try
+        {
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+            var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "CBBE", CancellationToken.None);
+
+            Assert.Contains("TravelerWaist", resolved.Sliders);
+            Assert.DoesNotContain(string.Empty, resolved.Sliders);
+            Assert.NotNull(resolved.ReusableMorphPayloads);
+            Assert.True(resolved.ReusableMorphPayloads!.ContainsKey("TravelerWaist"));
+            Assert.False(resolved.ReusableMorphPayloads.ContainsKey(string.Empty));
         }
         finally
         {

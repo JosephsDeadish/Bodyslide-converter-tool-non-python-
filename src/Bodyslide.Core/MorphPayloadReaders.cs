@@ -513,7 +513,7 @@ internal static class OsdMorphReader
             }
 
             var nameLength = bytes[offset++];
-            if (nameLength == 0 || offset + nameLength + 2 > bytes.Length)
+            if (offset + nameLength + 2 > bytes.Length)
             {
                 return false;
             }
