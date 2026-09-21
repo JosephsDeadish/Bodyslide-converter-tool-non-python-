@@ -762,12 +762,14 @@
     "sliderNames": [
       "Body",
       "Chest",
+      "Belly",
       "Waist",
       "Arms",
       "Legs",
       "Shoulders",
       "Butt",
-      "Pecs"
+      "Pecs",
+      "Thighs"
     ],
     "transformationField": {
       "chest": 1.1,
@@ -826,11 +828,14 @@
     "sliderNames": [
       "Body",
       "Chest",
+      "Belly",
       "Waist",
       "Arms",
       "Legs",
       "Shoulders",
-      "Butt"
+      "Butt",
+      "Pecs",
+      "Thighs"
     ],
     "transformationField": {
       "chest": 1.08,
@@ -892,11 +897,14 @@
     "sliderNames": [
       "Body",
       "Chest",
+      "Belly",
       "Waist",
       "Arms",
       "Legs",
       "Shoulders",
-      "Butt"
+      "Butt",
+      "Pecs",
+      "Thighs"
     ],
     "transformationField": {
       "chest": 1.05,
@@ -965,11 +973,14 @@
     "sliderNames": [
       "Body",
       "Chest",
+      "Belly",
       "Waist",
       "Arms",
       "Legs",
       "Shoulders",
-      "Butt"
+      "Butt",
+      "Pecs",
+      "Thighs"
     ],
     "transformationField": {
       "chest": 1.05,
@@ -1169,12 +1180,14 @@
     "sliderNames": [
       "Body",
       "Chest",
+      "Belly",
       "Waist",
       "Arms",
       "Legs",
       "Shoulders",
       "Butt",
       "Pecs",
+      "Thighs",
       "Genitals"
     ],
     "transformationField": {

@@ -1,0 +1,31 @@
+{
+  "name": "HimboSupport Reference",
+  "aliases": [
+    "HIMBO Raider",
+    "Nordic HIMBO"
+  ],
+  "referenceTokens": [
+    "himbo",
+    "male",
+    "raider"
+  ],
+  "sliderNames": [
+    "Body",
+    "Chest",
+    "Belly",
+    "Thighs",
+    "Pecs"
+  ],
+  "physicsBones": [
+    "NPC L Pec",
+    "NPC R Pec",
+    "NPC Belly",
+    "NPC L Lat",
+    "NPC R Lat"
+  ],
+  "physicsProfile": "smp",
+  "gender": "male",
+  "skeletonFoundation": "XPMSSE",
+  "skeletonFramework": "xpmsse-male-smp",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}

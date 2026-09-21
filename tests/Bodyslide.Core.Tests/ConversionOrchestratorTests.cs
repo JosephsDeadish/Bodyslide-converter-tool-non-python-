@@ -10688,6 +10688,62 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedHimboShapeDataPack_ResolvesMaleBodyPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticHimboModPack", Path.Combine("meshes", "male", "himbo", "variant", "himbo_raider_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "HIMBO", CancellationToken.None);
+
+        Assert.Contains("HimboChest", resolved.Sliders);
+        Assert.Contains("BellyBulk", resolved.Sliders);
+        Assert.Contains("Thighs", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+        Assert.True(resolved.ReusableMorphPayloads!.TryGetValue("Pecs", out var pecPayloads));
+        Assert.NotNull(pecPayloads.LowWeight);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedSamLightShapeDataPack_ResolvesMaleFrameworkPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticSamLightModPack", Path.Combine("meshes", "male", "samlight", "variant", "samlight_raider_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "SAM Light", CancellationToken.None);
+
+        Assert.Contains("SamChest", resolved.Sliders);
+        Assert.Contains("BellyLean", resolved.Sliders);
+        Assert.Contains("Thighs", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedSosVariantShapeDataPack_ResolvesDistinctGenitalLayoutPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticSosVariantModPack", Path.Combine("meshes", "male", "sos", "variant", "sos_raider_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "SOS", CancellationToken.None);
+
+        Assert.Contains("SosChest", resolved.Sliders);
+        Assert.Contains("BellyMass", resolved.Sliders);
+        Assert.Contains("Thighs", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithMalformedUnnamedMorphFixture_IgnoresUnnamedEntriesAndKeepsValidPayloads()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -12980,6 +13036,14 @@ public sealed class PhysicsMeshTypeTuningTests
     [Fact]
     public void BuiltInBodyCatalog_ExposesUbeAndSosSpecialBones()
     {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("HIMBO", out var himbo));
+        Assert.Contains("Belly", himbo.SliderNames);
+        Assert.Contains("Thighs", himbo.SliderNames);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("SAM Light", out var samLight));
+        Assert.Contains("Belly", samLight.SliderNames);
+        Assert.Contains("Thighs", samLight.SliderNames);
+
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("UBE", out var ube));
         Assert.Contains("Vagina", ube.AvailablePhysicsBones);
         Assert.Contains("VaginaDeep", ube.AvailablePhysicsBones);
@@ -13007,10 +13071,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("HDT Jaw", tng.AvailablePhysicsBones);
         Assert.Contains("HDT Tongue", tng.AvailablePhysicsBones);
         Assert.Contains("HDT Throat", tng.AvailablePhysicsBones);
+        Assert.Contains("Belly", tng.SliderNames);
+        Assert.Contains("Thighs", tng.SliderNames);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("The New Gentleman 2", out var tngAlias));
         Assert.Equal("TNG", tngAlias.Name);
 
-        Assert.True(BuiltInBodyMetadataCatalog.TryGet("SAM Light", out var samLight));
         Assert.Contains("SAM Foreskin", samLight.AvailablePhysicsBones);
     }
 
@@ -13199,6 +13264,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("mouth", throatGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TongueTipPhysics", out var tongueGroup));
         Assert.Equal("mouth", tongueGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("BellyBulkChain", out var bellyGroup));
+        Assert.Equal("belly", bellyGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("UpperThighSwing", out var thighGroup));
+        Assert.Equal("thigh", thighGroup);
         var longTailToken = $"{new string('X', 384)}TailChain";
         Assert.True(PhysicsRepairCatalog.TryMatchGroup(longTailToken, out var longTokenGroup));
         Assert.Equal("tail", longTokenGroup);
@@ -13216,6 +13285,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("tng-extended", SkeletonFrameworkCatalog.DetectFramework(["TNG Shaft", "TNG Glans"]));
         Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["HDT Mouth", "HDT Throat"]));
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["TailSheath", "BeastVagina"]));
+        Assert.Equal("tng-extended", SkeletonFrameworkCatalog.DetectFramework(["tng_shaft_ctrl", "tng_glans_ctrl"]));
+        Assert.Equal("sam-light", SkeletonFrameworkCatalog.DetectFramework(["samfskin_ctrl", "sam_genitalswing"]));
+        Assert.Equal("ube-extended", SkeletonFrameworkCatalog.DetectFramework(["hdtTongue_ctrl", "hdtThroat_ctrl"]));
     }
 }
 
@@ -14494,6 +14566,78 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticHimboModPack_WritesDedicatedMaleBodyArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHimboModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "male", "himbo", "variant", "himbo_raider_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputPath, "HIMBO", outputDirectory, PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "himbo", "himbo_raider_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticSamLightModPack_WritesDedicatedSamLightArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSamLightModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "male", "samlight", "variant", "samlight_raider_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputPath, "SAM Light", outputDirectory, PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "sam-light", "samlight_raider_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticSosVariantModPack_WritesDistinctSosArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSosVariantModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "male", "sos", "variant", "sos_raider_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputPath, "SOS", outputDirectory, PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "sos", "sos_raider_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
         }
         finally
         {
