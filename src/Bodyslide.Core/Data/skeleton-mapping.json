@@ -145,11 +145,17 @@
         "SOS GenitalsBase",
         "SOS Genitals01",
         "SOS Genitals02",
+        "SAM Genitals",
+        "SAM Foreskin",
         "SOS Foreskin",
         "SOS Shaft",
         "SOS Glans",
         "SOS Scrotum"
-      ]
+      ],
+      "fallbackMappings": {
+        "SAM Genitals": ["SOS GenitalsBase", "SOS Genitals01"],
+        "SAM Foreskin": ["SOS Foreskin", "SOS Genitals01"]
+      }
     },
     {
       "id": "sam-light",
@@ -159,6 +165,14 @@
         "NPC Belly",
         "SAM Genitals",
         "SAM Foreskin",
+        "HDT Mouth",
+        "HDT Jaw",
+        "HDT JawLower",
+        "HDT Tongue",
+        "HDT TongueMid",
+        "HDT TongueTip",
+        "HDT Throat",
+        "HDT ThroatLower",
         "SOS GenitalsBase",
         "SOS Foreskin",
         "SOS Shaft",
@@ -170,7 +184,15 @@
         "TNG Foreskin": ["SAM Foreskin", "SOS Foreskin", "SOS Genitals01"],
         "TNG Shaft": ["SAM Genitals", "SOS Shaft", "SOS Genitals01"],
         "TNG Glans": ["SAM Genitals", "SOS Glans", "SOS Genitals02"],
-        "TNG Balls": ["SOS Scrotum", "NPC Pelvis"]
+        "TNG Balls": ["SOS Scrotum", "NPC Pelvis"],
+        "HDT Mouth": ["NPC Head"],
+        "HDT Jaw": ["HDT Mouth", "NPC Head"],
+        "HDT JawLower": ["HDT Jaw", "HDT Mouth", "NPC Head"],
+        "HDT Tongue": ["HDT Mouth", "NPC Head"],
+        "HDT TongueMid": ["HDT Tongue", "HDT Mouth", "NPC Head"],
+        "HDT TongueTip": ["HDT Tongue", "HDT Mouth", "NPC Head"],
+        "HDT Throat": ["HDT Mouth", "NPC Head"],
+        "HDT ThroatLower": ["HDT Throat", "HDT Mouth", "NPC Head"]
       }
     },
     {
@@ -418,7 +440,17 @@
         "DewClaw.L",
         "DewClaw.R",
         "DigitigradeToe.L",
-        "DigitigradeToe.R"
+        "DigitigradeToe.R",
+        "TailSheath",
+        "BeastForeskin",
+        "BeastGlans",
+        "BeastKnot",
+        "BeastScrotum",
+        "BeastVagina",
+        "BeastAnus",
+        "JawLower",
+        "TongueMid",
+        "TongueTip"
       ],
       "fallbackMappings": {
         "DigitigradeFoot.L": ["PawFront.L", "Hoof.L", "NPC L Foot", "NPC L Calf"],
@@ -431,7 +463,17 @@
         "DewClaw.R": ["PawFront.R", "Hoof.R", "NPC R Foot"],
         "DigitigradeToe.L": ["PawFront.L", "Hoof.L", "NPC L Foot"],
         "DigitigradeToe.R": ["PawFront.R", "Hoof.R", "NPC R Foot"],
-        "TailTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"]
+        "TailTip": ["Tail5", "Tail4", "Tail3", "Tail2", "Tail1", "NPC Tail"],
+        "TailSheath": ["NPC Tail", "Tail1", "Tail2"],
+        "BeastForeskin": ["NPC Pelvis", "NPC Tail", "TailSheath"],
+        "BeastGlans": ["BeastForeskin", "NPC Pelvis"],
+        "BeastKnot": ["BeastGlans", "BeastForeskin", "NPC Pelvis"],
+        "BeastScrotum": ["NPC Pelvis", "TailSheath"],
+        "BeastVagina": ["NPC Pelvis", "NPC Tail"],
+        "BeastAnus": ["NPC Pelvis", "NPC Tail"],
+        "JawLower": ["NPC Head"],
+        "TongueMid": ["JawLower", "NPC Head"],
+        "TongueTip": ["TongueMid", "JawLower", "NPC Head"]
       }
     },
     {
