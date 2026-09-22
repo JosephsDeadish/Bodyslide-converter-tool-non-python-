@@ -24096,10 +24096,10 @@ public sealed class OutputCompletenessTests
                 <?xml version="1.0" encoding="utf-8"?>
                 <SliderSetInfo version="1">
                   <SliderSet name="SemanticProject" baseShape="Base Shape" bsversion="20">
-                    <SetFolder>CalienteTools\BodySlide\ShapeData\SemanticProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\SemanticProject\missing_source_0.nif</SourceFile>
-                    <OutputPath>meshes\armor\semantic\</OutputPath>
-                    <OutputFile gender="f" use="true">semantic_0.nif</OutputFile>
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\WrongProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\WrongProject\missing_source_0.nif</SourceFile>
+                    <OutputPath>C:\invalid\absolute\path\</OutputPath>
+                    <OutputFile gender="f" use="true">semantic_1.nif</OutputFile>
                     <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
                   </SliderSet>
                 </SliderSetInfo>
@@ -24131,12 +24131,60 @@ public sealed class OutputCompletenessTests
                 new BodySlideProject("SemanticProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
-            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("SetFolder", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("missing ShapeData NIFs", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
             Directory.Delete(outputDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void EvaluateTargetBodySupportQuality_FlagsShallowBuiltInLikeMetadata()
+    {
+        var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            referenceTokens: ["thin"],
+            sliderNames: ["Body"],
+            physicsBones: ["NPC Belly"],
+            expectedSemanticRegions: ["breasts", "belly", "thighs"],
+            expectedCollisionRegions: ["breasts", "belly", "thighs"],
+            minimumPhysicsSlotCount: 3,
+            minimumPhysicsChainDepth: 2,
+            collisionComplexity: "extended",
+            hasSkeletonMetadata: false,
+            requestedPhysicsProfile: "smp");
+
+        Assert.Contains(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("sliderNames-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-coverage", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EvaluateTargetBodySupportQuality_KnownBuiltInBodyAvoidsNoise()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("TNG", out var metadata));
+        var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            metadata.ReferenceTokens,
+            metadata.SliderNames,
+            metadata.AvailablePhysicsBones,
+            metadata.ExpectedSemanticRegions,
+            metadata.ExpectedCollisionRegions,
+            metadata.MinimumPhysicsSlotCount,
+            metadata.MinimumPhysicsChainDepth,
+            metadata.CollisionComplexity,
+            hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
+                                 !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
+            requestedPhysicsProfile: metadata.DefaultPhysics);
+
+        Assert.DoesNotContain(warnings, warning => warning.StartsWith("physicsBones-", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
