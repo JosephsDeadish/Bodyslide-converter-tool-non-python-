@@ -4284,8 +4284,7 @@ public sealed class MainForm : Form
 
         try
         {
-            using var stream = File.OpenRead(reportPath);
-            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream, options: ReportJsonOptions);
+            var report = JsonSerializer.Deserialize<InGameValidationReport>(File.ReadAllText(reportPath), options: ReportJsonOptions);
             if (report is null)
             {
                 requiresReview = true;
@@ -4551,7 +4550,8 @@ public sealed class MainForm : Form
 
     private static JsonDocument OpenJsonDocument(string path)
     {
-        return JsonDocument.Parse(File.OpenRead(path));
+        using var stream = File.OpenRead(path);
+        return JsonDocument.Parse(stream);
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>

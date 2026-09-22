@@ -20331,9 +20331,16 @@ internal sealed class LocalExportService(
             }
 
             await using var sourceStream = File.OpenRead(fullSource);
-            await using var destinationStream = File.Create(destinationPath);
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
-            copied.Add(destinationPath);
+            try
+            {
+                await using var destinationStream = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await sourceStream.CopyToAsync(destinationStream, cancellationToken);
+                copied.Add(destinationPath);
+            }
+            catch (IOException) when (File.Exists(destinationPath))
+            {
+                continue;
+            }
         }
 
         return copied;
