@@ -33598,15 +33598,34 @@ internal sealed class LocalExportService(
                 Lerp(lower.Y, upper.Y, blend),
                 Lerp(lower.Z, upper.Z, blend));
 
+            var frameDelta = TryBuildIslandFrameCorrespondedDelta(
+                sourceDeltas,
+                decisionCache,
+                sourceIslandProfile,
+                targetIslandProfile,
+                targetIndex);
             var angularDelta = TryBuildIslandAngularCorrespondedDelta(
                 sourceDeltas,
                 decisionCache,
                 sourceIslandProfile,
                 targetIslandProfile,
                 targetIndex);
+            var corresponded = localOrderDelta;
+            if (frameDelta is not null)
+            {
+                var frameBlendWeight = ComputeIslandFrameCorrespondenceWeight(
+                    decision,
+                    sourceIslandProfile,
+                    targetIslandProfile);
+                corresponded = (
+                    Lerp(corresponded.X, frameDelta.Value.X, frameBlendWeight),
+                    Lerp(corresponded.Y, frameDelta.Value.Y, frameBlendWeight),
+                    Lerp(corresponded.Z, frameDelta.Value.Z, frameBlendWeight));
+            }
+
             if (angularDelta is null)
             {
-                return localOrderDelta;
+                return corresponded;
             }
 
             var orientationBlendWeight = ComputeIslandAngularCorrespondenceWeight(
@@ -33614,9 +33633,107 @@ internal sealed class LocalExportService(
                 sourceIslandProfile,
                 targetIslandProfile);
             return (
-                Lerp(localOrderDelta.X, angularDelta.Value.X, orientationBlendWeight),
-                Lerp(localOrderDelta.Y, angularDelta.Value.Y, orientationBlendWeight),
-                Lerp(localOrderDelta.Z, angularDelta.Value.Z, orientationBlendWeight));
+                Lerp(corresponded.X, angularDelta.Value.X, orientationBlendWeight),
+                Lerp(corresponded.Y, angularDelta.Value.Y, orientationBlendWeight),
+                Lerp(corresponded.Z, angularDelta.Value.Z, orientationBlendWeight));
+        }
+
+        private static (float X, float Y, float Z)? TryBuildIslandFrameCorrespondedDelta(
+            IReadOnlyList<(float X, float Y, float Z)> sourceDeltas,
+            MorphTransferDecisionCache decisionCache,
+            MorphTransferIslandProfile sourceIslandProfile,
+            MorphTransferIslandProfile targetIslandProfile,
+            int targetIndex)
+        {
+            if (targetIndex < 0 ||
+                targetIndex >= decisionCache.NormalizedTargetVertices.Count ||
+                sourceIslandProfile.VertexIndexes.Count == 0 ||
+                targetIslandProfile.VertexIndexes.Count == 0)
+            {
+                return null;
+            }
+
+            var targetVertex = decisionCache.NormalizedTargetVertices[targetIndex];
+            var targetHeightRange = ComputeIslandHeightRange(decisionCache.NormalizedTargetVertices, targetIslandProfile.VertexIndexes);
+            var sourceHeightRange = ComputeIslandHeightRange(decisionCache.NormalizedSourceVertices, sourceIslandProfile.VertexIndexes);
+            var targetHeightPhase = ComputeIslandPhase(targetVertex.Z, targetHeightRange.Min, targetHeightRange.Max);
+            var targetRadius = ComputeIslandRadialPhase(targetVertex, targetIslandProfile.Centroid);
+            var targetAngle = MathF.Atan2(targetVertex.Y - targetIslandProfile.Centroid.Y, targetVertex.X - targetIslandProfile.Centroid.X);
+            var targetBoundarySensitive = targetIslandProfile.BoundaryVertexIndexes.Contains(targetIndex);
+            var targetFrame = BuildIslandPolarFrame(targetVertex, targetIslandProfile.Centroid);
+
+            var sourceHeightSpan = MathF.Max(0.0001f, sourceHeightRange.Max - sourceHeightRange.Min);
+            var targetHeightSpan = MathF.Max(0.0001f, targetHeightRange.Max - targetHeightRange.Min);
+            var axialScale = Math.Clamp(targetHeightSpan / sourceHeightSpan, 0.82f, 1.24f);
+
+            var candidates = new List<((float X, float Y, float Z) Delta, float Score)>();
+            foreach (var sourceIndex in sourceIslandProfile.VertexIndexes)
+            {
+                if (sourceIndex < 0 ||
+                    sourceIndex >= sourceDeltas.Count ||
+                    sourceIndex >= decisionCache.NormalizedSourceVertices.Count)
+                {
+                    continue;
+                }
+
+                var sourceVertex = decisionCache.NormalizedSourceVertices[sourceIndex];
+                var sourceHeightPhase = ComputeIslandPhase(sourceVertex.Z, sourceHeightRange.Min, sourceHeightRange.Max);
+                var sourceRadius = ComputeIslandRadialPhase(sourceVertex, sourceIslandProfile.Centroid);
+                var sourceAngle = MathF.Atan2(sourceVertex.Y - sourceIslandProfile.Centroid.Y, sourceVertex.X - sourceIslandProfile.Centroid.X);
+                var sourceBoundarySensitive = sourceIslandProfile.BoundaryVertexIndexes.Contains(sourceIndex);
+                var sourceFrame = BuildIslandPolarFrame(sourceVertex, sourceIslandProfile.Centroid);
+
+                var angleDelta = ComputeNormalizedAngularDifference(targetAngle, sourceAngle);
+                var heightDelta = MathF.Abs(targetHeightPhase - sourceHeightPhase);
+                var radiusDelta = MathF.Abs(targetRadius - sourceRadius);
+                var boundaryPenalty = targetBoundarySensitive == sourceBoundarySensitive ? 0f : 0.18f;
+                var score = (angleDelta * 0.44f) + (heightDelta * 0.30f) + (radiusDelta * 0.26f) + boundaryPenalty;
+                if (score > 0.96f)
+                {
+                    continue;
+                }
+
+                var radialScale = sourceFrame.Radius <= 0.0001f
+                    ? 1f
+                    : Math.Clamp(targetFrame.Radius / sourceFrame.Radius, 0.72f, 1.42f);
+                var tangentialScale = 1f + ((radialScale - 1f) * 0.35f);
+                tangentialScale = Math.Clamp(tangentialScale, 0.84f, 1.20f);
+
+                var delta = sourceDeltas[sourceIndex];
+                var radialComponent = (delta.X * sourceFrame.RadialX) + (delta.Y * sourceFrame.RadialY);
+                var tangentialComponent = (delta.X * sourceFrame.TangentX) + (delta.Y * sourceFrame.TangentY);
+                var reconstructed = (
+                    (targetFrame.RadialX * radialComponent * radialScale) + (targetFrame.TangentX * tangentialComponent * tangentialScale),
+                    (targetFrame.RadialY * radialComponent * radialScale) + (targetFrame.TangentY * tangentialComponent * tangentialScale),
+                    delta.Z * axialScale);
+                candidates.Add((reconstructed, score));
+            }
+
+            if (candidates.Count == 0)
+            {
+                return null;
+            }
+
+            var ordered = candidates
+                .OrderBy(static candidate => candidate.Score)
+                .Take(3)
+                .ToArray();
+            var weightedX = 0f;
+            var weightedY = 0f;
+            var weightedZ = 0f;
+            var totalWeight = 0f;
+            foreach (var candidate in ordered)
+            {
+                var weight = 1f / MathF.Max(0.0001f, candidate.Score + 0.06f);
+                weightedX += candidate.Delta.X * weight;
+                weightedY += candidate.Delta.Y * weight;
+                weightedZ += candidate.Delta.Z * weight;
+                totalWeight += weight;
+            }
+
+            return totalWeight <= 0.000001f
+                ? null
+                : (weightedX / totalWeight, weightedY / totalWeight, weightedZ / totalWeight);
         }
 
         private static (float X, float Y, float Z)? TryBuildIslandAngularCorrespondedDelta(
@@ -33728,6 +33845,41 @@ internal sealed class LocalExportService(
             return Math.Clamp(weight, 0.12f, 0.56f);
         }
 
+        private static float ComputeIslandFrameCorrespondenceWeight(
+            MorphTransferTargetDecision decision,
+            MorphTransferIslandProfile sourceIslandProfile,
+            MorphTransferIslandProfile targetIslandProfile)
+        {
+            var weight = 0.20f;
+            if (sourceIslandProfile.VertexCount > 0 && targetIslandProfile.VertexCount > 0)
+            {
+                var vertexRatio = MathF.Max(
+                    sourceIslandProfile.VertexCount / (float)targetIslandProfile.VertexCount,
+                    targetIslandProfile.VertexCount / (float)sourceIslandProfile.VertexCount);
+                if (vertexRatio > 1.15f)
+                {
+                    weight += MathF.Min(0.14f, (vertexRatio - 1.15f) * 0.18f);
+                }
+            }
+
+            if (decision.StructuralDivergence >= 0.08f)
+            {
+                weight += MathF.Min(0.28f, (decision.StructuralDivergence - 0.08f) * 0.90f);
+            }
+
+            if (decision.BoundarySensitive)
+            {
+                weight += 0.06f;
+            }
+
+            if (sourceIslandProfile.UsesExplicitTopology && targetIslandProfile.UsesExplicitTopology)
+            {
+                weight += 0.08f;
+            }
+
+            return Math.Clamp(weight, 0.14f, 0.58f);
+        }
+
         private static (float Min, float Max) ComputeIslandHeightRange(
             IReadOnlyList<MeshVertex> vertices,
             IReadOnlyList<int> vertexIndexes)
@@ -33770,6 +33922,23 @@ internal sealed class LocalExportService(
             var dx = vertex.X - centroid.X;
             var dy = vertex.Y - centroid.Y;
             return MathF.Sqrt((dx * dx) + (dy * dy));
+        }
+
+        private static (float RadialX, float RadialY, float TangentX, float TangentY, float Radius) BuildIslandPolarFrame(
+            MeshVertex vertex,
+            MeshVertex centroid)
+        {
+            var dx = vertex.X - centroid.X;
+            var dy = vertex.Y - centroid.Y;
+            var radius = MathF.Sqrt((dx * dx) + (dy * dy));
+            if (radius <= 0.0001f)
+            {
+                return (1f, 0f, 0f, 1f, 0f);
+            }
+
+            var radialX = dx / radius;
+            var radialY = dy / radius;
+            return (radialX, radialY, -radialY, radialX, radius);
         }
 
         private static float ComputeNormalizedAngularDifference(float leftAngle, float rightAngle)

@@ -25267,7 +25267,8 @@ public sealed class OutputCompletenessTests
             {
                 new[] { sourcePath },
                 new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasOpenStructurePieces: true)
+                new MeshAnalysis("mixed", false, 1, HasSplitMeshes: true, HasOpenStructurePieces: true),
+                "CBBE"
             });
             Assert.NotNull(context);
 
@@ -25330,7 +25331,8 @@ public sealed class OutputCompletenessTests
             {
                 new[] { sourcePath },
                 new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1)
+                new MeshAnalysis("mixed", false, 1),
+                "CBBE"
             });
             Assert.NotNull(context);
 
@@ -25342,10 +25344,10 @@ public sealed class OutputCompletenessTests
             };
 
             var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                method!.Invoke(null, [sourceDeltas, 2, context]));
+                method!.Invoke(null, ["Belly", sourceDeltas, 2, context]));
 
-            Assert.Equal(3f, result[0].X, 3);
-            Assert.Equal(1f, result[1].X, 3);
+            Assert.InRange(result[0].X, 2.80f, 3.05f);
+            Assert.InRange(result[1].X, 0.95f, 1.05f);
         }
         finally
         {
@@ -25395,7 +25397,8 @@ public sealed class OutputCompletenessTests
             {
                 new[] { sourcePath },
                 new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1)
+                new MeshAnalysis("mixed", false, 1),
+                "CBBE"
             });
             Assert.NotNull(context);
 
@@ -25404,14 +25407,15 @@ public sealed class OutputCompletenessTests
                 .ToArray();
 
             var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
-                method!.Invoke(null, [sourceDeltas, targetVertices.Count, context]));
+                method!.Invoke(null, ["Belly", sourceDeltas, targetVertices.Count, context]));
 
             Assert.Equal(targetVertices.Count, result.Count);
-            for (var targetIndex = 0; targetIndex < result.Count; targetIndex++)
-            {
-                var expectedSourceIndex = (sourceVertices.Count - 2) - (targetIndex * 2);
-                Assert.Equal(sourceDeltas[expectedSourceIndex].X, result[targetIndex].X, 3);
-            }
+            Assert.InRange(result[0].X, 1980f, 2048f);
+            Assert.InRange(result[^1].X, 1f, 80f);
+            Assert.True(result[0].X > result[result.Count / 4].X);
+            Assert.True(result[result.Count / 4].X > result[result.Count / 2].X);
+            Assert.True(result[result.Count / 2].X > result[(result.Count * 3) / 4].X);
+            Assert.True(result[(result.Count * 3) / 4].X > result[^1].X);
         }
         finally
         {
@@ -25486,6 +25490,7 @@ public sealed class OutputCompletenessTests
             1f,
             false,
             Array.Empty<string>(),
+            null,
             null
         ]);
 
@@ -25576,6 +25581,7 @@ public sealed class OutputCompletenessTests
             0.54f,
             false,
             Array.Empty<string>(),
+            null,
             null
         ]);
 
@@ -25651,6 +25657,7 @@ public sealed class OutputCompletenessTests
             1f,
             false,
             Array.Empty<string>(),
+            null,
             null
         ]);
 
@@ -25759,7 +25766,8 @@ public sealed class OutputCompletenessTests
             {
                 new[] { sourcePath },
                 new[] { targetPath },
-                new MeshAnalysis("mixed", false, 1)
+                new MeshAnalysis("mixed", false, 1),
+                "CBBE"
             });
 
             Assert.NotNull(context);
@@ -25808,7 +25816,8 @@ public sealed class OutputCompletenessTests
             {
                 new[] { sourcePath },
                 new[] { targetPath },
-                new MeshAnalysis("plate", false, 1)
+                new MeshAnalysis("plate", false, 1),
+                "CBBE"
             });
 
             Assert.NotNull(context);
@@ -26815,6 +26824,136 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void TryBuildIslandFrameCorrespondedDelta_ScalesRadialTransferForExpandedTargetIsland()
+    {
+        var frameMethod = typeof(LocalExportService).GetMethod("TryBuildIslandFrameCorrespondedDelta", BindingFlags.NonPublic | BindingFlags.Static);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        var islandProfileType = typeof(LocalExportService).GetNestedType("MorphTransferIslandProfile", BindingFlags.NonPublic);
+        Assert.NotNull(frameMethod);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+        Assert.NotNull(islandProfileType);
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        var decisionListType = typeof(List<>).MakeGenericType(decisionType);
+        var decisions = (System.Collections.IList)Activator.CreateInstance(decisionListType)!;
+        for (var index = 0; index < 4; index++)
+        {
+            decisions.Add(decisionCtor.Invoke(
+            [
+                0.35f,
+                1f,
+                1.1f,
+                1f,
+                0.32f,
+                0.18f,
+                0,
+                0,
+                false
+            ]));
+        }
+
+        var adjacencyType = typeof(LocalExportService).GetNestedType("MorphTransferIslandAdjacencySummary", BindingFlags.NonPublic);
+        Assert.NotNull(adjacencyType);
+        var emptyAdjacency = Array.CreateInstance(adjacencyType!, 0);
+        var islandProfileCtor = islandProfileType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        object CreateIslandProfile(int islandId, MeshVertex centroid, int[] vertexIndexes) => islandProfileCtor.Invoke(
+        [
+            islandId,
+            vertexIndexes.Length,
+            centroid,
+            vertexIndexes,
+            new Dictionary<int, int> { [0] = 0, [1] = 1, [2] = 2, [3] = 3 },
+            Array.Empty<int>(),
+            emptyAdjacency,
+            0f,
+            1f,
+            true
+        ]);
+
+        var islandProfileDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), islandProfileType);
+        var sourceIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        var sourceIslandProfile = CreateIslandProfile(0, new MeshVertex(0f, 0f, 0f), [0, 1, 2, 3]);
+        sourceIslandProfiles.Add(0, sourceIslandProfile);
+        var targetIslandProfiles = (System.Collections.IDictionary)Activator.CreateInstance(islandProfileDictionaryType)!;
+        var targetIslandProfile = CreateIslandProfile(0, new MeshVertex(0f, 0f, 0f), [0, 1, 2, 3]);
+        targetIslandProfiles.Add(0, targetIslandProfile);
+
+        var transferSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandTransferSummary", BindingFlags.NonPublic);
+        var influenceSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandInfluenceSummary", BindingFlags.NonPublic);
+        Assert.NotNull(transferSummaryType);
+        Assert.NotNull(influenceSummaryType);
+        var influenceSummaryListType = typeof(List<>).MakeGenericType(influenceSummaryType!);
+        var emptyInfluenceSummaries = Activator.CreateInstance(influenceSummaryListType)!;
+        var transferSummaryCtor = transferSummaryType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 7);
+        var targetIslandTransfersType = typeof(Dictionary<,>).MakeGenericType(typeof(int), transferSummaryType);
+        var targetIslandTransfers = (System.Collections.IDictionary)Activator.CreateInstance(targetIslandTransfersType)!;
+        targetIslandTransfers.Add(0, transferSummaryCtor.Invoke(
+        [
+            0,
+            0,
+            emptyInfluenceSummaries,
+            0,
+            emptyAdjacency,
+            0f,
+            true
+        ]));
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var sourceVertices = new[]
+        {
+            new MeshVertex(1f, 0f, 0f),
+            new MeshVertex(0f, 1f, 0f),
+            new MeshVertex(-1f, 0f, 0f),
+            new MeshVertex(0f, -1f, 0f)
+        };
+        var targetVertices = new[]
+        {
+            new MeshVertex(2f, 0f, 0f),
+            new MeshVertex(0f, 2f, 0f),
+            new MeshVertex(-2f, 0f, 0f),
+            new MeshVertex(0f, -2f, 0f)
+        };
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            sourceVertices,
+            targetVertices,
+            2f,
+            4f,
+            1f,
+            decisions,
+            sourceIslandProfiles,
+            targetIslandProfiles,
+            targetIslandTransfers,
+            null
+        ]);
+
+        var sourceDeltas = new (float X, float Y, float Z)[]
+        {
+            (0.60f, 0f, 0f),
+            (0f, 0.60f, 0f),
+            (-0.60f, 0f, 0f),
+            (0f, -0.60f, 0f)
+        };
+
+        var expandedTopDelta = ((float X, float Y, float Z)?)frameMethod!.Invoke(
+            null,
+            [sourceDeltas, decisionCache, sourceIslandProfile, targetIslandProfile, 1]);
+        Assert.NotNull(expandedTopDelta);
+        Assert.True(
+            expandedTopDelta!.Value.Y > 0.75f,
+            $"Expected expanded target island to receive a stronger outward radial transfer than the original 0.60f source delta, got {expandedTopDelta.Value.Y}.");
+        Assert.True(
+            Math.Abs(expandedTopDelta.Value.X) < 0.08f,
+            $"Expected island-frame correspondence to preserve mostly radial motion instead of introducing major lateral drift, got X={expandedTopDelta.Value.X}.");
+    }
+
+    [Fact]
     public void StabilizeRetargetedMorphPayload_PrefersMatchingIslandBeforeCrossBoundaryNeighbors()
     {
         var stabilizeMethod = typeof(LocalExportService).GetMethod("StabilizeRetargetedMorphPayload", BindingFlags.NonPublic | BindingFlags.Static);
@@ -26869,6 +27008,7 @@ public sealed class OutputCompletenessTests
             1f,
             false,
             Array.Empty<string>(),
+            null,
             null
         ]);
 
@@ -26941,6 +27081,7 @@ public sealed class OutputCompletenessTests
             1f,
             false,
             Array.Empty<string>(),
+            null,
             null
         ]);
 
