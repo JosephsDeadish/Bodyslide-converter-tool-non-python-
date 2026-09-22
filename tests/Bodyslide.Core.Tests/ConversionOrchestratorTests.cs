@@ -5970,6 +5970,36 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BasicWeightSolverService_ComplexLocalIslandCageBoostsRepairCounts()
+    {
+        var simple = new WeightedMesh("cloth", "CBBE", false, []);
+        var complex = new WeightedMesh(
+            "cloth",
+            "CBBE",
+            false,
+            DeformationCage: new DeformationCage(
+                "local-complexity",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        "local_mesh",
+                        0,
+                        ["belly", "waist"],
+                        BoundaryLoops: [new CageIslandBoundaryLoopControl(1, ["belly"], IsHole: true)],
+                        AuthoredRegions: [new CageIslandAuthoredRegion("belly", new CageRegion(0.62f, 0.18f, 0.50f, 0.78f, 0.50f, 0.86f, 1f, 1f, 1f, 0f))],
+                        EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 8, 4, 2, 8, 5, false, true))
+                ]));
+
+        var svc = new BasicWeightSolverService();
+        var simpleReport = await svc.SolveAsync(simple, CancellationToken.None);
+        var complexReport = await svc.SolveAsync(complex, CancellationToken.None);
+
+        Assert.True(complexReport.FixedUnderweightCount > simpleReport.FixedUnderweightCount);
+        Assert.True(complexReport.DisconnectedVertexCount > simpleReport.DisconnectedVertexCount);
+    }
+
+    [Fact]
     public async Task BasicWeightSolverService_WasRepairedTrueWhenDefectsExist()
     {
         var mesh = new WeightedMesh("plate", "CBBE", false, []);
@@ -17891,6 +17921,39 @@ public sealed class PoseSimulationAndPreviewTests
     }
 
     [Fact]
+    public async Task PoseSimulation_UsesLocalIslandMorphingWhenGlobalFieldIsMild()
+    {
+        var service = new BasicPoseSimulationService();
+        var mesh = new ConvertedMesh(
+            "mixed",
+            "local-cage",
+            1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["thighs"] = 1.02
+            },
+            new DeformationCage(
+                "local-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl("leg_panel", 0, ["thighs"])
+                ],
+                IslandRegionalMorphing: new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["leg_panel\u001f0"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["thighs"] = 1.14d
+                    }
+                }));
+
+        var result = await service.SimulateAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.True(result.TotalPosesAtRisk > 0);
+        Assert.Contains("thighs", result.HighRiskRegions, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PoseSimulation_ResultContainsAllEightPoses()
     {
         var service = new BasicPoseSimulationService();
@@ -21377,6 +21440,39 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("breasts", result.Regions);
         Assert.Contains("pelvis", result.Regions);
         Assert.Contains("voxel-penetration", result.DetectionMethods);
+    }
+
+    [Fact]
+    public async Task BasicClippingDetectionService_UsesLocalIslandMorphingWhenGlobalFieldIsMild()
+    {
+        var service = new BasicClippingDetectionService();
+        var mesh = new ConvertedMesh(
+            "mixed",
+            "local-cage",
+            1,
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["belly"] = 1.04
+            },
+            new DeformationCage(
+                "local-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl("torso_panel", 0, ["belly"])
+                ],
+                IslandRegionalMorphing: new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["torso_panel\u001f0"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["belly"] = 1.18d
+                    }
+                }));
+
+        var result = await service.DetectAsync(mesh, "CBBE", CancellationToken.None);
+
+        Assert.True(result.HasClipping);
+        Assert.Contains("belly", result.Regions);
     }
 
     // ── PresetCatalog — anime presets present ────────────────────────────────────

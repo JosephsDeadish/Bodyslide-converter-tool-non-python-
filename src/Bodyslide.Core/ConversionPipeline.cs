@@ -7971,6 +7971,14 @@ internal sealed class BasicWeightSolverService : IWeightSolverService
             under  = (int)Math.Round(under  * 1.20);
         }
 
+        var localCageComplexity = IslandLocalMorphingSupport.ComputeLocalCageComplexity(mesh.DeformationCage);
+        if (localCageComplexity > 0d)
+        {
+            over = (int)Math.Round(over * (1d + Math.Min(0.18d, localCageComplexity * 0.35d)));
+            under = (int)Math.Round(under * (1d + Math.Min(0.34d, localCageComplexity * 0.60d)));
+            disc = (int)Math.Round(disc + Math.Ceiling(localCageComplexity * 3d));
+        }
+
         var wasRepaired = over > 0 || under > 0 || disc > 0;
 
         return Task.FromResult(new WeightSolverReport(
@@ -7978,6 +7986,62 @@ internal sealed class BasicWeightSolverService : IWeightSolverService
             FixedUnderweightCount: under,
             DisconnectedVertexCount: disc,
             WasRepaired: wasRepaired));
+    }
+}
+
+internal static class IslandLocalMorphingSupport
+{
+    internal static IReadOnlyDictionary<string, double> BuildEffectiveRegionalMorphing(
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandRegionalMorphing is not { Count: > 0 } islandRegionalMorphing)
+        {
+            return regionalMorphing;
+        }
+
+        var merged = new Dictionary<string, double>(regionalMorphing, StringComparer.OrdinalIgnoreCase);
+        foreach (var localField in islandRegionalMorphing.Values)
+        {
+            foreach (var (region, factor) in localField)
+            {
+                if (!double.IsFinite(factor) || factor <= 0.01d)
+                {
+                    continue;
+                }
+
+                if (!merged.TryGetValue(region, out var current) ||
+                    Math.Abs(factor - 1d) > Math.Abs(current - 1d))
+                {
+                    merged[region] = factor;
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    internal static double ComputeLocalCageComplexity(DeformationCage? deformationCage)
+    {
+        if (deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return 0d;
+        }
+
+        var authoredCount = islandControls.Sum(static control => control.AuthoredRegions?.Count ?? 0);
+        var holeCount = islandControls.Sum(static control => control.BoundaryLoops?.Count(static loop => loop.IsHole) ?? 0);
+        var riskyCount = islandControls.Count(static control =>
+            control.EdgeNetworkSummary?.HasManifoldRisk == true ||
+            control.EdgeNetworkSummary?.NonManifoldEdgeCount > 0);
+        var multiRegionCount = islandControls.Count(static control => control.CageRegions.Count > 1);
+
+        var rawScore =
+            (islandControls.Count * 0.04d) +
+            (authoredCount * 0.015d) +
+            (multiRegionCount * 0.04d) +
+            (holeCount * 0.06d) +
+            (riskyCount * 0.10d);
+        return Math.Clamp(rawScore, 0d, 0.65d);
     }
 }
 
@@ -12578,9 +12642,12 @@ internal sealed class BasicClippingDetectionService : IClippingDetectionService
     public Task<ClippingReport> DetectAsync(ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
         var threshold = MeshBehaviorCatalog.Get(mesh.MeshType).ClippingThreshold;
+        var effectiveMorphing = IslandLocalMorphingSupport.BuildEffectiveRegionalMorphing(
+            mesh.RegionalMorphing,
+            mesh.DeformationCage);
 
         var regionScores = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+        foreach (var (region, morphFactor) in effectiveMorphing)
         {
             if (morphFactor < threshold)
             {
@@ -18176,11 +18243,12 @@ internal sealed class LocalExportService(
             var pluginNifPaths = writtenNifs
                 .Select(p => $"meshes/slidesmith/{safeBodyToken}/{Path.GetFileName(p)}")
                 .ToList();
+            var scratchMasterHints = BuildScratchPluginMasterHints(pluginAnalysis);
 
             var scratchResult = scratchPluginGen.Generate(
                 armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath,
                 meshType: analysis.MeshType,
-                masterFileHints: pluginAnalysis.ScannedPlugins);
+                masterFileHints: scratchMasterHints);
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
@@ -27052,6 +27120,53 @@ internal sealed class LocalExportService(
         return orderedMasters;
     }
 
+    private static IReadOnlyList<string> BuildScratchPluginMasterHints(PluginAnalysisResult pluginAnalysis)
+    {
+        var orderedHints = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddHint(string? value)
+        {
+            var normalized = NormalizeResolvedPluginFileNameOrNull(value);
+            if (string.IsNullOrWhiteSpace(normalized) || !seen.Add(normalized))
+            {
+                return;
+            }
+
+            orderedHints.Add(normalized);
+        }
+
+        foreach (var pluginName in pluginAnalysis.ScannedPlugins)
+        {
+            AddHint(pluginName);
+        }
+
+        foreach (var addon in pluginAnalysis.ArmorAddons)
+        {
+            AddHint(addon.OwningPluginFileName);
+            foreach (var master in addon.DeclaredMasterFileNames ?? [])
+            {
+                AddHint(master);
+            }
+        }
+
+        foreach (var record in pluginAnalysis.ArmorRecords ?? [])
+        {
+            AddHint(record.OwningPluginFileName);
+            foreach (var master in record.DeclaredMasterFileNames ?? [])
+            {
+                AddHint(master);
+            }
+
+            foreach (var linkedAddon in record.LinkedArmorAddonReferences ?? [])
+            {
+                AddHint(linkedAddon.OwningPluginFileName);
+            }
+        }
+
+        return orderedHints;
+    }
+
     private static string BuildFomodModuleConfigXml(
         string packageName,
         string targetBody,
@@ -29099,6 +29214,31 @@ internal sealed class LocalExportService(
             var islandDecision = targetIndex < decisionCache.TargetDecisions.Count
                 ? decisionCache.TargetDecisions[targetIndex]
                 : null;
+            if (islandDecision is not null &&
+                (islandDecision.StructuralDivergence >= 0.42f || islandDecision.PreferredSourceIsland < 0))
+            {
+                var sourceCentroid = islandDecision.PreferredSourceIsland >= 0 &&
+                                     decisionCache.SourceIslandProfiles.TryGetValue(islandDecision.PreferredSourceIsland, out var sourceIslandProfile)
+                    ? sourceIslandProfile.Centroid
+                    : centroid;
+                var severeBlend = Math.Clamp(
+                    Math.Max(
+                        islandDecision.PreferredSourceIsland < 0 ? 0.42f : 0.24f,
+                        (islandDecision.StructuralDivergence - 0.30f) * 0.95f),
+                    0f,
+                    0.68f);
+                var sourceBiasX = Math.Clamp((sourceCentroid.X - centroid.X) * 1.8f, -1f, 1f);
+                var sourceBiasY = Math.Clamp((sourceCentroid.Y - centroid.Y) * 1.8f, -1f, 1f);
+                var sourceBiasZ = Math.Clamp((sourceCentroid.Z - centroid.Z) * 1.6f, -1f, 1f);
+                var divergenceStretch = 1f + MathF.Min(0.55f, islandDecision.StructuralDivergence * 0.80f);
+                var reconstructedX = adaptiveScale * weightScale * divergenceStretch * ((0.22f * waveA) + (0.42f * localXBias) + (0.24f * sourceBiasX));
+                var reconstructedY = adaptiveScale * weightScale * divergenceStretch * ((0.18f * waveB) + (0.36f * localYBias) + (0.22f * sourceBiasY));
+                var reconstructedZ = adaptiveScale * weightScale * divergenceStretch * ((0.30f * waveA) + (0.32f * localCenterBias) + (0.30f * localZBias) + (0.18f * sourceBiasZ));
+                x = Lerp(x, reconstructedX, severeBlend);
+                y = Lerp(y, reconstructedY, severeBlend);
+                z = Lerp(z, reconstructedZ, severeBlend);
+            }
+
             var ownershipDamping = Math.Clamp(
                 1f - (boundaryWeight * 0.55f) - ((islandDecision?.BoundarySensitive ?? false) ? 0.06f : 0f),
                 0.32f,
@@ -33835,6 +33975,9 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
         string targetBody,
         CancellationToken cancellationToken)
     {
+        var effectiveMorphing = IslandLocalMorphingSupport.BuildEffectiveRegionalMorphing(
+            mesh.RegionalMorphing,
+            mesh.DeformationCage);
         var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var highRiskSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var atRiskPoseCount = 0;
@@ -33845,7 +33988,7 @@ internal sealed class BasicPoseSimulationService : IPoseSimulationService
             amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
             var atRiskRegions = new List<string>();
-            foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+            foreach (var (region, morphFactor) in effectiveMorphing)
             {
                 amplifiers.TryGetValue(region, out var amp);
                 var effectiveStress = morphFactor * (amp > 0 ? amp : 1.0);
@@ -34270,6 +34413,9 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
         CancellationToken cancellationToken)
     {
         var heelAware = IsHeelAwareSource(sourceMeshPaths);
+        var effectiveMorphing = IslandLocalMorphingSupport.BuildEffectiveRegionalMorphing(
+            mesh.RegionalMorphing,
+            mesh.DeformationCage);
 
         // Try animation-driven mode when source NIF paths are available
         if (sourceMeshPaths is { Count: > 0 })
@@ -34284,7 +34430,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
                     var vertices = ExtractVertices(bytes);
                     if (vertices.Count > 0)
                     {
-                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, mesh.RegionalMorphing, heelAware);
+                        var solverResult = AnimationDrivenGeometrySolver.Solve(vertices, effectiveMorphing, heelAware);
                         return BuildResultFromSolverOutput(solverResult, heelAware);
                     }
                 }
@@ -34397,6 +34543,9 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
 
     private static PoseSimulationResult RunHeuristicSimulation(ConvertedMesh mesh, bool heelAware = false)
     {
+        var effectiveMorphing = IslandLocalMorphingSupport.BuildEffectiveRegionalMorphing(
+            mesh.RegionalMorphing,
+            mesh.DeformationCage);
         var poseClippingRisk = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var highRiskSet      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var atRiskPoseCount  = 0;
@@ -34409,7 +34558,7 @@ internal sealed class AnimationDrivenPoseSimulationService : IPoseSimulationServ
             amplifiers ??= new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
             var atRiskRegions = new List<string>();
-            foreach (var (region, morphFactor) in mesh.RegionalMorphing)
+            foreach (var (region, morphFactor) in effectiveMorphing)
             {
                 amplifiers.TryGetValue(region, out var amp);
                 var effectiveStress = morphFactor * (amp > 0 ? amp : 1.0);
