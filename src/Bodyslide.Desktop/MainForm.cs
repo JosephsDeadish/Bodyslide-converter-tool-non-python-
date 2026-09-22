@@ -3598,13 +3598,53 @@ public sealed class MainForm : Form
         try
         {
             using var document = OpenJsonDocument(reportPath);
-            return TryReadValidationSummary(document.RootElement);
+            return TryReadValidationSummary(document.RootElement)
+                ?? TryReadBatchValidationSummary(document.RootElement);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to read validation summary from '{reportPath}': {ex.Message}");
             return null;
         }
+    }
+
+    private static ConversionValidationSummary? TryReadBatchValidationSummary(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Results", out var results) || results.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var status = TryReadString(element, "PackReadinessStatus");
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            status = results.EnumerateArray()
+                .Select(static item => TryReadString(item, "ValidationStatus"))
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .OrderByDescending(static value => ConversionValidationPresentation.GetGateRank(value!))
+                .FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return null;
+        }
+
+        var score = TryReadIntValue(element, "AverageValidationScore")
+            ?? results.EnumerateArray()
+                .Select(static item => TryReadIntValue(item, "ValidationScore"))
+                .Where(static value => value.HasValue)
+                .Select(static value => value!.Value)
+                .DefaultIfEmpty(0)
+                .Min();
+
+        return new ConversionValidationSummary(
+            status,
+            score,
+            TryReadIntValue(element, "HighRiskCount") ?? 0,
+            TryReadIntValue(element, "NeedsReviewCount") ?? 0,
+            TryReadIntValue(element, "ReadyCount") ?? 0,
+            []);
     }
 
     private static void AppendGuidanceFromBatchReport(
@@ -4620,7 +4660,8 @@ public sealed class MainForm : Form
         return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "ShapeData"))
             ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderSets"))
             ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide"))
-            ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json");
+            ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
+            ?? outputDirectory;
     }
 
     private static string? ResolveFirstExistingPath(string outputDirectory, params string[] patterns)
