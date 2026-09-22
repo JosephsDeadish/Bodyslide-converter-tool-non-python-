@@ -13752,6 +13752,19 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(sparseAquaticAlt.UsedSparseInference);
         Assert.Contains(sparseAquaticAlt.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void DetectFrameworkDetails_UsesContextCuesForSparseUnknownBones()
+    {
+        var detection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
+            ["Bone01", "Bone02", "Bone03"],
+            ["alien", "hybrid", "digitigrade", "tail", "paw", "sheath"]);
+
+        Assert.Equal("digitigrade-beast", detection.Label);
+        Assert.True(detection.UsedSparseInference);
+        Assert.True(detection.Confidence > 0d);
+        Assert.Contains(detection.Evidence, evidence => evidence.StartsWith("context-cues:", StringComparison.Ordinal));
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17156,12 +17169,18 @@ public sealed class RealisticModPackFixtureTests
             using var inGameReport = JsonDocument.Parse(inGameJson);
             Assert.True(inGameReport.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
             Assert.Contains("\"BlocksRelease\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Custom skeleton remap sweep", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("desktop-preflight", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("release-gate", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Mixed mod-stack load-order sweep", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             using var runtimePlan = JsonDocument.Parse(runtimePlanJson);
             Assert.Equal("external-harness-ready", runtimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresLiveGameExecution").GetBoolean());
@@ -17175,8 +17194,13 @@ public sealed class RealisticModPackFixtureTests
 
             var runtimeHarnessJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-harness.json"));
             Assert.Contains("\"AutomationCoverage\": \"external-harness-ready\"", runtimeHarnessJson, StringComparison.Ordinal);
-            Assert.Contains("\"ProbeId\": \"desktop-preflight\"", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("dispatch-animation-sequence", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("launch-full-load-order", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("verify-plugin-and-race-compatibility", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
+            using var runtimeHarness = JsonDocument.Parse(runtimeHarnessJson);
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("ProbeId").GetString()),
+                static probeId => string.Equals(probeId, "desktop-review-preflight", StringComparison.OrdinalIgnoreCase));
 
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);

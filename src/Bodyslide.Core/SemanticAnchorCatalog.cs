@@ -130,14 +130,14 @@ internal static class SemanticAnchorCatalog
         }
 
         profile = ranked.candidate;
-        evidence =
-        [
+        evidence = new[]
+        {
             $"fallback-profile:{profile.Name}",
             ranked.nameMatch ? "profile-name-match" : string.Empty,
             ranked.aliasMatches > 0 ? $"profile-alias-matches:{ranked.aliasMatches}" : string.Empty,
             ranked.regionAnchorMatches.Length > 0 ? $"profile-region-matches:{ranked.regionAnchorMatches.Length}" : string.Empty,
             ranked.landmarkCoverage > 0 ? $"profile-landmark-regions:{ranked.landmarkCoverage}" : string.Empty
-        ]
+        }
         .Where(static item => !string.IsNullOrWhiteSpace(item))
         .ToArray();
         return true;
