@@ -424,6 +424,11 @@ internal static class BodySupportMetadataHeuristics
         }
 
         var v = value.Trim();
+        if (CanonicalSupportRegions.TryGetValue(v, out var canonicalRegion))
+        {
+            return canonicalRegion;
+        }
+
         return v switch
         {
             var text when text.Contains("breast", StringComparison.OrdinalIgnoreCase) || text.Contains("pec", StringComparison.OrdinalIgnoreCase) => "breasts",
@@ -455,6 +460,44 @@ internal static class BodySupportMetadataHeuristics
             _ => string.Empty
         };
     }
+
+    private static readonly IReadOnlyDictionary<string, string> CanonicalSupportRegions =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["breast"] = "breasts",
+            ["breasts"] = "breasts",
+            ["belly"] = "belly",
+            ["butt"] = "butt",
+            ["thigh"] = "thighs",
+            ["thighs"] = "thighs",
+            ["calf"] = "calves",
+            ["calves"] = "calves",
+            ["pelvis"] = "pelvis",
+            ["chest"] = "chest",
+            ["shoulder"] = "shoulders",
+            ["shoulders"] = "shoulders",
+            ["arm"] = "arms",
+            ["arms"] = "arms",
+            ["jaw"] = "jaw",
+            ["tongue"] = "tongue",
+            ["throat"] = "throat",
+            ["mouth"] = "mouth",
+            ["vagina"] = "vagina",
+            ["anus"] = "anus",
+            ["genital"] = "genitals",
+            ["genitals"] = "genitals",
+            ["tail"] = "tail",
+            ["foot"] = "feet",
+            ["feet"] = "feet",
+            ["wing"] = "wing",
+            ["fin"] = "fin",
+            ["frill"] = "frill",
+            ["antenna"] = "antenna",
+            ["mandible"] = "mandible",
+            ["horn"] = "horn",
+            ["branch"] = "branch",
+            ["mane"] = "mane"
+        };
 
     private static IReadOnlyList<string>? NullIfEmpty(this IReadOnlyList<string> values) =>
         values.Count == 0 ? null : values;
