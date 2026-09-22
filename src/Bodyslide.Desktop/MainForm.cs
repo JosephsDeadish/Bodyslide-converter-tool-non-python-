@@ -2064,6 +2064,7 @@ public sealed class MainForm : Form
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entries = new List<GuidanceEntry>();
 
+        _openGuidanceTargetButton.Enabled = false;
         _guidanceListView.BeginUpdate();
         try
         {
@@ -3643,7 +3644,9 @@ public sealed class MainForm : Form
                 $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open conversion-quality.json for the full breakdown.",
                 qualityPath);
 
-            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3))
+            var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 4).ToArray();
+
+            foreach (var issue in prioritizedIssues.Take(3))
             {
                 add(
                     GetGuidanceAreaForIssueCode(issue.Code),
@@ -3652,7 +3655,7 @@ public sealed class MainForm : Form
                     ResolveGuidanceTargetPath(outputDirectory, previewPath, issue.Code, qualityPath));
             }
 
-            foreach (var issue in ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 4))
+            foreach (var issue in prioritizedIssues)
             {
                 var action = ConversionValidationGuidance.GetIssueFollowUp(issue, targetBody);
                 if (string.IsNullOrWhiteSpace(action))
@@ -4483,7 +4486,7 @@ public sealed class MainForm : Form
 
     private static JsonDocument OpenJsonDocument(string path)
     {
-        return JsonDocument.Parse(File.ReadAllBytes(path));
+        return JsonDocument.Parse(File.OpenRead(path));
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>
