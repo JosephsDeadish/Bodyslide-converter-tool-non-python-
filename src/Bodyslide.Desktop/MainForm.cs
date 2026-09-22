@@ -1199,13 +1199,17 @@ public sealed class MainForm : Form
                 new JsonSerializerOptions { WriteIndented = true });
             tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
             File.WriteAllText(tempPath, json);
-            if (File.Exists(settingsPath))
+            if (OperatingSystem.IsWindows() && File.Exists(settingsPath))
             {
-                if (OperatingSystem.IsWindows())
+                try
                 {
                     File.Replace(tempPath, settingsPath, destinationBackupFileName: null);
                 }
-                else
+                catch (FileNotFoundException)
+                {
+                    File.Move(tempPath, settingsPath, overwrite: true);
+                }
+                catch (IOException) when (!File.Exists(settingsPath))
                 {
                     File.Move(tempPath, settingsPath, overwrite: true);
                 }
@@ -1214,7 +1218,7 @@ public sealed class MainForm : Form
             }
             else
             {
-                File.Move(tempPath, settingsPath);
+                File.Move(tempPath, settingsPath, overwrite: true);
                 tempPath = null;
             }
         }
@@ -4284,7 +4288,13 @@ public sealed class MainForm : Form
 
         try
         {
-            var report = JsonSerializer.Deserialize<InGameValidationReport>(File.ReadAllText(reportPath), options: ReportJsonOptions);
+            using var stream = File.OpenRead(reportPath);
+            using var reportDocument = JsonDocument.Parse(stream, new JsonDocumentOptions
+            {
+                AllowTrailingCommas = ReportJsonOptions.AllowTrailingCommas,
+                CommentHandling = ReportJsonOptions.ReadCommentHandling
+            });
+            var report = reportDocument.RootElement.Deserialize<InGameValidationReport>(ReportJsonOptions);
             if (report is null)
             {
                 requiresReview = true;
