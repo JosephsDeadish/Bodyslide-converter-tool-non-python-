@@ -11235,6 +11235,9 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         return result;
     }
 
+    private static string BuildIslandRegionalMorphingKey(string meshKey, int islandId) =>
+        $"{meshKey?.Trim() ?? string.Empty}\u001f{islandId}";
+
     private static IReadOnlyDictionary<string, double> BuildMultiPieceAppendageRoutingDamping(
         IEnumerable<string> regions,
         DeformationCage? deformationCage)
