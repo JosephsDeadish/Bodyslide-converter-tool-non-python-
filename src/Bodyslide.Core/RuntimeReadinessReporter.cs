@@ -245,9 +245,9 @@ public static class RuntimeReadinessReporter
             body.MinimumRuntimePhysicsNodeCount,
             body.CollisionComplexity,
             !string.IsNullOrWhiteSpace(body.SkeletonFramework) || !string.IsNullOrWhiteSpace(body.SkeletonFoundation),
-            body.DefaultPhysics,
+            profile.RecommendedPhysicsProfile,
             body.PhysicsTokens,
-            body.DefaultPhysics,
+            profile.RecommendedPhysicsProfile,
             body.HasExplicitSupportMetadata);
         var structuralWarnings = supportWarnings
             .Where(static warning =>

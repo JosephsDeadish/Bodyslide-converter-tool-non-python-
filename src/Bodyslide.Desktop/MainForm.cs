@@ -1136,7 +1136,7 @@ public sealed class MainForm : Form
             }
 
             var json = File.ReadAllText(settingsPath);
-            var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ReportJsonOptions);
             if (settings is not null &&
                 settings.TryGetValue("theme", out var themeValue) &&
                 Enum.TryParse<UiTheme>(themeValue, ignoreCase: true, out var theme))
@@ -2139,6 +2139,17 @@ public sealed class MainForm : Form
                 AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
             }
 
+            if (requiresReview &&
+                !string.IsNullOrWhiteSpace(previewPath) &&
+                File.Exists(previewPath))
+            {
+                Add(
+                    "Review flow",
+                    "Action",
+                    "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
+                    previewPath);
+            }
+
             if (entries.Count > 0)
             {
                 var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
@@ -2149,17 +2160,6 @@ public sealed class MainForm : Form
                     gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
                     BuildGuidanceOverview(entries, requiresReview, gateStatus),
                     guidanceTarget);
-            }
-
-            if (requiresReview &&
-                !string.IsNullOrWhiteSpace(previewPath) &&
-                File.Exists(previewPath))
-            {
-                Add(
-                    "Review flow",
-                    "Action",
-                    "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
-                    previewPath);
             }
 
             if (entries.Count == 0)
