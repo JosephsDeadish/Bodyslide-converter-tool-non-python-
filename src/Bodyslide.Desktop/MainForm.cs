@@ -205,12 +205,13 @@ public sealed class MainForm : Form
             UpdatePathActionStates();
             ClearInspectionTab("Input changed. Click Inspect Input to refresh detection and compatibility details.");
         };
-        var browseInputFileButton = new Button { Text = "File...", AutoSize = true };
+        var browseInputFileButton = new Button { Name = "browseInputFileButton", Text = "File...", AutoSize = true };
         browseInputFileButton.Click += (_, _) => BrowseInputFile();
-        var browseInputFolderButton = new Button { Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+        var browseInputFolderButton = new Button { Name = "browseInputFolderButton", Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
         browseInputFolderButton.Click += (_, _) => BrowseInputFolder();
         _inspectInputButton = new Button
         {
+            Name = "inspectInputButton",
             Text = "Inspect Input",
             AutoSize = true,
             Enabled = false,
@@ -219,6 +220,7 @@ public sealed class MainForm : Form
         _inspectInputButton.Click += async (_, _) => await InspectInputAsync();
         _openInputButton = new Button
         {
+            Name = "openInputButton",
             Text = "Open",
             AutoSize = true,
             Enabled = false,
@@ -321,6 +323,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label { Text = "Preset batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _presetBatchTextBox = new TextBox
         {
+            Name = "presetBatchTextBox",
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
@@ -354,6 +357,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label { Text = "Destination body batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
         _targetBatchTextBox = new TextBox
         {
+            Name = "targetBatchTextBox",
             Dock = DockStyle.Fill,
             PlaceholderText = "Example: CBBE, 3BA, HIMBO",
         };
@@ -361,6 +365,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label(), 0, 5);
         var allBodiesButton = new Button
         {
+            Name = "allBodiesButton",
             Text = "Convert to every supported body",
             AutoSize = true,
             Anchor = AnchorStyles.Left,
@@ -547,6 +552,7 @@ public sealed class MainForm : Form
 
         _customProfilesListView = new ListView
         {
+            Name = "customProfilesListView",
             Dock = DockStyle.Fill,
             Height = 92,
             View = View.Details,
@@ -623,6 +629,7 @@ public sealed class MainForm : Form
         _cancelButton.Click += (_, _) => CancelConversion();
         _clearLogButton = new Button
         {
+            Name = "clearLogButton",
             Text = "Clear log",
             Width = 90,
             Height = 34,
@@ -631,6 +638,7 @@ public sealed class MainForm : Form
         _clearLogButton.Click += (_, _) => ClearLog();
         _openOutputButton = new Button
         {
+            Name = "openOutputButton",
             Text = "Open output",
             Width = 110,
             Height = 34,
@@ -659,6 +667,7 @@ public sealed class MainForm : Form
         _loadResultButton.Click += async (_, _) => await LoadPreviousResultAsync();
         _openBatchReportButton = new Button
         {
+            Name = "openBatchReportButton",
             Text = "Batch report",
             Width = 110,
             Height = 34,
@@ -667,6 +676,7 @@ public sealed class MainForm : Form
         _openBatchReportButton.Click += (_, _) => OpenBatchReport();
         _openReportButton = new Button
         {
+            Name = "openReportButton",
             Text = "Open report",
             Width = 110,
             Height = 34,
@@ -676,6 +686,7 @@ public sealed class MainForm : Form
         _openReportButton.Click += (_, _) => OpenSelectedReport();
         _openGuidanceTargetButton = new Button
         {
+            Name = "openGuidanceTargetButton",
             Text = "Open next action",
             Width = 125,
             Height = 34,
@@ -685,6 +696,7 @@ public sealed class MainForm : Form
         _openGuidanceTargetButton.Click += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _openArtifactButton = new Button
         {
+            Name = "openArtifactButton",
             Text = "Open file",
             Width = 110,
             Height = 34,
@@ -694,6 +706,7 @@ public sealed class MainForm : Form
         _openArtifactButton.Click += (_, _) => OpenSelectedArtifact();
         _loadCustomProfileButton = new Button
         {
+            Name = "loadCustomProfileButton",
             Text = "Load custom profile...",
             Width = 140,
             Height = 34,
@@ -702,6 +715,7 @@ public sealed class MainForm : Form
         _loadCustomProfileButton.Click += (_, _) => LoadCustomProfileFile();
         _saveProfileButton = new Button
         {
+            Name = "saveProfileButton",
             Text = "Save profile...",
             Width = 110,
             Height = 34,
@@ -710,6 +724,7 @@ public sealed class MainForm : Form
         _saveProfileButton.Click += (_, _) => SaveCurrentProfile();
         _inspectCacheButton = new Button
         {
+            Name = "inspectCacheButton",
             Text = "Inspect cache",
             Width = 110,
             Height = 34,
@@ -794,9 +809,9 @@ public sealed class MainForm : Form
             Name = "resultsTabControl",
             Dock = DockStyle.Fill,
         };
-        var logTabPage = new TabPage("Log");
+        var logTabPage = new TabPage("Log") { Name = "logTabPage" };
         logTabPage.Controls.Add(_logTextBox);
-        _previewTabPage = new TabPage("Preview");
+        _previewTabPage = new TabPage("Preview") { Name = "previewTabPage" };
         _previewPanel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -810,9 +825,10 @@ public sealed class MainForm : Form
         _previewTabPage.Controls.Add(_previewPanel);
         _resultsTabControl.TabPages.Add(logTabPage);
         _resultsTabControl.TabPages.Add(_previewTabPage);
-        _inspectTabPage = new TabPage("Inspect");
+        _inspectTabPage = new TabPage("Inspect") { Name = "inspectTabPage" };
         _inspectListView = new ListView
         {
+            Name = "inspectListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -823,9 +839,10 @@ public sealed class MainForm : Form
         _inspectListView.Columns.Add("Value", -2);
         _inspectTabPage.Controls.Add(_inspectListView);
         _resultsTabControl.TabPages.Add(_inspectTabPage);
-        _summaryTabPage = new TabPage("Summary");
+        _summaryTabPage = new TabPage("Summary") { Name = "summaryTabPage" };
         _summaryListView = new ListView
         {
+            Name = "summaryListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -836,7 +853,7 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
-        _guidanceTabPage = new TabPage("Next actions");
+        _guidanceTabPage = new TabPage("Next actions") { Name = "guidanceTabPage" };
         _guidanceListView = new ListView
         {
             Name = "guidanceListView",
@@ -856,7 +873,7 @@ public sealed class MainForm : Form
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
         _resultsTabControl.TabPages.Add(_guidanceTabPage);
-        _reportsTabPage = new TabPage("Reports");
+        _reportsTabPage = new TabPage("Reports") { Name = "reportsTabPage" };
         _reportsListView = new ListView
         {
             Name = "reportsListView",
@@ -873,9 +890,10 @@ public sealed class MainForm : Form
         _reportsListView.DoubleClick += (_, _) => OpenSelectedReport();
         _reportsTabPage.Controls.Add(_reportsListView);
         _resultsTabControl.TabPages.Add(_reportsTabPage);
-        _catalogTabPage = new TabPage("Catalog");
+        _catalogTabPage = new TabPage("Catalog") { Name = "catalogTabPage" };
         _catalogListView = new ListView
         {
+            Name = "catalogListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -887,9 +905,10 @@ public sealed class MainForm : Form
         _catalogListView.Columns.Add("Details", -2);
         _catalogTabPage.Controls.Add(_catalogListView);
         _resultsTabControl.TabPages.Add(_catalogTabPage);
-        _readinessTabPage = new TabPage("Readiness");
+        _readinessTabPage = new TabPage("Readiness") { Name = "readinessTabPage" };
         _readinessListView = new ListView
         {
+            Name = "readinessListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -901,7 +920,7 @@ public sealed class MainForm : Form
         _readinessListView.Columns.Add("Details", -2);
         _readinessTabPage.Controls.Add(_readinessListView);
         _resultsTabControl.TabPages.Add(_readinessTabPage);
-        _artifactsTabPage = new TabPage("Files");
+        _artifactsTabPage = new TabPage("Files") { Name = "artifactsTabPage" };
         _artifactsListView = new ListView
         {
             Name = "artifactsListView",
@@ -916,9 +935,10 @@ public sealed class MainForm : Form
         _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _artifactsTabPage.Controls.Add(_artifactsListView);
         _resultsTabControl.TabPages.Add(_artifactsTabPage);
-        _cacheTabPage = new TabPage("Cache");
+        _cacheTabPage = new TabPage("Cache") { Name = "cacheTabPage" };
         _cacheListView = new ListView
         {
+            Name = "cacheListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -3308,6 +3328,19 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
                     AddReportMetric(reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
                     break;
+                case "live-game-execution.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
+                    AddReportMetric(reportName, "External live-game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalHarness")), filePath);
+                    AddReportMetric(reportName, "SKSE launcher required", FormatBool(TryReadBoolValue(root, "RequiresSkseOrEquivalentLauncher")), filePath);
+                    AddReportMetric(reportName, "Mod-manager load order required", FormatBool(TryReadBoolValue(root, "RequiresDeployedModManagerLoadOrder")), filePath);
+                    AddReportMetric(reportName, "Host capabilities", TryReadArray(root, "RequiredHostCapabilities"), filePath);
+                    AddReportMetric(reportName, "Observation channels", TryReadArray(root, "ObservationChannels"), filePath);
+                    AddReportMetric(reportName, "Validation save profiles", TryReadArray(root, "ValidationSaveProfiles"), filePath);
+                    AddReportMetric(reportName, "Live-game launch sequence", TryReadArray(root, "LaunchSequence"), filePath);
+                    AddReportMetric(reportName, "Live-game probes", CountNestedArray(root, "Probes"), filePath);
+                    break;
                 case "topology-correspondence.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
@@ -3338,6 +3371,17 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
                     AddReportMetric(reportName, "Blocking GUI steps", CountObjectsWithBool(root, "SuggestedGuiFlow", "Blocking", expected: true), filePath);
                     AddReportMetric(reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
+                    break;
+                case "windows-ui-e2e-automation.json":
+                    AddReportMetric(reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
+                    AddReportMetric(reportName, "External UI harness", FormatBool(TryReadBoolValue(root, "RequiresExternalUiHarness")), filePath);
+                    AddReportMetric(reportName, "Embedded preview runtime required", FormatBool(TryReadBoolValue(root, "RequiresEmbeddedPreviewRuntimeForInAppPreview")), filePath);
+                    AddReportMetric(reportName, "Supported UI flows", TryReadArray(root, "SupportedFlows"), filePath);
+                    AddReportMetric(reportName, "Automation signals", TryReadArray(root, "AutomationSignals"), filePath);
+                    AddReportMetric(reportName, "UI selectors", CountNestedArray(root, "Selectors"), filePath);
+                    AddReportMetric(reportName, "UI automation steps", CountNestedArray(root, "Steps"), filePath);
+                    AddReportMetric(reportName, "UI step highlights", TryReadWindowsUiStepHighlights(root), filePath);
                     break;
                 case "mod-stack-cross-validation.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -4876,6 +4920,30 @@ public sealed class MainForm : Form
                return string.IsNullOrWhiteSpace(action)
                    ? null
                    : string.IsNullOrWhiteSpace(area) ? action : $"{area}: {action}";
+            })
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
+
+        return items.Length == 0 ? null : string.Join("; ", items);
+    }
+
+    private static string? TryReadWindowsUiStepHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static step =>
+            {
+               var area = TryReadString(step, "Area");
+               var signal = TryReadString(step, "ExpectedSignal");
+               return string.IsNullOrWhiteSpace(area)
+                   ? signal
+                   : string.IsNullOrWhiteSpace(signal) ? area : $"{area}: {signal}";
             })
             .Where(static item => !string.IsNullOrWhiteSpace(item))
             .Take(4)

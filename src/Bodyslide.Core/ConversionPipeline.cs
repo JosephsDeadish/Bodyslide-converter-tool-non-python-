@@ -349,6 +349,9 @@ public sealed record LiveGameExecutionPlan(
     bool RequiresDeployedModManagerLoadOrder,
     IReadOnlyList<string> DeploymentArtifacts,
     IReadOnlyList<string> LaunchSequence,
+    IReadOnlyList<string> RequiredHostCapabilities,
+    IReadOnlyList<string> ObservationChannels,
+    IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ModStackCrossValidationReport(
@@ -416,6 +419,8 @@ public sealed record WindowsUiE2EAutomationPlan(
     bool RequiresWindowsHost,
     bool RequiresExternalUiHarness,
     bool RequiresEmbeddedPreviewRuntimeForInAppPreview,
+    IReadOnlyList<string> SupportedFlows,
+    IReadOnlyList<string> AutomationSignals,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<WindowsUiAutomationSelector> Selectors,
     IReadOnlyList<WindowsUiAutomationStep> Steps);
@@ -29231,6 +29236,33 @@ internal sealed class LocalExportService(
             launchSequence.Insert(2, "apply-full-load-order-profile");
         }
 
+        var requiredHostCapabilities = new[]
+        {
+            "windows-host-control",
+            "mod-manager-profile-selection",
+            "skse-or-game-launcher-control",
+            "validation-save-selection",
+            "runtime-scenario-dispatch",
+            "host-observation-capture",
+            "release-gate-persistence"
+        };
+        var observationChannels = new[]
+        {
+            "screenshot-capture",
+            "render-preview-capture",
+            "load-order-state-snapshot",
+            "runtime-log-capture",
+            "manual-observation-notes"
+        };
+        var validationSaveProfiles = new[]
+        {
+            "neutral-smoke-test-save",
+            "combat-stress-save",
+            modStackCrossValidation?.RequiresLoadOrderValidation == true
+                ? "full-load-order-integration-save"
+                : "standard-load-order-validation-save"
+        };
+
         var probes = runtimePlan.AutomationHarness?.Probes
             .Select(probe => new LiveGameExecutionProbe(
                 probe.ProbeId,
@@ -29262,6 +29294,9 @@ internal sealed class LocalExportService(
             RequiresDeployedModManagerLoadOrder: modStackCrossValidation?.RequiresLoadOrderValidation ?? true,
             DeploymentArtifacts: deploymentArtifacts,
             LaunchSequence: launchSequence,
+            RequiredHostCapabilities: requiredHostCapabilities,
+            ObservationChannels: observationChannels,
+            ValidationSaveProfiles: validationSaveProfiles,
             LimitationNotes: limitationNotes,
             Probes: probes);
     }
@@ -29272,17 +29307,38 @@ internal sealed class LocalExportService(
         {
             new WindowsUiAutomationSelector("main-form", "winforms-name", "mainForm", "Top-level SlideSmith window"),
             new WindowsUiAutomationSelector("input-path", "winforms-name", "inputPathTextBox", "Primary input path field"),
+            new WindowsUiAutomationSelector("browse-input-file", "winforms-name", "browseInputFileButton", "Browse input file button"),
+            new WindowsUiAutomationSelector("browse-input-folder", "winforms-name", "browseInputFolderButton", "Browse input folder button"),
+            new WindowsUiAutomationSelector("inspect-input", "winforms-name", "inspectInputButton", "Inspect input action"),
+            new WindowsUiAutomationSelector("open-input", "winforms-name", "openInputButton", "Open selected input path"),
             new WindowsUiAutomationSelector("output-path", "winforms-name", "outputPathTextBox", "Primary output path field"),
             new WindowsUiAutomationSelector("target-body", "winforms-name", "targetBodyComboBox", "Target body selector"),
             new WindowsUiAutomationSelector("preset-body", "winforms-name", "presetBodyComboBox", "Preset selector"),
+            new WindowsUiAutomationSelector("preset-batch", "winforms-name", "presetBatchTextBox", "Preset batch list field"),
+            new WindowsUiAutomationSelector("target-batch", "winforms-name", "targetBatchTextBox", "Target batch list field"),
+            new WindowsUiAutomationSelector("all-bodies", "winforms-name", "allBodiesButton", "Convert to all supported bodies"),
             new WindowsUiAutomationSelector("convert-button", "winforms-name", "convertButton", "Starts conversion"),
             new WindowsUiAutomationSelector("cancel-button", "winforms-name", "cancelButton", "Cancels active conversion"),
+            new WindowsUiAutomationSelector("open-output-button", "winforms-name", "openOutputButton", "Opens the output directory"),
+            new WindowsUiAutomationSelector("show-preview-button", "winforms-name", "showPreviewButton", "Shows preview in app or fallback"),
             new WindowsUiAutomationSelector("load-result-button", "winforms-name", "loadResultButton", "Loads prior result folders"),
+            new WindowsUiAutomationSelector("open-report-button", "winforms-name", "openReportButton", "Opens the selected report"),
+            new WindowsUiAutomationSelector("open-guidance-target-button", "winforms-name", "openGuidanceTargetButton", "Opens the selected next-action target"),
+            new WindowsUiAutomationSelector("open-artifact-button", "winforms-name", "openArtifactButton", "Opens the selected artifact"),
+            new WindowsUiAutomationSelector("load-custom-profile-button", "winforms-name", "loadCustomProfileButton", "Loads one or more custom profiles"),
+            new WindowsUiAutomationSelector("save-profile-button", "winforms-name", "saveProfileButton", "Saves the current target as a reusable profile"),
+            new WindowsUiAutomationSelector("inspect-cache-button", "winforms-name", "inspectCacheButton", "Opens learning cache inspection"),
             new WindowsUiAutomationSelector("run-self-check-button", "winforms-name", "runSelfCheckButton", "Runs readiness self-check"),
             new WindowsUiAutomationSelector("results-tabs", "winforms-name", "resultsTabControl", "Main results tab control"),
+            new WindowsUiAutomationSelector("inspect-list", "winforms-name", "inspectListView", "Input inspection list view"),
+            new WindowsUiAutomationSelector("summary-list", "winforms-name", "summaryListView", "Summary list view"),
             new WindowsUiAutomationSelector("guidance-list", "winforms-name", "guidanceListView", "Guidance list view"),
             new WindowsUiAutomationSelector("reports-list", "winforms-name", "reportsListView", "Reports list view"),
+            new WindowsUiAutomationSelector("catalog-list", "winforms-name", "catalogListView", "Catalog list view"),
+            new WindowsUiAutomationSelector("readiness-list", "winforms-name", "readinessListView", "Readiness list view"),
             new WindowsUiAutomationSelector("artifacts-list", "winforms-name", "artifactsListView", "Artifacts list view"),
+            new WindowsUiAutomationSelector("cache-list", "winforms-name", "cacheListView", "Learning cache list view"),
+            new WindowsUiAutomationSelector("custom-profiles-list", "winforms-name", "customProfilesListView", "Loaded custom profiles list"),
             new WindowsUiAutomationSelector("preview-root", "html-data-testid", "preview-workbench-root", "Preview workbench root"),
             new WindowsUiAutomationSelector("preview-canvas", "html-data-testid", "workbench-canvas", "Preview workbench canvas"),
             new WindowsUiAutomationSelector("preview-reset-view", "html-data-testid", "reset-view-button", "Preview reset control")
@@ -29291,13 +29347,20 @@ internal sealed class LocalExportService(
         var steps = new[]
         {
             new WindowsUiAutomationStep("Startup", "Launch desktop app and wait for readiness state", "main-form", "SlideSmith window is visible and interactive", true),
+            new WindowsUiAutomationStep("Readiness", "Run self-check and inspect the Readiness tab before conversion", "run-self-check-button", "Readiness list is populated without blocking runtime failures", true),
             new WindowsUiAutomationStep("Input", "Populate input and output fields for a fixture conversion", "input-path", "Input and output paths are accepted without validation errors", true),
+            new WindowsUiAutomationStep("Inspect", "Inspect the selected input and confirm source detection details populate", "inspect-input", "Inspect list shows detected body, mesh type, and compatibility details", true),
             new WindowsUiAutomationStep("Configuration", "Choose a target body or preset and confirm options", "target-body", "Target selection is reflected in the form state", true),
+            new WindowsUiAutomationStep("Profiles", "Load or save custom body profiles when exercising custom-body workflows", "load-custom-profile-button", "Custom profiles list reflects added or saved profile paths", false),
+            new WindowsUiAutomationStep("Batch targets", "Use the all-bodies button or batch fields to exercise multi-target conversion flows", "all-bodies", "Target batch field accepts expanded body coverage requests", false),
             new WindowsUiAutomationStep("Execution", "Start conversion and wait for report artifacts", "convert-button", "Conversion completes and result tabs populate", true),
+            new WindowsUiAutomationStep("Load result", "Reload an existing output folder through the Desktop workflow", "load-result-button", "Summary, reports, artifacts, and preview state refresh from the loaded result", true),
             new WindowsUiAutomationStep("Preview", "Open or inspect the embedded preview workbench", "preview-root", "Preview workbench root loads with canvas controls", false),
             new WindowsUiAutomationStep("Guidance", "Open Next actions and confirm blocking guidance entries", "guidance-list", "Guidance entries reflect review-required runtime or topology steps", true),
             new WindowsUiAutomationStep("Reports", "Open report metrics and verify runtime/load-order artifacts are listed", "reports-list", "Report list includes runtime, live-game, and mod-stack artifacts", true),
-            new WindowsUiAutomationStep("Artifacts", "Open output artifacts tab and verify generated files are reachable", "artifacts-list", "Artifacts list includes preview and automation JSON outputs", true)
+            new WindowsUiAutomationStep("Artifacts", "Open output artifacts tab and verify generated files are reachable", "artifacts-list", "Artifacts list includes preview and automation JSON outputs", true),
+            new WindowsUiAutomationStep("Open actions", "Use open-report, open-next-action, open-file, and open-output actions to confirm the Desktop click paths reach the exported artifacts", "open-report-button", "Desktop open actions launch the selected report, guidance target, artifact, or output folder", true),
+            new WindowsUiAutomationStep("Catalog and cache", "Open catalog and cache-oriented views to confirm non-conversion navigation still works", "catalog-list", "Catalog and cache views remain reachable after conversion and after loading a previous result", false)
         };
 
         return new WindowsUiE2EAutomationPlan(
@@ -29305,6 +29368,24 @@ internal sealed class LocalExportService(
             RequiresWindowsHost: true,
             RequiresExternalUiHarness: true,
             RequiresEmbeddedPreviewRuntimeForInAppPreview: true,
+            SupportedFlows:
+            [
+                "self-check-and-readiness",
+                "inspect-input",
+                "preset-and-manual-target-selection",
+                "custom-profile-management",
+                "multi-target-batch-conversion",
+                "load-existing-result",
+                "preview-guidance-report-artifact-review",
+                "catalog-and-cache-navigation"
+            ],
+            AutomationSignals:
+            [
+                "stable-winforms-control-names",
+                "artifact-backed-report-metrics",
+                "html-data-testid-preview-selectors",
+                "result-reload-state-validation"
+            ],
             LimitationNotes:
             [
                 "The generated plan exposes stable WinForms Name selectors and preview HTML data-testid selectors, but execution still requires an external Windows UI harness.",

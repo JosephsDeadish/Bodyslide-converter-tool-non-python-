@@ -374,6 +374,19 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Harness phases", TryReadHarnessPhases(root), filePath);
                     Add(metrics, reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
                     break;
+                case "live-game-execution.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
+                    Add(metrics, reportName, "External live-game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalHarness")), filePath);
+                    Add(metrics, reportName, "SKSE launcher required", FormatBool(TryReadBoolValue(root, "RequiresSkseOrEquivalentLauncher")), filePath);
+                    Add(metrics, reportName, "Mod-manager load order required", FormatBool(TryReadBoolValue(root, "RequiresDeployedModManagerLoadOrder")), filePath);
+                    Add(metrics, reportName, "Host capabilities", TryReadArray(root, "RequiredHostCapabilities"), filePath);
+                    Add(metrics, reportName, "Observation channels", TryReadArray(root, "ObservationChannels"), filePath);
+                    Add(metrics, reportName, "Validation save profiles", TryReadArray(root, "ValidationSaveProfiles"), filePath);
+                    Add(metrics, reportName, "Live-game launch sequence", TryReadArray(root, "LaunchSequence"), filePath);
+                    Add(metrics, reportName, "Live-game probes", CountNestedArray(root, "Probes"), filePath);
+                    break;
                 case "mod-stack-cross-validation.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
@@ -422,6 +435,17 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
                     Add(metrics, reportName, "Blocking GUI steps", CountBlockingGuiSteps(root), filePath);
                     Add(metrics, reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
+                    break;
+                case "windows-ui-e2e-automation.json":
+                    Add(metrics, reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
+                    Add(metrics, reportName, "External UI harness", FormatBool(TryReadBoolValue(root, "RequiresExternalUiHarness")), filePath);
+                    Add(metrics, reportName, "Embedded preview runtime required", FormatBool(TryReadBoolValue(root, "RequiresEmbeddedPreviewRuntimeForInAppPreview")), filePath);
+                    Add(metrics, reportName, "Supported UI flows", TryReadArray(root, "SupportedFlows"), filePath);
+                    Add(metrics, reportName, "Automation signals", TryReadArray(root, "AutomationSignals"), filePath);
+                    Add(metrics, reportName, "UI selectors", CountNestedArray(root, "Selectors"), filePath);
+                    Add(metrics, reportName, "UI automation steps", CountNestedArray(root, "Steps"), filePath);
+                    Add(metrics, reportName, "UI step highlights", TryReadWindowsUiStepHighlights(root), filePath);
                     break;
                 case "pose-simulation-report.json":
                     Add(metrics, reportName, "Tested poses", CountNestedArray(root, "TestedPoses"), filePath);
@@ -656,6 +680,28 @@ internal static class DesktopWorkflowAutomation
                 .Take(4)!);
     }
 
+    private static string? TryReadWindowsUiStepHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Steps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "; ",
+            value.EnumerateArray()
+                .Select(static step =>
+                {
+                    var area = TryReadString(step, "Area");
+                    var signal = TryReadString(step, "ExpectedSignal");
+                    return string.IsNullOrWhiteSpace(area)
+                        ? signal
+                        : string.IsNullOrWhiteSpace(signal) ? area : $"{area}: {signal}";
+                })
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+                .Take(4)!);
+    }
+
     private static bool? TryReadBoolValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
             ? value.GetBoolean()
@@ -727,6 +773,23 @@ internal static class DesktopWorkflowAutomation
                 Blocking: false));
         }
 
+        var uiHarnessMetric = FindMetric(reportMetrics, "UI automation coverage", static value => value.Contains("external-windows-ui-harness-ready", StringComparison.OrdinalIgnoreCase));
+        if (uiHarnessMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Readiness click path",
+                "Run the self-check button and verify the Readiness tab stays green before conversion, after conversion, and after loading a previous result.",
+                $"{uiHarnessMetric.Property}: {uiHarnessMetric.Value}",
+                uiHarnessMetric.FilePath,
+                Blocking: false));
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Load-result click path",
+                "Exercise Load result..., then confirm Preview, Summary, Reports, Files, and Guidance refresh from the loaded output folder.",
+                $"{uiHarnessMetric.Property}: {uiHarnessMetric.Value}",
+                uiHarnessMetric.FilePath,
+                Blocking: true));
+        }
+
         var topologyMetric = FindMetric(reportMetrics, "Heuristic-heavy topology", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
                              ?? FindMetric(reportMetrics, "Topology correspondence", static value => !value.Equals("aligned", StringComparison.OrdinalIgnoreCase));
         if (topologyMetric is not null)
@@ -795,6 +858,18 @@ internal static class DesktopWorkflowAutomation
                 "Prepare an external modded test environment before treating the runtime validation plan as executable.",
                 $"{harnessMetric.Property}: {harnessMetric.Value}",
                 harnessMetric.FilePath,
+                Blocking: false));
+        }
+
+        var liveGameMetric = FindMetric(reportMetrics, "Live-game integration coverage", static value => value.Contains("external-live-game-harness", StringComparison.OrdinalIgnoreCase))
+                             ?? FindMetric(reportMetrics, "Host capabilities");
+        if (liveGameMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Live-game host contract",
+                "Open live-game-execution.json and confirm the required host capabilities, validation save profiles, and observation channels are available in the external harness.",
+                $"{liveGameMetric.Property}: {liveGameMetric.Value}",
+                liveGameMetric.FilePath,
                 Blocking: false));
         }
 
