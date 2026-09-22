@@ -3638,12 +3638,16 @@ public sealed class MainForm : Form
                 .DefaultIfEmpty(0)
                 .Min();
 
+        var explicitHighSeverityCount = TryReadIntValue(element, "HighSeverityCount");
+        var explicitMediumSeverityCount = TryReadIntValue(element, "MediumSeverityCount");
+        var explicitLowSeverityCount = TryReadIntValue(element, "LowSeverityCount");
+
         return new ConversionValidationSummary(
             status,
             score,
-            TryReadIntValue(element, "HighRiskCount") ?? 0,
-            TryReadIntValue(element, "NeedsReviewCount") ?? 0,
-            TryReadIntValue(element, "ReadyCount") ?? 0,
+            explicitHighSeverityCount ?? 0,
+            explicitMediumSeverityCount ?? 0,
+            explicitLowSeverityCount ?? 0,
             []);
     }
 
@@ -4600,8 +4604,8 @@ public sealed class MainForm : Form
 
     private static JsonDocument OpenJsonDocument(string path)
     {
-        using var stream = File.OpenRead(path);
-        return JsonDocument.Parse(stream, new JsonDocumentOptions
+        var json = File.ReadAllText(path);
+        return JsonDocument.Parse(json, new JsonDocumentOptions
         {
             AllowTrailingCommas = ReportJsonOptions.AllowTrailingCommas,
             CommentHandling = ReportJsonOptions.ReadCommentHandling
