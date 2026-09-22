@@ -79,6 +79,16 @@
       "body": "Draconic Humanoid",
       "compatibleGroups": ["humanoid", "beast", "draconic", "reptile", "tail", "horned", "winged", "creature"],
       "warningGroups": []
+    },
+    {
+      "body": "Insectoid Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "insectoid", "chitin", "antenna", "mandible", "arthropod", "creature"],
+      "warningGroups": []
+    },
+    {
+      "body": "Aquatic Humanoid",
+      "compatibleGroups": ["humanoid", "beast", "aquatic", "finned", "whiskered", "frilled", "gilled", "tail", "creature"],
+      "warningGroups": []
     }
   ],
   "inferenceRules": [
@@ -166,6 +176,20 @@
       "editorIdHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk"],
       "pluginNameHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk", "feather", "wing", "nestling", "hatchling", "thrall", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["avian", "wing", "feather", "bird", "pinion", "talon"]
+    },
+    {
+      "name": "Insectoid variant",
+      "groups": ["beast", "insectoid", "arthropod", "chitin", "antenna", "mandible", "creature"],
+      "editorIdHints": ["insectoid", "mothfolk", "scarabfolk", "beetleborn", "vespid", "mantis", "arthropod", "chitin", "mandible", "antenna"],
+      "pluginNameHints": ["insectoid", "mothfolk", "scarabfolk", "beetleborn", "vespid", "mantis", "arthropod", "chitin", "mandible", "antenna", "carapace", "follower", "custom race", "customrace", "vampire", "child"],
+      "meshPathHints": ["insectoid", "moth", "scarab", "beetle", "vespid", "mantis", "chitin", "antenna", "mandible", "carapace", "abdomen"]
+    },
+    {
+      "name": "Aquatic variant",
+      "groups": ["beast", "aquatic", "finned", "whiskered", "frilled", "gilled", "tail", "creature"],
+      "editorIdHints": ["aquatic", "mermaid", "merrow", "siren", "koi", "selkie", "frill", "gill", "whisker", "reefkin"],
+      "pluginNameHints": ["aquatic", "mermaid", "merrow", "siren", "koi", "selkie", "reefkin", "frill", "gill", "whisker", "fin", "follower", "custom race", "customrace", "vampire", "child"],
+      "meshPathHints": ["aquatic", "mer", "siren", "koi", "reef", "fin", "frill", "whisker", "gill", "tailfin"]
     }
   ]
 }

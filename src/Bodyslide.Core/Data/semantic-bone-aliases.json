@@ -146,11 +146,15 @@
     "ventralfin",
     "tailfin",
     "spinefin",
-    "webfin"
+    "webfin",
+    "merfin"
   ],
   "frill": [
     "frill",
     "gillfrill",
+    "gillcrest",
+    "reeffrill",
+    "reefwhisker",
     "crest",
     "whisker",
     "mane"
@@ -172,10 +176,14 @@
   "antenna": [
     "antenna",
     "feeler",
+    "mothfeeler",
+    "feelersway",
     "tendril"
   ],
   "mandible": [
     "mandible",
+    "mandiblearc",
+    "shellmandible",
     "fang",
     "pincer"
   ]

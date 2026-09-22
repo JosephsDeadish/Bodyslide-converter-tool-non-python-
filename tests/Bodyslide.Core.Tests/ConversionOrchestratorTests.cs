@@ -5027,6 +5027,8 @@ public sealed class ConversionOrchestratorTests
     [InlineData("Spriggan", "SprigganRootsArmorAddon", "meshes/armor/spriggan/bark_wrap_0.nif", "Spriggan variant")]
     [InlineData("Equine Humanoid", "HorseFollowerArmorAddon", "meshes/armor/horse/hoof_boots_0.nif", "Equine variant")]
     [InlineData("Avian Humanoid", "AvianWingedFollowerAddon", "meshes/armor/avian/feather_wrap_0.nif", "Avian variant")]
+    [InlineData("Insectoid Humanoid", "MothfolkMandibleHarnessAddon", "meshes/armor/insectoid/chitin_harness_0.nif", "Insectoid variant")]
+    [InlineData("Aquatic Humanoid", "SirenFrillWhiskerAddon", "meshes/armor/aquatic/reef_wrap_0.nif", "Aquatic variant")]
     public async Task BasicRaceCompatibilityService_AllowsUncommonCreatureVariantOnMatchingBody(
         string targetBody,
         string editorId,
@@ -5078,6 +5080,10 @@ public sealed class ConversionOrchestratorTests
     [InlineData("nestling_harpy_thrall_patch.esp", "Avian variant")]
     [InlineData("panther_cub_retainer.esp", "Khajiit variant")]
     [InlineData("nightborn_saxhleel_thrall.esp", "Argonian variant")]
+    [InlineData("mothfolk_scarab_customrace.esp", "Insectoid variant")]
+    [InlineData("vespid_mantis_follower.esp", "Insectoid variant")]
+    [InlineData("reefkin_siren_merrow_patch.esp", "Aquatic variant")]
+    [InlineData("koi_selkie_whisker_follower.esp", "Aquatic variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -13549,6 +13555,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("equine", equineRule.CompatibleGroups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Avian Humanoid", out var avianRule));
         Assert.Contains("avian", avianRule.CompatibleGroups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Insectoid Humanoid", out var insectoidRule));
+        Assert.Contains("insectoid", insectoidRule.CompatibleGroups);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Aquatic Humanoid", out var aquaticRule));
+        Assert.Contains("aquatic", aquaticRule.CompatibleGroups);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HornTip.L", "horned-humanoid", out var hornFallbacks));
         Assert.Contains("Horn.L", hornFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingTip.L", "winged-humanoid", out var wingFallbacks));
@@ -13636,6 +13646,12 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("mouth", throatGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("TongueTipPhysics", out var tongueGroup));
         Assert.Equal("mouth", tongueGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("ShellMandibleArcSwing", out var mandibleArcGroup));
+        Assert.Equal("mandible", mandibleArcGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("ReefWhiskerDrift", out var reefWhiskerGroup));
+        Assert.Equal("frill", reefWhiskerGroup);
+        Assert.True(PhysicsRepairCatalog.TryMatchGroup("MerFinPulse", out var merFinGroup));
+        Assert.Equal("fin", merFinGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("BellyBulkChain", out var bellyGroup));
         Assert.Equal("belly", bellyGroup);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("UpperThighSwing", out var thighGroup));
@@ -13677,6 +13693,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["BriarSwingCtrl", "RootTwigGrip"]));
         Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ChitinCrestCtrl", "AbdomenSegmentTip"]));
         Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["SirenFrillCtrl", "KoiWhiskerAim"]));
+        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ShellMandibleArc", "MothFeelerSwing"]));
+        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["GillCrestCtrl", "ReefWhiskerRig"]));
 
         var sparse = SkeletonFrameworkCatalog.DetectFrameworkDetails(["MawLatch", "TongueBlade", "WombCore"]);
         Assert.Equal("ube-extended", sparse.Label);
@@ -13720,11 +13738,19 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("insectoid-humanoid", sparseInsectoid.Label);
         Assert.True(sparseInsectoid.UsedSparseInference);
         Assert.Contains(sparseInsectoid.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+        var sparseInsectoidAlt = SkeletonFrameworkCatalog.DetectFrameworkDetails(["ShellMandibleArc", "MothFeelerSwing"]);
+        Assert.Equal("insectoid-humanoid", sparseInsectoidAlt.Label);
+        Assert.True(sparseInsectoidAlt.UsedSparseInference);
+        Assert.Contains(sparseInsectoidAlt.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
 
         var sparseAquatic = SkeletonFrameworkCatalog.DetectFrameworkDetails(["SirenFrillCtrl", "KoiWhiskerAim"]);
         Assert.Equal("aquatic-humanoid", sparseAquatic.Label);
         Assert.True(sparseAquatic.UsedSparseInference);
         Assert.Contains(sparseAquatic.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+        var sparseAquaticAlt = SkeletonFrameworkCatalog.DetectFrameworkDetails(["GillCrestCtrl", "ReefWhiskerRig"]);
+        Assert.Equal("aquatic-humanoid", sparseAquaticAlt.Label);
+        Assert.True(sparseAquaticAlt.UsedSparseInference);
+        Assert.Contains(sparseAquaticAlt.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
     }
 }
 
@@ -24582,7 +24608,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -24672,7 +24698,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[]
@@ -24759,7 +24785,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(2, 1f)), 2);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -25050,7 +25076,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var contextArgs = new object?[]
         {
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0.3f), new MeshVertex(0f, 0f, 0.7f), new MeshVertex(1f, 0f, 1f) },
@@ -25071,6 +25097,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             Array.Empty<string>(),
+            null,
             decisionCache
         };
 
@@ -25171,7 +25198,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
@@ -25192,6 +25219,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             Array.Empty<string>(),
+            null,
             decisionCache
         ]);
 
@@ -25210,6 +25238,146 @@ public sealed class OutputCompletenessTests
             blendMethod!.Invoke(null, ["Belly", true, morphing, retargeted, context]));
 
         Assert.All(result, delta => Assert.True(delta.X < 0.08f, $"Expected severe unmatched topology to rebuild more aggressively toward synthetic output, got {delta.X}."));
+    }
+
+    [Fact]
+    public void BlendRetargetedMorphPayloadForHardDivergence_StrengthensAmbiguousIslandToIslandRebuilds()
+    {
+        var blendMethod = typeof(LocalExportService).GetMethod("BlendRetargetedMorphPayloadForHardDivergence", BindingFlags.NonPublic | BindingFlags.Static);
+        var contextType = typeof(LocalExportService).GetNestedType("MorphTransferContext", BindingFlags.NonPublic);
+        var influenceType = typeof(LocalExportService).GetNestedType("MorphTransferInfluence", BindingFlags.NonPublic);
+        var adjacencyType = typeof(LocalExportService).GetNestedType("MorphTransferIslandAdjacencySummary", BindingFlags.NonPublic);
+        var islandInfluenceType = typeof(LocalExportService).GetNestedType("MorphTransferIslandInfluenceSummary", BindingFlags.NonPublic);
+        var transferSummaryType = typeof(LocalExportService).GetNestedType("MorphTransferIslandTransferSummary", BindingFlags.NonPublic);
+        var decisionType = typeof(LocalExportService).GetNestedType("MorphTransferTargetDecision", BindingFlags.NonPublic);
+        var decisionCacheType = typeof(LocalExportService).GetNestedType("MorphTransferDecisionCache", BindingFlags.NonPublic);
+        Assert.NotNull(blendMethod);
+        Assert.NotNull(contextType);
+        Assert.NotNull(influenceType);
+        Assert.NotNull(adjacencyType);
+        Assert.NotNull(islandInfluenceType);
+        Assert.NotNull(transferSummaryType);
+        Assert.NotNull(decisionType);
+        Assert.NotNull(decisionCacheType);
+
+        var influenceCtor = influenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 2);
+        object CreateInfluence(int index, float weight) => influenceCtor.Invoke([index, weight]);
+
+        var influenceListType = typeof(List<>).MakeGenericType(influenceType);
+        object CreateInfluenceList(params object[] influences)
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(influenceListType)!;
+            foreach (var influence in influences)
+            {
+                list.Add(influence);
+            }
+
+            return list;
+        }
+
+        var influenceArrayType = typeof(IReadOnlyList<>).MakeGenericType(influenceType);
+        var influenceLists = Array.CreateInstance(influenceArrayType, 2);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(0, 1f)), 0);
+        influenceLists.SetValue(CreateInfluenceList(CreateInfluence(1, 1f)), 1);
+
+        var decisionCtor = decisionType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 9);
+        object CreateDecision() => decisionCtor.Invoke(
+        [
+            0.5f,
+            1f,
+            1f,
+            1f,
+            0.72f,
+            0.25f,
+            0,
+            0,
+            true
+        ]);
+
+        var decisions = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(decisionType))!;
+        decisions.Add(CreateDecision());
+        decisions.Add(CreateDecision());
+
+        var adjacencyCtor = adjacencyType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 4);
+        var adjacencyListType = typeof(List<>).MakeGenericType(adjacencyType);
+        var adjacencyList = (System.Collections.IList)Activator.CreateInstance(adjacencyListType)!;
+        adjacencyList.Add(adjacencyCtor.Invoke([1, 2, 1, 0.10f]));
+
+        var islandInfluenceCtor = islandInfluenceType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 6);
+        var islandInfluenceListType = typeof(List<>).MakeGenericType(islandInfluenceType);
+        var islandInfluences = (System.Collections.IList)Activator.CreateInstance(islandInfluenceListType)!;
+        islandInfluences.Add(islandInfluenceCtor.Invoke([0, 0.26f, 0.58f, 0.04f, 0.03f, true]));
+        islandInfluences.Add(islandInfluenceCtor.Invoke([1, 0.29f, 0.41f, 0.05f, 0.04f, false]));
+
+        var transferSummaryCtor = transferSummaryType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 7);
+        var transferSummary = transferSummaryCtor.Invoke([0, 0, islandInfluences, 2, adjacencyList, 0.05f, true]);
+        var transferDictionaryType = typeof(Dictionary<,>).MakeGenericType(typeof(int), transferSummaryType);
+        var transferDictionary = (System.Collections.IDictionary)Activator.CreateInstance(transferDictionaryType)!;
+        transferDictionary.Add(0, transferSummary);
+
+        var decisionCacheCtor = decisionCacheType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 10);
+        var decisionCache = decisionCacheCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            1f,
+            1f,
+            1f,
+            decisions,
+            null,
+            null,
+            transferDictionary,
+            null
+        ]);
+
+        static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
+        var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Single(ctor => ctor.GetParameters().Length == 20);
+        var context = contextCtor.Invoke(
+        [
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 1f) },
+            new[] { 0, 1 },
+            influenceLists,
+            new IReadOnlyList<int>[] { [1], [0] },
+            new IReadOnlyList<int>[] { [1], [0] },
+            null,
+            null,
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 4) },
+            new[] { Zone(0, 1, 0, 0), Zone(0, 1, 2, 4) },
+            new[] { 0, 0 },
+            new[] { 0, 0 },
+            new[] { 0 },
+            new[] { 0.12f, 0.10f },
+            1f,
+            1f,
+            true,
+            Array.Empty<string>(),
+            null,
+            decisionCache
+        ]);
+
+        var retargeted = new (float X, float Y, float Z)[]
+        {
+            (0.20f, 0f, 0f),
+            (0.20f, 0f, 0f)
+        };
+        var morphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tail"] = 1.18d,
+            ["belly"] = 1.10d
+        };
+
+        var result = Assert.IsAssignableFrom<IReadOnlyList<(float X, float Y, float Z)>>(
+            blendMethod!.Invoke(null, ["TailBase", true, morphing, retargeted, context]));
+
+        Assert.All(result, delta => Assert.True(delta.X < 0.14f, $"Expected ambiguous island-to-island severe unmatch to rebuild more strongly toward synthetic output, got {delta.X}."));
     }
 
     [Fact]
@@ -25317,7 +25485,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             normalizedVertices,
@@ -25338,6 +25506,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             Array.Empty<string>(),
+            null,
             decisionCache
         ]);
 
@@ -25834,7 +26003,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -25906,7 +26075,7 @@ public sealed class OutputCompletenessTests
 
         static int Zone(int shell, int depth, int lateral, int height) => (((shell * 3) + depth) * 3 + lateral) * 5 + height;
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         var context = contextCtor.Invoke(
         [
             new[] { new MeshVertex(0f, 0f, 0f), new MeshVertex(1f, 0f, 0f), new MeshVertex(2f, 0f, 0f) },
@@ -25978,7 +26147,7 @@ public sealed class OutputCompletenessTests
         influenceLists.SetValue(CreateInfluenceList(CreateInfluence(3, 1f)), 3);
 
         var contextCtor = contextType!.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Single(ctor => ctor.GetParameters().Length == 19);
+            .Single(ctor => ctor.GetParameters().Length == 20);
         object CreateContext(IReadOnlyList<string> partHints) => contextCtor.Invoke(
         [
             new[]

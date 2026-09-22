@@ -29097,6 +29097,11 @@ internal sealed class LocalExportService(
                     if (islandTransfer.SourceInfluences.Count > 1)
                     {
                         blendWeight += MathF.Min(0.06f, (1f - islandTransfer.SourceInfluences[0].Weight) * 0.08f);
+                        blendWeight += ComputeMorphTransferAmbiguousIslandSevereUnmatchBoost(
+                            islandTransfer,
+                            averageDivergence,
+                            severeRatio,
+                            missingSourceRatio);
                     }
                 }
 
@@ -29104,6 +29109,52 @@ internal sealed class LocalExportService(
             }
 
             return weights;
+        }
+
+        private static float ComputeMorphTransferAmbiguousIslandSevereUnmatchBoost(
+            MorphTransferIslandTransferSummary islandTransfer,
+            float averageDivergence,
+            float severeRatio,
+            float missingSourceRatio)
+        {
+            if (islandTransfer.SourceInfluences.Count < 2)
+            {
+                return 0f;
+            }
+
+            var primary = islandTransfer.SourceInfluences[0];
+            var secondary = islandTransfer.SourceInfluences[1];
+            var influenceGap = MathF.Max(0f, primary.Weight - secondary.Weight);
+            var ambiguousOwnership = MathF.Max(0f, 0.20f - influenceGap) / 0.20f;
+            var weakPrimaryOwnership = MathF.Max(0f, 0.62f - primary.Weight) / 0.24f;
+            var averageTopMatchScore = (primary.MatchScore + secondary.MatchScore) * 0.5f;
+            var poorMatchPressure = MathF.Max(0f, 0.34f - averageTopMatchScore) / 0.16f;
+            var boundaryPressure = MathF.Max(0f, islandTransfer.BoundaryBlendBias - 0.04f) / 0.18f;
+            if (ambiguousOwnership <= 0f && weakPrimaryOwnership <= 0f)
+            {
+                return 0f;
+            }
+
+            var boost = MathF.Min(
+                0.16f,
+                (ambiguousOwnership * 0.09f) +
+                (weakPrimaryOwnership * 0.07f) +
+                (poorMatchPressure * 0.05f) +
+                (boundaryPressure * 0.04f));
+
+            if (averageDivergence >= 0.24f &&
+                primary.Weight < 0.60f &&
+                influenceGap < 0.18f &&
+                (boundaryPressure > 0f || poorMatchPressure > 0.10f || missingSourceRatio > 0.05f || severeRatio > 0.20f))
+            {
+                boost = MathF.Max(
+                    boost,
+                    0.18f +
+                    MathF.Min(0.08f, poorMatchPressure * 0.05f) +
+                    MathF.Min(0.05f, boundaryPressure * 0.04f));
+            }
+
+            return boost;
         }
 
         private static float ComputeMorphTransferSyntheticBlendWeight(
@@ -29128,6 +29179,15 @@ internal sealed class LocalExportService(
             if (decision.BoundarySensitive && decision.StructuralDivergence >= 0.22f)
             {
                 blendWeight += 0.06f;
+            }
+
+            if (decision.BoundarySensitive &&
+                decision.StructuralDivergence >= 0.45f &&
+                decision.EdgeDrivenDamping <= 0.35f)
+            {
+                blendWeight = MathF.Max(
+                    blendWeight,
+                    0.48f + MathF.Min(0.10f, (decision.StructuralDivergence - 0.45f) * 0.25f));
             }
 
             blendWeight += MathF.Min(0.10f, (1f - decision.EdgeDrivenDamping) * 0.18f);
