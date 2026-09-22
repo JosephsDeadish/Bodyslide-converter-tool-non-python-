@@ -13646,11 +13646,6 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("BeastKnot", equine.AvailablePhysicsBones);
         Assert.Contains("ManeLength", equine.SliderNames);
         Assert.Contains("KnotSize", equine.SliderNames);
-
-        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Verdant Spirit", out var sprigganAlias));
-        Assert.Equal("Spriggan", sprigganAlias.Name);
-        Assert.Contains("BranchMid.L", sprigganAlias.AvailablePhysicsBones);
-        Assert.Contains("LeafFrond.L", sprigganAlias.AvailablePhysicsBones);
     }
 
     [Fact]
@@ -13729,13 +13724,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["PawFront.L", "DigitigradeToe.R"]));
         Assert.Equal("serpentine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CoilRoot", "CoilTip"]));
         Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["Branch.L", "Vine.R"]));
-        Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["LeafFrond.L", "Branchwarden"]));
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchTip.L", "spriggan-branch", out var branchFallbacks));
         Assert.Contains("Branch.L", branchFallbacks);
-        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchMid.L", "spriggan-branch", out var branchMidFallbacks));
-        Assert.Contains("Branch.L", branchMidFallbacks);
-        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("LeafFrond.L", "spriggan-branch", out var leafFallbacks));
-        Assert.Contains("BranchTip.L", leafFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("BriarTendrilChain", out var branchGroup));
         Assert.Equal("branch", branchGroup);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingFinger03.L", "draconic-humanoid", out var draconicWingFallbacks));
@@ -16165,7 +16155,7 @@ public sealed class RealisticModPackFixtureTests
 
             using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.Equal("Spriggan", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
-            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.Contains("semantic-anchors", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("MatchingMode").GetString(), StringComparison.Ordinal);
             Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
 
             var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
@@ -16179,6 +16169,21 @@ public sealed class RealisticModPackFixtureTests
         {
             Directory.Delete(workingDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void SprigganCatalogs_ExposeExtendedBranchAliasAndFallbackCoverage()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Verdant Spirit", out var sprigganAlias));
+        Assert.Equal("Spriggan", sprigganAlias.Name);
+        Assert.Contains("BranchMid.L", sprigganAlias.AvailablePhysicsBones);
+        Assert.Contains("LeafFrond.L", sprigganAlias.AvailablePhysicsBones);
+
+        Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["LeafFrond.L", "Branchwarden"]));
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchMid.L", "spriggan-branch", out var branchMidFallbacks));
+        Assert.Contains("Branch.L", branchMidFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("LeafFrond.L", "spriggan-branch", out var leafFallbacks));
+        Assert.Contains("BranchTip.L", leafFallbacks);
     }
 
     [Fact]
