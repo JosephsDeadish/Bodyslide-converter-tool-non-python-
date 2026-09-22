@@ -29,6 +29,8 @@ internal static class SemanticAnchorCatalog
     private static readonly Lazy<IReadOnlyDictionary<string, SemanticAnchorProfile>> Profiles = new(LoadProfiles);
     private static readonly Lazy<IReadOnlyDictionary<string, string>> AliasMap = new(LoadAliasMap);
 
+    public static IReadOnlyList<SemanticAnchorProfile> All => Profiles.Value.Values.ToArray();
+
     public static bool TryGet(string? bodyName, out SemanticAnchorProfile profile)
     {
         profile = default!;
@@ -44,6 +46,101 @@ internal static class SemanticAnchorCatalog
 
         return AliasMap.Value.TryGetValue(bodyName.Trim(), out var canonicalName) &&
                Profiles.Value.TryGetValue(canonicalName, out profile!);
+    }
+
+    public static bool TryResolveBestProfile(
+        string? bodyName,
+        IEnumerable<string>? cueTokens,
+        IReadOnlyList<string>? focusRegions,
+        out SemanticAnchorProfile profile,
+        out IReadOnlyList<string> evidence)
+    {
+        evidence = [];
+        if (TryGet(bodyName, out profile!))
+        {
+            return true;
+        }
+
+        var normalizedCues = NormalizeCueTokens(cueTokens)
+            .Concat(NormalizeCueTokens([bodyName ?? string.Empty]))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedCues.Length == 0)
+        {
+            return false;
+        }
+
+        var relevantRegions = (focusRegions ?? [])
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var ranked = All
+            .Select(candidate =>
+            {
+                var aliasMatches = candidate.Aliases
+                    .Select(NormalizeCueToken)
+                    .Where(static alias => !string.IsNullOrWhiteSpace(alias))
+                    .Count(alias => normalizedCues.Any(cue => cue.Contains(alias, StringComparison.OrdinalIgnoreCase) ||
+                                                              alias.Contains(cue, StringComparison.OrdinalIgnoreCase)));
+                var nameMatch = normalizedCues.Any(cue =>
+                    cue.Contains(NormalizeCueToken(candidate.Name), StringComparison.OrdinalIgnoreCase) ||
+                    NormalizeCueToken(candidate.Name).Contains(cue, StringComparison.OrdinalIgnoreCase));
+                var regionAnchorMatches = candidate.Anchors
+                    .Where(pair => relevantRegions.Length == 0 || relevantRegions.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
+                    .Select(pair => new
+                    {
+                        pair.Key,
+                        MatchCount = pair.Value.Count(anchor =>
+                        {
+                            var normalizedAnchor = NormalizeCueToken(anchor);
+                            return normalizedCues.Any(cue => cue.Contains(normalizedAnchor, StringComparison.OrdinalIgnoreCase) ||
+                                                             normalizedAnchor.Contains(cue, StringComparison.OrdinalIgnoreCase));
+                        })
+                    })
+                    .Where(static pair => pair.MatchCount > 0)
+                    .ToArray();
+                var landmarkCoverage = regionAnchorMatches.Count(pair =>
+                    candidate.Landmarks.TryGetValue(pair.Key, out var landmarks) && landmarks.Count > 0);
+                var score = (nameMatch ? 2.5d : 0d) +
+                            aliasMatches * 1.4d +
+                            regionAnchorMatches.Sum(static pair => Math.Min(2, pair.MatchCount)) * 1.15d +
+                            landmarkCoverage * 0.85d;
+                return new
+                {
+                    candidate,
+                    score,
+                    nameMatch,
+                    aliasMatches,
+                    regionAnchorMatches,
+                    landmarkCoverage
+                };
+            })
+            .Where(static entry => entry.score >= 2.2d)
+            .OrderByDescending(static entry => entry.score)
+            .ThenByDescending(static entry => entry.landmarkCoverage)
+            .ThenByDescending(static entry => entry.regionAnchorMatches.Length)
+            .ThenBy(static entry => entry.candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+
+        if (ranked is null)
+        {
+            profile = default!;
+            return false;
+        }
+
+        profile = ranked.candidate;
+        evidence =
+        [
+            $"fallback-profile:{profile.Name}",
+            ranked.nameMatch ? "profile-name-match" : string.Empty,
+            ranked.aliasMatches > 0 ? $"profile-alias-matches:{ranked.aliasMatches}" : string.Empty,
+            ranked.regionAnchorMatches.Length > 0 ? $"profile-region-matches:{ranked.regionAnchorMatches.Length}" : string.Empty,
+            ranked.landmarkCoverage > 0 ? $"profile-landmark-regions:{ranked.landmarkCoverage}" : string.Empty
+        ]
+        .Where(static item => !string.IsNullOrWhiteSpace(item))
+        .ToArray();
+        return true;
     }
 
     private static IReadOnlyDictionary<string, SemanticAnchorProfile> LoadProfiles()
@@ -73,6 +170,32 @@ internal static class SemanticAnchorCatalog
         }
 
         return aliases;
+    }
+
+    private static IEnumerable<string> NormalizeCueTokens(IEnumerable<string>? values) =>
+        values?
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(static value => value
+                .Split(['\\', '/', '_', '-', ' ', '.', ':'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(NormalizeCueToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase) ?? [];
+
+    private static string NormalizeCueToken(string value)
+    {
+        Span<char> buffer = value.Length <= 256
+            ? stackalloc char[value.Length]
+            : new char[value.Length];
+        var length = 0;
+        foreach (var ch in value)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                buffer[length++] = char.ToLowerInvariant(ch);
+            }
+        }
+
+        return new string(buffer[..length]);
     }
 
     private static SemanticAnchorProfile Normalize(SemanticAnchorProfileDto dto)

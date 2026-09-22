@@ -50,15 +50,16 @@ internal static class SkeletonFrameworkCatalog
         return false;
     }
 
-    public static string? DetectFramework(IReadOnlyList<string> boneNames)
-        => DetectFrameworkDetails(boneNames).Label;
+    public static string? DetectFramework(IReadOnlyList<string> boneNames, IReadOnlyList<string>? contextCues = null)
+        => DetectFrameworkDetails(boneNames, contextCues).Label;
 
-    public static SkeletonFrameworkDetectionResult DetectFrameworkDetails(IReadOnlyList<string> boneNames)
-        => RankFrameworkDetections(boneNames, maxCandidates: 1).FirstOrDefault()
+    public static SkeletonFrameworkDetectionResult DetectFrameworkDetails(IReadOnlyList<string> boneNames, IReadOnlyList<string>? contextCues = null)
+        => RankFrameworkDetections(boneNames, contextCues, maxCandidates: 1).FirstOrDefault()
            ?? new SkeletonFrameworkDetectionResult(null, 0d, [], false);
 
     public static IReadOnlyList<SkeletonFrameworkDetectionResult> RankFrameworkDetections(
         IReadOnlyList<string> boneNames,
+        IReadOnlyList<string>? contextCues = null,
         int maxCandidates = 3)
     {
         if (boneNames.Count == 0)
@@ -85,6 +86,14 @@ internal static class SkeletonFrameworkCatalog
         {
             return [];
         }
+
+        var condensedContextCues = (contextCues ?? [])
+            .Where(static cue => !string.IsNullOrWhiteSpace(cue))
+            .Select(static cue => cue.Trim())
+            .Select(NormalizeForMatching)
+            .Where(static cue => !string.IsNullOrWhiteSpace(cue))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         var detections = new List<(double Score, SkeletonFrameworkDetectionResult Detection)>();
         var observedSemanticKeys = ExtractSemanticKeys(normalizedBoneNames);
@@ -119,7 +128,7 @@ internal static class SkeletonFrameworkCatalog
             }
 
             var fallbackEvidence = new List<string>();
-            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, observedSemanticKeys, observedPhysicsGroups, fallbackEvidence);
+            var fallbackScore = ComputeFallbackScore(framework, condensedBoneNames, condensedContextCues, observedSemanticKeys, observedPhysicsGroups, fallbackEvidence);
             if (fallbackScore >= 2d)
             {
                 var normalizedScore = Math.Min(0.89d, 0.25d + (fallbackScore / 5d));
@@ -182,6 +191,7 @@ internal static class SkeletonFrameworkCatalog
     private static double ComputeFallbackScore(
         SkeletonFrameworkMetadata framework,
         IReadOnlyList<string> condensedBoneNames,
+        IReadOnlyList<string> condensedContextCues,
         IReadOnlySet<string> observedSemanticKeys,
         IReadOnlySet<string> observedPhysicsGroups,
         List<string> evidence)
@@ -224,6 +234,13 @@ internal static class SkeletonFrameworkCatalog
         {
             evidence.Add($"ecosystem-cues:{cueMatches}");
         }
+        var contextCueMatches = ecosystemCues.Count(cue =>
+            condensedContextCues.Any(context => context.Contains(cue, StringComparison.OrdinalIgnoreCase) ||
+                                                cue.Contains(context, StringComparison.OrdinalIgnoreCase)));
+        if (contextCueMatches > 0)
+        {
+            evidence.Add($"context-cues:{contextCueMatches}");
+        }
 
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
@@ -232,7 +249,7 @@ internal static class SkeletonFrameworkCatalog
             if (observedSemanticKeys.Count == 0 || frameworkSemanticKeys.Count == 0)
             {
                 if ((observedPhysicsGroups.Count == 0 || sparseFrameworkPhysicsGroups.Count == 0) &&
-                    cueMatches < framework.MinimumSignatureMatches)
+                    cueMatches + contextCueMatches < framework.MinimumSignatureMatches)
                 {
                     return 0d;
                 }
@@ -257,8 +274,8 @@ internal static class SkeletonFrameworkCatalog
             var physicsScore = physicsMatches >= framework.MinimumSignatureMatches
                 ? physicsMatches * 1d
                 : 0d;
-            var cueScore = cueMatches >= framework.MinimumSignatureMatches
-                ? cueMatches * 1.10d
+            var cueScore = cueMatches + contextCueMatches >= framework.MinimumSignatureMatches
+                ? (cueMatches + contextCueMatches) * 1.10d
                 : 0d;
             return Math.Max(Math.Max(semanticScore, physicsScore), cueScore);
         }
@@ -281,7 +298,7 @@ internal static class SkeletonFrameworkCatalog
             evidence.Add($"group-overlap:{physicsOverlap}");
         }
 
-        return prefixMatches + (tokenMatches * 0.75d) + (cueMatches * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
+        return prefixMatches + (tokenMatches * 0.75d) + ((cueMatches + contextCueMatches) * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)

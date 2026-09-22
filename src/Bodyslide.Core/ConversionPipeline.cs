@@ -13244,17 +13244,20 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
         }
 
+        var sourceFrameworkContextCues = BuildSkeletonInferenceContextCues(armor, parsedSkeletonLabel);
         var sourceFrameworkDetection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
             sourcePhysicsBones
                 .Concat(parsedBones)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList());
+                .ToList(),
+            sourceFrameworkContextCues);
         var sourceFrameworkCandidates = SkeletonFrameworkCatalog
             .RankFrameworkDetections(
                 sourcePhysicsBones
                     .Concat(parsedBones)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList(),
+                sourceFrameworkContextCues,
                 maxCandidates: 3)
             .Select(candidate => new SkeletonInferenceCandidate(
                 candidate.Label ?? string.Empty,
@@ -13277,6 +13280,58 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             SourceSkeletonEvidence: sourceFrameworkDetection.Evidence,
             SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference,
             SourceSkeletonCandidates: sourceFrameworkCandidates);
+    }
+
+    private static IReadOnlyList<string> BuildSkeletonInferenceContextCues(ImportedArmor armor, string? parsedSkeletonLabel)
+    {
+        var cues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        static void AddPathTokens(HashSet<string> target, string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            foreach (var token in path.Split(['\\', '/', '_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (token.Length >= 3)
+                {
+                    target.Add(token);
+                }
+            }
+        }
+
+        AddPathTokens(cues, parsedSkeletonLabel);
+        AddPathTokens(cues, armor.SourcePath);
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            AddPathTokens(cues, meshFile);
+            AddPathTokens(cues, Path.GetFileNameWithoutExtension(meshFile));
+        }
+
+        if (armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
+        {
+            foreach (var profile in customProfiles)
+            {
+                AddPathTokens(cues, profile.Name);
+                AddPathTokens(cues, profile.SkeletonFoundation);
+                AddPathTokens(cues, profile.SkeletonFramework);
+                foreach (var alias in profile.Aliases ?? [])
+                {
+                    AddPathTokens(cues, alias);
+                }
+                foreach (var token in profile.DetectionTokens
+                             .Concat(profile.ReferenceTokens ?? [])
+                             .Concat(profile.PhysicsTokens)
+                             .Concat(profile.PhysicsBones ?? []))
+                {
+                    AddPathTokens(cues, token);
+                }
+            }
+        }
+
+        return cues.ToArray();
     }
 
     private static string? ResolveFallbackBone(string sourceBone, IReadOnlySet<string> targetBones, string? frameworkId)
@@ -18488,6 +18543,7 @@ internal sealed class LocalExportService(
         var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
         var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
         var topologyCorrespondence = BuildTopologyCorrespondenceReport(
+            armor,
             request.TargetBody,
             topologyMismatchRisk,
             qualityWarnings,
@@ -18534,6 +18590,8 @@ internal sealed class LocalExportService(
             clipping,
             voxelResult,
             skeletonMapping,
+            pluginAnalysis,
+            raceCompatibility,
             physics,
             poseSimulation,
             worldPhysics,
@@ -27345,6 +27403,8 @@ internal sealed class LocalExportService(
         ClippingReport clipping,
         VoxelCollisionResult voxelResult,
         SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
         PhysicsConfig physics,
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics,
@@ -27441,6 +27501,8 @@ internal sealed class LocalExportService(
            topologyCorrespondence,
            manualCleanupLikely,
            skeletonMapping,
+           pluginAnalysis,
+           raceCompatibility,
            physics,
            poseSimulation,
            worldPhysics);
@@ -27630,6 +27692,14 @@ internal sealed class LocalExportService(
             actions.Add("capture-runtime-observation");
         }
 
+        if (step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Add("launch-full-load-order");
+            actions.Add("verify-plugin-and-race-compatibility");
+            actions.Add("capture-load-order-observation");
+        }
+
         if (step.Name.Contains("release gate", StringComparison.OrdinalIgnoreCase))
         {
             actions.Add("persist-release-gate-result");
@@ -27647,6 +27717,7 @@ internal sealed class LocalExportService(
         report.ManualCleanupLikely && scenario.Name.Contains("cleanup", StringComparison.OrdinalIgnoreCase);
 
     private static TopologyCorrespondenceReport BuildTopologyCorrespondenceReport(
+        ImportedArmor armor,
         string targetBody,
         bool topologyMismatchRisk,
         IReadOnlyList<string> qualityWarnings,
@@ -27731,7 +27802,7 @@ internal sealed class LocalExportService(
         }
 
         var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
-        var semanticAnchors = BuildSemanticAnchorAssessment(targetBody, focusRegions, cageTopology);
+        var semanticAnchors = BuildSemanticAnchorAssessment(armor, targetBody, focusRegions, cageTopology);
         if (semanticAnchors.UsesTrueSemanticCorrespondence)
         {
             signals.Add($"semantic-anchor-coverage:{semanticAnchors.Coverage}");
@@ -27796,38 +27867,18 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> Evidence);
 
     private static SemanticAnchorAssessment BuildSemanticAnchorAssessment(
+        ImportedArmor armor,
         string targetBody,
         IReadOnlyList<string> focusRegions,
         CageTopologyReport? cageTopology)
     {
-        if (!SemanticAnchorCatalog.TryGet(targetBody, out var profile))
+        var observedTokens = BuildSemanticAnchorObservedTokens(armor, targetBody, cageTopology);
+        if (!SemanticAnchorCatalog.TryResolveBestProfile(targetBody, observedTokens.Concat(focusRegions), focusRegions, out var profile, out var resolutionEvidence))
         {
             return new SemanticAnchorAssessment(null, 0, false, []);
         }
 
-        var observedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
-        {
-            foreach (var token in metadata.AvailablePhysicsBones
-                         .Concat(metadata.SliderNames)
-                         .Concat(metadata.ReferenceTokens)
-                         .Concat(metadata.PhysicsBoneSignatures))
-            {
-                observedTokens.Add(token);
-            }
-        }
-
-        if (cageTopology is not null)
-        {
-            foreach (var label in cageTopology.Islands
-                         .SelectMany(static island => island.SemanticLabels ?? [])
-                         .Where(static label => !string.IsNullOrWhiteSpace(label)))
-            {
-                observedTokens.Add(label);
-            }
-        }
-
-        var evidence = new List<string>();
+        var evidence = new List<string>(resolutionEvidence);
         var coveredRegions = 0;
         var landmarkCoveredRegions = 0;
         foreach (var region in focusRegions)
@@ -27873,6 +27924,57 @@ internal sealed class LocalExportService(
             Math.Min(coveredRegions, landmarkCoveredRegions == 0 ? coveredRegions : landmarkCoveredRegions),
             usesTrueSemanticCorrespondence,
             evidence);
+    }
+
+    private static IReadOnlySet<string> BuildSemanticAnchorObservedTokens(
+        ImportedArmor armor,
+        string targetBody,
+        CageTopologyReport? cageTopology)
+    {
+        var observedTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            foreach (var token in metadata.AvailablePhysicsBones
+                         .Concat(metadata.SliderNames)
+                         .Concat(metadata.ReferenceTokens)
+                         .Concat(metadata.PhysicsBoneSignatures)
+                         .Append(metadata.Name))
+            {
+                observedTokens.Add(token);
+            }
+        }
+
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            foreach (var token in customProfile.DetectionTokens
+                         .Concat(customProfile.ReferenceTokens ?? [])
+                         .Concat(customProfile.TextureTokens)
+                         .Concat(customProfile.PhysicsTokens)
+                         .Concat(customProfile.SliderNames ?? [])
+                         .Concat(customProfile.PhysicsBones ?? [])
+                         .Concat(customProfile.Aliases ?? [])
+                         .Append(customProfile.Name)
+                         .Append(customProfile.SkeletonFoundation ?? string.Empty)
+                         .Append(customProfile.SkeletonFramework ?? string.Empty))
+            {
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    observedTokens.Add(token);
+                }
+            }
+        }
+
+        if (cageTopology is not null)
+        {
+            foreach (var label in cageTopology.Islands
+                         .SelectMany(static island => island.SemanticLabels ?? [])
+                         .Where(static label => !string.IsNullOrWhiteSpace(label)))
+            {
+                observedTokens.Add(label);
+            }
+        }
+
+        return observedTokens;
     }
 
     private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping)
@@ -28217,6 +28319,8 @@ internal sealed class LocalExportService(
         TopologyCorrespondenceReport topologyCorrespondence,
         bool manualCleanupLikely,
         SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
         PhysicsConfig physics,
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics)
@@ -28370,6 +28474,22 @@ internal sealed class LocalExportService(
                ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"]));
         }
 
+        if (RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody))
+        {
+           var mixedRegions = sensitiveRegions.Count > 0
+               ? sensitiveRegions
+               : beastRegions.Count > 0
+                  ? beastRegions
+                  : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions);
+           scenarios.Add(new InGameValidationScenario(
+               "Mixed mod-stack load-order sweep",
+               "High",
+               BuildMixedModStackValidationSummary(targetBody, pluginAnalysis, raceCompatibility),
+               ["full load-order launch", "equip", "cell transition", "save / reload"],
+               mixedRegions,
+               ["plugin-patches.json", "race-compatibility.json", "runtime-validation-plan.json", "skeleton-compatibility.json"]));
+        }
+
         if (manualCleanupLikely)
         {
            scenarios.Add(new InGameValidationScenario(
@@ -28414,6 +28534,37 @@ internal sealed class LocalExportService(
            .Where(region => expectedRegions.Contains(region, StringComparer.OrdinalIgnoreCase))
            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
            .ToArray();
+
+    private static bool RequiresMixedModStackValidation(
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody)
+    {
+        var pluginCount = pluginAnalysis?.ScannedPlugins?.Count ?? 0;
+        var addonCount = pluginAnalysis?.ArmorAddons?.Count ?? 0;
+        var armorRecordCount = pluginAnalysis?.ArmorRecords?.Count ?? 0;
+        var ambiguousPluginCount = pluginAnalysis?.AmbiguousPlugins?.Count ?? 0;
+        var raceRisk = (raceCompatibility?.Warnings?.Count ?? 0) > 0 || (raceCompatibility?.IncompatibleRaces?.Count ?? 0) > 0;
+        return pluginCount >= 2 ||
+               addonCount >= 2 ||
+               armorRecordCount >= 2 ||
+               ambiguousPluginCount > 0 ||
+               raceRisk ||
+               IsBeastOrExoticTarget(targetBody);
+    }
+
+    private static string BuildMixedModStackValidationSummary(
+        string targetBody,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility)
+    {
+        var pluginCount = pluginAnalysis?.ScannedPlugins?.Count ?? 0;
+        var addonCount = pluginAnalysis?.ArmorAddons?.Count ?? 0;
+        var armorRecordCount = pluginAnalysis?.ArmorRecords?.Count ?? 0;
+        var incompatibleRaces = raceCompatibility?.IncompatibleRaces?.Count ?? 0;
+        var raceWarnings = raceCompatibility?.Warnings?.Count ?? 0;
+        return $"Mixed plugin/race/body-family validation is recommended for {targetBody} because the stack includes {pluginCount} plugin(s), {addonCount} armor addon(s), {armorRecordCount} armor record(s), and {incompatibleRaces + raceWarnings} race compatibility warning(s).";
+    }
 
     private static bool IsBeastOrExoticTarget(string targetBody) =>
         targetBody.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
