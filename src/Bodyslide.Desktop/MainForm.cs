@@ -2462,7 +2462,8 @@ public sealed class MainForm : Form
         bool requiresReview)
     {
         var state = DesktopWorkflowAutomation.BuildValidationState(outputDirectories, previewPath);
-        if (!requiresReview)
+        var validationSummary = TryReadWorstValidationSummary(outputDirectories);
+        if (!requiresReview || validationSummary is null)
         {
             return state.OutcomeSummary;
         }
@@ -2470,47 +2471,12 @@ public sealed class MainForm : Form
         var effectiveStatus = ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) >= ConversionValidationPresentation.GetGateRank("needs-review")
             ? state.EffectiveStatus
             : "needs-review";
-        var validationSummary = TryReadWorstValidationSummary(outputDirectories);
-        var highSeverityCount = validationSummary?.HighSeverityCount ?? 0;
-        var mediumSeverityCount = validationSummary?.MediumSeverityCount ?? 0;
-        var lowSeverityCount = validationSummary?.LowSeverityCount ?? 0;
         return ConversionValidationPresentation.BuildOutcomeSummary(
             effectiveStatus,
-            highSeverityCount,
-            mediumSeverityCount,
-            lowSeverityCount,
+            validationSummary.HighSeverityCount,
+            validationSummary.MediumSeverityCount,
+            validationSummary.LowSeverityCount,
             state.PreviewAvailable);
-    }
-
-    private static (int HighSeverityCount, int MediumSeverityCount, int LowSeverityCount) ExtractValidationIssueCounts(string? outcomeSummary)
-    {
-        if (string.IsNullOrWhiteSpace(outcomeSummary))
-        {
-            return (0, 0, 0);
-        }
-
-        var marker = "Validation issues:";
-        var markerIndex = outcomeSummary.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
-        {
-            return (0, 0, 0);
-        }
-
-        var counts = outcomeSummary[(markerIndex + marker.Length)..]
-            .Split([',', '.', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(token => int.TryParse(token, out var value) ? value : (int?)null)
-            .Where(static value => value.HasValue)
-            .Select(static value => value!.Value)
-            .Take(3)
-            .ToArray();
-
-        return counts.Length switch
-        {
-            >= 3 => (counts[0], counts[1], counts[2]),
-            2 => (counts[0], counts[1], 0),
-            1 => (counts[0], 0, 0),
-            _ => (0, 0, 0)
-        };
     }
 
     private void UpdatePresetDetails()
