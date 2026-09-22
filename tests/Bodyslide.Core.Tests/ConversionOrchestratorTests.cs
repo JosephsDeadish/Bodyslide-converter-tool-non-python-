@@ -13977,6 +13977,43 @@ public sealed class PhysicsMeshTypeTuningTests
 
         Assert.Equal("provisional", safety);
     }
+
+    [Fact]
+    public void SkeletonRemapSafetyClassifier_DowngradesVeryWeakSparseMatchToUnsafe()
+    {
+        var candidates = new[]
+        {
+            new SkeletonInferenceCandidate(
+                "custom-beast-rig",
+                0.69d,
+                ["semantic-overlap:1", "ecosystem-cues:1"],
+                true),
+            new SkeletonInferenceCandidate(
+                "digitigrade-beast",
+                0.51d,
+                ["semantic-overlap:1"],
+                true)
+        };
+
+        var safety = SkeletonRemapSafetyClassifier.BuildSafety(
+            mappedBoneCount: 12,
+            unsupportedBoneCount: 0,
+            sourceSkeletonConfidence: 0.69d,
+            usedSparseInference: true,
+            sourceSkeletonCandidates: candidates);
+        var signals = SkeletonRemapSafetyClassifier.BuildSignals(
+            mappedBoneCount: 12,
+            unsupportedBoneCount: 0,
+            sourceSkeletonConfidence: 0.69d,
+            usedSparseInference: true,
+            sourceSkeletonCandidates: candidates,
+            remapSafety: safety);
+
+        Assert.Equal("unsafe", safety);
+        Assert.Contains("weak-sparse-framework", signals);
+        Assert.Contains("semantic-overlap:1", signals);
+        Assert.Contains("framework-cues:1", signals);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25451,11 +25488,20 @@ public sealed class OutputCompletenessTests
             Assert.Contains("physicsBones-family-coverage", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("physicsBones-family-count", qualityJson, StringComparison.OrdinalIgnoreCase);
             using var qualityDocument = JsonDocument.Parse(qualityJson);
+            var conversionReadiness = qualityDocument.RootElement.GetProperty("ConversionReadiness");
             var targetBodySupport = qualityDocument.RootElement.GetProperty("TargetBodySupport");
             Assert.True(targetBodySupport.GetProperty("HasCustomProfile").GetBoolean());
             Assert.False(targetBodySupport.GetProperty("HasExplicitSupportMetadata").GetBoolean());
             Assert.Equal("standard", targetBodySupport.GetProperty("CollisionComplexity").GetString());
             Assert.Equal(2, targetBodySupport.GetProperty("MinimumPhysicsFamilyCount").GetInt32());
+            Assert.Equal("experimental-manual-cleanup", qualityDocument.RootElement.GetProperty("SupportTier").GetString());
+            Assert.True(qualityDocument.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
+            Assert.Equal("unsafe", conversionReadiness.GetProperty("TargetBodySupportReliability").GetString());
+            Assert.Equal("manual-cleanup", conversionReadiness.GetProperty("RecommendedReleaseGate").GetString());
+            Assert.False(conversionReadiness.GetProperty("CanSafelyAnimate").GetBoolean());
+            Assert.Contains(
+                qualityDocument.RootElement.GetProperty("Caveats").EnumerateArray().Select(static item => item.GetString()),
+                value => value is not null && value.Contains("Target-body support metadata", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 targetBodySupport.GetProperty("QualityWarnings").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "referenceTokens-quality", StringComparison.OrdinalIgnoreCase));

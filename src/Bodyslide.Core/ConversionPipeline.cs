@@ -258,6 +258,7 @@ internal static class SkeletonRemapSafetyClassifier
         var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
         var candidateAmbiguity = sourceSkeletonCandidates is { Count: > 1 } &&
                                  candidateGap is null or < 0.12d;
+        var primaryCandidate = GetPrimaryCandidate(sourceSkeletonCandidates);
         var strongSparseMatch = IsStrongSparseMatch(
             unsupportedBoneCount,
             unsupportedRatio,
@@ -265,12 +266,18 @@ internal static class SkeletonRemapSafetyClassifier
             usedSparseInference,
             sourceSkeletonCandidates,
             candidateGap);
+        var weakSparseMatch = IsWeakSparseMatch(
+            sourceSkeletonConfidence,
+            usedSparseInference,
+            primaryCandidate,
+            strongSparseMatch);
 
         if (unsupportedBoneCount >= 8 ||
             unsupportedRatio >= 0.35d ||
             sourceSkeletonConfidence is > 0d and < 0.45d ||
             (usedSparseInference && sourceSkeletonConfidence is > 0d and < 0.60d) ||
-            candidateAmbiguity)
+            candidateAmbiguity ||
+            weakSparseMatch)
         {
             return "unsafe";
         }
@@ -303,6 +310,7 @@ internal static class SkeletonRemapSafetyClassifier
         var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
         var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
         var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
+        var primaryCandidate = GetPrimaryCandidate(sourceSkeletonCandidates);
         var strongSparseMatch = IsStrongSparseMatch(
             unsupportedBoneCount,
             unsupportedRatio,
@@ -310,6 +318,11 @@ internal static class SkeletonRemapSafetyClassifier
             usedSparseInference,
             sourceSkeletonCandidates,
             candidateGap);
+        var weakSparseMatch = IsWeakSparseMatch(
+            sourceSkeletonConfidence,
+            usedSparseInference,
+            primaryCandidate,
+            strongSparseMatch);
 
         if (unsupportedBoneCount > 0)
         {
@@ -331,6 +344,34 @@ internal static class SkeletonRemapSafetyClassifier
             signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
         }
 
+        if (primaryCandidate is not null)
+        {
+            var semanticOverlap = GetEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
+            var groupOverlap = GetEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
+            var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
+            var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
+                             GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+            if (semanticOverlap > 0)
+            {
+                signals.Add($"semantic-overlap:{semanticOverlap}");
+            }
+
+            if (groupOverlap > 0)
+            {
+                signals.Add($"group-overlap:{groupOverlap}");
+            }
+
+            if (chainDepth > 0)
+            {
+                signals.Add($"chain-depth:{chainDepth}");
+            }
+
+            if (cueMatches > 0)
+            {
+                signals.Add($"framework-cues:{cueMatches}");
+            }
+        }
+
         if (unsupportedRatio >= 0.15d)
         {
             signals.Add($"unsupported-ratio:{unsupportedRatio:0.##}");
@@ -340,6 +381,10 @@ internal static class SkeletonRemapSafetyClassifier
         {
             signals.Add("strong-sparse-framework");
         }
+        else if (weakSparseMatch)
+        {
+            signals.Add("weak-sparse-framework");
+        }
 
         if (signals.Count == 0)
         {
@@ -348,6 +393,18 @@ internal static class SkeletonRemapSafetyClassifier
 
         signals.Add($"remap-safety:{remapSafety}");
         return signals;
+    }
+
+    private static SkeletonInferenceCandidate? GetPrimaryCandidate(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
+    {
+        if (sourceSkeletonCandidates is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        return sourceSkeletonCandidates
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .First();
     }
 
     private static double? GetCandidateGap(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
@@ -387,10 +444,8 @@ internal static class SkeletonRemapSafetyClassifier
             return false;
         }
 
-        var primaryCandidate = sourceSkeletonCandidates
-            .OrderByDescending(static candidate => candidate.Confidence)
-            .First();
-        if (!primaryCandidate.UsedSparseInference)
+        var primaryCandidate = GetPrimaryCandidate(sourceSkeletonCandidates);
+        if (primaryCandidate is null || !primaryCandidate.UsedSparseInference)
         {
             return false;
         }
@@ -403,6 +458,29 @@ internal static class SkeletonRemapSafetyClassifier
 
         return semanticOverlap >= 2 &&
                (chainDepth >= 2 || groupOverlap >= 2 || cueMatches >= 2);
+    }
+
+    private static bool IsWeakSparseMatch(
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        SkeletonInferenceCandidate? primaryCandidate,
+        bool strongSparseMatch)
+    {
+        if (!usedSparseInference || strongSparseMatch || primaryCandidate is null)
+        {
+            return false;
+        }
+
+        var semanticOverlap = GetEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
+        var groupOverlap = GetEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
+        var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
+        var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
+                         GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+        var sparseEvidenceScore = semanticOverlap + groupOverlap + chainDepth + cueMatches;
+
+        return primaryCandidate.UsedSparseInference &&
+               sourceSkeletonConfidence is > 0d and < 0.72d &&
+               (semanticOverlap < 2 || sparseEvidenceScore < 4 || (groupOverlap == 0 && chainDepth == 0 && cueMatches < 2));
     }
 
     private static int GetEvidenceValue(IReadOnlyList<string>? evidence, string prefix)
@@ -575,6 +653,7 @@ public sealed record ConversionReadinessAssessment(
     bool CanSafelyAnimate,
     string SkeletonReliability,
     string SkeletonRemapSafety,
+    string TargetBodySupportReliability,
     string RecommendedReleaseGate);
 public sealed record RuntimeValidationExecutionPlan(
     string TargetBody,
@@ -19171,7 +19250,7 @@ internal sealed class LocalExportService(
 
         var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
         var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
-        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse);
+        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse, BuildTargetBodySupportReliability(targetBodySupportAssessment));
         var topologyCorrespondence = BuildTopologyCorrespondenceReport(
             armor,
             request.TargetBody,
@@ -19190,7 +19269,8 @@ internal sealed class LocalExportService(
             runtimeVerificationRequired,
             skeletonMapping,
             physicsCompatibility,
-            topologyCorrespondence);
+            topologyCorrespondence,
+            targetBodySupportAssessment);
 
         await File.WriteAllTextAsync(
             skeletonCompatPath,
@@ -24752,6 +24832,34 @@ internal sealed class LocalExportService(
         return new TargetBodySupportAssessment(false, customProfile, missingFields, qualityWarnings);
     }
 
+    private static bool HasHighSeverityTargetBodySupportGap(TargetBodySupportAssessment assessment) =>
+        assessment.CustomProfile is null ||
+        assessment.MissingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
+        assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("runtime-config-expectations-quality", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("physicsBones-family-coverage", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("physicsBones-pairing-coverage", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("physicsBones-family-depth", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("physicsBones-slot-coverage", StringComparer.OrdinalIgnoreCase) ||
+        assessment.QualityWarnings.Contains("physicsBones-chain-depth", StringComparer.OrdinalIgnoreCase);
+
+    private static string BuildTargetBodySupportReliability(TargetBodySupportAssessment assessment)
+    {
+        if (!assessment.HasBuiltInCoverage && assessment.CustomProfile is null)
+        {
+            return "unsafe";
+        }
+
+        if (assessment.MissingFields.Count == 0 && assessment.QualityWarnings.Count == 0)
+        {
+            return "direct";
+        }
+
+        return HasHighSeverityTargetBodySupportGap(assessment)
+            ? "unsafe"
+            : "review";
+    }
+
     internal static IReadOnlyList<string> EvaluateTargetBodySupportQuality(
         IReadOnlyList<string>? referenceTokens,
         IReadOnlyList<string>? sliderNames,
@@ -25591,14 +25699,7 @@ internal sealed class LocalExportService(
             return false;
         }
 
-        var severity = assessment.MissingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("runtime-config-expectations-quality", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("physicsBones-family-coverage", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("physicsBones-pairing-coverage", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("physicsBones-family-depth", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("physicsBones-slot-coverage", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.QualityWarnings.Contains("physicsBones-chain-depth", StringComparer.OrdinalIgnoreCase)
+        var severity = HasHighSeverityTargetBodySupportGap(assessment)
             ? "high"
             : "medium";
         var details = new List<string>();
@@ -29398,7 +29499,8 @@ internal sealed class LocalExportService(
         var caveats = BuildConversionCaveats(targetBody, manualCleanupLikely, runtimeVerificationRequired, validationSummary.Issues.Any(issue =>
                issue.Code.Equals("topology-mismatch-risk", StringComparison.OrdinalIgnoreCase)),
            skeletonMapping,
-           null);
+           null,
+           conversionReadiness.TargetBodySupportReliability);
         var lowerBodyRegions = IntersectInGameRegions(coreRegions.Concat(hotspotRegions), "belly", "butt", "thighs", "waist", "pelvis", "calves", "feet");
         var oralRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "mouth", "jaw", "tongue", "throat");
         var beastRegions = IntersectInGameRegions(sensitiveRegions.Concat(hotspotRegions), "tail", "paw", "hock", "hoof", "wing", "feather", "talon", "sheath", "genitals", "vagina", "anus");
@@ -30440,6 +30542,34 @@ internal sealed class LocalExportService(
             signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
         }
 
+        if (primaryCandidate is not null)
+        {
+            var semanticOverlap = GetEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
+            var groupOverlap = GetEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
+            var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
+            var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
+                             GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+            if (semanticOverlap > 0)
+            {
+                signals.Add($"semantic-overlap:{semanticOverlap}");
+            }
+
+            if (groupOverlap > 0)
+            {
+                signals.Add($"group-overlap:{groupOverlap}");
+            }
+
+            if (chainDepth > 0)
+            {
+                signals.Add($"chain-depth:{chainDepth}");
+            }
+
+            if (cueMatches > 0)
+            {
+                signals.Add($"framework-cues:{cueMatches}");
+            }
+        }
+
         if (unsupportedRatio >= 0.15d)
         {
             signals.Add($"unsupported-ratio:{unsupportedRatio:0.##}");
@@ -30632,7 +30762,8 @@ internal sealed class LocalExportService(
         bool runtimeVerificationRequired,
         bool topologyMismatchRisk,
         SkeletonMappingResult skeletonMapping,
-        MorphPayloadReuseSummary? payloadReuse)
+        MorphPayloadReuseSummary? payloadReuse,
+        string targetBodySupportReliability)
     {
         var caveats = new List<string>();
         if (manualCleanupLikely)
@@ -30651,6 +30782,11 @@ internal sealed class LocalExportService(
            caveats.Add("Extreme oral/genital/alien/custom appendage meshes remain the highest-risk automatic conversion path.");
         }
 
+        if (!targetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase))
+        {
+           caveats.Add($"Target-body support metadata for {targetBody} is only {targetBodySupportReliability}; release gating should follow target-specific profile coverage before trusting final animation or physics output.");
+        }
+
         if (runtimeVerificationRequired)
         {
            caveats.Add($"Generated validation guidance improves review for {targetBody}, but it is not a substitute for real in-game/runtime checks.");
@@ -30666,7 +30802,8 @@ internal sealed class LocalExportService(
         bool runtimeVerificationRequired,
         SkeletonMappingResult skeletonMapping,
         PhysicsCompatibilityReport physicsCompatibility,
-        TopologyCorrespondenceReport topologyCorrespondence)
+        TopologyCorrespondenceReport topologyCorrespondence,
+        TargetBodySupportAssessment targetBodySupportAssessment)
     {
         var skeletonReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
         var skeletonRemapSafety = skeletonMapping.AutomaticRemapSafety;
@@ -30678,6 +30815,7 @@ internal sealed class LocalExportService(
                                !runtimeVerificationRequired &&
                                skeletonReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
                                skeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase) &&
+                               targetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
                                !topologyCorrespondence.HeuristicHeavy;
         var supportTier = DetermineSupportTier(
             canConvert,
@@ -30685,6 +30823,7 @@ internal sealed class LocalExportService(
             canSafelyAnimate,
             skeletonReliability,
             skeletonRemapSafety,
+            targetBodySupportReliability,
             topologyCorrespondence,
             manualCleanupLikely,
             runtimeVerificationRequired);
@@ -30696,12 +30835,13 @@ internal sealed class LocalExportService(
 
         return new ConversionReadinessAssessment(
             supportTier,
-            BuildSupportTierSummary(targetBody, supportTier, canConvert, canPhysicsConvert, canSafelyAnimate, skeletonReliability, skeletonRemapSafety),
+            BuildSupportTierSummary(targetBody, supportTier, canConvert, canPhysicsConvert, canSafelyAnimate, skeletonReliability, skeletonRemapSafety, targetBodySupportReliability),
             canConvert,
             canPhysicsConvert,
             canSafelyAnimate,
             skeletonReliability,
             skeletonRemapSafety,
+            targetBodySupportReliability,
             releaseGate);
     }
 
@@ -30711,6 +30851,7 @@ internal sealed class LocalExportService(
         bool canSafelyAnimate,
         string skeletonReliability,
         string skeletonRemapSafety,
+        string targetBodySupportReliability,
         TopologyCorrespondenceReport topologyCorrespondence,
         bool manualCleanupLikely,
         bool runtimeVerificationRequired)
@@ -30720,7 +30861,8 @@ internal sealed class LocalExportService(
             manualCleanupLikely ||
             topologyCorrespondence.HeuristicHeavy ||
             skeletonReliability.Equals("provisional", StringComparison.OrdinalIgnoreCase) ||
-            skeletonRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase))
+            skeletonRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ||
+            targetBodySupportReliability.Equals("unsafe", StringComparison.OrdinalIgnoreCase))
         {
             return "experimental-manual-cleanup";
         }
@@ -30729,6 +30871,7 @@ internal sealed class LocalExportService(
             runtimeVerificationRequired ||
             skeletonReliability.Equals("review", StringComparison.OrdinalIgnoreCase) ||
             skeletonRemapSafety.Equals("provisional", StringComparison.OrdinalIgnoreCase) ||
+            targetBodySupportReliability.Equals("review", StringComparison.OrdinalIgnoreCase) ||
             !topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
         {
             return "advanced-review-required";
@@ -30744,15 +30887,16 @@ internal sealed class LocalExportService(
         bool canPhysicsConvert,
         bool canSafelyAnimate,
         string skeletonReliability,
-        string skeletonRemapSafety) =>
+        string skeletonRemapSafety,
+        string targetBodySupportReliability) =>
         supportTier switch
         {
             "mainstream-automatic" =>
-                $"{targetBody} currently fits the mainstream automatic tier: conversion, physics, animation, and skeleton remap signals all look strong with direct framework evidence.",
+                $"{targetBody} currently fits the mainstream automatic tier: conversion, physics, animation, target-body support metadata, and skeleton remap signals all look strong with direct framework evidence.",
             "advanced-review-required" =>
-                $"{targetBody} currently fits the advanced review-required tier: conversion is viable, but live review is still required before trusting final animation or topology behavior; skeleton remap safety is {skeletonRemapSafety}.",
+                $"{targetBody} currently fits the advanced review-required tier: conversion is viable, but live review is still required before trusting final animation or topology behavior; skeleton remap safety is {skeletonRemapSafety} and target-body support is {targetBodySupportReliability}.",
             _ =>
-                $"{targetBody} currently fits the experimental/manual-cleanup tier: conversion can proceed={canConvert}, physics-ready={canPhysicsConvert}, safe-animation={canSafelyAnimate}, skeleton reliability={skeletonReliability}, remap safety={skeletonRemapSafety}."
+                $"{targetBody} currently fits the experimental/manual-cleanup tier: conversion can proceed={canConvert}, physics-ready={canPhysicsConvert}, safe-animation={canSafelyAnimate}, skeleton reliability={skeletonReliability}, remap safety={skeletonRemapSafety}, target-body support={targetBodySupportReliability}."
         };
 
     private static bool IsRuntimePhysicsRequested(string requestedProfile) =>

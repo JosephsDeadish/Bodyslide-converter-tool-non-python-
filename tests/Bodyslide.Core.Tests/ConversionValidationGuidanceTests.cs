@@ -411,6 +411,7 @@ public sealed class ConversionValidationGuidanceTests
                 CanSafelyAnimate: false,
                 SkeletonReliability: "review",
                 SkeletonRemapSafety: "unsafe",
+                TargetBodySupportReliability: "review",
                 RecommendedReleaseGate: "manual-cleanup"),
             ManualCleanupLikely: true,
             RuntimeVerificationRequired: true,
