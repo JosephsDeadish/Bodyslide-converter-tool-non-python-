@@ -27166,6 +27166,7 @@ public sealed class OutputCompletenessTests
             1f,
             true,
             partHints,
+            null,
             null
         ]);
 
