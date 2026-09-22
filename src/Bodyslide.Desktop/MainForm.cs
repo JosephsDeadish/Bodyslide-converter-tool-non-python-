@@ -1179,7 +1179,14 @@ public sealed class MainForm : Form
             File.WriteAllText(tempPath, json);
             if (File.Exists(settingsPath))
             {
-                File.Replace(tempPath, settingsPath, destinationBackupFileName: null);
+                if (OperatingSystem.IsWindows())
+                {
+                    File.Replace(tempPath, settingsPath, destinationBackupFileName: null);
+                }
+                else
+                {
+                    File.Move(tempPath, settingsPath, overwrite: true);
+                }
             }
             else
             {
@@ -2473,11 +2480,11 @@ public sealed class MainForm : Form
             ? state.EffectiveStatus
             : "needs-review";
         return ConversionValidationPresentation.BuildOutcomeSummary(
-            effectiveStatus,
-            validationSummary.HighSeverityCount,
-            validationSummary.MediumSeverityCount,
-            validationSummary.LowSeverityCount,
-            state.PreviewAvailable);
+            status: effectiveStatus,
+            highSeverityCount: validationSummary.HighSeverityCount,
+            mediumSeverityCount: validationSummary.MediumSeverityCount,
+            lowSeverityCount: validationSummary.LowSeverityCount,
+            previewAvailable: state.PreviewAvailable);
     }
 
     private void UpdatePresetDetails()
