@@ -17201,6 +17201,28 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("ProbeId").GetString()),
                 static probeId => string.Equals(probeId, "desktop-review-preflight", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("ExpectedAssertions").EnumerateArray().Select(static item => item.GetString()).ToArray()),
+                assertions => assertions.Contains("full-load-order-launched", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("FailureSignals").EnumerateArray().Select(static item => item.GetString()).ToArray()),
+                failures => failures.Contains("load-order-compatibility-regression", StringComparer.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("RequiresFullLoadOrderLaunch").GetBoolean()),
+                static value => value);
+
+            var modStackJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "mod-stack-cross-validation.json"));
+            Assert.Contains("\"RequiresLoadOrderValidation\": true", modStackJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Mixed mod-stack load-order sweep", modStackJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("launch-full-load-order", modStackJson, StringComparison.OrdinalIgnoreCase);
+            using var modStackReport = JsonDocument.Parse(modStackJson);
+            Assert.Equal("Alien Hybrid", modStackReport.RootElement.GetProperty("TargetBody").GetString());
+            Assert.True(modStackReport.RootElement.GetProperty("RequiresLoadOrderValidation").GetBoolean());
+            Assert.True(modStackReport.RootElement.GetProperty("DistinctMeshFamilyCount").GetInt32() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("DistinctDeclaredMasterCount").GetInt32() > 0);
+            Assert.Contains(
+                modStackReport.RootElement.GetProperty("RecommendedRuntimeScenarios").EnumerateArray().Select(static item => item.GetString()),
+                static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.OrdinalIgnoreCase));
 
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
@@ -17208,10 +17230,17 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Support tier", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Runtime harness automation", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Load-order cross-validation", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AutomationContract\"", desktopAutomationJson, StringComparison.Ordinal);
             using var desktopAutomation = JsonDocument.Parse(desktopAutomationJson);
             Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsTrueUiEndToEndAutomation").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresManualWinFormsInteraction").GetBoolean());
+            Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
+                static property => string.Equals(property, "Requires load-order validation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("SuggestedGuiFlow").EnumerateArray().Select(static step => step.GetProperty("Area").GetString()),
+                static area => string.Equals(area, "Load-order cross-validation", StringComparison.OrdinalIgnoreCase));
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
             Assert.Contains("data-testid=\"preview-workbench-root\"", previewHtml, StringComparison.Ordinal);

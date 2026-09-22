@@ -312,10 +312,13 @@ public sealed record RuntimeAutomationHarnessProbe(
     string Priority,
     string Objective,
     IReadOnlyList<string> DispatchActions,
+    IReadOnlyList<string> ExpectedAssertions,
+    IReadOnlyList<string> FailureSignals,
     IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease,
-    bool RequiresManualAssertion);
+    bool RequiresManualAssertion,
+    bool RequiresFullLoadOrderLaunch);
 public sealed record RuntimeAutomationHarness(
     string TargetBody,
     string ValidationGate,
@@ -327,6 +330,28 @@ public sealed record RuntimeAutomationHarness(
     bool RequiresManualAssertion,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<RuntimeAutomationHarnessProbe> Probes);
+public sealed record ModStackCrossValidationReport(
+    string TargetBody,
+    string TargetBodyFamily,
+    string SupportTier,
+    string SourceSkeletonReliability,
+    bool RequiresLoadOrderValidation,
+    bool RequiresPluginPatchReview,
+    int ScannedPluginCount,
+    int ArmorAddonCount,
+    int ArmorRecordCount,
+    int AmbiguousPluginCount,
+    int DistinctMeshFamilyCount,
+    IReadOnlyList<string> DistinctMeshFamilies,
+    int DistinctDeclaredMasterCount,
+    int LinkedArmorFamilyCount,
+    int RaceWarningCount,
+    IReadOnlyList<string> RaceWarnings,
+    int IncompatibleRaceCount,
+    IReadOnlyList<string> IncompatibleRaces,
+    IReadOnlyList<string> RecommendedRuntimeScenarios,
+    IReadOnlyList<string> SuggestedHarnessActions,
+    IReadOnlyList<string> ReviewArtifacts);
 public sealed record ConversionReadinessAssessment(
     string SupportTier,
     string Summary,
@@ -10936,7 +10961,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
         var featureAdjustedMorphing = ApplyMeshFeatureTuning(solverRefinedMorphing, analysis);
-        var physicsRigHints = InspectPhysicsRigStabilizationHints(armor, analysis);
+        var physicsRigHints = InspectPhysicsRigStabilizationHints(armor, analysis, targetBody);
         var stabilizationAssessment = CreateStabilizationAssessment(extremeDifference, analysis, physicsRigHints);
         var stabilizedMorphing = stabilizationAssessment.IsExtreme || physicsRigHints.StrengthenStabilization
             ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, stabilizationAssessment, physicsRigHints.StrengthenStabilization)
@@ -12112,17 +12137,18 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         return (value - low) / Math.Max(0.0001d, high - low);
     }
 
-    private static PhysicsRigStabilizationHints InspectPhysicsRigStabilizationHints(ImportedArmor armor, MeshAnalysis analysis)
+    private static PhysicsRigStabilizationHints InspectPhysicsRigStabilizationHints(ImportedArmor armor, MeshAnalysis analysis, string? targetBody = null)
     {
         SkeletonFrameworkDetectionResult? frameworkDetection = null;
+        var contextCues = BasicSkeletonMappingService.BuildSkeletonInferenceContextCues(armor, parsedSkeletonLabel: null, targetBody);
         if (armor.PhysicsFiles.Count > 0)
         {
-            frameworkDetection = DetectCustomRigFrameworkFromPhysicsFiles(armor.PhysicsFiles);
+            frameworkDetection = DetectCustomRigFrameworkFromPhysicsFiles(armor.PhysicsFiles, contextCues);
         }
 
         if ((frameworkDetection is null || string.IsNullOrWhiteSpace(frameworkDetection.Label)) && armor.BodyReferenceFiles.Count > 0)
         {
-            frameworkDetection = DetectCustomRigFrameworkFromBodyReferences(armor.BodyReferenceFiles);
+            frameworkDetection = DetectCustomRigFrameworkFromBodyReferences(armor.BodyReferenceFiles, contextCues);
         }
 
         var frameworkLabel = frameworkDetection?.Label;
@@ -12200,7 +12226,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             frameworkDetection?.UsedSparseInference == true);
     }
 
-    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromPhysicsFiles(IReadOnlyList<string> physicsFiles)
+    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromPhysicsFiles(IReadOnlyList<string> physicsFiles, IReadOnlyList<string>? contextCues = null)
     {
         var boneNames = new List<string>();
         foreach (var physicsPath in physicsFiles)
@@ -12225,10 +12251,10 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             }
         }
 
-        return boneNames.Count == 0 ? null : SkeletonFrameworkCatalog.DetectFrameworkDetails(boneNames);
+        return boneNames.Count == 0 ? null : SkeletonFrameworkCatalog.DetectFrameworkDetails(boneNames, contextCues);
     }
 
-    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromBodyReferences(IReadOnlyList<string> bodyReferenceFiles)
+    private static SkeletonFrameworkDetectionResult? DetectCustomRigFrameworkFromBodyReferences(IReadOnlyList<string> bodyReferenceFiles, IReadOnlyList<string>? contextCues = null)
     {
         foreach (var bodyReferencePath in bodyReferenceFiles)
         {
@@ -12240,7 +12266,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             try
             {
                 var frameworkDetection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
-                    SkeletonNifBoneParser.ExtractBoneNames(File.ReadAllBytes(bodyReferencePath)));
+                    SkeletonNifBoneParser.ExtractBoneNames(File.ReadAllBytes(bodyReferencePath)),
+                    contextCues);
                 if (!string.IsNullOrWhiteSpace(frameworkDetection.Label))
                 {
                     return frameworkDetection;
@@ -13244,7 +13271,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             }
         }
 
-        var sourceFrameworkContextCues = BuildSkeletonInferenceContextCues(armor, parsedSkeletonLabel);
+        var sourceFrameworkContextCues = BuildSkeletonInferenceContextCues(armor, parsedSkeletonLabel, targetBody);
         var sourceFrameworkDetection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
             sourcePhysicsBones
                 .Concat(parsedBones)
@@ -13282,7 +13309,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             SourceSkeletonCandidates: sourceFrameworkCandidates);
     }
 
-    private static IReadOnlyList<string> BuildSkeletonInferenceContextCues(ImportedArmor armor, string? parsedSkeletonLabel)
+    internal static IReadOnlyList<string> BuildSkeletonInferenceContextCues(ImportedArmor armor, string? parsedSkeletonLabel, string? targetBody = null)
     {
         var cues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -13303,6 +13330,7 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
         }
 
         AddPathTokens(cues, parsedSkeletonLabel);
+        AddPathTokens(cues, targetBody);
         AddPathTokens(cues, armor.SourcePath);
         foreach (var meshFile in armor.MeshFiles)
         {
@@ -13325,6 +13353,43 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
                              .Concat(profile.ReferenceTokens ?? [])
                              .Concat(profile.PhysicsTokens)
                              .Concat(profile.PhysicsBones ?? []))
+                {
+                    AddPathTokens(cues, token);
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetBody))
+        {
+            if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+            {
+                foreach (var token in metadata.Aliases
+                             .Append(metadata.Name)
+                             .Append(metadata.SkeletonFoundation)
+                             .Append(metadata.SkeletonFramework)
+                             .Concat(metadata.ReferenceTokens)
+                             .Concat(metadata.DetectionTokens)
+                             .Concat(metadata.PhysicsTokens)
+                             .Concat(metadata.AvailablePhysicsBones)
+                             .Concat(metadata.PhysicsBoneSignatures)
+                             .Concat(metadata.SliderNames))
+                {
+                    AddPathTokens(cues, token);
+                }
+            }
+
+            if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+            {
+                foreach (var token in (customProfile.Aliases ?? [])
+                             .Append(customProfile.Name)
+                             .Append(customProfile.SkeletonFoundation ?? string.Empty)
+                             .Append(customProfile.SkeletonFramework ?? string.Empty)
+                             .Concat(customProfile.ReferenceTokens ?? [])
+                             .Concat(customProfile.DetectionTokens)
+                             .Concat(customProfile.TextureTokens)
+                             .Concat(customProfile.PhysicsTokens)
+                             .Concat(customProfile.PhysicsBones ?? [])
+                             .Concat(customProfile.SliderNames ?? []))
                 {
                     AddPathTokens(cues, token);
                 }
@@ -18602,6 +18667,23 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(inGameValidation, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(inGameValidationPath);
+
+        var modStackCrossValidationPath = Path.Combine(outputDirectory, "mod-stack-cross-validation.json");
+        var modStackCrossValidation = BuildModStackCrossValidationReport(
+            request.TargetBody,
+            pluginAnalysis,
+            raceCompatibility,
+            skeletonMapping,
+            conversionReadiness,
+            inGameValidation);
+        if (modStackCrossValidation is not null)
+        {
+            await File.WriteAllTextAsync(
+                modStackCrossValidationPath,
+                JsonSerializer.Serialize(modStackCrossValidation, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(modStackCrossValidationPath);
+        }
 
         var runtimeValidationPlanPath = Path.Combine(outputDirectory, "runtime-validation-plan.json");
         var runtimeValidationPlan = BuildRuntimeValidationExecutionPlan(inGameValidation);
@@ -27365,6 +27447,7 @@ internal sealed class LocalExportService(
 
         if (hasPluginArtifacts)
         {
+            files.Add("mod-stack-cross-validation.json");
             files.Add("race-compatibility.json");
             files.Add("patch-armor.pas");
             files.Add("plugin-patches.json");
@@ -27385,6 +27468,7 @@ internal sealed class LocalExportService(
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
@@ -27617,11 +27701,15 @@ internal sealed class LocalExportService(
             step.Priority,
             step.Objective,
             DispatchActions: BuildRuntimeDispatchActions(step),
+            ExpectedAssertions: BuildRuntimeExpectedAssertions(step),
+            FailureSignals: BuildRuntimeFailureSignals(step),
             step.FocusRegions,
             step.RelatedArtifacts,
             step.BlocksRelease,
             RequiresManualAssertion: step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
-                                     step.BlocksRelease))
+                                     step.BlocksRelease,
+            RequiresFullLoadOrderLaunch: step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+                                         step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
         return new RuntimeAutomationHarness(
@@ -27706,6 +27794,99 @@ internal sealed class LocalExportService(
         }
 
         return actions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildRuntimeExpectedAssertions(RuntimeValidationExecutionStep step)
+    {
+        var assertions = new List<string>();
+        if (step.RelatedArtifacts.Count > 0)
+        {
+            assertions.Add("related-artifacts-readable");
+        }
+
+        if (step.Phase.Contains("preflight", StringComparison.OrdinalIgnoreCase) ||
+            step.Phase.Contains("desktop", StringComparison.OrdinalIgnoreCase))
+        {
+            assertions.Add("preview-contract-loaded");
+            assertions.Add("runtime-plan-loaded");
+        }
+
+        if (step.Phase.Contains("workbench", StringComparison.OrdinalIgnoreCase))
+        {
+            assertions.Add("cleanup-observation-captured");
+        }
+
+        if (step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
+            step.Phase.Contains("scenario", StringComparison.OrdinalIgnoreCase))
+        {
+            assertions.Add("outfit-equipped");
+            assertions.Add("animation-sequence-dispatched");
+            assertions.Add("runtime-observation-captured");
+        }
+
+        if (step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase))
+        {
+            assertions.Add("full-load-order-launched");
+            assertions.Add("plugin-race-compatibility-verified");
+            assertions.Add("load-order-observation-captured");
+        }
+
+        if (step.Name.Contains("release gate", StringComparison.OrdinalIgnoreCase))
+        {
+            assertions.Add("release-gate-persisted");
+        }
+
+        return assertions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildRuntimeFailureSignals(RuntimeValidationExecutionStep step)
+    {
+        var failures = new List<string>();
+        if (step.BlocksRelease)
+        {
+            failures.Add("blocking-step-unresolved");
+        }
+
+        if (step.FocusRegions.Count > 0)
+        {
+            failures.Add("focus-region-instability");
+        }
+
+        if (step.Name.Contains("skeleton", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add("skeleton-remap-regression");
+        }
+
+        if (step.Name.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("cleanup", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add("semantic-fit-regression");
+        }
+
+        if (step.Name.Contains("physics", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("ground", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add("physics-instability");
+        }
+
+        if (step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add("load-order-compatibility-regression");
+        }
+
+        if (step.Name.Contains("release gate", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add("release-gate-failed");
+        }
+
+        return failures
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -28487,7 +28668,7 @@ internal sealed class LocalExportService(
                BuildMixedModStackValidationSummary(targetBody, pluginAnalysis, raceCompatibility),
                ["full load-order launch", "equip", "cell transition", "save / reload"],
                mixedRegions,
-               ["plugin-patches.json", "race-compatibility.json", "runtime-validation-plan.json", "skeleton-compatibility.json"]));
+               ["mod-stack-cross-validation.json", "plugin-patches.json", "race-compatibility.json", "runtime-validation-plan.json", "skeleton-compatibility.json"]));
         }
 
         if (manualCleanupLikely)
@@ -28564,6 +28745,163 @@ internal sealed class LocalExportService(
         var incompatibleRaces = raceCompatibility?.IncompatibleRaces?.Count ?? 0;
         var raceWarnings = raceCompatibility?.Warnings?.Count ?? 0;
         return $"Mixed plugin/race/body-family validation is recommended for {targetBody} because the stack includes {pluginCount} plugin(s), {addonCount} armor addon(s), {armorRecordCount} armor record(s), and {incompatibleRaces + raceWarnings} race compatibility warning(s).";
+    }
+
+    private static ModStackCrossValidationReport? BuildModStackCrossValidationReport(
+        string targetBody,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        SkeletonMappingResult skeletonMapping,
+        ConversionReadinessAssessment conversionReadiness,
+        InGameValidationReport inGameValidation)
+    {
+        if (pluginAnalysis is null && raceCompatibility is null)
+        {
+            return null;
+        }
+
+        var pluginNames = pluginAnalysis?.ScannedPlugins ?? [];
+        var armorAddons = pluginAnalysis?.ArmorAddons ?? [];
+        var armorRecords = pluginAnalysis?.ArmorRecords ?? [];
+        var distinctMeshFamilies = BuildPluginMeshFamilySummary(armorAddons, armorRecords);
+        var declaredMasters = armorAddons
+            .SelectMany(static addon => addon.DeclaredMasterFileNames ?? [])
+            .Concat(armorRecords.SelectMany(static record => record.DeclaredMasterFileNames ?? []))
+            .Where(static master => !string.IsNullOrWhiteSpace(master))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static master => master, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var linkedArmorFamilies = armorRecords
+            .SelectMany(static record => record.LinkedArmorAddonReferences ?? [])
+            .Select(static reference => reference.OwningPluginFileName)
+            .Where(static plugin => !string.IsNullOrWhiteSpace(plugin))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        var recommendedScenarios = inGameValidation.ScenarioMatrix
+            .Where(static scenario =>
+                scenario.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+                scenario.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase) ||
+                scenario.Name.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+                scenario.Name.Contains("race", StringComparison.OrdinalIgnoreCase))
+            .Select(static scenario => scenario.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (recommendedScenarios.Length == 0 && RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody))
+        {
+            recommendedScenarios =
+            [
+                "Mixed mod-stack load-order sweep",
+                "Sparse skeleton confidence sweep"
+            ];
+        }
+
+        return new ModStackCrossValidationReport(
+            TargetBody: targetBody,
+            TargetBodyFamily: BuildTargetBodyFamily(targetBody),
+            SupportTier: conversionReadiness.SupportTier,
+            SourceSkeletonReliability: BuildSourceSkeletonInferenceReliability(skeletonMapping),
+            RequiresLoadOrderValidation: RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody),
+            RequiresPluginPatchReview: pluginAnalysis is not null && ((pluginAnalysis.AmbiguousPlugins?.Count ?? 0) > 0 || pluginNames.Count > 0),
+            ScannedPluginCount: pluginNames.Count,
+            ArmorAddonCount: armorAddons.Count,
+            ArmorRecordCount: armorRecords.Count,
+            AmbiguousPluginCount: pluginAnalysis?.AmbiguousPlugins?.Count ?? 0,
+            DistinctMeshFamilyCount: distinctMeshFamilies.Count,
+            DistinctMeshFamilies: distinctMeshFamilies,
+            DistinctDeclaredMasterCount: declaredMasters.Length,
+            LinkedArmorFamilyCount: linkedArmorFamilies,
+            RaceWarningCount: raceCompatibility?.Warnings.Count ?? 0,
+            RaceWarnings: raceCompatibility?.Warnings ?? [],
+            IncompatibleRaceCount: raceCompatibility?.IncompatibleRaces.Count ?? 0,
+            IncompatibleRaces: raceCompatibility?.IncompatibleRaces ?? [],
+            RecommendedRuntimeScenarios: recommendedScenarios,
+            SuggestedHarnessActions:
+            [
+                "verify-related-artifacts",
+                "launch-full-load-order",
+                "verify-plugin-and-race-compatibility",
+                "capture-load-order-observation",
+                "persist-release-gate-result"
+            ],
+            ReviewArtifacts:
+            [
+                "mod-stack-cross-validation.json",
+                "plugin-patches.json",
+                "race-compatibility.json",
+                "runtime-validation-plan.json",
+                "skeleton-compatibility.json"
+            ]);
+    }
+
+    private static IReadOnlyList<string> BuildPluginMeshFamilySummary(
+        IReadOnlyList<PluginArmorAddon> armorAddons,
+        IReadOnlyList<PluginArmorRecord> armorRecords) =>
+        armorAddons
+            .SelectMany(static addon => addon.DetectedMeshPaths)
+            .Concat(armorRecords.SelectMany(static record => record.DetectedMeshPaths))
+            .Select(ExtractPluginMeshFamily)
+            .Where(static family => !string.IsNullOrWhiteSpace(family))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static family => family, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToArray()!;
+
+    private static string? ExtractPluginMeshFamily(string? meshPath)
+    {
+        if (string.IsNullOrWhiteSpace(meshPath))
+        {
+            return null;
+        }
+
+        var tokens = meshPath
+            .Split(['\\', '/', '_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static token => token.Length >= 3)
+            .Select(static token => token.ToLowerInvariant())
+            .ToArray();
+        if (tokens.Length == 0)
+        {
+            return null;
+        }
+
+        var preferred = tokens.FirstOrDefault(static token =>
+            token.Contains("body", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("race", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("throat", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("sheath", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("genital", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("fin", StringComparison.OrdinalIgnoreCase) ||
+            token.Contains("beast", StringComparison.OrdinalIgnoreCase));
+        return preferred ?? tokens[^1];
+    }
+
+    private static string BuildTargetBodyFamily(string targetBody)
+    {
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            var familyCue = metadata.ReferenceTokens
+                .Concat(metadata.DetectionTokens)
+                .Concat(metadata.Aliases)
+                .FirstOrDefault(token =>
+                    token.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("canine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("equine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("serpentine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("aquatic", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("draconic", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("insectoid", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("alien", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(familyCue))
+            {
+                return familyCue;
+            }
+        }
+
+        return targetBody;
     }
 
     private static bool IsBeastOrExoticTarget(string targetBody) =>

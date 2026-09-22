@@ -358,6 +358,24 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
                     Add(metrics, reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
                     Add(metrics, reportName, "Harness phases", TryReadHarnessPhases(root), filePath);
+                    Add(metrics, reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
+                    break;
+                case "mod-stack-cross-validation.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonReliability"), filePath);
+                    Add(metrics, reportName, "Requires load-order validation", FormatBool(TryReadBoolValue(root, "RequiresLoadOrderValidation")), filePath);
+                    Add(metrics, reportName, "Requires plugin patch review", FormatBool(TryReadBoolValue(root, "RequiresPluginPatchReview")), filePath);
+                    Add(metrics, reportName, "Plugins", TryReadIntValue(root, "ScannedPluginCount"), filePath);
+                    Add(metrics, reportName, "Armor add-ons", TryReadIntValue(root, "ArmorAddonCount"), filePath);
+                    Add(metrics, reportName, "Armor records", TryReadIntValue(root, "ArmorRecordCount"), filePath);
+                    Add(metrics, reportName, "Ambiguous plugins", TryReadIntValue(root, "AmbiguousPluginCount"), filePath);
+                    Add(metrics, reportName, "Declared masters", TryReadIntValue(root, "DistinctDeclaredMasterCount"), filePath);
+                    Add(metrics, reportName, "Linked armor families", TryReadIntValue(root, "LinkedArmorFamilyCount"), filePath);
+                    Add(metrics, reportName, "Plugin mesh families", TryReadArray(root, "DistinctMeshFamilies"), filePath);
+                    Add(metrics, reportName, "Recommended runtime scenarios", TryReadArray(root, "RecommendedRuntimeScenarios"), filePath);
+                    Add(metrics, reportName, "Suggested harness actions", TryReadArray(root, "SuggestedHarnessActions"), filePath);
                     break;
                 case "desktop-workflow-automation.json":
                     Add(metrics, reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
@@ -465,6 +483,11 @@ internal static class DesktopWorkflowAutomation
     private static int CountNestedArray(JsonElement element, string objectPropertyName, string nestedArrayPropertyName) =>
         TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
             ? CountNestedArray(nested, nestedArrayPropertyName)
+            : 0;
+
+    private static int CountObjectsWithBool(JsonElement element, string arrayPropertyName, string boolPropertyName, bool expected) =>
+        TryGetProperty(element, arrayPropertyName, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Count(item => TryReadBoolValue(item, boolPropertyName) == expected)
             : 0;
 
     private static string? TryReadScenarioHighlights(JsonElement element)
@@ -753,6 +776,18 @@ internal static class DesktopWorkflowAutomation
                 $"{harnessCoverageMetric.Property}: {harnessCoverageMetric.Value}",
                 harnessCoverageMetric.FilePath,
                 Blocking: false));
+        }
+
+        var modStackMetric = FindMetric(reportMetrics, "Requires load-order validation", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                             ?? FindMetric(reportMetrics, "Load-order probes", static value => !value.Equals("0", StringComparison.OrdinalIgnoreCase));
+        if (modStackMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Load-order cross-validation",
+                "Open mod-stack-cross-validation.json and confirm the recommended mixed-stack/runtime scenarios before release.",
+                $"{modStackMetric.Property}: {modStackMetric.Value}",
+                FindMetricFile(reportMetrics, "Plugin mesh families") ?? modStackMetric.FilePath,
+                Blocking: true));
         }
 
         var packagingMetric = FindMetric(reportMetrics, "Pack status")

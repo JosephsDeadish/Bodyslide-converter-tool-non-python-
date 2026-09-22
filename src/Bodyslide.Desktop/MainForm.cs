@@ -96,6 +96,10 @@ public sealed class MainForm : Form
         "conversion-quality.json",
         "dependency-map.json",
         "in-game-validation.json",
+        "mod-stack-cross-validation.json",
+        "runtime-validation-plan.json",
+        "runtime-validation-harness.json",
+        "desktop-workflow-automation.json",
         "skeleton-compatibility.json",
         "race-compatibility.json",
         "texture-summary.json",
@@ -2096,6 +2100,7 @@ public sealed class MainForm : Form
                 AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromModStackCrossValidation(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
             }
@@ -3276,6 +3281,17 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Blocking runtime steps", CountObjectsWithBool(root, "Steps", "BlocksRelease", expected: true), filePath);
                     AddReportMetric(reportName, "Runtime execution highlights", TryReadExecutionHighlights(root), filePath);
                     break;
+                case "runtime-validation-harness.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Harness automation coverage", TryReadString(root, "AutomationCoverage"), filePath);
+                    AddReportMetric(reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
+                    AddReportMetric(reportName, "Modded test environment", FormatBool(TryReadBoolValue(root, "RequiresModdedTestEnvironment")), filePath);
+                    AddReportMetric(reportName, "Artifact preflight automation", FormatBool(TryReadBoolValue(root, "SupportsArtifactPreflightAutomation")), filePath);
+                    AddReportMetric(reportName, "Scenario dispatch automation", FormatBool(TryReadBoolValue(root, "SupportsScenarioDispatchAutomation")), filePath);
+                    AddReportMetric(reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
+                    AddReportMetric(reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
+                    AddReportMetric(reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
+                    break;
                 case "desktop-workflow-automation.json":
                     AddReportMetric(reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
                     AddReportMetric(reportName, "Guidance tab", TryReadNestedString(root, "ValidationState", "GuidanceTabTitle"), filePath);
@@ -3288,6 +3304,25 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "GUI flow steps", CountNestedArray(root, "SuggestedGuiFlow"), filePath);
                     AddReportMetric(reportName, "Blocking GUI steps", CountObjectsWithBool(root, "SuggestedGuiFlow", "Blocking", expected: true), filePath);
                     AddReportMetric(reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
+                    break;
+                case "mod-stack-cross-validation.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonReliability"), filePath);
+                    AddReportMetric(reportName, "Requires load-order validation", FormatBool(TryReadBoolValue(root, "RequiresLoadOrderValidation")), filePath);
+                    AddReportMetric(reportName, "Requires plugin patch review", FormatBool(TryReadBoolValue(root, "RequiresPluginPatchReview")), filePath);
+                    AddReportMetric(reportName, "Plugins", TryReadInt(root, "ScannedPluginCount"), filePath);
+                    AddReportMetric(reportName, "Armor add-ons", TryReadInt(root, "ArmorAddonCount"), filePath);
+                    AddReportMetric(reportName, "Armor records", TryReadInt(root, "ArmorRecordCount"), filePath);
+                    AddReportMetric(reportName, "Ambiguous plugins", TryReadInt(root, "AmbiguousPluginCount"), filePath);
+                    AddReportMetric(reportName, "Declared masters", TryReadInt(root, "DistinctDeclaredMasterCount"), filePath);
+                    AddReportMetric(reportName, "Linked armor families", TryReadInt(root, "LinkedArmorFamilyCount"), filePath);
+                    AddReportMetric(reportName, "Plugin mesh families", TryReadArray(root, "DistinctMeshFamilies"), filePath);
+                    AddReportMetric(reportName, "Race warnings", TryReadArray(root, "RaceWarnings"), filePath);
+                    AddReportMetric(reportName, "Incompatible races", TryReadArray(root, "IncompatibleRaces"), filePath);
+                    AddReportMetric(reportName, "Recommended runtime scenarios", TryReadArray(root, "RecommendedRuntimeScenarios"), filePath);
+                    AddReportMetric(reportName, "Suggested harness actions", TryReadArray(root, "SuggestedHarnessActions"), filePath);
                     break;
                 case "race-compatibility.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -4024,6 +4059,69 @@ public sealed class MainForm : Form
         {
             requiresReview = true;
             add("Plugin patching", "Warning", $"Could not read plugin-patches.json: {ex.Message}", patchPath);
+        }
+    }
+
+    private static void AppendGuidanceFromModStackCrossValidation(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var reportPath = Path.Combine(outputDirectory, "mod-stack-cross-validation.json");
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = OpenJsonDocument(reportPath);
+            var root = document.RootElement;
+            var targetBody = TryReadString(root, "TargetBody") ?? "target body";
+            var requiresLoadOrderValidation = TryReadBoolValue(root, "RequiresLoadOrderValidation") == true;
+            var requiresPluginPatchReview = TryReadBoolValue(root, "RequiresPluginPatchReview") == true;
+            var pluginCount = TryReadIntValue(root, "ScannedPluginCount") ?? 0;
+            var masterCount = TryReadIntValue(root, "DistinctDeclaredMasterCount") ?? 0;
+            var meshFamilies = TryReadArray(root, "DistinctMeshFamilies");
+            var runtimeScenarios = TryReadArray(root, "RecommendedRuntimeScenarios");
+            var skeletonReliability = TryReadString(root, "SourceSkeletonReliability");
+
+            if (requiresLoadOrderValidation)
+            {
+                requiresReview = true;
+                add(
+                    "Load order",
+                    "High",
+                    $"Large mixed-stack validation is still required for {targetBody}. Review {pluginCount} plugin(s), {masterCount} declared master chain(s), and the recommended runtime scenarios before release.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "runtime-validation-plan", reportPath));
+            }
+
+            if (requiresPluginPatchReview)
+            {
+                requiresReview = true;
+                add(
+                    "Plugin / race stack",
+                    "Action",
+                    $"Cross-check plugin-patches.json and mod-stack-cross-validation.json together before release. Mesh families: {meshFamilies ?? "Unknown"}. Runtime scenarios: {runtimeScenarios ?? "See report"}.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "plugin-rewrite-verification-warning", reportPath));
+            }
+
+            if (string.Equals(skeletonReliability, "provisional", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(skeletonReliability, "review", StringComparison.OrdinalIgnoreCase))
+            {
+                requiresReview = true;
+                add(
+                    "Custom skeleton stack",
+                    string.Equals(skeletonReliability, "provisional", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+                    $"Source skeleton reliability is {skeletonReliability}. Validate the mixed load order against the real rig before treating this conversion as pack-ready.",
+                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "skeleton-compatibility-report", reportPath));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add("Load order", "Warning", $"Could not read mod-stack-cross-validation.json: {ex.Message}", reportPath);
         }
     }
 
