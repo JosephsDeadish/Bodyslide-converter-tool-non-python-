@@ -14,7 +14,9 @@ public sealed class MainForm : Form
     private static readonly string[] PreviewFileCandidates = ["preview-workbench.html", "preview.html"];
     private static readonly JsonSerializerOptions ReportJsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        AllowTrailingCommas = true,
+        ReadCommentHandling = JsonCommentHandling.Skip
     };
 
     private readonly TextBox _inputTextBox;
@@ -1187,10 +1189,13 @@ public sealed class MainForm : Form
                 {
                     File.Move(tempPath, settingsPath, overwrite: true);
                 }
+
+                tempPath = null;
             }
             else
             {
                 File.Move(tempPath, settingsPath);
+                tempPath = null;
             }
         }
         catch (Exception ex)
