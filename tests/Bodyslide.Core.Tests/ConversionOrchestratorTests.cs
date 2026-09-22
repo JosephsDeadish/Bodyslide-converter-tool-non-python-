@@ -13418,6 +13418,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("BellyLower", ube.AvailablePhysicsBones);
         Assert.Contains("Butt", ube.SliderNames);
         Assert.Contains("Thighs", ube.SliderNames);
+        Assert.True(ube.HasExplicitSupportMetadata);
+        Assert.Contains("mouth", ube.ExpectedSemanticRegions);
+        Assert.Contains("vagina", ube.ExpectedCollisionRegions);
+        Assert.Equal("extended", ube.CollisionComplexity);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("SOS", out var sos));
         Assert.Contains("SOS GenitalsBase", sos.AvailablePhysicsBones);
@@ -13436,6 +13440,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("HDT Throat", tng.AvailablePhysicsBones);
         Assert.Contains("Belly", tng.SliderNames);
         Assert.Contains("Thighs", tng.SliderNames);
+        Assert.True(tng.HasExplicitSupportMetadata);
+        Assert.Contains("genitals", tng.ExpectedCollisionRegions);
+        Assert.True(tng.MinimumPhysicsSlotCount >= 3);
+        Assert.True(tng.MinimumPhysicsChainDepth >= 3);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("The New Gentleman 2", out var tngAlias));
         Assert.Equal("TNG", tngAlias.Name);
 
@@ -13447,6 +13455,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("TongueMid", equine.AvailablePhysicsBones);
         Assert.Contains("Butt", equine.SliderNames);
         Assert.Contains("Thighs", equine.SliderNames);
+        Assert.True(equine.HasExplicitSupportMetadata);
+        Assert.Contains("tail", equine.ExpectedCollisionRegions);
+        Assert.Contains("genitals", equine.ExpectedCollisionRegions);
     }
 
     [Fact]
@@ -13460,6 +13471,9 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("BeastKnot", feline.AvailablePhysicsBones);
         Assert.Contains("TongueMid", feline.AvailablePhysicsBones);
         Assert.Contains("Butt", feline.SliderNames);
+        Assert.True(feline.HasExplicitSupportMetadata);
+        Assert.Contains("tail", feline.ExpectedCollisionRegions);
+        Assert.Contains("feet", feline.ExpectedCollisionRegions);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Canine Humanoid", out var canine));
         Assert.Contains("PawFront.L", canine.AvailablePhysicsBones);
@@ -13470,6 +13484,7 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("TongueMid", canine.AvailablePhysicsBones);
         Assert.Contains("Butt", canine.SliderNames);
         Assert.Contains("TongueTipLength", canine.SliderNames);
+        Assert.True(canine.HasExplicitSupportMetadata);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("Goat Humanoid", out var goat));
         Assert.Contains("Horn.L", goat.AvailablePhysicsBones);
@@ -24283,6 +24298,7 @@ public sealed class OutputCompletenessTests
     public void EvaluateTargetBodySupportQuality_KnownBuiltInBodyAvoidsNoise()
     {
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("TNG", out var metadata));
+        Assert.True(metadata.HasExplicitSupportMetadata);
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
             metadata.ReferenceTokens,
             metadata.SliderNames,
@@ -24296,7 +24312,8 @@ public sealed class OutputCompletenessTests
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
             requestedPhysicsProfile: metadata.DefaultPhysics,
             physicsTokens: metadata.PhysicsTokens,
-            declaredPhysicsProfile: metadata.DefaultPhysics);
+            declaredPhysicsProfile: metadata.DefaultPhysics,
+            hasExplicitSupportMetadata: metadata.HasExplicitSupportMetadata);
 
         Assert.DoesNotContain(warnings, warning => warning.StartsWith("physicsBones-", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
@@ -24304,6 +24321,7 @@ public sealed class OutputCompletenessTests
         Assert.DoesNotContain(warnings, warning => warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -24311,6 +24329,7 @@ public sealed class OutputCompletenessTests
     {
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("CBBE", out var metadata));
         Assert.True(metadata.ReferenceTokens.Count < 3);
+        Assert.True(metadata.HasExplicitSupportMetadata);
 
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
             metadata.ReferenceTokens,
@@ -24325,9 +24344,11 @@ public sealed class OutputCompletenessTests
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
             requestedPhysicsProfile: metadata.DefaultPhysics,
             physicsTokens: metadata.PhysicsTokens,
-            declaredPhysicsProfile: metadata.DefaultPhysics);
+            declaredPhysicsProfile: metadata.DefaultPhysics,
+            hasExplicitSupportMetadata: metadata.HasExplicitSupportMetadata);
 
         Assert.DoesNotContain(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -24351,6 +24372,27 @@ public sealed class OutputCompletenessTests
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-depth", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EvaluateTargetBodySupportQuality_HeuristicOnlyAdvancedMetadataFlagsExplicitnessGap()
+    {
+        var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            referenceTokens: ["feline", "tail", "beast"],
+            sliderNames: ["TailBase", "PawWidth", "TongueTipLength"],
+            physicsBones: ["TailSheath", "BeastKnot", "TongueMid"],
+            expectedSemanticRegions: ["tail", "genitals", "tongue", "feet"],
+            expectedCollisionRegions: ["tail", "genitals", "tongue", "feet"],
+            minimumPhysicsSlotCount: 3,
+            minimumPhysicsChainDepth: 2,
+            collisionComplexity: "extended",
+            hasSkeletonMetadata: true,
+            requestedPhysicsProfile: "smp",
+            physicsTokens: ["smp", "tail"],
+            declaredPhysicsProfile: "smp",
+            hasExplicitSupportMetadata: false);
+
+        Assert.Contains(warnings, warning => warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

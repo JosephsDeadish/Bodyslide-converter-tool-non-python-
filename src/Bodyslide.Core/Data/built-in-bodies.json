@@ -71,7 +71,25 @@
       "NPC L Butt",
       "NPC R Butt"
     ],
-    "skeletonFramework": "xpmsse-female-cbbe"
+    "skeletonFramework": "xpmsse-female-cbbe",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
   },
   {
     "name": "3BA",
@@ -163,7 +181,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-advanced"
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "BHUNP",
@@ -248,7 +285,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-advanced"
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "UNP",
@@ -315,7 +371,25 @@
       "NPC L Butt",
       "NPC R Butt"
     ],
-    "skeletonFramework": "xpmsse-female-cbpc"
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "UNPB",
@@ -396,7 +470,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-cbpc"
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "UUNP",
@@ -485,7 +578,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-cbpc"
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "COCO CBBE",
@@ -576,7 +688,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-advanced"
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "COCO UUNP",
@@ -669,7 +800,26 @@
       "NPC L Thigh",
       "NPC R Thigh"
     ],
-    "skeletonFramework": "xpmsse-female-advanced"
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "TBD",
@@ -735,7 +885,25 @@
       "NPC Belly01",
       "NPC L Butt"
     ],
-    "skeletonFramework": "xpmsse-female-cbpc"
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "HIMBO",
@@ -804,7 +972,26 @@
       "NPC LPec",
       "NPC RPec"
     ],
-    "skeletonFramework": "xpmsse-male-smp"
+    "skeletonFramework": "xpmsse-male-smp",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
   },
   {
     "name": "SAM",
@@ -869,7 +1056,25 @@
       "SAM Foreskin",
       "NPC L Breast01"
     ],
-    "skeletonFramework": "sam-light"
+    "skeletonFramework": "sam-light",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "SAM Light",
@@ -941,7 +1146,28 @@
       "NPC L Pec",
       "NPC R Pec"
     ],
-    "skeletonFramework": "sam-light"
+    "skeletonFramework": "sam-light",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals",
+      "mouth"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
   },
   {
     "name": "SOS",
@@ -1020,7 +1246,26 @@
       "SOS Glans",
       "SOS Scrotum"
     ],
-    "skeletonFramework": "xpmsse-male-smp"
+    "skeletonFramework": "xpmsse-male-smp",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "UBE",
@@ -1147,7 +1392,37 @@
       "NPC L Butt",
       "NPC R Butt"
     ],
-    "skeletonFramework": "ube-extended"
+    "skeletonFramework": "ube-extended",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "jaw",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "throat",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "breasts",
+      "butt",
+      "jaw",
+      "mouth",
+      "throat",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 9,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "TNG",
@@ -1244,7 +1519,34 @@
       "NPC L Pec",
       "NPC R Pec"
     ],
-    "skeletonFramework": "tng-extended"
+    "skeletonFramework": "tng-extended",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "jaw",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "throat",
+      "tongue"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals",
+      "jaw",
+      "mouth",
+      "throat",
+      "tongue"
+    ],
+    "minimumPhysicsSlotCount": 7,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Vanilla",
@@ -1301,7 +1603,23 @@
     "depthToWidthRatioMin": 0.28,
     "depthToWidthRatioMax": 0.9,
     "physicsBoneSignatures": [],
-    "skeletonFramework": "vanilla-skyrim"
+    "skeletonFramework": "vanilla-skyrim",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly"
+    ],
+    "minimumPhysicsSlotCount": 1,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "minimal"
   },
   {
     "name": "Vanilla Beast",
@@ -1423,7 +1741,25 @@
       "Tail2",
       "Tail3"
     ],
-    "skeletonFramework": "beast-humanoid"
+    "skeletonFramework": "beast-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "minimal"
   },
   {
     "name": "Serpentine Humanoid",
@@ -1523,7 +1859,25 @@
       "Tail5",
       "CoilTip"
     ],
-    "skeletonFramework": "serpentine-humanoid"
+    "skeletonFramework": "serpentine-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Goat Humanoid",
@@ -1622,7 +1976,29 @@
       "Hock.L",
       "Hock.R"
     ],
-    "skeletonFramework": "horned-humanoid"
+    "skeletonFramework": "horned-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "horn",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "feet",
+      "horn",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
   },
   {
     "name": "Hagraven",
@@ -1702,7 +2078,25 @@
       "WingTip.L",
       "WingTip.R"
     ],
-    "skeletonFramework": "winged-humanoid"
+    "skeletonFramework": "winged-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Spriggan",
@@ -1799,7 +2193,25 @@
       "RootClaw.L",
       "RootClaw.R"
     ],
-    "skeletonFramework": "spriggan-branch"
+    "skeletonFramework": "spriggan-branch",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "branch",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "branch"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Equine Humanoid",
@@ -1916,7 +2328,39 @@
       "Hoof.L",
       "Hoof.R"
     ],
-    "skeletonFramework": "equine-humanoid"
+    "skeletonFramework": "equine-humanoid",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "mane",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "mane",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 9,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Avian Humanoid",
@@ -2017,7 +2461,27 @@
       "Feather01.L",
       "Feather01.R"
     ],
-    "skeletonFramework": "avian-humanoid"
+    "skeletonFramework": "avian-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "feet",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Feline Humanoid",
@@ -2140,7 +2604,37 @@
       "TailSheath",
       "BeastVagina"
     ],
-    "skeletonFramework": "digitigrade-beast"
+    "skeletonFramework": "digitigrade-beast",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 8,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Canine Humanoid",
@@ -2264,7 +2758,37 @@
       "BeastForeskin",
       "BeastVagina"
     ],
-    "skeletonFramework": "digitigrade-beast"
+    "skeletonFramework": "digitigrade-beast",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 8,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Draconic Humanoid",
@@ -2370,7 +2894,28 @@
       "Wing.L",
       "Wing.R"
     ],
-    "skeletonFramework": "draconic-humanoid"
+    "skeletonFramework": "draconic-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "frill",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
   },
   {
     "name": "Insectoid Humanoid",
@@ -2494,7 +3039,29 @@
       "CarapaceWing.L",
       "CarapaceWing.R"
     ],
-    "skeletonFramework": "insectoid-humanoid"
+    "skeletonFramework": "insectoid-humanoid",
+    "expectedSemanticRegions": [
+      "antenna",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "mandible",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "antenna",
+      "belly",
+      "mandible",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   },
   {
     "name": "Aquatic Humanoid",
@@ -2635,6 +3202,29 @@
       "Frill.L",
       "Frill.R"
     ],
-    "skeletonFramework": "aquatic-humanoid"
+    "skeletonFramework": "aquatic-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "fin",
+      "frill",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "fin",
+      "frill",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 5,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
   }
 ]

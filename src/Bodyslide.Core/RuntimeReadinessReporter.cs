@@ -87,6 +87,7 @@ public static class RuntimeReadinessReporter
             var skeletonCommonBoneCount = SkeletonMappingCatalog.CommonBones.Count;
             var raceCompatibilityRuleCount = RaceCompatibilityCatalog.BodyRules.Count;
             var physicsRepairGroupCount = PhysicsRepairCatalog.All.Count;
+            var explicitSupportMetadataCount = builtInBodies.Count(static body => body.HasExplicitSupportMetadata);
             var consistencyIssues = ValidateCatalogConsistency();
             _ = BodyDetectionTuningCatalog.Current;
             _ = MeshBehaviorCatalog.Get("cloth");
@@ -95,8 +96,8 @@ public static class RuntimeReadinessReporter
                 "Catalog data",
                 consistencyIssues.Count == 0 ? "OK" : "Error",
                 consistencyIssues.Count == 0
-                    ? $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, verified body physics bone coverage"
-                    : $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups; catalog consistency issues: {string.Join(" | ", consistencyIssues.Take(5))}");
+                    ? $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, explicit support expectations for {explicitSupportMetadataCount}/{builtInBodies.Count} bodies, verified body physics bone coverage"
+                    : $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, explicit support expectations for {explicitSupportMetadataCount}/{builtInBodies.Count} bodies; catalog consistency issues: {string.Join(" | ", consistencyIssues.Take(5))}");
         }
         catch (Exception ex)
         {

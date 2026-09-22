@@ -23918,7 +23918,8 @@ internal sealed class LocalExportService(
                     !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation),
                     requestedPhysicsProfile,
                     builtInMetadata.PhysicsTokens,
-                    builtInMetadata.DefaultPhysics));
+                    builtInMetadata.DefaultPhysics,
+                    builtInMetadata.HasExplicitSupportMetadata));
         }
 
         if (!CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
@@ -23980,7 +23981,12 @@ internal sealed class LocalExportService(
             hasSkeletonMetadata,
             requestedPhysicsProfile,
             customProfile.PhysicsTokens,
-            customProfile.PhysicsProfile));
+            customProfile.PhysicsProfile,
+            customProfile.ExpectedSemanticRegions is { Count: > 0 } &&
+            customProfile.ExpectedCollisionRegions is { Count: > 0 } &&
+            customProfile.MinimumPhysicsSlotCount > 0 &&
+            customProfile.MinimumPhysicsChainDepth > 0 &&
+            !string.IsNullOrWhiteSpace(customProfile.CollisionComplexity)));
 
         return new TargetBodySupportAssessment(false, customProfile, missingFields, qualityWarnings);
     }
@@ -23997,7 +24003,8 @@ internal sealed class LocalExportService(
         bool hasSkeletonMetadata,
         string requestedPhysicsProfile,
         IReadOnlyList<string>? physicsTokens = null,
-        string? declaredPhysicsProfile = null)
+        string? declaredPhysicsProfile = null,
+        bool hasExplicitSupportMetadata = true)
     {
         var semanticRegions = expectedSemanticRegions?.Count > 0
             ? expectedSemanticRegions
@@ -24024,6 +24031,19 @@ internal sealed class LocalExportService(
         if (!hasSkeletonMetadata)
         {
             qualityWarnings.Add("skeletonFoundation/skeletonFramework-quality");
+        }
+
+        var hasAdvancedSupportRegion = semanticRegions
+            .Concat(collisionRegions)
+            .Any(static region => region is "mouth" or "jaw" or "tongue" or "throat" or "genitals" or "vagina" or "anus" or "tail" or "wing" or "fin" or "frill" or "antenna" or "mandible" or "horn" or "branch" or "mane");
+        var normalizedCollisionComplexity = NormalizeCollisionComplexity(collisionComplexity);
+        var expectsAdvancedCoverage = !string.Equals(requestedPhysicsProfile, "none", StringComparison.OrdinalIgnoreCase) ||
+                                      normalizedCollisionComplexity.Equals("standard", StringComparison.OrdinalIgnoreCase) ||
+                                      normalizedCollisionComplexity.Equals("extended", StringComparison.OrdinalIgnoreCase) ||
+                                      hasAdvancedSupportRegion;
+        if (!hasExplicitSupportMetadata && expectsAdvancedCoverage)
+        {
+            qualityWarnings.Add("support-metadata-explicitness");
         }
 
         var effectiveMinimumPhysicsSlotCount = minimumPhysicsSlotCount > 0

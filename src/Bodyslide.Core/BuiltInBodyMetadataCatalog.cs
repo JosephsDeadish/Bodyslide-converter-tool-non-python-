@@ -29,8 +29,20 @@ internal sealed record BuiltInBodyMetadata(
     IReadOnlyList<string> ExpectedCollisionRegions,
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
-    string CollisionComplexity)
+    string CollisionComplexity,
+    bool HasExplicitExpectedSemanticRegions,
+    bool HasExplicitExpectedCollisionRegions,
+    bool HasExplicitMinimumPhysicsSlotCount,
+    bool HasExplicitMinimumPhysicsChainDepth,
+    bool HasExplicitCollisionComplexity)
 {
+    public bool HasExplicitSupportMetadata =>
+        HasExplicitExpectedSemanticRegions &&
+        HasExplicitExpectedCollisionRegions &&
+        HasExplicitMinimumPhysicsSlotCount &&
+        HasExplicitMinimumPhysicsChainDepth &&
+        HasExplicitCollisionComplexity;
+
     public BodySignatureTemplate ToSignatureTemplate() =>
         new(
             Name,
@@ -233,7 +245,12 @@ internal static class BuiltInBodyMetadataCatalog
                 : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(dto.AvailablePhysicsBones, dto.PhysicsBoneSignatures),
             string.IsNullOrWhiteSpace(dto.CollisionComplexity)
                 ? BodySupportMetadataHeuristics.InferCollisionComplexity(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures)
-                : dto.CollisionComplexity.Trim());
+                : dto.CollisionComplexity.Trim(),
+            dto.ExpectedSemanticRegions is { Length: > 0 },
+            dto.ExpectedCollisionRegions is { Length: > 0 },
+            dto.MinimumPhysicsSlotCount > 0,
+            dto.MinimumPhysicsChainDepth > 0,
+            !string.IsNullOrWhiteSpace(dto.CollisionComplexity));
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
