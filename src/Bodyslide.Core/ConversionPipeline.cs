@@ -2214,6 +2214,10 @@ public sealed record BodyTechnicalProfileInfo(
                         .ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
+    public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones);
+
+    public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones);
+
     private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
         IReadOnlyList<string> requiredBones)
     {
@@ -2366,10 +2370,6 @@ public sealed record BodyTechnicalProfileInfo(
         {
             yield return sideBone;
         }
-
-        public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones);
-
-        public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones);
     }
 
     private readonly record struct SemanticBoneSlot(

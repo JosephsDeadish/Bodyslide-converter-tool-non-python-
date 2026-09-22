@@ -219,12 +219,12 @@ internal static class BuiltInBodyMetadataCatalog
             dto.DepthToWidthRatioMax,
             NormalizeStringList(dto.PhysicsBoneSignatures),
             string.IsNullOrWhiteSpace(dto.SkeletonFramework) ? "xpmsse" : dto.SkeletonFramework.Trim(),
-            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedSemanticRegions)
-                .NullIfEmpty()
-                ?? BodySupportMetadataHeuristics.InferExpectedSemanticRegions(dto.SliderNames, dto.AvailablePhysicsBones, dto.TransformationField?.Keys),
-            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedCollisionRegions)
-                .NullIfEmpty()
-                ?? BodySupportMetadataHeuristics.InferExpectedCollisionRegions(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures),
+            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedSemanticRegions) is { Count: > 0 } expectedSemanticRegions
+                ? expectedSemanticRegions
+                : BodySupportMetadataHeuristics.InferExpectedSemanticRegions(dto.SliderNames, dto.AvailablePhysicsBones, dto.TransformationField?.Keys),
+            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedCollisionRegions) is { Count: > 0 } expectedCollisionRegions
+                ? expectedCollisionRegions
+                : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures),
             dto.MinimumPhysicsSlotCount > 0
                 ? dto.MinimumPhysicsSlotCount
                 : BodySupportMetadataHeuristics.CountPhysicsSlots(dto.AvailablePhysicsBones),

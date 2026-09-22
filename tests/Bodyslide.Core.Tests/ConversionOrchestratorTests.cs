@@ -24100,7 +24100,7 @@ public sealed class OutputCompletenessTests
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "SemanticProject");
             Directory.CreateDirectory(shapeDataDirectory);
             File.WriteAllText(Path.Combine(shapeDataDirectory, "semantic_0.nif"), "mesh");
-            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdBytes("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdPayload("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
 
             Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
             File.WriteAllText(
