@@ -15762,6 +15762,8 @@ public sealed class RealisticModPackFixtureTests
                     { "Label": "ube-extended", "Confidence": 0.61, "Evidence": ["semantic-overlap:3"], "UsedSparseInference": true },
                     { "Label": "digitigrade-beast", "Confidence": 0.42, "Evidence": ["group-overlap:2"], "UsedSparseInference": true }
                   ],
+                  "AutomaticRemapSafety": "unsafe",
+                  "AutomaticRemapSignals": ["sparse-inference", "candidate-gap:0.19", "remap-safety:unsafe"],
                   "SupportTier": "experimental-manual-cleanup",
                   "ConversionReadiness": {
                     "SupportTier": "experimental-manual-cleanup",
@@ -15770,6 +15772,7 @@ public sealed class RealisticModPackFixtureTests
                     "CanPhysicsConvert": false,
                     "CanSafelyAnimate": false,
                     "SkeletonReliability": "provisional",
+                    "SkeletonRemapSafety": "unsafe",
                     "RecommendedReleaseGate": "manual-cleanup"
                   }
                 }
@@ -15793,6 +15796,67 @@ public sealed class RealisticModPackFixtureTests
                                                                step.Blocking);
             Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
             Assert.Contains("REVIEW REQUIRED", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesUnsafeRemapMetricForReviewState()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "conversion-quality.json"),
+                """
+                {
+                  "SupportTier": "mainstream-automatic",
+                  "ValidationSummary": { "Status": "ready", "Score": 97, "HighSeverityCount": 0, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] },
+                  "ConversionReadiness": {
+                    "CanConvert": true,
+                    "CanPhysicsConvert": true,
+                    "CanSafelyAnimate": true,
+                    "SkeletonReliability": "direct",
+                    "SkeletonRemapSafety": "safe",
+                    "Summary": "Mainstream automatic."
+                  }
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "skeleton-compatibility.json"),
+                """
+                {
+                  "SourceSkeleton": "custom-beast",
+                  "TargetSkeleton": "xpmsse",
+                  "BoneMappings": [],
+                  "UnsupportedBones": ["TailBlade.L", "TailBlade.R"],
+                  "SourceSkeletonConfidence": 0.52,
+                  "SourceSkeletonUsedSparseInference": false,
+                  "SourceSkeletonInferenceReliability": "review",
+                  "AutomaticRemapSafety": "unsafe",
+                  "AutomaticRemapSignals": ["unsupported-bones:2/4", "unsupported-ratio:0.5", "remap-safety:unsafe"],
+                  "ConversionReadiness": {
+                    "CanConvert": true,
+                    "CanPhysicsConvert": true,
+                    "CanSafelyAnimate": true,
+                    "SkeletonReliability": "review",
+                    "SkeletonRemapSafety": "unsafe"
+                  }
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Skeleton remap safety", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("unsafe", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -16212,6 +16276,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
             var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
             Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("AutomaticRemapSafety", skeletonJson, StringComparison.OrdinalIgnoreCase);
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
             Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
@@ -17503,6 +17568,7 @@ public sealed class RealisticModPackFixtureTests
             using var qualityReport = JsonDocument.Parse(qualityJson);
             Assert.Equal("experimental-manual-cleanup", qualityReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.False(qualityReport.RootElement.GetProperty("ConversionReadiness").GetProperty("CanSafelyAnimate").GetBoolean());
+            Assert.Equal("unsafe", qualityReport.RootElement.GetProperty("ConversionReadiness").GetProperty("SkeletonRemapSafety").GetString());
 
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
@@ -17510,6 +17576,7 @@ public sealed class RealisticModPackFixtureTests
             using var inGameReport = JsonDocument.Parse(inGameJson);
             Assert.True(inGameReport.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
+            Assert.Equal("unsafe", inGameReport.RootElement.GetProperty("ConversionReadiness").GetProperty("SkeletonRemapSafety").GetString());
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString()));
@@ -17538,6 +17605,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresLiveGameExecution").GetBoolean());
             Assert.True(runtimePlan.RootElement.GetProperty("SupportsAutomatedGameExecution").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", runtimePlan.RootElement.GetProperty("SupportTier").GetString());
+            Assert.Equal("unsafe", runtimePlan.RootElement.GetProperty("ConversionReadiness").GetProperty("SkeletonRemapSafety").GetString());
             Assert.True(runtimePlan.RootElement.TryGetProperty("AutomationHarness", out var automationHarness));
             Assert.Equal("external-harness-ready", automationHarness.GetProperty("AutomationCoverage").GetString());
             Assert.True(automationHarness.GetProperty("SupportsArtifactPreflightAutomation").GetBoolean());

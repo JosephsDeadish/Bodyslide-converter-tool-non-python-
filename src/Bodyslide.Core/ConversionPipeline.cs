@@ -240,7 +240,111 @@ public sealed record SkeletonMappingResult(
     double? SourceSkeletonConfidence = null,
     IReadOnlyList<string>? SourceSkeletonEvidence = null,
     bool SourceSkeletonUsedSparseInference = false,
-    IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null);
+    IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null,
+    string AutomaticRemapSafety = "safe",
+    IReadOnlyList<string>? AutomaticRemapSignals = null);
+
+internal static class SkeletonRemapSafetyClassifier
+{
+    public static string BuildSafety(
+        int mappedBoneCount,
+        int unsupportedBoneCount,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
+    {
+        var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
+        var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
+        var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
+        var candidateAmbiguity = sourceSkeletonCandidates is { Count: > 1 } &&
+                                 candidateGap is null or < 0.12d;
+
+        if (unsupportedBoneCount >= 8 ||
+            unsupportedRatio >= 0.35d ||
+            sourceSkeletonConfidence is > 0d and < 0.45d ||
+            (usedSparseInference && sourceSkeletonConfidence is > 0d and < 0.60d) ||
+            candidateAmbiguity)
+        {
+            return "unsafe";
+        }
+
+        if (usedSparseInference ||
+            unsupportedBoneCount > 0 ||
+            unsupportedRatio >= 0.15d ||
+            sourceSkeletonConfidence is > 0d and < 0.80d)
+        {
+            return "provisional";
+        }
+
+        return "safe";
+    }
+
+    public static IReadOnlyList<string> BuildSignals(
+        int mappedBoneCount,
+        int unsupportedBoneCount,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates,
+        string remapSafety)
+    {
+        var signals = new List<string>();
+        var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
+        var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
+
+        if (unsupportedBoneCount > 0)
+        {
+            signals.Add($"unsupported-bones:{unsupportedBoneCount}/{totalObservedBones}");
+        }
+
+        if (usedSparseInference)
+        {
+            signals.Add("sparse-inference");
+        }
+
+        if (sourceSkeletonConfidence is > 0d and < 0.80d)
+        {
+            signals.Add($"low-confidence:{sourceSkeletonConfidence.Value:0.##}");
+        }
+
+        var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
+        if (sourceSkeletonCandidates is { Count: > 1 } && candidateGap is not null)
+        {
+            signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
+        }
+
+        if (unsupportedRatio >= 0.15d)
+        {
+            signals.Add($"unsupported-ratio:{unsupportedRatio:0.##}");
+        }
+
+        if (signals.Count == 0)
+        {
+            signals.Add("direct-framework-match");
+        }
+
+        signals.Add($"remap-safety:{remapSafety}");
+        return signals;
+    }
+
+    private static double? GetCandidateGap(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
+    {
+        if (sourceSkeletonCandidates is not { Count: > 1 })
+        {
+            return null;
+        }
+
+        var orderedCandidates = sourceSkeletonCandidates
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .Take(2)
+            .ToArray();
+        if (orderedCandidates.Length < 2)
+        {
+            return null;
+        }
+
+        return orderedCandidates[0].Confidence - orderedCandidates[1].Confidence;
+    }
+}
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
 public sealed record ConversionResult(bool Success, string OutputDirectory, IReadOnlyList<string> Steps, IReadOnlyList<string> OutputFiles);
 public sealed record ConversionInspectionResult(
@@ -359,6 +463,7 @@ public sealed record ModStackCrossValidationReport(
     string TargetBodyFamily,
     string SupportTier,
     string SourceSkeletonReliability,
+    string SourceSkeletonRemapSafety,
     bool RequiresLoadOrderValidation,
     bool RequiresPluginPatchReview,
     int ScannedPluginCount,
@@ -386,6 +491,7 @@ public sealed record ConversionReadinessAssessment(
     bool CanPhysicsConvert,
     bool CanSafelyAnimate,
     string SkeletonReliability,
+    string SkeletonRemapSafety,
     string RecommendedReleaseGate);
 public sealed record RuntimeValidationExecutionPlan(
     string TargetBody,
@@ -742,6 +848,10 @@ internal static class ConversionValidationGuidance
                 "Open skeleton-compatibility.json, install the skeleton expected by the target body, and patch outfit weights/bone names for any unsupported custom-rig bones.",
             "sparse-skeleton-inference" =>
                 "Open skeleton-compatibility.json and conversion-quality.json, confirm the sparsely inferred source skeleton against the actual mod rig, then add or configure a closer custom body/skeleton profile before trusting automatic physics or appendage mapping.",
+            "provisional-skeleton-remap" =>
+                "Open skeleton-compatibility.json, conversion-quality.json, and in-game-validation.json, review the provisional remap signals against the real rig, and keep the result in review-required status until the skeleton match is verified.",
+            "unsafe-skeleton-remap" =>
+                "Open skeleton-compatibility.json, conversion-quality.json, and preview-workbench.html, treat the automatic skeleton remap as unsafe, and switch to a closer framework/profile or manual Outfit Studio cleanup before release.",
             "physics-profile-unsupported" =>
                 "Open skeleton-compatibility.json, compare the requested physics profile against the target body's advertised capability and generated runtime configs, then switch to a physics-capable body/skeleton or set Physics to None before release.",
             "physics-config-mismatch" =>
@@ -900,6 +1010,8 @@ internal static class ConversionValidationGuidance
                 ["race-compatibility.json", "skeleton-compatibility.json", "plugin-patches.json", "conversion-quality.json", "in-game-validation.json"],
             "sparse-skeleton-inference" =>
                 ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"],
+            "provisional-skeleton-remap" or "unsafe-skeleton-remap" =>
+                ["skeleton-compatibility.json", "conversion-quality.json", "preview-workbench.html", "in-game-validation.json"],
             "manual-cleanup-likely" =>
                 ["preview-workbench.html", "conversion-quality.json", "skeleton-compatibility.json", "in-game-validation.json", "CalienteTools/BodySlide/ShapeData/"],
             "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-coverage" or "physics-bone-remap" =>
@@ -13620,15 +13732,32 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             : parsedSkeletonLabel;
         var targetSkeleton = ResolveTargetSkeletonLabel(targetBody, armor, targetPhysicsBones.Count > 0);
 
+        double? sourceSkeletonConfidence = sourceFrameworkDetection.Confidence > 0d ? sourceFrameworkDetection.Confidence : null;
+        var remapSafety = SkeletonRemapSafetyClassifier.BuildSafety(
+            mappings.Count,
+            unsupportedBones.Count,
+            sourceSkeletonConfidence,
+            sourceFrameworkDetection.UsedSparseInference,
+            sourceFrameworkCandidates);
+        var remapSignals = SkeletonRemapSafetyClassifier.BuildSignals(
+            mappings.Count,
+            unsupportedBones.Count,
+            sourceSkeletonConfidence,
+            sourceFrameworkDetection.UsedSparseInference,
+            sourceFrameworkCandidates,
+            remapSafety);
+
         return new SkeletonMappingResult(
             sourceSkeleton,
             targetSkeleton,
             mappings,
             unsupportedBones,
-            SourceSkeletonConfidence: sourceFrameworkDetection.Confidence > 0d ? sourceFrameworkDetection.Confidence : null,
+            SourceSkeletonConfidence: sourceSkeletonConfidence,
             SourceSkeletonEvidence: sourceFrameworkDetection.Evidence,
             SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference,
-            SourceSkeletonCandidates: sourceFrameworkCandidates);
+            SourceSkeletonCandidates: sourceFrameworkCandidates,
+            AutomaticRemapSafety: remapSafety,
+            AutomaticRemapSignals: remapSignals);
     }
 
     internal static IReadOnlyList<string> BuildSkeletonInferenceContextCues(ImportedArmor armor, string? parsedSkeletonLabel, string? targetBody = null)
@@ -18333,6 +18462,8 @@ internal sealed class LocalExportService(
                 skeletonMapping.SourceSkeletonUsedSparseInference,
                 skeletonMapping.SourceSkeletonCandidates,
                 SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
+                AutomaticRemapSafety = skeletonMapping.AutomaticRemapSafety,
+                AutomaticRemapSignals = skeletonMapping.AutomaticRemapSignals,
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
                 TargetBodySupport = targetBodySupport,
@@ -18991,6 +19122,8 @@ internal sealed class LocalExportService(
                 skeletonMapping.SourceSkeletonUsedSparseInference,
                 skeletonMapping.SourceSkeletonCandidates,
                 SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
+                AutomaticRemapSafety = skeletonMapping.AutomaticRemapSafety,
+                AutomaticRemapSignals = skeletonMapping.AutomaticRemapSignals,
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
                 TargetBodySupport = targetBodySupport,
@@ -23247,6 +23380,21 @@ internal sealed class LocalExportService(
                 "sparse-skeleton-inference",
                 skeletonMapping.UnsupportedBones.Count > 0 ? "high" : "medium",
                 $"Source skeleton '{skeletonMapping.SourceSkeleton}' was inferred from sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}."));
+        }
+
+        if (skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "unsafe-skeleton-remap",
+                "high",
+                $"Automatic skeleton remap safety is unsafe for '{skeletonMapping.SourceSkeleton}' → '{skeletonMapping.TargetSkeleton}' ({string.Join(", ", (skeletonMapping.AutomaticRemapSignals ?? []).Take(4))})."));
+        }
+        else if (skeletonMapping.AutomaticRemapSafety.Equals("provisional", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add(new ConversionValidationIssue(
+                "provisional-skeleton-remap",
+                skeletonMapping.UnsupportedBones.Count > 0 ? "high" : "medium",
+                $"Automatic skeleton remap safety is provisional for '{skeletonMapping.SourceSkeleton}' → '{skeletonMapping.TargetSkeleton}' ({string.Join(", ", (skeletonMapping.AutomaticRemapSignals ?? []).Take(4))})."));
         }
 
         var physicsBoneRemaps = ExtractPhysicsBoneRemaps(steps);
@@ -30143,34 +30291,129 @@ internal sealed class LocalExportService(
         }
     }
 
-    private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping)
+    private static string BuildSkeletonRemapSafety(
+        int mappedBoneCount,
+        int unsupportedBoneCount,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
     {
-        if (skeletonMapping.SourceSkeletonUsedSparseInference ||
-            skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.55d)
+        var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
+        var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
+        var candidateGap = GetSkeletonCandidateGap(sourceSkeletonCandidates);
+        var candidateAmbiguity = sourceSkeletonCandidates is { Count: > 1 } &&
+                                 candidateGap is null or < 0.12d;
+
+        if (unsupportedBoneCount >= 8 ||
+            unsupportedRatio >= 0.35d ||
+            sourceSkeletonConfidence is > 0d and < 0.45d ||
+            (usedSparseInference && sourceSkeletonConfidence is > 0d and < 0.60d) ||
+            candidateAmbiguity)
+        {
+            return "unsafe";
+        }
+
+        if (usedSparseInference ||
+            unsupportedBoneCount > 0 ||
+            unsupportedRatio >= 0.15d ||
+            sourceSkeletonConfidence is > 0d and < 0.80d)
         {
             return "provisional";
         }
 
-        if (skeletonMapping.SourceSkeletonConfidence is > 0d and < 0.80d)
+        return "safe";
+    }
+
+    private static IReadOnlyList<string> BuildSkeletonRemapSignals(
+        int mappedBoneCount,
+        int unsupportedBoneCount,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates,
+        string remapSafety)
+    {
+        var signals = new List<string>();
+        var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
+        var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
+
+        if (unsupportedBoneCount > 0)
         {
-            return "review";
+            signals.Add($"unsupported-bones:{unsupportedBoneCount}/{totalObservedBones}");
         }
 
-        return "direct";
+        if (usedSparseInference)
+        {
+            signals.Add("sparse-inference");
+        }
+
+        if (sourceSkeletonConfidence is > 0d and < 0.80d)
+        {
+            signals.Add($"low-confidence:{sourceSkeletonConfidence.Value:0.##}");
+        }
+
+        var candidateGap = GetSkeletonCandidateGap(sourceSkeletonCandidates);
+        if (sourceSkeletonCandidates is { Count: > 1 } && candidateGap is not null)
+        {
+            signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
+        }
+
+        if (unsupportedRatio >= 0.15d)
+        {
+            signals.Add($"unsupported-ratio:{unsupportedRatio:0.##}");
+        }
+
+        if (signals.Count == 0)
+        {
+            signals.Add("direct-framework-match");
+        }
+
+        signals.Add($"remap-safety:{remapSafety}");
+        return signals;
     }
+
+    private static double? GetSkeletonCandidateGap(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
+    {
+        if (sourceSkeletonCandidates is not { Count: > 1 })
+        {
+            return null;
+        }
+
+        var orderedCandidates = sourceSkeletonCandidates
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .Take(2)
+            .ToArray();
+        if (orderedCandidates.Length < 2)
+        {
+            return null;
+        }
+
+        return orderedCandidates[0].Confidence - orderedCandidates[1].Confidence;
+    }
+
+    private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping) =>
+        skeletonMapping.AutomaticRemapSafety switch
+        {
+            "unsafe" => "provisional",
+            "provisional" => "review",
+            _ => "direct"
+        };
 
     private static string BuildSourceSkeletonInferenceSummary(SkeletonMappingResult skeletonMapping)
     {
         var reliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
+        var remapSafety = skeletonMapping.AutomaticRemapSafety;
         var alternatives = BuildSourceSkeletonCandidateSummary(skeletonMapping.SourceSkeletonCandidates, skeletonMapping.SourceSkeleton);
+        var remapSignals = skeletonMapping.AutomaticRemapSignals is { Count: > 0 }
+            ? $" Remap safety={remapSafety}; signals: {string.Join(", ", skeletonMapping.AutomaticRemapSignals.Take(4))}."
+            : string.Empty;
         return reliability switch
         {
             "provisional" =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' still relies on sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.",
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' still relies on sparse or low-confidence custom bone evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.{remapSignals.TrimStart()}",
             "review" =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved with limited confidence and should be reviewed against the real rig{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.",
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved with limited confidence and should be reviewed against the real rig{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.{remapSignals.TrimStart()}",
             _ =>
-                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved through direct framework evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}."
+                $"Source skeleton '{skeletonMapping.SourceSkeleton}' resolved through direct framework evidence{FormatSkeletonEvidenceSuffix(skeletonMapping.SourceSkeletonEvidence)}{alternatives}.{remapSignals.TrimStart()}"
         };
     }
 
@@ -30343,6 +30586,7 @@ internal sealed class LocalExportService(
         TopologyCorrespondenceReport topologyCorrespondence)
     {
         var skeletonReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
+        var skeletonRemapSafety = skeletonMapping.AutomaticRemapSafety;
         var canConvert = !validationSummary.Status.Equals("high-risk", StringComparison.OrdinalIgnoreCase);
         var canPhysicsConvert = !IsRuntimePhysicsRequested(physicsCompatibility.RequestedProfile) || physicsCompatibility.IsCompatible;
         var canSafelyAnimate = canConvert &&
@@ -30350,12 +30594,14 @@ internal sealed class LocalExportService(
                                !manualCleanupLikely &&
                                !runtimeVerificationRequired &&
                                skeletonReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
+                               skeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase) &&
                                !topologyCorrespondence.HeuristicHeavy;
         var supportTier = DetermineSupportTier(
             canConvert,
             canPhysicsConvert,
             canSafelyAnimate,
             skeletonReliability,
+            skeletonRemapSafety,
             topologyCorrespondence,
             manualCleanupLikely,
             runtimeVerificationRequired);
@@ -30367,11 +30613,12 @@ internal sealed class LocalExportService(
 
         return new ConversionReadinessAssessment(
             supportTier,
-            BuildSupportTierSummary(targetBody, supportTier, canConvert, canPhysicsConvert, canSafelyAnimate, skeletonReliability),
+            BuildSupportTierSummary(targetBody, supportTier, canConvert, canPhysicsConvert, canSafelyAnimate, skeletonReliability, skeletonRemapSafety),
             canConvert,
             canPhysicsConvert,
             canSafelyAnimate,
             skeletonReliability,
+            skeletonRemapSafety,
             releaseGate);
     }
 
@@ -30380,6 +30627,7 @@ internal sealed class LocalExportService(
         bool canPhysicsConvert,
         bool canSafelyAnimate,
         string skeletonReliability,
+        string skeletonRemapSafety,
         TopologyCorrespondenceReport topologyCorrespondence,
         bool manualCleanupLikely,
         bool runtimeVerificationRequired)
@@ -30388,7 +30636,8 @@ internal sealed class LocalExportService(
             !canPhysicsConvert ||
             manualCleanupLikely ||
             topologyCorrespondence.HeuristicHeavy ||
-            skeletonReliability.Equals("provisional", StringComparison.OrdinalIgnoreCase))
+            skeletonReliability.Equals("provisional", StringComparison.OrdinalIgnoreCase) ||
+            skeletonRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase))
         {
             return "experimental-manual-cleanup";
         }
@@ -30396,6 +30645,7 @@ internal sealed class LocalExportService(
         if (!canSafelyAnimate ||
             runtimeVerificationRequired ||
             skeletonReliability.Equals("review", StringComparison.OrdinalIgnoreCase) ||
+            skeletonRemapSafety.Equals("provisional", StringComparison.OrdinalIgnoreCase) ||
             !topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
         {
             return "advanced-review-required";
@@ -30410,15 +30660,16 @@ internal sealed class LocalExportService(
         bool canConvert,
         bool canPhysicsConvert,
         bool canSafelyAnimate,
-        string skeletonReliability) =>
+        string skeletonReliability,
+        string skeletonRemapSafety) =>
         supportTier switch
         {
             "mainstream-automatic" =>
-                $"{targetBody} currently fits the mainstream automatic tier: conversion, physics, and animation signals all look strong with direct skeleton evidence.",
+                $"{targetBody} currently fits the mainstream automatic tier: conversion, physics, animation, and skeleton remap signals all look strong with direct framework evidence.",
             "advanced-review-required" =>
-                $"{targetBody} currently fits the advanced review-required tier: conversion is viable, but live review is still required before trusting final animation or topology behavior.",
+                $"{targetBody} currently fits the advanced review-required tier: conversion is viable, but live review is still required before trusting final animation or topology behavior; skeleton remap safety is {skeletonRemapSafety}.",
             _ =>
-                $"{targetBody} currently fits the experimental/manual-cleanup tier: conversion can proceed={canConvert}, physics-ready={canPhysicsConvert}, safe-animation={canSafelyAnimate}, skeleton reliability={skeletonReliability}."
+                $"{targetBody} currently fits the experimental/manual-cleanup tier: conversion can proceed={canConvert}, physics-ready={canPhysicsConvert}, safe-animation={canSafelyAnimate}, skeleton reliability={skeletonReliability}, remap safety={skeletonRemapSafety}."
         };
 
     private static bool IsRuntimePhysicsRequested(string requestedProfile) =>
@@ -30625,7 +30876,7 @@ internal sealed class LocalExportService(
         {
            scenarios.Add(new InGameValidationScenario(
                "Custom skeleton remap sweep",
-               "High",
+               skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
                $"Unsupported or sparsely inferred bones still need live verification: {string.Join(", ", skeletonMapping.UnsupportedBones.Take(6))}",
                ["idle", "walk", "combat"],
                sensitiveRegions.Count > 0 ? sensitiveRegions : hotspotRegions,
@@ -30637,7 +30888,7 @@ internal sealed class LocalExportService(
         {
            scenarios.Add(new InGameValidationScenario(
                "Sparse skeleton confidence sweep",
-               skeletonMapping.SourceSkeletonUsedSparseInference ? "High" : "Action",
+               skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) || skeletonMapping.SourceSkeletonUsedSparseInference ? "High" : "Action",
                BuildSourceSkeletonInferenceSummary(skeletonMapping),
                ["idle", "walk", "combat", "jump"],
                sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
@@ -30789,6 +31040,7 @@ internal sealed class LocalExportService(
             TargetBodyFamily: BuildTargetBodyFamily(targetBody),
             SupportTier: conversionReadiness.SupportTier,
             SourceSkeletonReliability: BuildSourceSkeletonInferenceReliability(skeletonMapping),
+            SourceSkeletonRemapSafety: skeletonMapping.AutomaticRemapSafety,
             RequiresLoadOrderValidation: RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody),
             RequiresPluginPatchReview: pluginAnalysis is not null && ((pluginAnalysis.AmbiguousPlugins?.Count ?? 0) > 0 || pluginNames.Count > 0),
             ScannedPluginCount: pluginNames.Count,

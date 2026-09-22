@@ -214,6 +214,8 @@ internal static class DesktopWorkflowAutomation
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Source skeleton reliability", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("provisional", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Skeleton remap safety", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("safe", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Can safely animate", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase) &&
@@ -284,6 +286,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
                     Add(metrics, reportName, "Support tier summary", TryReadNestedString(root, "ConversionReadiness", "Summary"), filePath);
                     Add(metrics, reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
                     Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
@@ -307,6 +310,8 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Source skeleton evidence", TryReadArray(root, "SourceSkeletonEvidence"), filePath);
                     Add(metrics, reportName, "Sparse source inference", FormatBool(TryReadBoolValue(root, "SourceSkeletonUsedSparseInference")), filePath);
                     Add(metrics, reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonInferenceReliability"), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadString(root, "AutomaticRemapSafety"), filePath);
+                    Add(metrics, reportName, "Skeleton remap signals", TryReadArray(root, "AutomaticRemapSignals"), filePath);
                     Add(metrics, reportName, "Source skeleton summary", TryReadString(root, "SourceSkeletonInferenceSummary"), filePath);
                     Add(metrics, reportName, "Source skeleton candidates", CountNestedArray(root, "SourceSkeletonCandidates"), filePath);
                     Add(metrics, reportName, "Source skeleton alternatives", TryReadInferenceCandidateHighlights(root), filePath);
@@ -317,6 +322,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
                     break;
                 case "in-game-validation.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -325,6 +331,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
                     Add(metrics, reportName, "Support tier summary", TryReadNestedString(root, "ConversionReadiness", "Summary"), filePath);
                     Add(metrics, reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
                     Add(metrics, reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
@@ -352,6 +359,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
                     Add(metrics, reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
                     Add(metrics, reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     Add(metrics, reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
@@ -392,6 +400,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
                     Add(metrics, reportName, "Source skeleton reliability", TryReadString(root, "SourceSkeletonReliability"), filePath);
+                    Add(metrics, reportName, "Skeleton remap safety", TryReadString(root, "SourceSkeletonRemapSafety"), filePath);
                     Add(metrics, reportName, "Requires load-order validation", FormatBool(TryReadBoolValue(root, "RequiresLoadOrderValidation")), filePath);
                     Add(metrics, reportName, "Requires plugin patch review", FormatBool(TryReadBoolValue(root, "RequiresPluginPatchReview")), filePath);
                     Add(metrics, reportName, "Plugins", TryReadIntValue(root, "ScannedPluginCount"), filePath);

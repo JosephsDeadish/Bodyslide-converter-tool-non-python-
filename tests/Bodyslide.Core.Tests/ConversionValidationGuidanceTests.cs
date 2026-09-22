@@ -410,6 +410,7 @@ public sealed class ConversionValidationGuidanceTests
                 CanPhysicsConvert: true,
                 CanSafelyAnimate: false,
                 SkeletonReliability: "review",
+                SkeletonRemapSafety: "unsafe",
                 RecommendedReleaseGate: "manual-cleanup"),
             ManualCleanupLikely: true,
             RuntimeVerificationRequired: true,
