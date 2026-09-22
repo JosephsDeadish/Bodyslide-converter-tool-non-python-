@@ -23226,6 +23226,7 @@ internal sealed class LocalExportService(
 
     internal static IReadOnlyList<ConversionValidationIssue> BuildPackageArtifactIssues(
         ConversionRequest request,
+        ImportedArmor armor,
         string outputDirectory,
         IReadOnlyList<string> outputFiles,
         BodySlideProject bodySlideProject,
@@ -23284,6 +23285,8 @@ internal sealed class LocalExportService(
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Select(static value => value!.Trim())
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var generatedSliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(bodySlideProject.Sliders);
+                var targetSliderRegions = ResolveTargetSliderRegions(armor, request.TargetBody);
                 var missingOspSliders = bodySlideProject.Sliders
                     .Where(expected => !ospSliderNames.Contains(expected))
                     .ToArray();
@@ -23307,6 +23310,11 @@ internal sealed class LocalExportService(
                 if (missingSourceFiles.Length > 0)
                 {
                     problems.Add($"OSP source references are missing ShapeData NIFs: {string.Join(", ", missingSourceFiles.Take(3))}");
+                }
+
+                if (sourceFiles.Length == 0)
+                {
+                    problems.Add("OSP does not declare any BodySlide SourceFile reference NIFs.");
                 }
 
                 var payloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -23340,6 +23348,28 @@ internal sealed class LocalExportService(
                     if (missingPayloadCoverage.Length == bodySlideProject.Sliders.Count && bodySlideProject.Sliders.Count > 0)
                     {
                         problems.Add($"ShapeData payloads do not expose any expected BodySlide sliders for '{bodySlideProject.ProjectName}'.");
+                    }
+                    else if (missingPayloadCoverage.Length > 0)
+                    {
+                        problems.Add($"ShapeData payloads are missing expected BodySlide sliders: {string.Join(", ", missingPayloadCoverage.Take(4))}");
+                    }
+                }
+
+                if (targetSliderRegions.Count > 0)
+                {
+                    var coveredRegions = generatedSliderRegions
+                        .Intersect(targetSliderRegions, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (coveredRegions.Length == 0)
+                    {
+                        problems.Add($"Generated sliders do not cover any target-body regions expected for '{request.TargetBody}': {string.Join(", ", targetSliderRegions)}");
+                    }
+                    else if (targetSliderRegions.Count >= 2 && coveredRegions.Length < Math.Min(2, targetSliderRegions.Count))
+                    {
+                        var missingRegions = targetSliderRegions
+                            .Except(coveredRegions, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        problems.Add($"Generated sliders only cover {coveredRegions.Length}/{targetSliderRegions.Count} expected target-body regions; missing: {string.Join(", ", missingRegions.Take(4))}");
                     }
                 }
             }
@@ -23851,6 +23881,11 @@ internal sealed class LocalExportService(
                 qualityWarnings.Add("expectedCollisionRegions-quality");
             }
 
+            if (HasWeakPhysicsFamilyCoverage(collisionRegions, semanticRegions, actualPhysicsSlotCount, collisionComplexity: customProfile.CollisionComplexity))
+            {
+                qualityWarnings.Add("physicsBones-family-coverage");
+            }
+
             if (actualPhysicsSlotCount > 0 && actualPhysicsSlotCount < minimumPhysicsSlotCount)
             {
                 qualityWarnings.Add("physicsBones-slot-coverage");
@@ -23859,6 +23894,16 @@ internal sealed class LocalExportService(
             if (actualPhysicsChainDepth > 0 && actualPhysicsChainDepth < minimumPhysicsChainDepth)
             {
                 qualityWarnings.Add("physicsBones-chain-depth");
+            }
+
+            if (HasBilateralCoverageGap(customProfile.PhysicsBones, semanticRegions, collisionRegions))
+            {
+                qualityWarnings.Add("physicsBones-pairing-coverage");
+            }
+
+            if (HasAdvancedRegionDepthGap(semanticRegions, collisionRegions, actualPhysicsChainDepth))
+            {
+                qualityWarnings.Add("physicsBones-family-depth");
             }
         }
 
@@ -24513,6 +24558,9 @@ internal sealed class LocalExportService(
 
         var severity = assessment.MissingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
                        assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.QualityWarnings.Contains("physicsBones-family-coverage", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.QualityWarnings.Contains("physicsBones-pairing-coverage", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.QualityWarnings.Contains("physicsBones-family-depth", StringComparer.OrdinalIgnoreCase) ||
                        assessment.QualityWarnings.Contains("physicsBones-slot-coverage", StringComparer.OrdinalIgnoreCase) ||
                        assessment.QualityWarnings.Contains("physicsBones-chain-depth", StringComparer.OrdinalIgnoreCase)
             ? "high"
@@ -24534,6 +24582,115 @@ internal sealed class LocalExportService(
             $"Custom target body profile '{assessment.CustomProfile.Name}' has incomplete support coverage: {string.Join("; ", details)}. Conversion can proceed, but certainty stays limited until those fields are supplied or strengthened.");
         return true;
     }
+
+    private static IReadOnlyList<string> ResolveTargetSliderRegions(ImportedArmor armor, string targetBody)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            return BodySupportMetadataHeuristics.NormalizeSupportRegionList(customProfile.SliderNames);
+        }
+
+        return BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata)
+            ? BodySupportMetadataHeuristics.NormalizeSupportRegionList(metadata.SliderNames)
+            : [];
+    }
+
+    private static bool HasWeakPhysicsFamilyCoverage(
+        IReadOnlyList<string> collisionRegions,
+        IReadOnlyList<string> semanticRegions,
+        int actualPhysicsSlotCount,
+        string? collisionComplexity)
+    {
+        if (actualPhysicsSlotCount <= 0)
+        {
+            return false;
+        }
+
+        var declaredComplexity = string.IsNullOrWhiteSpace(collisionComplexity)
+            ? collisionRegions.Count >= 5 ? "extended" : collisionRegions.Count >= 3 ? "standard" : "minimal"
+            : collisionComplexity.Trim();
+        var coverageFloor = declaredComplexity.Equals("extended", StringComparison.OrdinalIgnoreCase)
+            ? 3
+            : declaredComplexity.Equals("standard", StringComparison.OrdinalIgnoreCase)
+                ? 2
+                : 1;
+        var familyRichness = Math.Max(collisionRegions.Count, semanticRegions.Count);
+        if (familyRichness >= 4)
+        {
+            coverageFloor = Math.Max(coverageFloor, 2);
+        }
+
+        return actualPhysicsSlotCount < coverageFloor;
+    }
+
+    private static bool HasBilateralCoverageGap(
+        IReadOnlyList<string>? physicsBones,
+        IReadOnlyList<string> semanticRegions,
+        IReadOnlyList<string> collisionRegions)
+    {
+        if (physicsBones is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        var expectedBilateralRegions = semanticRegions
+            .Concat(collisionRegions)
+            .Where(static region => region is "breasts" or "butt" or "arms" or "feet" or "wing")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (expectedBilateralRegions.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var region in expectedBilateralRegions)
+        {
+            var regionBones = physicsBones
+                .Where(bone => BodySupportMetadataHeuristics.NormalizeSupportRegion(bone).Equals(region, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (regionBones.Length == 0)
+            {
+                continue;
+            }
+
+            var hasLeft = regionBones.Any(static bone => HasSideMarker(bone, "left"));
+            var hasRight = regionBones.Any(static bone => HasSideMarker(bone, "right"));
+            if (hasLeft ^ hasRight)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasAdvancedRegionDepthGap(
+        IReadOnlyList<string> semanticRegions,
+        IReadOnlyList<string> collisionRegions,
+        int actualPhysicsChainDepth)
+    {
+        var advancedRegions = semanticRegions
+            .Concat(collisionRegions)
+            .Where(static region => region is "mouth" or "jaw" or "tongue" or "throat" or "genitals" or "vagina" or "anus" or "tail" or "wing")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return advancedRegions.Length > 0 && actualPhysicsChainDepth < 2;
+    }
+
+    private static bool HasSideMarker(string boneName, string side) =>
+        side.Equals("left", StringComparison.OrdinalIgnoreCase)
+            ? boneName.Contains(" left", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("_left", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains(".l", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("_l", StringComparison.OrdinalIgnoreCase) ||
+              boneName.StartsWith("l ", StringComparison.OrdinalIgnoreCase) ||
+              boneName.StartsWith("l_", StringComparison.OrdinalIgnoreCase)
+            : boneName.Contains(" right", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("_right", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains(".r", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("_r", StringComparison.OrdinalIgnoreCase) ||
+              boneName.StartsWith("r ", StringComparison.OrdinalIgnoreCase) ||
+              boneName.StartsWith("r_", StringComparison.OrdinalIgnoreCase);
 
     private static PhysicsCompatibilityReport BuildPhysicsCompatibilityReport(
         ImportedArmor armor,
