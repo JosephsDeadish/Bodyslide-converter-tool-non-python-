@@ -17654,6 +17654,27 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresModdedTestEnvironment").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsAutomatedWebViewInteraction").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRunner_RealisticAlienSparseCustomPluginModPackDirectory_PromotesSupportTierAndHarnessSignalsIntoPackReadiness()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAlienSparseCustomPluginModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+
+            Assert.NotEmpty(results);
+            Assert.All(results, result => Assert.True(result.Success));
 
             using var armorPackValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
             Assert.Equal("high-risk", armorPackValidation.RootElement.GetProperty("PackReadinessStatus").GetString());
@@ -17662,7 +17683,12 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(armorPackValidation.RootElement.GetProperty("RuntimeVerificationRequiredCount").GetInt32() > 0);
             Assert.True(armorPackValidation.RootElement.GetProperty("ExternalGameHarnessCount").GetInt32() > 0);
             Assert.True(armorPackValidation.RootElement.GetProperty("ExternalUiHarnessCount").GetInt32() > 0);
-            var packItem = armorPackValidation.RootElement.GetProperty("Items").EnumerateArray().Single();
+            Assert.Contains(
+                armorPackValidation.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("ValidationStatus").GetString()),
+                static status => string.Equals(status, "high-risk", StringComparison.OrdinalIgnoreCase));
+
+            var packItem = armorPackValidation.RootElement.GetProperty("Items").EnumerateArray()
+                .First(item => string.Equals(item.GetProperty("SupportTier").GetString(), "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
             Assert.Equal("experimental-manual-cleanup", packItem.GetProperty("SupportTier").GetString());
             Assert.Equal("high-risk", packItem.GetProperty("ValidationStatus").GetString());
             Assert.True(packItem.GetProperty("ManualCleanupLikely").GetBoolean());
