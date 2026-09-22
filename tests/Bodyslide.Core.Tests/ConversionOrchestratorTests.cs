@@ -24158,10 +24158,75 @@ public sealed class OutputCompletenessTests
 
         Assert.Contains(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("sliderNames-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("sliderNames-region-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsBodySlideOutputFileThatDoesNotMatchStagedMesh()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "StagedMismatchProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="StagedMismatchProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\StagedMismatchProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\StagedMismatchProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\oracle\</OutputPath>
+                    <OutputFile gender="f" use="true">oracle_good_0.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "StagedMismatchProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "meshes", "armor", "oracle"));
+            File.WriteAllText(Path.Combine(outputDirectory, "meshes", "armor", "oracle", "wrong_name_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("StagedMismatchProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("staged generated meshes", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -24179,12 +24244,38 @@ public sealed class OutputCompletenessTests
             metadata.CollisionComplexity,
             hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
-            requestedPhysicsProfile: metadata.DefaultPhysics);
+            requestedPhysicsProfile: metadata.DefaultPhysics,
+            physicsTokens: metadata.PhysicsTokens,
+            declaredPhysicsProfile: metadata.DefaultPhysics);
 
         Assert.DoesNotContain(warnings, warning => warning.StartsWith("physicsBones-", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EvaluateTargetBodySupportQuality_InfersSlotAndDepthExpectationsFromAdvancedRegions()
+    {
+        var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            referenceTokens: ["oracle", "mouth", "throat"],
+            sliderNames: ["TongueTipLength", "JawDepth", "ThroatDepth"],
+            physicsBones: ["HDT Tongue"],
+            expectedSemanticRegions: ["mouth", "tongue", "throat", "tail"],
+            expectedCollisionRegions: ["mouth", "tongue", "throat", "tail"],
+            minimumPhysicsSlotCount: 0,
+            minimumPhysicsChainDepth: 0,
+            collisionComplexity: "extended",
+            hasSkeletonMetadata: true,
+            requestedPhysicsProfile: "smp",
+            physicsTokens: ["mouth"],
+            declaredPhysicsProfile: "none");
+
+        Assert.Contains(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-depth", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
