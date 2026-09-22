@@ -743,6 +743,8 @@ internal static class ConversionValidationGuidance
                 "Open skeleton-compatibility.json, world-physics.json, and in-game-validation.json, restore the missing runtime config outputs or switch to a compatible physics profile before packaging the result.",
             "physics-bone-missing" =>
                 "Open skeleton-compatibility.json and in-game-validation.json, compare the requested physics profile against the expected and missing target bones, then switch to a compatible body/skeleton or disable the unsupported physics chains before release.",
+            "physics-bone-coverage" =>
+                "Open skeleton-compatibility.json, in-game-validation.json, and world-physics.json, then expand the target body's physics bone coverage or regenerate deeper SMP/CBPC chains before release.",
             "physics-bone-remap" =>
                 "Open skeleton-compatibility.json and review the remapped physics chains so SMP/CBPC bones still land on the intended target-body regions before release.",
             "unknown-export-partitions" =>
@@ -895,7 +897,7 @@ internal static class ConversionValidationGuidance
                 ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"],
             "manual-cleanup-likely" =>
                 ["preview-workbench.html", "conversion-quality.json", "skeleton-compatibility.json", "in-game-validation.json", "CalienteTools/BodySlide/ShapeData/"],
-            "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-remap" =>
+            "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-coverage" or "physics-bone-remap" =>
                 ["skeleton-compatibility.json", "world-physics.json", "conversion-quality.json", "in-game-validation.json"],
             "missing-normal-maps" =>
                 ["texture-summary.json", "conversion-quality.json"],
@@ -1596,8 +1598,14 @@ public sealed record PhysicsCompatibilityReport(
     IReadOnlyList<string> RemappedBones,
     IReadOnlyList<string> ExpectedRuntimeConfigs,
     IReadOnlyList<string> GeneratedRuntimeConfigs,
+    IReadOnlyList<string> GeneratedPhysicsBones,
     IReadOnlyList<string> MissingRuntimeConfigs,
     bool HasRequiredRuntimeConfigs,
+    int ExpectedMinimumPhysicsSlotCount,
+    int GeneratedPhysicsSlotCount,
+    int ExpectedMinimumPhysicsChainDepth,
+    int GeneratedPhysicsChainDepth,
+    bool HasSufficientPhysicsCoverage,
     string Summary);
 
 public sealed record PreviewWorkbenchPayload(
@@ -23059,6 +23067,16 @@ internal sealed class LocalExportService(
                 $"Requested physics profile '{physicsCompatibility.RequestedProfile}' did not generate required runtime config(s): {string.Join(", ", physicsCompatibility.MissingRuntimeConfigs)}."));
         }
 
+        if (!string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase) &&
+            physicsCompatibility.TargetBodySupportsPhysics &&
+            !physicsCompatibility.HasSufficientPhysicsCoverage)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-bone-coverage",
+                physicsCompatibility.GeneratedPhysicsSlotCount == 0 ? "high" : "medium",
+                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s) with chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth} for target body '{physicsCompatibility.TargetBody}'."));
+        }
+
         if (poseSimulation.TotalPosesAtRisk > 0)
         {
             issues.Add(new ConversionValidationIssue(
@@ -25035,14 +25053,30 @@ internal sealed class LocalExportService(
             : physics.Profile;
         var expectedRuntimeConfigs = GetExpectedRuntimeConfigs(requestedProfile);
         var generatedRuntimeConfigs = GetGeneratedRuntimeConfigs(physics);
+        var generatedPhysicsBones = ExtractSuggestedPhysicsBones(physics);
         var missingRuntimeConfigs = expectedRuntimeConfigs
             .Where(config => !generatedRuntimeConfigs.Contains(config, StringComparer.OrdinalIgnoreCase))
             .ToList();
         var targetBodySupportsPhysics = hasProfile && profile.SupportsPhysics;
         var physicsRequested = !string.Equals(requestedProfile, "none", StringComparison.OrdinalIgnoreCase);
         var hasRequiredRuntimeConfigs = missingRuntimeConfigs.Count == 0;
+        var expectedMinimumPhysicsSlotCount = hasProfile
+            ? Math.Max(0, profile.MinimumPhysicsSlotCount)
+            : 0;
+        var generatedPhysicsSlotCount = BodySupportMetadataHeuristics.CountPhysicsSlots(generatedPhysicsBones);
+        var expectedMinimumPhysicsChainDepth = hasProfile
+            ? Math.Max(0, profile.MinimumPhysicsChainDepth)
+            : 0;
+        var generatedPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(generatedPhysicsBones, expectedBones);
+        var hasSufficientPhysicsCoverage = !physicsRequested ||
+                                           !targetBodySupportsPhysics ||
+                                           HasSufficientGeneratedPhysicsCoverage(
+                                               expectedMinimumPhysicsSlotCount,
+                                               generatedPhysicsSlotCount,
+                                               expectedMinimumPhysicsChainDepth,
+                                               generatedPhysicsChainDepth);
         var isCompatible = !physicsRequested ||
-            (targetBodySupportsPhysics && missingBones.Count == 0 && hasRequiredRuntimeConfigs);
+            (targetBodySupportsPhysics && missingBones.Count == 0 && hasRequiredRuntimeConfigs && hasSufficientPhysicsCoverage);
         var summary = !physicsRequested
             ? "No runtime physics profile was requested for this output."
             : !targetBodySupportsPhysics
@@ -25051,6 +25085,8 @@ internal sealed class LocalExportService(
                     ? $"Physics profile '{requestedProfile}' expected runtime config(s) {FormatPhysicsConfigList(expectedRuntimeConfigs)} but only generated {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
                 : missingBones.Count > 0
                     ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
+                    : !hasSufficientPhysicsCoverage
+                        ? $"Physics profile '{requestedProfile}' generated only {generatedPhysicsSlotCount}/{expectedMinimumPhysicsSlotCount} expected physics slot(s) with chain depth {generatedPhysicsChainDepth}/{expectedMinimumPhysicsChainDepth} for {targetBody}."
                     : remappedBones.Count > 0
                         ? $"Physics profile '{requestedProfile}' is usable, but {remappedBones.Count} physics chain(s) were remapped to fit the target skeleton."
                         : injectedBones.Count > 0
@@ -25070,10 +25106,24 @@ internal sealed class LocalExportService(
             remappedBones,
             expectedRuntimeConfigs,
             generatedRuntimeConfigs,
+            generatedPhysicsBones,
             missingRuntimeConfigs,
             hasRequiredRuntimeConfigs,
+            expectedMinimumPhysicsSlotCount,
+            generatedPhysicsSlotCount,
+            expectedMinimumPhysicsChainDepth,
+            generatedPhysicsChainDepth,
+            hasSufficientPhysicsCoverage,
             summary);
     }
+
+    private static bool HasSufficientGeneratedPhysicsCoverage(
+        int expectedMinimumPhysicsSlotCount,
+        int generatedPhysicsSlotCount,
+        int expectedMinimumPhysicsChainDepth,
+        int generatedPhysicsChainDepth) =>
+        generatedPhysicsSlotCount >= Math.Max(0, expectedMinimumPhysicsSlotCount) &&
+        generatedPhysicsChainDepth >= Math.Max(0, expectedMinimumPhysicsChainDepth);
 
     private static IReadOnlyList<string> GetExpectedRuntimeConfigs(string requestedProfile)
     {

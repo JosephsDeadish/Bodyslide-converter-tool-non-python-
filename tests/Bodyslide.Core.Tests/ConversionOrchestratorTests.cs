@@ -5154,6 +5154,8 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(
                 compatibility.GetProperty("GeneratedRuntimeConfigs").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "smp-config.xml", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsSlotCount").GetInt32());
+            Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsChainDepth").GetInt32());
             Assert.Contains(
                 compatibility.GetProperty("MissingBones").EnumerateArray().Select(static item => item.GetString()),
                 value => string.Equals(value, "NPC Belly", StringComparison.OrdinalIgnoreCase));
@@ -5302,6 +5304,94 @@ public sealed class ConversionOrchestratorTests
                 "does not advertise built-in physics-capable bones",
                 compatibility.GetProperty("Summary").GetString(),
                 StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_SkeletonCompatibilityReport_FlagsShallowGeneratedPhysicsCoverage()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await SyntheticNifTestData.WriteAsync(inputFile, SyntheticNifTestData.CreateBodyVertices(32));
+
+        try
+        {
+            var service = new LocalExportService();
+            var request = new ConversionRequest(inputFile, "MyFollower", OutputDirectory: outputDirectory);
+            var armor = new ImportedArmor(
+                inputFile,
+                [inputFile],
+                [],
+                [],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        Name: "MyFollower",
+                        DetectionTokens: ["myfollower"],
+                        TextureTokens: [],
+                        PhysicsTokens: ["smp"],
+                        VertexCountMin: 0,
+                        VertexCountMax: 0,
+                        TransformationField: new Dictionary<string, double>(),
+                        SliderNames: ["Body", "Belly", "Thighs"],
+                        PhysicsBones: ["NPC L Pec", "NPC R Pec", "NPC Belly", "NPC L Thigh", "NPC R Thigh"],
+                        PhysicsProfile: "smp",
+                        ReferenceTokens: ["myfollowerbody"],
+                        SkeletonFramework: "xpmsse-male-smp",
+                        ExpectedCollisionRegions: ["breasts", "belly", "thighs"],
+                        MinimumPhysicsSlotCount: 3,
+                        MinimumPhysicsChainDepth: 2,
+                        CollisionComplexity: "extended")
+                ]);
+            var analysis = new MeshAnalysis("cloth", false, 1);
+            var mesh = new ConvertedMesh("cloth", "test", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp", SmpConfigXml: "<system name=\"test\"><bone name=\"NPC L Pec\" /></system>");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bodySlideProject = new BodySlideProject("TestProject", "MyFollower", ["Body"], "<BodySlideProject/>");
+            var pluginAnalysis = new PluginAnalysisResult([], [], string.Empty);
+            var textureSummary = new TextureSummary(0, [], [], []);
+            var poseSimulation = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detectedBody = new BodyDetectionReport("CBBE", 1.0, ["test"]);
+            var skeletonMapping = new SkeletonMappingResult(
+                "xpmsse-physics",
+                "xpmsse-male-smp",
+                [new SkeletonBoneMapping("NPC Root [Root]", "NPC Root [Root]", false)],
+                []);
+            var voxelResult = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+            var steps = new[] { "physics:smp" };
+
+            await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bodySlideProject, pluginAnalysis,
+                textureSummary, poseSimulation, steps,
+                detectedBody, skeletonMapping, null, voxelResult,
+                CancellationToken.None);
+
+            var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
+            using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath)))
+            {
+                var compatibility = document.RootElement.GetProperty("PhysicsCompatibility");
+                Assert.False(compatibility.GetProperty("IsCompatible").GetBoolean());
+                Assert.Equal(3, compatibility.GetProperty("ExpectedMinimumPhysicsSlotCount").GetInt32());
+                Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsSlotCount").GetInt32());
+                Assert.Equal(2, compatibility.GetProperty("ExpectedMinimumPhysicsChainDepth").GetInt32());
+                Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsChainDepth").GetInt32());
+                Assert.False(compatibility.GetProperty("HasSufficientPhysicsCoverage").GetBoolean());
+                Assert.Contains("generated only 1/3 expected physics slot", compatibility.GetProperty("Summary").GetString(), StringComparison.OrdinalIgnoreCase);
+            }
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"physics-bone-coverage\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("GeneratedPhysicsSlotCount", await File.ReadAllTextAsync(reportPath), StringComparison.Ordinal);
         }
         finally
         {

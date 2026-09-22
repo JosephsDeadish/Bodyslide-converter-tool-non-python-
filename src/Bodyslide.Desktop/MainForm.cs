@@ -3236,9 +3236,15 @@ public sealed class MainForm : Form
                         AddReportMetric(reportName, "Physics ready", FormatBool(TryReadBoolValue(physicsCompatibility, "IsCompatible")), filePath);
                         AddReportMetric(reportName, "Expected physics configs", TryReadArray(physicsCompatibility, "ExpectedRuntimeConfigs"), filePath);
                         AddReportMetric(reportName, "Generated physics configs", TryReadArray(physicsCompatibility, "GeneratedRuntimeConfigs"), filePath);
+                        AddReportMetric(reportName, "Generated physics bones", TryReadArray(physicsCompatibility, "GeneratedPhysicsBones"), filePath);
                         AddReportMetric(reportName, "Missing physics configs", TryReadArray(physicsCompatibility, "MissingRuntimeConfigs"), filePath);
                         AddReportMetric(reportName, "Missing physics bones", TryReadArray(physicsCompatibility, "MissingBones"), filePath);
                         AddReportMetric(reportName, "Remapped physics bones", TryReadArray(physicsCompatibility, "RemappedBones"), filePath);
+                        AddReportMetric(reportName, "Expected physics slots", TryReadInt(physicsCompatibility, "ExpectedMinimumPhysicsSlotCount"), filePath);
+                        AddReportMetric(reportName, "Generated physics slots", TryReadInt(physicsCompatibility, "GeneratedPhysicsSlotCount"), filePath);
+                        AddReportMetric(reportName, "Expected chain depth", TryReadInt(physicsCompatibility, "ExpectedMinimumPhysicsChainDepth"), filePath);
+                        AddReportMetric(reportName, "Generated chain depth", TryReadInt(physicsCompatibility, "GeneratedPhysicsChainDepth"), filePath);
+                        AddReportMetric(reportName, "Physics coverage sufficient", FormatBool(TryReadBoolValue(physicsCompatibility, "HasSufficientPhysicsCoverage")), filePath);
                     }
                     break;
                 case "in-game-validation.json":
