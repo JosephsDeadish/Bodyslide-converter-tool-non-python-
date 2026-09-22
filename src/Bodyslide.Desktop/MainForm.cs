@@ -4209,6 +4209,13 @@ public sealed class MainForm : Form
         {
             using var stream = File.OpenRead(reportPath);
             var report = JsonSerializer.Deserialize<InGameValidationReport>(stream);
+            if (report is null)
+            {
+                requiresReview = true;
+                add("Runtime scenarios", "Warning", "Could not materialize in-game-validation.json. Open the report directly before release.", reportPath);
+                return;
+            }
+
             foreach (var entry in InGameValidationGuidance.BuildDesktopGuidanceEntries(report))
             {
                 var priority = entry.Priority;
@@ -4467,8 +4474,7 @@ public sealed class MainForm : Form
 
     private static JsonDocument OpenJsonDocument(string path)
     {
-        using var stream = File.OpenRead(path);
-        return JsonDocument.Parse(stream);
+        return JsonDocument.Parse(File.ReadAllBytes(path));
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>
