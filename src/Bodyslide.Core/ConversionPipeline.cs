@@ -23363,6 +23363,7 @@ internal sealed class LocalExportService(
                     request.TargetBody,
                     out var expectedMinimumPhysicsSlotCount,
                     out var expectedMinimumPhysicsChainDepth,
+                    out var expectedMinimumPhysicsFamilyCount,
                     out var targetCollisionComplexity);
                 var missingOspSliders = bodySlideProject.Sliders
                     .Where(expected => !ospSliderNames.Contains(expected))
@@ -23594,6 +23595,18 @@ internal sealed class LocalExportService(
                             .ToArray();
                         problems.Add($"Generated sliders/payloads only cover {coveredCollisionRegions.Length}/{targetCollisionRegions.Count} collision-sensitive target-body regions; missing: {string.Join(", ", missingCollisionRegions.Take(4))}");
                     }
+
+                    var minimumCollisionFamilyCoverage = Math.Min(
+                        Math.Max(0, expectedMinimumPhysicsFamilyCount),
+                        targetCollisionRegions.Count);
+                    if (minimumCollisionFamilyCoverage > 0 &&
+                        coveredCollisionRegions.Length < minimumCollisionFamilyCoverage)
+                    {
+                        var missingCollisionFamilies = targetCollisionRegions
+                            .Except(coveredCollisionRegions, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        problems.Add($"Generated sliders/payloads only cover {coveredCollisionRegions.Length}/{minimumCollisionFamilyCoverage} expected collision-sensitive region families for '{request.TargetBody}'; missing: {string.Join(", ", missingCollisionFamilies.Take(4))}");
+                    }
                 }
 
                 if (targetHasExtendedCoverageExpectation)
@@ -23636,6 +23649,121 @@ internal sealed class LocalExportService(
             }
 
             return problems;
+        }
+
+        IReadOnlyList<string> ValidateRuntimePhysicsSemanticConsistency(
+            string rootCbpcPath,
+            string stagedCbpcPath,
+            string rootSmpPath,
+            string stagedSmpPath)
+        {
+            var problems = new List<string>();
+            var existingPhysicsConfigPaths = new[] { rootCbpcPath, stagedCbpcPath, rootSmpPath, stagedSmpPath }
+                .Where(File.Exists)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (existingPhysicsConfigPaths.Length == 0)
+            {
+                return problems;
+            }
+
+            if (!BodyTechnicalProfileCatalog.TryGet(armor, request.TargetBody, out var targetProfile) ||
+                !targetProfile.SupportsPhysics)
+            {
+                return problems;
+            }
+
+            var generatedPhysicsNodes = existingPhysicsConfigPaths
+                .SelectMany(ReadPhysicsNodeNamesFromConfigFile)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (generatedPhysicsNodes.Length == 0)
+            {
+                problems.Add("No bone or physics-group names could be read from the generated SMP/CBPC config files.");
+                return problems;
+            }
+
+            var generatedCollisionRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(generatedPhysicsNodes);
+            var expectedCollisionRegions = ResolveTargetCollisionRegions(armor, request.TargetBody);
+            var expectedMinimumCollisionFamilyCoverage = Math.Min(
+                Math.Max(0, targetProfile.MinimumPhysicsFamilyCount),
+                expectedCollisionRegions.Count);
+            if (expectedMinimumCollisionFamilyCoverage > 0)
+            {
+                var coveredCollisionFamilies = generatedCollisionRegions
+                    .Intersect(expectedCollisionRegions, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (coveredCollisionFamilies.Length < expectedMinimumCollisionFamilyCoverage)
+                {
+                    var missingCollisionFamilies = expectedCollisionRegions
+                        .Except(coveredCollisionFamilies, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    problems.Add($"Runtime config coverage only exposes {coveredCollisionFamilies.Length}/{expectedMinimumCollisionFamilyCoverage} expected collision-sensitive region families; missing: {string.Join(", ", missingCollisionFamilies.Take(4))}");
+                }
+            }
+
+            var generatedPhysicsSlotCount = BodySupportMetadataHeuristics.CountPhysicsSlots(generatedPhysicsNodes);
+            if (targetProfile.MinimumPhysicsSlotCount > 0 &&
+                generatedPhysicsSlotCount < targetProfile.MinimumPhysicsSlotCount)
+            {
+                problems.Add($"Runtime config coverage exposes only {generatedPhysicsSlotCount}/{targetProfile.MinimumPhysicsSlotCount} expected physics slot(s).");
+            }
+
+            var expectedPhysicsBones = targetProfile.RequiredPhysicsBones
+                .Concat(targetProfile.PhysicsBoneSignatures)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var generatedPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(generatedPhysicsNodes, expectedPhysicsBones);
+            if (targetProfile.MinimumPhysicsChainDepth > 0 &&
+                generatedPhysicsChainDepth < targetProfile.MinimumPhysicsChainDepth)
+            {
+                problems.Add($"Runtime config coverage only reaches chain depth {generatedPhysicsChainDepth}/{targetProfile.MinimumPhysicsChainDepth}.");
+            }
+
+            var generatedPhysicsFamilyCount = BodySupportMetadataHeuristics.CountPhysicsFamilies(generatedPhysicsNodes, expectedPhysicsBones);
+            if (targetProfile.MinimumPhysicsFamilyCount > 0 &&
+                generatedPhysicsFamilyCount < targetProfile.MinimumPhysicsFamilyCount)
+            {
+                problems.Add($"Runtime config coverage only exposes {generatedPhysicsFamilyCount}/{targetProfile.MinimumPhysicsFamilyCount} expected physics family group(s).");
+            }
+
+            return problems;
+        }
+
+        static IReadOnlyList<string> ReadPhysicsNodeNamesFromConfigFile(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return [];
+            }
+
+            var xml = File.ReadAllText(path);
+            var nodes = new List<string>();
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                         xml,
+                         @"<bone\s+name=""([^""]+)""",
+                         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
+            {
+                var name = match.Groups[1].Value;
+                if (!string.IsNullOrWhiteSpace(name) && !nodes.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    nodes.Add(name);
+                }
+            }
+
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
+                         xml,
+                         @"<(\w+Physics)>",
+                         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
+            {
+                var name = match.Groups[1].Value;
+                if (!string.IsNullOrWhiteSpace(name) && !nodes.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    nodes.Add(name);
+                }
+            }
+
+            return nodes;
         }
 
         void AddMissingFileIssue(string relativePath, string code, string severity, string message)
@@ -23693,6 +23821,19 @@ internal sealed class LocalExportService(
                 "missing-staged-smp-config",
                 "medium",
                 "smp-config.xml was generated but was not staged into SKSE/Plugins/hdtSMP64/, so the package is not mod-manager ready for SMP installs."));
+        }
+
+        var runtimePhysicsSemanticProblems = ValidateRuntimePhysicsSemanticConsistency(
+            rootCbpcConfigPath,
+            stagedCbpcConfigPath,
+            rootSmpConfigPath,
+            stagedSmpConfigPath);
+        if (runtimePhysicsSemanticProblems.Count > 0)
+        {
+            issues.Add(new ConversionValidationIssue(
+                "physics-config-semantic-mismatch",
+                "medium",
+                $"Generated runtime physics config content is too weak for '{request.TargetBody}': {string.Join(" | ", runtimePhysicsSemanticProblems.Take(3))}"));
         }
 
         if (!HasAnyFile(stagedMeshDirectory, "*.nif"))
@@ -25032,16 +25173,19 @@ internal sealed class LocalExportService(
         string targetBody,
         out int minimumPhysicsSlotCount,
         out int minimumPhysicsChainDepth,
+        out int minimumPhysicsFamilyCount,
         out string collisionComplexity)
     {
         minimumPhysicsSlotCount = 0;
         minimumPhysicsChainDepth = 0;
+        minimumPhysicsFamilyCount = 0;
         collisionComplexity = "minimal";
 
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
         {
             minimumPhysicsSlotCount = Math.Max(0, customProfile.MinimumPhysicsSlotCount);
             minimumPhysicsChainDepth = Math.Max(0, customProfile.MinimumPhysicsChainDepth);
+            minimumPhysicsFamilyCount = Math.Max(0, customProfile.MinimumPhysicsFamilyCount);
             collisionComplexity = NormalizeCollisionComplexity(customProfile.CollisionComplexity);
             return true;
         }
@@ -25050,6 +25194,7 @@ internal sealed class LocalExportService(
         {
             minimumPhysicsSlotCount = Math.Max(0, metadata.MinimumPhysicsSlotCount);
             minimumPhysicsChainDepth = Math.Max(0, metadata.MinimumPhysicsChainDepth);
+            minimumPhysicsFamilyCount = Math.Max(0, metadata.MinimumPhysicsFamilyCount);
             collisionComplexity = NormalizeCollisionComplexity(metadata.CollisionComplexity);
             return true;
         }

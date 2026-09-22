@@ -24316,6 +24316,142 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_FlagsBodySlideCollisionFamilyCoverageGap()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "ube");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "CoverageProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="CoverageProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\CoverageProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\CoverageProject\coverage_0.nif</SourceFile>
+                    <OutputPath>meshes\slidesmith\ube\</OutputPath>
+                    <OutputFile gender="f" use="true">armor_0.nif</OutputFile>
+                    <Slider name="BreastsShape" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "CoverageProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "coverage_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "BreastsShape.bsd"), BuildBsdPayload("BreastsShape", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "BreastsShape_1.bsd"), BuildBsdPayload("BreastsShape", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly_1.bsd"), BuildBsdPayload("Belly", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "UBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("CoverageProject", "UBE", ["BreastsShape", "Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("collision-sensitive region families", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsWeakRuntimePhysicsConfigCoverage()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "conversion-quality.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "skeleton-compatibility.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "ube");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64"));
+            File.WriteAllText(Path.Combine(outputDirectory, "smp-config.xml"), "<system><bone name=\"NPC Belly\" /></system>");
+            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), "<system><bone name=\"NPC Belly\" /></system>");
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem"));
+            File.WriteAllText(Path.Combine(outputDirectory, "cbpc-config.xml"), "<Config><BellyPhysics></BellyPhysics></Config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml"), "<Config><BellyPhysics></BellyPhysics></Config>");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"SKSE\" destination=\"SKSE\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "UBE",
+                OutputDirectory: outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc",
+                GenerateBodySlideFiles: false);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("UnusedProject", "UBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var runtimeIssue = Assert.Single(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("collision-sensitive region families", runtimeIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EvaluateTargetBodySupportQuality_FlagsShallowBuiltInLikeMetadata()
     {
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
