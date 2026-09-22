@@ -98,6 +98,7 @@ public sealed class MainForm : Form
         "in-game-validation.json",
         "live-game-execution.json",
         "mod-stack-cross-validation.json",
+        "topology-correspondence.json",
         "runtime-validation-plan.json",
         "runtime-validation-harness.json",
         "desktop-workflow-automation.json",
@@ -3219,12 +3220,14 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
                     AddReportMetric(reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
                     AddReportMetric(reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    AddReportMetric(reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
                     AddReportMetric(reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
                     AddReportMetric(reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
                     AddReportMetric(reportName, "Semantic anchor evidence", TryReadNestedArray(root, "TopologyCorrespondence", "SemanticAnchorEvidence"), filePath);
                     AddReportMetric(reportName, "Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview")), filePath);
                     AddReportMetric(reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    AddReportMetric(reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
                     AddReportMetric(reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
                     AddReportMetric(reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
                     break;
@@ -3273,10 +3276,12 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     AddReportMetric(reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
                     AddReportMetric(reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    AddReportMetric(reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
                     AddReportMetric(reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
                     AddReportMetric(reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
                     AddReportMetric(reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    AddReportMetric(reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
                     AddReportMetric(reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     AddReportMetric(reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     AddReportMetric(reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
@@ -3310,6 +3315,24 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
                     AddReportMetric(reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
                     AddReportMetric(reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
+                    break;
+                case "topology-correspondence.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    AddReportMetric(reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
+                    AddReportMetric(reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
+                    AddReportMetric(reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    AddReportMetric(reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
+                    AddReportMetric(reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    AddReportMetric(reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
+                    AddReportMetric(reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
+                    AddReportMetric(reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
+                    AddReportMetric(reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    AddReportMetric(reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
+                    AddReportMetric(reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
+                    AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
                 case "desktop-workflow-automation.json":
                     AddReportMetric(reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);

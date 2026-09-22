@@ -15669,9 +15669,11 @@ public sealed class RealisticModPackFixtureTests
                     "HeuristicHeavy": true,
                     "MatchingMode": "heuristic-island-regional",
                     "UsesTrueSemanticCorrespondence": false,
+                    "SemanticVertexMatchingStatus": "heuristic-regional",
                     "SemanticAnchorProfile": "Serpentine Humanoid",
                     "SemanticAnchorCoverage": 1,
                     "SemanticAnchorEvidence": ["tail:Tail4"],
+                    "UnmatchedFocusRegions": ["belly"],
                     "RequiresManualSemanticReview": true,
                     "LimitationNotes": ["Topology matching remains heuristic."],
                     "Signals": ["topology-mismatch-risk", "boundary-warning"],
@@ -15685,6 +15687,9 @@ public sealed class RealisticModPackFixtureTests
                 """
                 {
                   "TargetBody": "Serpentine Humanoid",
+                  "SupportTier": "experimental-manual-cleanup",
+                  "ManualCleanupLikely": true,
+                  "RuntimeVerificationRequired": true,
                   "ValidationGate": "REVIEW REQUIRED",
                   "CoreBodyRegions": ["belly", "butt"],
                   "SensitiveRegions": ["tail"],
@@ -15697,9 +15702,11 @@ public sealed class RealisticModPackFixtureTests
                     "HeuristicHeavy": true,
                     "MatchingMode": "heuristic-island-regional",
                     "UsesTrueSemanticCorrespondence": false,
+                    "SemanticVertexMatchingStatus": "heuristic-regional",
                     "SemanticAnchorProfile": "Serpentine Humanoid",
                     "SemanticAnchorCoverage": 1,
                     "SemanticAnchorEvidence": ["tail:Tail4"],
+                    "UnmatchedFocusRegions": ["belly"],
                     "RequiresManualSemanticReview": true,
                     "LimitationNotes": ["Topology matching remains heuristic."],
                     "Signals": ["topology-mismatch-risk", "boundary-warning"],
@@ -15708,6 +15715,34 @@ public sealed class RealisticModPackFixtureTests
                   },
                   "ScenarioMatrix": [],
                   "Checklist": []
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "topology-correspondence.json"),
+                """
+                {
+                  "TargetBody": "Serpentine Humanoid",
+                  "SupportTier": "experimental-manual-cleanup",
+                  "ManualCleanupLikely": true,
+                  "RuntimeVerificationRequired": true,
+                  "TopologyCorrespondence": {
+                    "Classification": "heuristic-heavy",
+                    "Confidence": 0.42,
+                    "HeuristicHeavy": true,
+                    "MatchingMode": "heuristic-island-regional",
+                    "UsesTrueSemanticCorrespondence": false,
+                    "SemanticVertexMatchingStatus": "heuristic-regional",
+                    "SemanticAnchorProfile": "Serpentine Humanoid",
+                    "SemanticAnchorCoverage": 1,
+                    "SemanticAnchorEvidence": ["tail:Tail4"],
+                    "UnmatchedFocusRegions": ["belly"],
+                    "RequiresManualSemanticReview": true,
+                    "LimitationNotes": ["Topology matching remains heuristic."],
+                    "Signals": ["topology-mismatch-risk", "boundary-warning"],
+                    "FocusRegions": ["belly", "tail"],
+                    "Recommendations": ["Open preview-workbench.html before trusting correspondence."]
+                  },
+                  "ReviewArtifacts": ["preview-workbench.html", "conversion-quality.json"]
                 }
                 """);
 
@@ -15721,8 +15756,12 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Value.Equals("heuristic-island-regional", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("True semantic correspondence", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Semantic vertex matching", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("heuristic-regional", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Semantic anchor profile", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Equals("Serpentine Humanoid", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Unmatched topology focus regions", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("belly", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Topology focus regions", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("tail", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Topology review", StringComparison.OrdinalIgnoreCase) &&
@@ -15908,6 +15947,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("tail", inGameJson, StringComparison.OrdinalIgnoreCase);
             var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
             Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
+            var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
+            Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -15937,6 +15979,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("wing", inGameJson, StringComparison.OrdinalIgnoreCase);
             var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
             Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
+            var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
+            Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("topology", topologyJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -17171,11 +17216,22 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
-            Assert.Equal("broad-landmark-backed", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString());
+            Assert.Equal("targeted-landmark-backed", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
+            Assert.Equal("targeted-anchor-guided", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString());
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UnmatchedFocusRegions").GetArrayLength() >= 0);
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
+
+            var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
+            Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
+            using var topologyReport = JsonDocument.Parse(topologyJson);
+            Assert.Equal("Alien Hybrid", topologyReport.RootElement.GetProperty("TargetBody").GetString());
+            Assert.True(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.Equal("targeted-anchor-guided", topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString());
+            Assert.True(topologyReport.RootElement.GetProperty("ReviewArtifacts").GetArrayLength() > 0);
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
             Assert.Contains("\"BlocksRelease\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);

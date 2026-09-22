@@ -281,9 +281,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
                     Add(metrics, reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
                     Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    Add(metrics, reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
                     Add(metrics, reportName, "Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview")), filePath);
                     Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    Add(metrics, reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
                     Add(metrics, reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
                     Add(metrics, reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
                     Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
@@ -321,10 +323,12 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
                     Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
                     Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    Add(metrics, reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
                     Add(metrics, reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
                     Add(metrics, reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
                     Add(metrics, reportName, "Semantic anchor evidence", TryReadNestedArray(root, "TopologyCorrespondence", "SemanticAnchorEvidence"), filePath);
                     Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    Add(metrics, reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
                     Add(metrics, reportName, "Caveats", TryReadArray(root, "Caveats"), filePath);
                     Add(metrics, reportName, "Scenario matrix", CountNestedArray(root, "ScenarioMatrix"), filePath);
                     Add(metrics, reportName, "Scenario highlights", TryReadScenarioHighlights(root), filePath);
@@ -376,6 +380,24 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Plugin mesh families", TryReadArray(root, "DistinctMeshFamilies"), filePath);
                     Add(metrics, reportName, "Recommended runtime scenarios", TryReadArray(root, "RecommendedRuntimeScenarios"), filePath);
                     Add(metrics, reportName, "Suggested harness actions", TryReadArray(root, "SuggestedHarnessActions"), filePath);
+                    break;
+                case "topology-correspondence.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
+                    Add(metrics, reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
+                    Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
+                    Add(metrics, reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
+                    Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
+                    Add(metrics, reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
+                    Add(metrics, reportName, "Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile"), filePath);
+                    Add(metrics, reportName, "Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage"), filePath);
+                    Add(metrics, reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
+                    Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
+                    Add(metrics, reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
+                    Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
                 case "desktop-workflow-automation.json":
                     Add(metrics, reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);

@@ -1170,6 +1170,7 @@ public sealed record TopologyCorrespondenceReport(
     string MatchingMode,
     bool UsesTrueSemanticCorrespondence,
     string CorrespondenceScope,
+    string SemanticVertexMatchingStatus,
     string? SemanticAnchorProfile,
     int SemanticAnchorCoverage,
     int MatchedFocusRegionCount,
@@ -1177,6 +1178,7 @@ public sealed record TopologyCorrespondenceReport(
     int LandmarkRegionCount,
     int ObservedTokenCount,
     IReadOnlyList<string> SemanticAnchorEvidence,
+    IReadOnlyList<string> UnmatchedFocusRegions,
     bool RequiresManualSemanticReview,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<string> Signals,
@@ -18731,6 +18733,28 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(inGameValidationPath);
 
+        var topologyCorrespondencePath = Path.Combine(outputDirectory, "topology-correspondence.json");
+        await File.WriteAllTextAsync(
+            topologyCorrespondencePath,
+            JsonSerializer.Serialize(new
+            {
+                TargetBody = request.TargetBody,
+                SupportTier = conversionReadiness.SupportTier,
+                ConversionReadiness = conversionReadiness,
+                ManualCleanupLikely = manualCleanupLikely,
+                RuntimeVerificationRequired = runtimeVerificationRequired,
+                TopologyCorrespondence = topologyCorrespondence,
+                ReviewArtifacts = new[]
+                {
+                    "preview-workbench.html",
+                    "conversion-quality.json",
+                    "in-game-validation.json",
+                    "runtime-validation-plan.json"
+                }
+            }, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(topologyCorrespondencePath);
+
         var modStackCrossValidationPath = Path.Combine(outputDirectory, "mod-stack-cross-validation.json");
         var modStackCrossValidation = BuildModStackCrossValidationReport(
             request.TargetBody,
@@ -27515,6 +27539,7 @@ internal sealed class LocalExportService(
             "desktop-workflow-automation.json",
             "in-game-validation.json",
             "live-game-execution.json",
+            "topology-correspondence.json",
             "runtime-validation-harness.json",
             "runtime-validation-plan.json",
             "skeleton-compatibility.json",
@@ -27550,6 +27575,7 @@ internal sealed class LocalExportService(
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
@@ -27699,10 +27725,10 @@ internal sealed class LocalExportService(
                 "desktop-preflight",
                 "Desktop review preflight",
                 report.ValidationGate.Equals("PASS", StringComparison.OrdinalIgnoreCase) ? "Info" : "Action",
-                $"Open preview-workbench.html, conversion-quality.json, and desktop-workflow-automation.json for {report.TargetBody} before starting live runtime checks.",
+                $"Open preview-workbench.html, conversion-quality.json, topology-correspondence.json, and desktop-workflow-automation.json for {report.TargetBody} before starting live runtime checks.",
                 ["preview compare"],
                 report.CoreBodyRegions.Count > 0 ? report.CoreBodyRegions : report.SensitiveRegions,
-                ["desktop-workflow-automation.json", "preview-workbench.html", "conversion-quality.json"],
+                ["desktop-workflow-automation.json", "topology-correspondence.json", "preview-workbench.html", "conversion-quality.json"],
                 BlocksRelease: false)
         };
 
@@ -27717,7 +27743,7 @@ internal sealed class LocalExportService(
                 report.TopologyCorrespondence?.FocusRegions?.Count > 0
                     ? report.TopologyCorrespondence.FocusRegions
                     : report.SensitiveRegions.Count > 0 ? report.SensitiveRegions : report.CoreBodyRegions,
-                ["conversion-quality.json", "preview-workbench.html", "skeleton-compatibility.json"],
+                ["topology-correspondence.json", "conversion-quality.json", "preview-workbench.html", "skeleton-compatibility.json"],
                 BlocksRelease: true));
         }
 
@@ -27781,6 +27807,7 @@ internal sealed class LocalExportService(
             "runtime-validation-plan.json",
             "runtime-validation-harness.json",
             "live-game-execution.json",
+            "topology-correspondence.json",
             "mod-stack-cross-validation.json",
             "plugin-patches.json",
             "race-compatibility.json",
@@ -28202,6 +28229,10 @@ internal sealed class LocalExportService(
                                            topologyMismatchRisk ||
                                            payloadReuse?.ExtremelyAdaptedVariantCount > 0 ||
                                            !semanticAnchors.UsesTrueSemanticCorrespondence;
+        var unmatchedFocusRegions = focusRegions
+            .Except(semanticAnchors.MatchedFocusRegions, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse, semanticAnchors);
         var recommendations = BuildTopologyCorrespondenceRecommendations(classification, focusRegions, requiresManualSemanticReview);
 
@@ -28212,6 +28243,7 @@ internal sealed class LocalExportService(
             MatchingMode: semanticAnchors.UsesTrueSemanticCorrespondence ? "topology-semantic-anchors+heuristic" : "heuristic-island-regional",
             UsesTrueSemanticCorrespondence: semanticAnchors.UsesTrueSemanticCorrespondence,
             CorrespondenceScope: semanticAnchors.CorrespondenceScope,
+            SemanticVertexMatchingStatus: BuildSemanticVertexMatchingStatus(semanticAnchors, classification, unmatchedFocusRegions),
             SemanticAnchorProfile: semanticAnchors.ProfileName,
             SemanticAnchorCoverage: semanticAnchors.Coverage,
             MatchedFocusRegionCount: semanticAnchors.MatchedFocusRegionCount,
@@ -28219,6 +28251,7 @@ internal sealed class LocalExportService(
             LandmarkRegionCount: semanticAnchors.LandmarkRegionCount,
             ObservedTokenCount: semanticAnchors.ObservedTokenCount,
             SemanticAnchorEvidence: semanticAnchors.Evidence,
+            UnmatchedFocusRegions: unmatchedFocusRegions,
             RequiresManualSemanticReview: requiresManualSemanticReview,
             LimitationNotes: limitationNotes,
             signals,
@@ -28251,7 +28284,8 @@ internal sealed class LocalExportService(
         int ObservedTokenCount,
         bool UsesTrueSemanticCorrespondence,
         string CorrespondenceScope,
-        IReadOnlyList<string> Evidence);
+        IReadOnlyList<string> Evidence,
+        IReadOnlyList<string> MatchedFocusRegions);
 
     private static SemanticAnchorAssessment BuildSemanticAnchorAssessment(
         ImportedArmor armor,
@@ -28262,10 +28296,11 @@ internal sealed class LocalExportService(
         var observedTokens = BuildSemanticAnchorObservedTokens(armor, targetBody, cageTopology);
         if (!SemanticAnchorCatalog.TryResolveBestProfile(targetBody, observedTokens.Concat(focusRegions), focusRegions, out var profile, out var resolutionEvidence))
         {
-            return new SemanticAnchorAssessment(null, 0, 0, 0, 0, observedTokens.Count, false, "heuristic-only", []);
+            return new SemanticAnchorAssessment(null, 0, 0, 0, 0, observedTokens.Count, false, "heuristic-only", [], []);
         }
 
         var evidence = new List<string>(resolutionEvidence);
+        var matchedFocusRegions = new List<string>();
         var coveredRegions = 0;
         var landmarkCoveredRegions = 0;
         foreach (var region in focusRegions)
@@ -28285,6 +28320,7 @@ internal sealed class LocalExportService(
             }
 
             coveredRegions++;
+            matchedFocusRegions.Add(region);
             var hasLandmarks = profile.Landmarks.TryGetValue(region, out var landmarks) && landmarks.Count > 0;
             if (hasLandmarks)
             {
@@ -28322,8 +28358,23 @@ internal sealed class LocalExportService(
             observedTokens.Count,
             usesTrueSemanticCorrespondence,
             correspondenceScope,
-            evidence);
+            evidence,
+            matchedFocusRegions);
     }
+
+    private static string BuildSemanticVertexMatchingStatus(
+        SemanticAnchorAssessment semanticAnchors,
+        string classification,
+        IReadOnlyList<string> unmatchedFocusRegions) =>
+        semanticAnchors.UsesTrueSemanticCorrespondence &&
+        unmatchedFocusRegions.Count == 0 &&
+        classification.Equals("aligned", StringComparison.OrdinalIgnoreCase)
+            ? "broad-anchor-guided"
+            : semanticAnchors.UsesTrueSemanticCorrespondence
+                ? "targeted-anchor-guided"
+                : semanticAnchors.MatchedFocusRegionCount > 0
+                    ? "partial-anchor-guided"
+                    : "heuristic-regional";
 
     private static IReadOnlySet<string> BuildSemanticAnchorObservedTokens(
         ImportedArmor armor,
