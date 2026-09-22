@@ -11113,6 +11113,24 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public async Task BodySlideSourceSupport_WithFixtureBackedSprigganShapeDataPack_ResolvesBranchPayloads()
+    {
+        var meshPath = GetFixtureFilePath("RealisticSprigganBranchFrameworkModPack", Path.Combine("meshes", "armor", "sprigganbranch", "spriggan_branch_0.nif"));
+
+        var armor = new ImportedArmor(meshPath, [meshPath], [], [], []);
+        var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, "Spriggan", CancellationToken.None);
+
+        Assert.Contains("BranchSpread", resolved.Sliders);
+        Assert.Contains("WaistWidth", resolved.Sliders);
+        Assert.Contains("Shoulders", resolved.Sliders);
+        Assert.NotNull(resolved.SourceAssetSupport);
+        Assert.True(resolved.SourceAssetSupport!.HasOsp);
+        Assert.True(resolved.SourceAssetSupport.HasOsdPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasTriPayloads);
+        Assert.True(resolved.SourceAssetSupport.HasBsdPayloads);
+    }
+
+    [Fact]
     public async Task BodySlideSourceSupport_WithFixtureBackedSerpentineSparseRigPack_ResolvesSparseCoilPayloads()
     {
         var meshPath = GetFixtureFilePath("RealisticSerpentineSparseRigModPack", Path.Combine("meshes", "beast", "serpentine_sparse", "serpentine_sparse_0.nif"));
@@ -13628,6 +13646,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("BeastKnot", equine.AvailablePhysicsBones);
         Assert.Contains("ManeLength", equine.SliderNames);
         Assert.Contains("KnotSize", equine.SliderNames);
+
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("Verdant Spirit", out var sprigganAlias));
+        Assert.Equal("Spriggan", sprigganAlias.Name);
+        Assert.Contains("BranchMid.L", sprigganAlias.AvailablePhysicsBones);
+        Assert.Contains("LeafFrond.L", sprigganAlias.AvailablePhysicsBones);
     }
 
     [Fact]
@@ -13706,8 +13729,13 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["PawFront.L", "DigitigradeToe.R"]));
         Assert.Equal("serpentine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CoilRoot", "CoilTip"]));
         Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["Branch.L", "Vine.R"]));
+        Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["LeafFrond.L", "Branchwarden"]));
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchTip.L", "spriggan-branch", out var branchFallbacks));
         Assert.Contains("Branch.L", branchFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BranchMid.L", "spriggan-branch", out var branchMidFallbacks));
+        Assert.Contains("Branch.L", branchMidFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("LeafFrond.L", "spriggan-branch", out var leafFallbacks));
+        Assert.Contains("BranchTip.L", leafFallbacks);
         Assert.True(PhysicsRepairCatalog.TryMatchGroup("BriarTendrilChain", out var branchGroup));
         Assert.Equal("branch", branchGroup);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("WingFinger03.L", "draconic-humanoid", out var draconicWingFallbacks));
@@ -16106,6 +16134,46 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("wing", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("feather", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticSprigganBranchFrameworkModPack_WritesBranchTopologyArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticSprigganBranchFrameworkModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "sprigganbranch", "spriggan_branch_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Spriggan",
+                outputDirectory,
+                PhysicsProfileOverride: "smp"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "spriggan", "spriggan_branch_0.nif")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "topology-correspondence.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+
+            using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
+            Assert.Equal("Spriggan", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
+            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
+
+            var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
+            Assert.Contains("spriggan-branch", skeletonJson, StringComparison.OrdinalIgnoreCase);
+
+            var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
+            Assert.Contains("\"SemanticAnchorProfile\": \"Spriggan\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("branch", topologyJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

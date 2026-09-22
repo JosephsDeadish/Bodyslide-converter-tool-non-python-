@@ -398,26 +398,38 @@
       "bones": [
         "Branch.L",
         "Branch.R",
+        "BranchMid.L",
+        "BranchMid.R",
         "BranchTip.L",
         "BranchTip.R",
         "Vine.L",
         "Vine.R",
+        "VineMid.L",
+        "VineMid.R",
         "VineTip.L",
         "VineTip.R",
         "Tendril.L",
         "Tendril.R",
         "RootClaw.L",
-        "RootClaw.R"
+        "RootClaw.R",
+        "LeafFrond.L",
+        "LeafFrond.R"
       ],
       "fallbackMappings": {
+        "BranchMid.L": ["Branch.L", "Vine.L", "NPC L ForeArm"],
+        "BranchMid.R": ["Branch.R", "Vine.R", "NPC R ForeArm"],
         "BranchTip.L": ["Branch.L", "Vine.L", "NPC L ForeArm", "NPC L Hand"],
         "BranchTip.R": ["Branch.R", "Vine.R", "NPC R ForeArm", "NPC R Hand"],
+        "VineMid.L": ["Vine.L", "Branch.L", "NPC L ForeArm"],
+        "VineMid.R": ["Vine.R", "Branch.R", "NPC R ForeArm"],
         "VineTip.L": ["Vine.L", "Branch.L", "NPC L ForeArm", "NPC L Hand"],
         "VineTip.R": ["Vine.R", "Branch.R", "NPC R ForeArm", "NPC R Hand"],
         "Tendril.L": ["Vine.L", "Branch.L", "NPC L ForeArm"],
         "Tendril.R": ["Vine.R", "Branch.R", "NPC R ForeArm"],
         "RootClaw.L": ["Branch.L", "NPC L Hand", "NPC L ForeArm"],
-        "RootClaw.R": ["Branch.R", "NPC R Hand", "NPC R ForeArm"]
+        "RootClaw.R": ["Branch.R", "NPC R Hand", "NPC R ForeArm"],
+        "LeafFrond.L": ["BranchTip.L", "VineTip.L", "Branch.L", "NPC L Hand"],
+        "LeafFrond.R": ["BranchTip.R", "VineTip.R", "Branch.R", "NPC R Hand"]
       }
     },
     {

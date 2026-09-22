@@ -57,10 +57,10 @@
   },
   {
     "label": "spriggan-branch",
-    "bonePrefixes": ["Branch", "Vine", "Tendril", "RootClaw", "Briar"],
-    "boneTokens": ["Branch.L", "Branch.R", "BranchTip", "Vine.L", "Vine.R", "VineTip", "Tendril", "RootClaw", "Briar", "Twig", "Spriggan"],
-    "distinctiveSignatures": ["Branch.L", "Branch.R", "Vine.L", "Vine.R", "RootClaw.L", "RootClaw.R"],
-    "ecosystemCues": ["briarswing", "branchcoil", "roottwig", "vinegrip", "spriggan"],
+    "bonePrefixes": ["Branch", "Vine", "Tendril", "RootClaw", "Briar", "LeafFrond"],
+    "boneTokens": ["Branch.L", "Branch.R", "BranchMid", "BranchTip", "Vine.L", "Vine.R", "VineMid", "VineTip", "Tendril", "RootClaw", "Briar", "Twig", "LeafFrond", "Spriggan"],
+    "distinctiveSignatures": ["Branch.L", "Branch.R", "Vine.L", "Vine.R", "RootClaw.L", "RootClaw.R", "LeafFrond.L", "LeafFrond.R"],
+    "ecosystemCues": ["briarswing", "branchcoil", "roottwig", "vinegrip", "spriggan", "verdantspirit", "leaffrond", "branchwarden"],
     "minimumSignatureMatches": 2
   },
   {

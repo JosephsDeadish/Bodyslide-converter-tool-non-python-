@@ -245,6 +245,34 @@
     }
   },
   {
+    "name": "Spriggan",
+    "aliases": ["Spriggan Humanoid", "Spriggan Body", "Briarfolk", "Rootfolk", "Dryad", "Nature Spirit", "Treefolk", "Verdant Spirit", "Branchwarden"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "arms": ["Branch.L", "Branch.R", "Vine.L", "Vine.R", "Tendril.L", "Tendril.R", "RootClaw.L", "RootClaw.R"],
+      "shoulders": ["Branch.L", "Branch.R", "BranchTip.L", "BranchTip.R", "VineMid.L", "VineMid.R"],
+      "branch": ["Branch.L", "Branch.R", "BranchMid.L", "BranchMid.R", "BranchTip.L", "BranchTip.R", "Vine.L", "Vine.R", "VineMid.L", "VineMid.R", "VineTip.L", "VineTip.R", "LeafFrond.L", "LeafFrond.R", "RootClaw.L", "RootClaw.R"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "core-knot", "x": 0.50, "y": 0.53, "z": 0.58 }
+      ],
+      "arms": [
+        { "label": "left-bough-root", "x": 0.29, "y": 0.54, "z": 0.72 },
+        { "label": "right-bough-root", "x": 0.71, "y": 0.54, "z": 0.72 }
+      ],
+      "shoulders": [
+        { "label": "left-canopy", "x": 0.28, "y": 0.50, "z": 0.80 },
+        { "label": "right-canopy", "x": 0.72, "y": 0.50, "z": 0.80 }
+      ],
+      "branch": [
+        { "label": "left-branch-mid", "x": 0.20, "y": 0.58, "z": 0.70 },
+        { "label": "right-branch-mid", "x": 0.80, "y": 0.58, "z": 0.70 },
+        { "label": "vine-sweep", "x": 0.50, "y": 0.66, "z": 0.64 }
+      ]
+    }
+  },
+  {
     "name": "Aquatic Humanoid",
     "aliases": ["Mermaid", "Siren"],
     "anchors": {

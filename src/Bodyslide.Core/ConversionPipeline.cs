@@ -29806,12 +29806,14 @@ internal sealed class LocalExportService(
         {
             AddSemanticAnchorPathTokens(observedTokens, bodyReferencePath);
             AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(bodyReferencePath));
+            AddSemanticAnchorSkeletonTokens(observedTokens, bodyReferencePath);
         }
 
         foreach (var physicsPath in armor.PhysicsFiles)
         {
             AddSemanticAnchorPathTokens(observedTokens, physicsPath);
             AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(physicsPath));
+            AddSemanticAnchorPhysicsTokens(observedTokens, physicsPath);
         }
 
         AddSemanticAnchorPathTokens(observedTokens, armor.SourcePath);
@@ -29848,6 +29850,65 @@ internal sealed class LocalExportService(
         }
 
         return observedTokens;
+    }
+
+    private static void AddSemanticAnchorSkeletonTokens(ISet<string> observedTokens, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            !path.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            foreach (var bone in SkeletonNifBoneParser.ExtractBoneNames(bytes))
+            {
+                observedTokens.Add(bone);
+                AddSemanticAnchorPathTokens(observedTokens, bone);
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore unreadable support NIFs; path-derived tokens are still useful.
+        }
+    }
+
+    private static void AddSemanticAnchorPhysicsTokens(ISet<string> observedTokens, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            !path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var document = System.Xml.Linq.XDocument.Load(path);
+            foreach (var element in document.Descendants())
+            {
+                if (!string.Equals(element.Name.LocalName, "bone", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var name = (string?)element.Attribute("name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                observedTokens.Add(name.Trim());
+                AddSemanticAnchorPathTokens(observedTokens, name);
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore malformed physics XML; filename/body-profile cues still apply.
+        }
     }
 
     private static void AddSemanticAnchorPathTokens(ISet<string> observedTokens, string? path)

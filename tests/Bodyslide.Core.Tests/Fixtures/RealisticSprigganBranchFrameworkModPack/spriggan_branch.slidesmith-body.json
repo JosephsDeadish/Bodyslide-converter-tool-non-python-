@@ -1,0 +1,47 @@
+{
+  "name": "Spriggan Branch Framework",
+  "aliases": [
+    "Verdant Spirit",
+    "Branchwarden",
+    "Briarfolk Vestment"
+  ],
+  "referenceTokens": [
+    "spriggan",
+    "branch",
+    "vine",
+    "bark",
+    "leaf",
+    "briar"
+  ],
+  "sliderNames": [
+    "Belly",
+    "WaistWidth",
+    "Shoulders",
+    "Arms",
+    "BranchSpread"
+  ],
+  "physicsBones": [
+    "NPC Belly",
+    "Branch.L",
+    "Branch.R",
+    "BranchMid.L",
+    "BranchMid.R",
+    "BranchTip.L",
+    "BranchTip.R",
+    "Vine.L",
+    "Vine.R",
+    "VineMid.L",
+    "VineMid.R",
+    "VineTip.L",
+    "VineTip.R",
+    "RootClaw.L",
+    "RootClaw.R",
+    "LeafFrond.L",
+    "LeafFrond.R"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Branch or vine creature-humanoid skeleton",
+  "skeletonFramework": "spriggan-branch",
+  "bodyOutputPath": "meshes\actors\character\character assets\"
+}

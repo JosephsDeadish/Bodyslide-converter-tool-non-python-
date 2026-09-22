@@ -2107,7 +2107,9 @@
       "Rootfolk",
       "Dryad",
       "Nature Spirit",
-      "Treefolk"
+      "Treefolk",
+      "Verdant Spirit",
+      "Branchwarden"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -2117,12 +2119,18 @@
       "NPC Belly",
       "Branch.L",
       "Branch.R",
+      "BranchMid.L",
+      "BranchMid.R",
       "BranchTip.L",
       "BranchTip.R",
       "Vine.L",
       "Vine.R",
+      "VineMid.L",
+      "VineMid.R",
       "RootClaw.L",
-      "RootClaw.R"
+      "RootClaw.R",
+      "LeafFrond.L",
+      "LeafFrond.R"
     ],
     "referenceTokens": [
       "spriggan",
@@ -2188,8 +2196,12 @@
     "physicsBoneSignatures": [
       "Branch.L",
       "Branch.R",
+      "BranchMid.L",
+      "BranchMid.R",
       "Vine.L",
       "Vine.R",
+      "VineMid.L",
+      "VineMid.R",
       "RootClaw.L",
       "RootClaw.R"
     ],
