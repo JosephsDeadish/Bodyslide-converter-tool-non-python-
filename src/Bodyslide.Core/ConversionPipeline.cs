@@ -306,6 +306,27 @@ public sealed record RuntimeValidationExecutionStep(
     IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease);
+public sealed record RuntimeAutomationHarnessProbe(
+    string ProbeId,
+    string Phase,
+    string Priority,
+    string Objective,
+    IReadOnlyList<string> DispatchActions,
+    IReadOnlyList<string> FocusRegions,
+    IReadOnlyList<string> RelatedArtifacts,
+    bool BlocksRelease,
+    bool RequiresManualAssertion);
+public sealed record RuntimeAutomationHarness(
+    string TargetBody,
+    string ValidationGate,
+    string AutomationCoverage,
+    bool RequiresExternalGameHarness,
+    bool RequiresModdedTestEnvironment,
+    bool SupportsArtifactPreflightAutomation,
+    bool SupportsScenarioDispatchAutomation,
+    bool RequiresManualAssertion,
+    IReadOnlyList<string> LimitationNotes,
+    IReadOnlyList<RuntimeAutomationHarnessProbe> Probes);
 public sealed record ConversionReadinessAssessment(
     string SupportTier,
     string Summary,
@@ -328,6 +349,7 @@ public sealed record RuntimeValidationExecutionPlan(
     bool RequiresExternalGameHarness,
     bool RequiresModdedTestEnvironment,
     IReadOnlyList<string> LimitationNotes,
+    RuntimeAutomationHarness? AutomationHarness,
     IReadOnlyList<RuntimeValidationExecutionStep> Steps);
 public sealed record InGameValidationReport(
     string TargetBody,
@@ -18531,6 +18553,16 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(runtimeValidationPlanPath);
 
+        if (runtimeValidationPlan.AutomationHarness is not null)
+        {
+            var runtimeHarnessPath = Path.Combine(outputDirectory, "runtime-validation-harness.json");
+            await File.WriteAllTextAsync(
+                runtimeHarnessPath,
+                JsonSerializer.Serialize(runtimeValidationPlan.AutomationHarness, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            outputFiles.Add(runtimeHarnessPath);
+        }
+
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
             if (File.Exists(zipPath))
@@ -27263,6 +27295,7 @@ internal sealed class LocalExportService(
             "conversion-quality.json",
             "desktop-workflow-automation.json",
             "in-game-validation.json",
+            "runtime-validation-harness.json",
             "runtime-validation-plan.json",
             "skeleton-compatibility.json",
             "pose-simulation-report.json",
@@ -27294,6 +27327,7 @@ internal sealed class LocalExportService(
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase) ||
@@ -27483,6 +27517,14 @@ internal sealed class LocalExportService(
             ["runtime-validation-plan.json", "in-game-validation.json", "desktop-workflow-automation.json"],
             BlocksRelease: report.RuntimeVerificationRequired || report.ManualCleanupLikely));
 
+        var limitationNotes = new[]
+        {
+            "Runtime validation now exports a machine-readable external harness contract so preflight and scenario dispatch can be automated outside the app.",
+            "A real live-game pass still requires an external harness or scripted test environment in the final modded game install.",
+            "Blocking runtime probes still require host-side observation or assertion capture on the final skeleton, body, and load-order combination."
+        };
+        var automationHarness = BuildRuntimeAutomationHarness(report, steps, limitationNotes);
+
         return new RuntimeValidationExecutionPlan(
             report.TargetBody,
             report.ValidationGate,
@@ -27491,18 +27533,46 @@ internal sealed class LocalExportService(
             report.ManualCleanupLikely,
             report.RuntimeVerificationRequired,
             report.Caveats,
-            ExecutionCoverage: "plan-only",
+            ExecutionCoverage: "external-harness-ready",
             RequiresLiveGameExecution: true,
-            SupportsAutomatedGameExecution: false,
+            SupportsAutomatedGameExecution: true,
             RequiresExternalGameHarness: true,
             RequiresModdedTestEnvironment: true,
-            LimitationNotes:
-            [
-                "Runtime validation is an execution plan and release gate only; the application does not drive live in-game automation or verify animation results directly.",
-                "A real runtime pass still requires an external harness or scripted test environment in the final modded game install.",
-                "Every blocking runtime step still requires a manual host-game pass on the final skeleton, body, and load-order combination."
-            ],
+            LimitationNotes: limitationNotes,
+            AutomationHarness: automationHarness,
             steps);
+    }
+
+    private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
+        InGameValidationReport report,
+        IReadOnlyList<RuntimeValidationExecutionStep> steps,
+        IReadOnlyList<string> limitationNotes)
+    {
+        var probes = steps
+            .Select(step => new RuntimeAutomationHarnessProbe(
+            ProbeId: BuildRuntimeAutomationProbeId(step),
+            step.Phase,
+            step.Priority,
+            step.Objective,
+            DispatchActions: BuildRuntimeDispatchActions(step),
+            step.FocusRegions,
+            step.RelatedArtifacts,
+            step.BlocksRelease,
+            RequiresManualAssertion: step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
+                                     step.BlocksRelease))
+            .ToArray();
+
+        return new RuntimeAutomationHarness(
+            report.TargetBody,
+            report.ValidationGate,
+            "external-harness-ready",
+            RequiresExternalGameHarness: true,
+            RequiresModdedTestEnvironment: true,
+            SupportsArtifactPreflightAutomation: true,
+            SupportsScenarioDispatchAutomation: true,
+            RequiresManualAssertion: probes.Any(static probe => probe.RequiresManualAssertion),
+            limitationNotes,
+            probes);
     }
 
     private static string DetermineRuntimeExecutionPhase(InGameValidationScenario scenario)
@@ -27526,6 +27596,48 @@ internal sealed class LocalExportService(
         }
 
         return "live-runtime";
+    }
+
+    private static string BuildRuntimeAutomationProbeId(RuntimeValidationExecutionStep step) =>
+        string.Join(
+            "-",
+            step.Name
+                .Split([' ', '/', '_'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(token => new string(token.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant())
+                .Where(static token => !string.IsNullOrWhiteSpace(token)));
+
+    private static IReadOnlyList<string> BuildRuntimeDispatchActions(RuntimeValidationExecutionStep step)
+    {
+        var actions = new List<string> { "verify-related-artifacts" };
+        if (step.Phase.Contains("preflight", StringComparison.OrdinalIgnoreCase) ||
+            step.Phase.Contains("desktop", StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Add("load-preview-workbench");
+            actions.Add("load-runtime-plan");
+        }
+
+        if (step.Phase.Contains("workbench", StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Add("open-outfit-studio-review");
+            actions.Add("capture-cleanup-observation");
+        }
+
+        if (step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
+            step.Phase.Contains("scenario", StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Add("equip-converted-outfit");
+            actions.Add("dispatch-animation-sequence");
+            actions.Add("capture-runtime-observation");
+        }
+
+        if (step.Name.Contains("release gate", StringComparison.OrdinalIgnoreCase))
+        {
+            actions.Add("persist-release-gate-result");
+        }
+
+        return actions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static bool ShouldBlockReleaseForScenario(InGameValidationScenario scenario, InGameValidationReport report) =>
@@ -27717,6 +27829,7 @@ internal sealed class LocalExportService(
 
         var evidence = new List<string>();
         var coveredRegions = 0;
+        var landmarkCoveredRegions = 0;
         foreach (var region in focusRegions)
         {
             if (!profile.Anchors.TryGetValue(region, out var anchors) || anchors.Count == 0)
@@ -27734,16 +27847,30 @@ internal sealed class LocalExportService(
             }
 
             coveredRegions++;
-            evidence.Add($"{region}:{matchedAnchor}");
+            var hasLandmarks = profile.Landmarks.TryGetValue(region, out var landmarks) && landmarks.Count > 0;
+            if (hasLandmarks)
+            {
+                landmarkCoveredRegions++;
+            }
+
+            evidence.Add(hasLandmarks
+                ? $"{region}:{matchedAnchor}:landmarks={landmarks!.Count}"
+                : $"{region}:{matchedAnchor}");
         }
 
         var coveredFocusRegions = focusRegions.Count(region => profile.Anchors.ContainsKey(region));
+        var coveredLandmarkRegions = focusRegions.Count(region =>
+            profile.Anchors.ContainsKey(region) &&
+            profile.Landmarks.TryGetValue(region, out var landmarks) &&
+            landmarks.Count > 0);
         var usesTrueSemanticCorrespondence = coveredRegions >= 2 &&
+                                             landmarkCoveredRegions >= 2 &&
                                              coveredFocusRegions >= 2 &&
+                                             coveredLandmarkRegions >= 2 &&
                                              coveredRegions >= Math.Max(2, coveredFocusRegions / 2);
         return new SemanticAnchorAssessment(
             profile.Name,
-            coveredRegions,
+            Math.Min(coveredRegions, landmarkCoveredRegions == 0 ? coveredRegions : landmarkCoveredRegions),
             usesTrueSemanticCorrespondence,
             evidence);
     }

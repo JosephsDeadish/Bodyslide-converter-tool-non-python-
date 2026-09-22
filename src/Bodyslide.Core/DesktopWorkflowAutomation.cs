@@ -344,9 +344,20 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
                     Add(metrics, reportName, "Modded test environment", FormatBool(TryReadBoolValue(root, "RequiresModdedTestEnvironment")), filePath);
                     Add(metrics, reportName, "Runtime limitation notes", TryReadArray(root, "LimitationNotes"), filePath);
+                    Add(metrics, reportName, "Harness probes", CountNestedArray(root, "AutomationHarness", "Probes"), filePath);
+                    Add(metrics, reportName, "Harness automation coverage", TryReadNestedString(root, "AutomationHarness", "AutomationCoverage"), filePath);
                     Add(metrics, reportName, "Execution phases", TryReadExecutionPhases(root), filePath);
                     Add(metrics, reportName, "Blocking runtime steps", CountBlockingExecutionSteps(root), filePath);
                     Add(metrics, reportName, "Runtime execution highlights", TryReadExecutionHighlights(root), filePath);
+                    break;
+                case "runtime-validation-harness.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Harness automation coverage", TryReadString(root, "AutomationCoverage"), filePath);
+                    Add(metrics, reportName, "Artifact preflight automation", FormatBool(TryReadBoolValue(root, "SupportsArtifactPreflightAutomation")), filePath);
+                    Add(metrics, reportName, "Scenario dispatch automation", FormatBool(TryReadBoolValue(root, "SupportsScenarioDispatchAutomation")), filePath);
+                    Add(metrics, reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
+                    Add(metrics, reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
+                    Add(metrics, reportName, "Harness phases", TryReadHarnessPhases(root), filePath);
                     break;
                 case "desktop-workflow-automation.json":
                     Add(metrics, reportName, "Preview tab", TryReadNestedString(root, "ValidationState", "PreviewTabTitle"), filePath);
@@ -451,6 +462,11 @@ internal static class DesktopWorkflowAutomation
             ? value.GetArrayLength()
             : 0;
 
+    private static int CountNestedArray(JsonElement element, string objectPropertyName, string nestedArrayPropertyName) =>
+        TryGetProperty(element, objectPropertyName, out var nested) && nested.ValueKind == JsonValueKind.Object
+            ? CountNestedArray(nested, nestedArrayPropertyName)
+            : 0;
+
     private static string? TryReadScenarioHighlights(JsonElement element)
     {
         if (!TryGetProperty(element, "ScenarioMatrix", out var value) || value.ValueKind != JsonValueKind.Array)
@@ -500,6 +516,21 @@ internal static class DesktopWorkflowAutomation
             ", ",
             value.EnumerateArray()
                 .Select(static step => TryReadString(step, "Phase"))
+                .Where(static phase => !string.IsNullOrWhiteSpace(phase))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string? TryReadHarnessPhases(JsonElement element)
+    {
+        if (!TryGetProperty(element, "Probes", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return string.Join(
+            ", ",
+            value.EnumerateArray()
+                .Select(static probe => TryReadString(probe, "Phase"))
                 .Where(static phase => !string.IsNullOrWhiteSpace(phase))
                 .Distinct(StringComparer.OrdinalIgnoreCase));
     }
@@ -709,6 +740,18 @@ internal static class DesktopWorkflowAutomation
                 "Prepare an external modded test environment before treating the runtime validation plan as executable.",
                 $"{harnessMetric.Property}: {harnessMetric.Value}",
                 harnessMetric.FilePath,
+                Blocking: false));
+        }
+
+        var harnessCoverageMetric = FindMetric(reportMetrics, "Harness automation coverage", static value => value.Contains("external-harness-ready", StringComparison.OrdinalIgnoreCase))
+                                   ?? FindMetric(reportMetrics, "Scenario dispatch automation", static value => value.Equals("Yes", StringComparison.OrdinalIgnoreCase));
+        if (harnessCoverageMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Runtime harness automation",
+                "Use the exported runtime harness contract to automate artifact preflight and scenario dispatch before the final live verification pass.",
+                $"{harnessCoverageMetric.Property}: {harnessCoverageMetric.Value}",
+                harnessCoverageMetric.FilePath,
                 Blocking: false));
         }
 

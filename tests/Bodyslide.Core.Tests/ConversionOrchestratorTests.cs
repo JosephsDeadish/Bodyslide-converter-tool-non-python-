@@ -15059,6 +15059,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "draconic-humanoid", "dragon_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
@@ -15165,6 +15166,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
+
+            using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
+            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.Equal("SAM Light", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
         }
         finally
         {
@@ -15485,8 +15491,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Desktop automation coverage", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("shared-output-contract", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Windows host required", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness automation coverage", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness probes", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(snapshot.ValidationState.PreviewAvailable);
             Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.StatusLabel));
         }
@@ -15942,6 +15951,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "mermaid", "siren_cuirass_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "README.txt")));
@@ -15954,6 +15964,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("target-body-template.slidesmith-body.json", qualityJson, StringComparison.OrdinalIgnoreCase);
+
+            using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
+            Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
+            Assert.Equal("Insectoid Humanoid", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
         }
         finally
         {
@@ -17149,16 +17163,27 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("desktop-preflight", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("release-gate", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             using var runtimePlan = JsonDocument.Parse(runtimePlanJson);
-            Assert.Equal("plan-only", runtimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
+            Assert.Equal("external-harness-ready", runtimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresLiveGameExecution").GetBoolean());
-            Assert.False(runtimePlan.RootElement.GetProperty("SupportsAutomatedGameExecution").GetBoolean());
+            Assert.True(runtimePlan.RootElement.GetProperty("SupportsAutomatedGameExecution").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", runtimePlan.RootElement.GetProperty("SupportTier").GetString());
+            Assert.True(runtimePlan.RootElement.TryGetProperty("AutomationHarness", out var automationHarness));
+            Assert.Equal("external-harness-ready", automationHarness.GetProperty("AutomationCoverage").GetString());
+            Assert.True(automationHarness.GetProperty("SupportsArtifactPreflightAutomation").GetBoolean());
+            Assert.True(automationHarness.GetProperty("SupportsScenarioDispatchAutomation").GetBoolean());
+            Assert.True(automationHarness.GetProperty("Probes").GetArrayLength() > 0);
+
+            var runtimeHarnessJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-harness.json"));
+            Assert.Contains("\"AutomationCoverage\": \"external-harness-ready\"", runtimeHarnessJson, StringComparison.Ordinal);
+            Assert.Contains("\"ProbeId\": \"desktop-preflight\"", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("dispatch-animation-sequence", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
 
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
             Assert.Contains("Preview", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Support tier", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Runtime harness automation", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AutomationContract\"", desktopAutomationJson, StringComparison.Ordinal);
             using var desktopAutomation = JsonDocument.Parse(desktopAutomationJson);
             Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsTrueUiEndToEndAutomation").GetBoolean());
