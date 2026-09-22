@@ -2449,7 +2449,10 @@ public sealed class MainForm : Form
         var effectiveStatus = ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) >= ConversionValidationPresentation.GetGateRank("needs-review")
             ? state.EffectiveStatus
             : "needs-review";
-        var (highSeverityCount, mediumSeverityCount, lowSeverityCount) = ExtractValidationIssueCounts(state.OutcomeSummary);
+        var validationSummary = TryReadWorstValidationSummary(outputDirectories);
+        var highSeverityCount = validationSummary?.HighSeverityCount ?? 0;
+        var mediumSeverityCount = validationSummary?.MediumSeverityCount ?? 0;
+        var lowSeverityCount = validationSummary?.LowSeverityCount ?? 0;
         return ConversionValidationPresentation.BuildOutcomeSummary(
             effectiveStatus,
             highSeverityCount,
