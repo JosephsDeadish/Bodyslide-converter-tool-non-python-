@@ -16988,25 +16988,27 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
-            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", qualityJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"CanConvert\": true", qualityJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"CanSafelyAnimate\": false", qualityJson, StringComparison.OrdinalIgnoreCase);
+            using var qualityReport = JsonDocument.Parse(qualityJson);
+            Assert.Equal("experimental-manual-cleanup", qualityReport.RootElement.GetProperty("SupportTier").GetString());
+            Assert.False(qualityReport.RootElement.GetProperty("ConversionReadiness").GetProperty("CanSafelyAnimate").GetBoolean());
 
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
             Assert.Contains("Alien Hybrid", inGameJson, StringComparison.Ordinal);
-            Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", inGameJson, StringComparison.OrdinalIgnoreCase);
+            using var inGameReport = JsonDocument.Parse(inGameJson);
+            Assert.True(inGameReport.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
+            Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
             Assert.Contains("\"BlocksRelease\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Custom skeleton remap sweep", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("desktop-preflight", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("release-gate", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"ExecutionCoverage\": \"plan-only\"", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"RequiresLiveGameExecution\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"SupportsAutomatedGameExecution\": false", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            using var runtimePlan = JsonDocument.Parse(runtimePlanJson);
+            Assert.Equal("plan-only", runtimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
+            Assert.True(runtimePlan.RootElement.GetProperty("RequiresLiveGameExecution").GetBoolean());
+            Assert.False(runtimePlan.RootElement.GetProperty("SupportsAutomatedGameExecution").GetBoolean());
+            Assert.Equal("experimental-manual-cleanup", runtimePlan.RootElement.GetProperty("SupportTier").GetString());
 
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
@@ -17014,18 +17016,19 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Support tier", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AutomationContract\"", desktopAutomationJson, StringComparison.Ordinal);
-            Assert.Contains("\"SupportsTrueUiEndToEndAutomation\": false", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"RequiresManualWinFormsInteraction\": true", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            using var desktopAutomation = JsonDocument.Parse(desktopAutomationJson);
+            Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsTrueUiEndToEndAutomation").GetBoolean());
+            Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresManualWinFormsInteraction").GetBoolean());
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
             Assert.Contains("data-testid=\"preview-workbench-root\"", previewHtml, StringComparison.Ordinal);
             Assert.Contains("preview-automation-model", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"workbench-canvas\"", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"reset-view-button\"", previewHtml, StringComparison.Ordinal);
-            Assert.Contains("\"RequiresExternalGameHarness\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"RequiresModdedTestEnvironment\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"RequiresWindowsHost\": true", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"SupportsAutomatedWebViewInteraction\": false", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.True(runtimePlan.RootElement.GetProperty("RequiresExternalGameHarness").GetBoolean());
+            Assert.True(runtimePlan.RootElement.GetProperty("RequiresModdedTestEnvironment").GetBoolean());
+            Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresWindowsHost").GetBoolean());
+            Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsAutomatedWebViewInteraction").GetBoolean());
         }
         finally
         {
