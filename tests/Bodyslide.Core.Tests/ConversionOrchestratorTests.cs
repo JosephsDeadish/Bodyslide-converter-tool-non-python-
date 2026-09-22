@@ -17723,6 +17723,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("external-harness-ready", automationHarness.GetProperty("AutomationCoverage").GetString());
             Assert.True(automationHarness.GetProperty("SupportsArtifactPreflightAutomation").GetBoolean());
             Assert.True(automationHarness.GetProperty("SupportsScenarioDispatchAutomation").GetBoolean());
+            Assert.Equal("runtime-validation-runner", automationHarness.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Contains(
+                automationHarness.GetProperty("BootstrapContract").GetProperty("RequiredInputs").EnumerateArray().Select(static item => item.GetString()),
+                static input => string.Equals(input, "conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(automationHarness.GetProperty("Probes").GetArrayLength() > 0);
 
             var runtimeHarnessJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-harness.json"));
@@ -17731,6 +17735,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("launch-full-load-order", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("verify-plugin-and-race-compatibility", runtimeHarnessJson, StringComparison.OrdinalIgnoreCase);
             using var runtimeHarness = JsonDocument.Parse(runtimeHarnessJson);
+            Assert.Equal("runtime-validation-runner", runtimeHarness.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("BootstrapContract").GetProperty("LaunchActions").EnumerateArray().Select(static item => item.GetString()),
+                static action => string.Equals(action, "dispatch-probes-by-phase", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("ProbeId").GetString()),
                 static probeId => string.Equals(probeId, "desktop-review-preflight", StringComparison.OrdinalIgnoreCase));
@@ -17750,6 +17758,10 @@ public sealed class RealisticModPackFixtureTests
             using var liveGameExecution = JsonDocument.Parse(liveGameExecutionJson);
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresSkseOrEquivalentLauncher").GetBoolean());
+            Assert.Equal("skyrim-live-game-external-runner", liveGameExecution.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("BootstrapContract").GetProperty("ResultArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "runtime-observation-bundle", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("RequiredHostCapabilities").EnumerateArray().Select(static item => item.GetString()),
                 static capability => string.Equals(capability, "validation-save-selection", StringComparison.OrdinalIgnoreCase));
@@ -17786,8 +17798,16 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("desktop-e2e", matrixProofJson, StringComparison.OrdinalIgnoreCase);
             using var matrixProof = JsonDocument.Parse(matrixProofJson);
             Assert.Equal("Alien Hybrid", matrixProof.RootElement.GetProperty("TargetBody").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(matrixProof.RootElement.GetProperty("TargetBodyFamily").GetString()));
             Assert.Equal("artifact-backed-with-major-gaps", matrixProof.RootElement.GetProperty("ProofCoverage").GetString());
             Assert.False(matrixProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("topology-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("runtime-physics:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("target-body-family-", matrixProof.RootElement.GetProperty("MatrixCoordinateKey").GetString(), StringComparison.OrdinalIgnoreCase);
             Assert.True(matrixProof.RootElement.GetProperty("Axes").GetArrayLength() >= 7);
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
@@ -17830,6 +17850,12 @@ public sealed class RealisticModPackFixtureTests
                 desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
                 static property => string.Equals(property, "Strict proof ready", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
+                static property => string.Equals(property, "Matrix coordinates", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
+                static property => string.Equals(property, "Runtime harness bootstrap", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 desktopAutomation.RootElement.GetProperty("SuggestedGuiFlow").EnumerateArray().Select(static step => step.GetProperty("Area").GetString()),
                 static area => string.Equals(area, "Load-order cross-validation", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -17845,6 +17871,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("\"Coverage\": \"external-windows-ui-harness-ready\"", windowsUiAutomationJson, StringComparison.Ordinal);
             using var windowsUiAutomation = JsonDocument.Parse(windowsUiAutomationJson);
             Assert.True(windowsUiAutomation.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
+            Assert.Equal("windows-ui-e2e-runner", windowsUiAutomation.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("BootstrapContract").GetProperty("LaunchActions").EnumerateArray().Select(static item => item.GetString()),
+                static action => string.Equals(action, "attach-winforms-uia-driver", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray().Select(static item => item.GetString()),
                 static flow => string.Equals(flow, "load-existing-result", StringComparison.OrdinalIgnoreCase));

@@ -378,6 +378,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Artifact preflight automation", FormatBool(TryReadBoolValue(root, "SupportsArtifactPreflightAutomation")), filePath);
                     Add(metrics, reportName, "Scenario dispatch automation", FormatBool(TryReadBoolValue(root, "SupportsScenarioDispatchAutomation")), filePath);
                     Add(metrics, reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
+                    Add(metrics, reportName, "Runtime harness bootstrap", TryReadNestedString(root, "BootstrapContract", "HarnessKind"), filePath);
                     Add(metrics, reportName, "Harness probes", CountNestedArray(root, "Probes"), filePath);
                     Add(metrics, reportName, "Harness phases", TryReadHarnessPhases(root), filePath);
                     Add(metrics, reportName, "Load-order probes", CountObjectsWithBool(root, "Probes", "RequiresFullLoadOrderLaunch", expected: true), filePath);
@@ -389,6 +390,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "External live-game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalHarness")), filePath);
                     Add(metrics, reportName, "SKSE launcher required", FormatBool(TryReadBoolValue(root, "RequiresSkseOrEquivalentLauncher")), filePath);
                     Add(metrics, reportName, "Mod-manager load order required", FormatBool(TryReadBoolValue(root, "RequiresDeployedModManagerLoadOrder")), filePath);
+                    Add(metrics, reportName, "Live-game bootstrap", TryReadNestedString(root, "BootstrapContract", "HarnessKind"), filePath);
                     Add(metrics, reportName, "Host capabilities", TryReadArray(root, "RequiredHostCapabilities"), filePath);
                     Add(metrics, reportName, "Observation channels", TryReadArray(root, "ObservationChannels"), filePath);
                     Add(metrics, reportName, "Validation save profiles", TryReadArray(root, "ValidationSaveProfiles"), filePath);
@@ -415,7 +417,10 @@ internal static class DesktopWorkflowAutomation
                     break;
                 case "conversion-matrix-proof.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Matrix coordinate key", TryReadString(root, "MatrixCoordinateKey"), filePath);
+                    Add(metrics, reportName, "Matrix coordinates", TryReadArray(root, "MatrixCoordinates"), filePath);
                     Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
                     Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
@@ -461,6 +466,7 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
                     Add(metrics, reportName, "External UI harness", FormatBool(TryReadBoolValue(root, "RequiresExternalUiHarness")), filePath);
                     Add(metrics, reportName, "Embedded preview runtime required", FormatBool(TryReadBoolValue(root, "RequiresEmbeddedPreviewRuntimeForInAppPreview")), filePath);
+                    Add(metrics, reportName, "UI harness bootstrap", TryReadNestedString(root, "BootstrapContract", "HarnessKind"), filePath);
                     Add(metrics, reportName, "Supported UI flows", TryReadArray(root, "SupportedFlows"), filePath);
                     Add(metrics, reportName, "Automation signals", TryReadArray(root, "AutomationSignals"), filePath);
                     Add(metrics, reportName, "UI selectors", CountNestedArray(root, "Selectors"), filePath);

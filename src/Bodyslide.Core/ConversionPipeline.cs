@@ -584,6 +584,13 @@ public sealed record RuntimeAutomationHarnessProbe(
     bool BlocksRelease,
     bool RequiresManualAssertion,
     bool RequiresFullLoadOrderLaunch);
+public sealed record ExternalHarnessBootstrapContract(
+    string HarnessKind,
+    string ContractVersion,
+    IReadOnlyList<string> RequiredInputs,
+    IReadOnlyList<string> LaunchActions,
+    IReadOnlyList<string> SuccessSignals,
+    IReadOnlyList<string> ResultArtifacts);
 public sealed record RuntimeAutomationHarness(
     string TargetBody,
     string ValidationGate,
@@ -594,6 +601,7 @@ public sealed record RuntimeAutomationHarness(
     bool SupportsScenarioDispatchAutomation,
     bool RequiresManualAssertion,
     IReadOnlyList<string> LimitationNotes,
+    ExternalHarnessBootstrapContract BootstrapContract,
     IReadOnlyList<RuntimeAutomationHarnessProbe> Probes);
 public sealed record LiveGameExecutionProbe(
     string ProbeId,
@@ -618,6 +626,7 @@ public sealed record LiveGameExecutionPlan(
     IReadOnlyList<string> ObservationChannels,
     IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
+    ExternalHarnessBootstrapContract BootstrapContract,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ConversionMatrixProofAxis(
     string Axis,
@@ -627,8 +636,11 @@ public sealed record ConversionMatrixProofAxis(
     IReadOnlyList<string> RequiredArtifacts);
 public sealed record ConversionMatrixProofReport(
     string TargetBody,
+    string TargetBodyFamily,
     string SupportTier,
     ConversionReadinessAssessment? ConversionReadiness,
+    string MatrixCoordinateKey,
+    IReadOnlyList<string> MatrixCoordinates,
     string ProofCoverage,
     bool StrictProofReady,
     IReadOnlyList<string> MissingProofAxes,
@@ -706,6 +718,7 @@ public sealed record WindowsUiE2EAutomationPlan(
     IReadOnlyList<string> SupportedFlows,
     IReadOnlyList<string> AutomationSignals,
     IReadOnlyList<string> LimitationNotes,
+    ExternalHarnessBootstrapContract BootstrapContract,
     IReadOnlyList<WindowsUiAutomationSelector> Selectors,
     IReadOnlyList<WindowsUiAutomationStep> Steps);
 public sealed record InGameValidationReport(
@@ -19405,6 +19418,7 @@ internal sealed class LocalExportService(
             topologyCorrespondence,
             skeletonMapping,
             modStackCrossValidation,
+            physicsCompatibility,
             runtimeValidationPlan,
             liveGameExecution,
             windowsUiAutomation);
@@ -29787,6 +29801,37 @@ internal sealed class LocalExportService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var bootstrapContract = new ExternalHarnessBootstrapContract(
+            HarnessKind: "skyrim-live-game-external-runner",
+            ContractVersion: "1.0",
+            RequiredInputs:
+            [
+                "live-game-execution.json",
+                "runtime-validation-plan.json",
+                "runtime-validation-harness.json",
+                "conversion-matrix-proof.json",
+                "mod-stack-cross-validation.json",
+                "preview-workbench.html"
+            ],
+            LaunchActions: launchSequence,
+            SuccessSignals:
+            [
+                "windows-host-connected",
+                "validation-save-loaded",
+                "runtime-scenarios-dispatched",
+                "host-observations-captured",
+                "release-gate-result-persisted"
+            ],
+            ResultArtifacts:
+            [
+                "live-game-execution.json",
+                "runtime-validation-plan.json",
+                "runtime-validation-harness.json",
+                "conversion-matrix-proof.json",
+                "runtime-observation-bundle",
+                "release-gate-result"
+            ]);
+
         return new LiveGameExecutionPlan(
             runtimePlan.TargetBody,
             runtimePlan.ValidationGate,
@@ -29801,6 +29846,7 @@ internal sealed class LocalExportService(
             ObservationChannels: observationChannels,
             ValidationSaveProfiles: validationSaveProfiles,
             LimitationNotes: limitationNotes,
+            BootstrapContract: bootstrapContract,
             Probes: probes);
     }
 
@@ -29866,6 +29912,43 @@ internal sealed class LocalExportService(
             new WindowsUiAutomationStep("Catalog and cache", "Open catalog and cache-oriented views to confirm non-conversion navigation still works", "catalog-list", "Catalog and cache views remain reachable after conversion and after loading a previous result", false)
         };
 
+        var bootstrapContract = new ExternalHarnessBootstrapContract(
+            HarnessKind: "windows-ui-e2e-runner",
+            ContractVersion: "1.0",
+            RequiredInputs:
+            [
+                "windows-ui-e2e-automation.json",
+                "desktop-workflow-automation.json",
+                "preview-workbench.html",
+                "runtime-validation-plan.json",
+                "conversion-matrix-proof.json"
+            ],
+            LaunchActions:
+            [
+                "launch-desktop-app",
+                "attach-winforms-uia-driver",
+                "load-fixture-input-and-output-paths",
+                "execute-supported-flow-steps",
+                "capture-ui-screenshots-and-selector-state",
+                "persist-ui-run-summary"
+            ],
+            SuccessSignals:
+            [
+                "main-form-visible",
+                "stable-selectors-resolved",
+                "supported-flow-steps-executed",
+                "artifact-tabs-populated",
+                "ui-run-summary-persisted"
+            ],
+            ResultArtifacts:
+            [
+                "windows-ui-e2e-automation.json",
+                "desktop-workflow-automation.json",
+                "ui-screenshot-bundle",
+                "ui-selector-resolution-log",
+                "ui-run-summary"
+            ]);
+
         return new WindowsUiE2EAutomationPlan(
             Coverage: "external-windows-ui-harness-ready",
             RequiresWindowsHost: true,
@@ -29894,6 +29977,7 @@ internal sealed class LocalExportService(
                 "The generated plan exposes stable WinForms Name selectors and preview HTML data-testid selectors, but execution still requires an external Windows UI harness.",
                 "WinForms dialogs, browser/runtime prompts, and true in-process WebView automation are not executed inside the core library or Linux test environment."
             ],
+            BootstrapContract: bootstrapContract,
             Selectors: selectors,
             Steps: steps);
     }
@@ -29904,6 +29988,7 @@ internal sealed class LocalExportService(
         TopologyCorrespondenceReport topologyCorrespondence,
         SkeletonMappingResult skeletonMapping,
         ModStackCrossValidationReport? modStackCrossValidation,
+        PhysicsCompatibilityReport physicsCompatibility,
         RuntimeValidationExecutionPlan runtimePlan,
         LiveGameExecutionPlan liveGameExecution,
         WindowsUiE2EAutomationPlan windowsUiAutomation)
@@ -30083,11 +30168,29 @@ internal sealed class LocalExportService(
             : missingProofAxes.Length <= 2
                 ? "artifact-backed-with-targeted-gaps"
                 : "artifact-backed-with-major-gaps";
+        var matrixCoordinates = BuildConversionMatrixCoordinates(
+            targetBody,
+            conversionReadiness,
+            topologyCorrespondence,
+            skeletonMapping,
+            modStackCrossValidation,
+            physicsCompatibility,
+            runtimePlan,
+            liveGameExecution,
+            windowsUiAutomation);
+        var matrixCoordinateKey = string.Join(
+            "__",
+            matrixCoordinates
+                .Select(static coordinate => coordinate.Replace(':', '-').Replace('/', '-'))
+                .Select(static coordinate => coordinate.Replace(' ', '-').ToLowerInvariant()));
 
         return new ConversionMatrixProofReport(
             TargetBody: targetBody,
+            TargetBodyFamily: BuildTargetBodyFamily(targetBody),
             SupportTier: conversionReadiness.SupportTier,
             ConversionReadiness: conversionReadiness,
+            MatrixCoordinateKey: matrixCoordinateKey,
+            MatrixCoordinates: matrixCoordinates,
             ProofCoverage: proofCoverage,
             StrictProofReady: missingProofAxes.Length == 0,
             MissingProofAxes: missingProofAxes,
@@ -30131,6 +30234,109 @@ internal sealed class LocalExportService(
             _ => $"Axis '{axis.Axis}' is not yet strictly proven."
         };
 
+
+    private static IReadOnlyList<string> BuildConversionMatrixCoordinates(
+        string targetBody,
+        ConversionReadinessAssessment conversionReadiness,
+        TopologyCorrespondenceReport topologyCorrespondence,
+        SkeletonMappingResult skeletonMapping,
+        ModStackCrossValidationReport? modStackCrossValidation,
+        PhysicsCompatibilityReport physicsCompatibility,
+        RuntimeValidationExecutionPlan runtimePlan,
+        LiveGameExecutionPlan liveGameExecution,
+        WindowsUiE2EAutomationPlan windowsUiAutomation)
+    {
+        var pluginMode = modStackCrossValidation is null
+            ? "plugin-free"
+            : modStackCrossValidation.RequiresLoadOrderValidation
+                ? "full-load-order-required"
+                : modStackCrossValidation.RequiresPluginPatchReview || modStackCrossValidation.AmbiguousPluginCount > 0
+                    ? "plugin-review-required"
+                    : "plugin-aware";
+        var skeletonMode = skeletonMapping.SourceSkeletonUsedSparseInference
+            ? "sparse-inference"
+            : skeletonMapping.UnsupportedBones.Count > 0
+                ? "partial-remap"
+                : conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase)
+                    ? "safe-remap"
+                    : conversionReadiness.SkeletonRemapSafety;
+        var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
+        var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
+            ? "physics-disabled"
+            : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
+
+        return
+        [
+            $"target-body:{targetBody}",
+            $"target-body-family:{BuildTargetBodyFamily(targetBody)}",
+            $"support-tier:{conversionReadiness.SupportTier}",
+            $"topology-family:{topologyFamily}",
+            $"topology-classification:{topologyCorrespondence.Classification}",
+            $"skeleton-mode:{skeletonMode}",
+            $"plugin-stack:{pluginMode}",
+            $"runtime-physics:{runtimePhysicsMode}",
+            $"runtime-automation:{runtimePlan.ExecutionCoverage}",
+            $"live-game:{liveGameExecution.IntegrationCoverage}",
+            $"desktop-ui:{windowsUiAutomation.Coverage}"
+        ];
+    }
+
+    private static string BuildTopologyMatrixFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
+    {
+        var signals = topologyCorrespondence.FocusRegions
+            .Concat(topologyCorrespondence.UnmatchedFocusRegions)
+            .Concat(topologyCorrespondence.Signals)
+            .Append(targetBody)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray();
+
+        if (signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("jaw", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("genital", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("shaft", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("vagina", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "oral-or-genital";
+        }
+
+        if (signals.Any(static value => value.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("muzzle", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("snout", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("hoof", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("serp", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("alien", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("canine", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "beast-or-custom-appendage";
+        }
+
+        if (signals.Any(static value => value.Contains("foot", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("boot", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("shoe", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("ground", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "footwear-or-grounding";
+        }
+
+        if (topologyCorrespondence.HeuristicHeavy ||
+            topologyCorrespondence.UnmatchedFocusRegions.Count > 0 ||
+            topologyCorrespondence.FocusRegions.Count > 1)
+        {
+            return "multipart-or-layered";
+        }
+
+        return "core-humanoid";
+    }
+
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
         InGameValidationReport report,
         IReadOnlyList<RuntimeValidationExecutionStep> steps,
@@ -30154,6 +30360,41 @@ internal sealed class LocalExportService(
                                          step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
+        var bootstrapContract = new ExternalHarnessBootstrapContract(
+            HarnessKind: "runtime-validation-runner",
+            ContractVersion: "1.0",
+            RequiredInputs:
+            [
+                "runtime-validation-plan.json",
+                "runtime-validation-harness.json",
+                "in-game-validation.json",
+                "preview-workbench.html",
+                "conversion-matrix-proof.json"
+            ],
+            LaunchActions:
+            [
+                "read-runtime-harness-contract",
+                "verify-artifact-preflight",
+                "dispatch-probes-by-phase",
+                "capture-assertions-and-failures",
+                "persist-release-gate-result"
+            ],
+            SuccessSignals:
+            [
+                "artifact-preflight-complete",
+                "probe-dispatch-complete",
+                "blocking-assertions-captured",
+                "release-gate-result-persisted"
+            ],
+            ResultArtifacts:
+            [
+                "runtime-validation-harness.json",
+                "runtime-validation-plan.json",
+                "in-game-validation.json",
+                "runtime-probe-results",
+                "release-gate-result"
+            ]);
+
         return new RuntimeAutomationHarness(
             report.TargetBody,
             report.ValidationGate,
@@ -30164,6 +30405,7 @@ internal sealed class LocalExportService(
             SupportsScenarioDispatchAutomation: true,
             RequiresManualAssertion: probes.Any(static probe => probe.RequiresManualAssertion),
             limitationNotes,
+            bootstrapContract,
             probes);
     }
 
