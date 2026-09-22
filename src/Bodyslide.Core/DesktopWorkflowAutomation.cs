@@ -429,6 +429,21 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
+                case "conversion-matrix-pack-proof.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Total conversions", TryReadIntValue(root, "TotalCount"), filePath);
+                    Add(metrics, reportName, "Strict proof ready count", TryReadIntValue(root, "StrictProofReadyCount"), filePath);
+                    Add(metrics, reportName, "Non-strict proof count", TryReadIntValue(root, "NonStrictProofCount"), filePath);
+                    Add(metrics, reportName, "Unique matrix coordinates", TryReadIntValue(root, "UniqueMatrixCoordinateCount"), filePath);
+                    Add(metrics, reportName, "Target body families", TryReadArray(root, "DistinctTargetBodyFamilies"), filePath);
+                    Add(metrics, reportName, "Support tiers", TryReadArray(root, "DistinctSupportTiers"), filePath);
+                    Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
+                    Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
+                    Add(metrics, reportName, "Axis summaries", CountNestedArray(root, "Axes"), filePath);
+                    Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
                 case "topology-correspondence.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
@@ -846,7 +861,7 @@ internal static class DesktopWorkflowAutomation
         {
             steps.Add(new DesktopWorkflowAutomationStep(
                 "Matrix proof",
-                "Open conversion-matrix-proof.json and review which body, topology, skeleton, plugin, runtime, or Desktop proof axes are still blocking a universal-ready claim.",
+                "Open the conversion-matrix proof report (per-conversion or pack-level) and review which body, topology, skeleton, plugin, runtime, or Desktop proof axes are still blocking a universal-ready claim.",
                 $"{matrixProofMetric.Property}: {matrixProofMetric.Value}",
                 matrixProofMetric.FilePath,
                 Blocking: true));

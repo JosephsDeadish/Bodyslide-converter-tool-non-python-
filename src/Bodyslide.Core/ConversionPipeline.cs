@@ -1613,6 +1613,44 @@ public sealed record ArmorPackValidationReport(
     IReadOnlyList<ArmorPackValidationIssueCount> TopIssueCodes,
     IReadOnlyList<ArmorPackValidationItem> Items,
     DateTimeOffset GeneratedAt);
+public sealed record ConversionMatrixPackProofAxisSummary(
+    string Axis,
+    int TotalCount,
+    int StrictlyProvenCount,
+    int MissingCount,
+    IReadOnlyList<string> CoverageModes,
+    IReadOnlyList<string> ReviewArtifacts);
+public sealed record ConversionMatrixPackProofItem(
+    string MeshFile,
+    string OutputDirectory,
+    string TargetBody,
+    string TargetBodyFamily,
+    string SupportTier,
+    string MatrixCoordinateKey,
+    IReadOnlyList<string> MatrixCoordinates,
+    string ProofCoverage,
+    bool StrictProofReady,
+    IReadOnlyList<string> MissingProofAxes,
+    IReadOnlyList<string> BlockingGaps);
+public sealed record ConversionMatrixPackProofReport(
+    string ConversionLabel,
+    string TargetBody,
+    int TotalCount,
+    int StrictProofReadyCount,
+    int NonStrictProofCount,
+    int UniqueMatrixCoordinateCount,
+    int UniqueTargetBodyFamilyCount,
+    string ProofCoverage,
+    bool StrictProofReady,
+    IReadOnlyList<string> MatrixCoordinateKeys,
+    IReadOnlyList<string> DistinctTargetBodyFamilies,
+    IReadOnlyList<string> DistinctSupportTiers,
+    IReadOnlyList<string> MissingProofAxes,
+    IReadOnlyList<string> BlockingGaps,
+    IReadOnlyList<ConversionMatrixPackProofAxisSummary> Axes,
+    IReadOnlyList<string> ReviewArtifacts,
+    IReadOnlyList<ConversionMatrixPackProofItem> Items,
+    DateTimeOffset GeneratedAt);
 
 /// <summary>
 /// Result of the normal recalculation pass — reports how many vertex normals were
@@ -7882,7 +7920,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             "plugin-patches.json",
             "patch-armor.pas",
             "armor-pack-validation.json",
-            "batch-report.json"
+            "batch-report.json",
+            "conversion-matrix-pack-proof.json"
         ];
 
         public static IReadOnlyList<string> EnumerateFiles(
@@ -8095,6 +8134,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         var validationJson = JsonSerializer.Serialize(armorPackValidation, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(rootOutput, "armor-pack-validation.json"), validationJson, cancellationToken);
+
+        var matrixPackProof = BuildConversionMatrixPackProofReport(resultsWithPaths, targetBody, conversionLabel);
+        var matrixPackProofJson = JsonSerializer.Serialize(matrixPackProof, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(Path.Combine(rootOutput, "conversion-matrix-pack-proof.json"), matrixPackProofJson, cancellationToken);
     }
 
     private static ArmorPackValidationReport BuildArmorPackValidationReport(
@@ -8204,6 +8247,159 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             GeneratedAt: DateTimeOffset.UtcNow);
     }
 
+    private static readonly string[] KnownMatrixProofAxes =
+    [
+        "body-support",
+        "topology-transfer",
+        "custom-skeleton",
+        "plugin-modstack",
+        "runtime-automation",
+        "live-game-execution",
+        "desktop-e2e"
+    ];
+
+    private static ConversionMatrixPackProofReport BuildConversionMatrixPackProofReport(
+        IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
+        string targetBody,
+        string conversionLabel)
+    {
+        var items = new List<ConversionMatrixPackProofItem>(resultsWithPaths.Count);
+        var reports = new List<ConversionMatrixProofReport>(resultsWithPaths.Count);
+
+        foreach (var (meshFile, result) in resultsWithPaths)
+        {
+            var qualityReport = TryReadConversionQualityReport(result);
+            var proofReport = TryReadConversionMatrixProofReport(result.OutputDirectory);
+            if (proofReport is not null)
+            {
+                reports.Add(proofReport);
+                items.Add(new ConversionMatrixPackProofItem(
+                    MeshFile: Path.GetFileName(meshFile),
+                    OutputDirectory: result.OutputDirectory,
+                    TargetBody: proofReport.TargetBody,
+                    TargetBodyFamily: proofReport.TargetBodyFamily,
+                    SupportTier: proofReport.SupportTier,
+                    MatrixCoordinateKey: proofReport.MatrixCoordinateKey,
+                    MatrixCoordinates: proofReport.MatrixCoordinates,
+                    ProofCoverage: proofReport.ProofCoverage,
+                    StrictProofReady: proofReport.StrictProofReady,
+                    MissingProofAxes: proofReport.MissingProofAxes,
+                    BlockingGaps: proofReport.BlockingGaps));
+                continue;
+            }
+
+            var missingAxes = KnownMatrixProofAxes.ToList();
+            items.Add(new ConversionMatrixPackProofItem(
+                MeshFile: Path.GetFileName(meshFile),
+                OutputDirectory: result.OutputDirectory,
+                TargetBody: targetBody,
+                TargetBodyFamily: BuildTargetBodyFamily(targetBody),
+                SupportTier: qualityReport?.SupportTier ?? qualityReport?.ConversionReadiness?.SupportTier ?? "unknown",
+                MatrixCoordinateKey: "missing-proof-report",
+                MatrixCoordinates: [],
+                ProofCoverage: "missing-proof-report",
+                StrictProofReady: false,
+                MissingProofAxes: missingAxes,
+                BlockingGaps:
+                [
+                    "Missing conversion-matrix-proof.json for this converted output."
+                ]));
+        }
+
+        var matrixCoordinateKeys = items
+            .Select(item => item.MatrixCoordinateKey)
+            .Where(value => !string.IsNullOrWhiteSpace(value) &&
+                            !value.Equals("missing-proof-report", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var distinctTargetBodyFamilies = items
+            .Select(item => item.TargetBodyFamily)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var distinctSupportTiers = items
+            .Select(item => item.SupportTier)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var missingProofAxes = items
+            .SelectMany(item => item.MissingProofAxes)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var blockingGaps = items
+            .SelectMany(item => item.BlockingGaps)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var reviewArtifacts = reports
+            .SelectMany(report => report.ReviewArtifacts)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var axes = KnownMatrixProofAxes
+            .Select(axisName =>
+            {
+                var axisEntries = reports
+                    .Select(report => report.Axes.FirstOrDefault(axis => axis.Axis.Equals(axisName, StringComparison.OrdinalIgnoreCase)))
+                    .Where(axis => axis is not null)
+                    .Cast<ConversionMatrixProofAxis>()
+                    .ToList();
+                var strictlyProvenCount = axisEntries.Count(axis => axis.StrictlyProven);
+                var coverageModes = axisEntries
+                    .Select(axis => axis.Coverage)
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var axisArtifacts = axisEntries
+                    .SelectMany(axis => axis.RequiredArtifacts)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return new ConversionMatrixPackProofAxisSummary(
+                    Axis: axisName,
+                    TotalCount: items.Count,
+                    StrictlyProvenCount: strictlyProvenCount,
+                    MissingCount: items.Count - strictlyProvenCount,
+                    CoverageModes: coverageModes,
+                    ReviewArtifacts: axisArtifacts);
+            })
+            .ToList();
+
+        var strictProofReadyCount = items.Count(item => item.StrictProofReady);
+        var strictProofReady = items.Count > 0 && strictProofReadyCount == items.Count;
+        var proofCoverage = strictProofReady
+            ? "strict-pack-proof-ready"
+            : strictProofReadyCount > 0 || matrixCoordinateKeys.Count > 1 || items.Count > 1
+                ? "artifact-backed-with-pack-gaps"
+                : "artifact-backed-with-major-pack-gaps";
+
+        return new ConversionMatrixPackProofReport(
+            ConversionLabel: conversionLabel,
+            TargetBody: targetBody,
+            TotalCount: items.Count,
+            StrictProofReadyCount: strictProofReadyCount,
+            NonStrictProofCount: items.Count - strictProofReadyCount,
+            UniqueMatrixCoordinateCount: matrixCoordinateKeys.Count,
+            UniqueTargetBodyFamilyCount: distinctTargetBodyFamilies.Count,
+            ProofCoverage: proofCoverage,
+            StrictProofReady: strictProofReady,
+            MatrixCoordinateKeys: matrixCoordinateKeys,
+            DistinctTargetBodyFamilies: distinctTargetBodyFamilies,
+            DistinctSupportTiers: distinctSupportTiers,
+            MissingProofAxes: missingProofAxes,
+            BlockingGaps: blockingGaps,
+            Axes: axes,
+            ReviewArtifacts: reviewArtifacts,
+            Items: items,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
+
     private static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
     {
         var qualityPath = result.OutputFiles.FirstOrDefault(path =>
@@ -8219,6 +8415,29 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             return JsonSerializer.Deserialize<ConversionQualityReport>(
                 File.ReadAllText(qualityPath),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ConversionMatrixProofReport? TryReadConversionMatrixProofReport(string outputDirectory)
+    {
+        var path = Path.Combine(outputDirectory, "conversion-matrix-proof.json");
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ConversionMatrixProofReport>(
+                File.ReadAllText(path),
                 new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,

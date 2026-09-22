@@ -17942,6 +17942,42 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(packItem.GetProperty("CanSafelyAnimate").GetBoolean());
             Assert.True(packItem.GetProperty("RequiresExternalGameHarness").GetBoolean());
             Assert.True(packItem.GetProperty("RequiresExternalUiHarness").GetBoolean());
+
+            var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
+            Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+
+            using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+            Assert.Equal("Alien Hybrid", packProof.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Equal(results.Count, packProof.RootElement.GetProperty("TotalCount").GetInt32());
+            Assert.False(packProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
+            Assert.True(packProof.RootElement.GetProperty("NonStrictProofCount").GetInt32() > 0);
+            Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() > 0);
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("DistinctSupportTiers").EnumerateArray().Select(static item => item.GetString()),
+                static tier => string.Equals(tier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(7, packProof.RootElement.GetProperty("Axes").GetArrayLength());
+            Assert.Contains(
+                packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
+                static key => !string.IsNullOrWhiteSpace(key));
+
+            var desktopSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
+            Assert.Contains(
+                desktopSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Unique matrix coordinates", StringComparison.OrdinalIgnoreCase) &&
+                          int.TryParse(metric.Value, out var coordinateCount) &&
+                          coordinateCount > 0);
+            Assert.Contains(
+                desktopSnapshot.SuggestedGuiFlow,
+                step => string.Equals(step.Area, "Matrix proof", StringComparison.OrdinalIgnoreCase) &&
+                        step.ArtifactPath is not null &&
+                        step.ArtifactPath.EndsWith("conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
