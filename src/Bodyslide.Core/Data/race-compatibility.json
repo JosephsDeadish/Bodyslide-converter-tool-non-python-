@@ -94,14 +94,14 @@
       "name": "Khajiit variant",
       "groups": ["beast", "khajiit", "feline", "digitigrade"],
       "editorIdHints": ["khajiit", "khajiitracevampire", "khajiitvampire", "khajiitchild", "senche", "cathay", "cathayraht", "ohmes", "ohmesraht", "dagi", "dagiraht", "panther", "tiger", "lion", "leonin", "sabrecat", "lynx"],
-      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "ohmes-raht", "dagi", "dagi-raht", "feline", "digitigrade", "panther", "tiger", "lion", "leonin", "sabrecat", "lynx", "vampire", "child", "follower", "custom race", "customrace"],
+      "pluginNameHints": ["khajiit", "senche", "cathay", "cathay-raht", "ohmes", "ohmes-raht", "dagi", "dagi-raht", "feline", "digitigrade", "panther", "tiger", "lion", "leonin", "sabrecat", "lynx", "cub", "kitten", "retainer", "vampire", "child", "follower", "custom race", "customrace"],
       "meshPathHints": ["khajiit", "senche", "cathay", "ohmes", "dagi", "feline", "digitigrade", "tail", "panther", "tiger", "lion", "lynx", "sabrecat"]
     },
     {
       "name": "Argonian variant",
       "groups": ["beast", "argonian", "reptile", "tail"],
       "editorIdHints": ["argonian", "argonianracevampire", "argonianvampire", "argonianchild", "saxhleel", "lizard", "draconid", "scaled"],
-      "pluginNameHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail", "vampire", "child", "follower", "custom race", "customrace"],
+      "pluginNameHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail", "nightborn", "thrall", "vampire", "child", "follower", "custom race", "customrace"],
       "meshPathHints": ["argonian", "saxhleel", "reptile", "lizard", "draconid", "scaled", "tail"]
     },
     {
@@ -157,14 +157,14 @@
       "name": "Equine variant",
       "groups": ["beast", "equine", "hoofed"],
       "editorIdHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "horsefolk", "hooffolk"],
-      "pluginNameHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "horsefolk", "hooffolk", "hoof", "follower", "custom race", "customrace", "vampire", "child"],
+      "pluginNameHints": ["horse", "mare", "pony", "equine", "centaur", "marefolk", "equus", "horsefolk", "hooffolk", "hoof", "foal", "colt", "stallion", "thrall", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["horse", "mane", "hoof", "equine", "centaur", "marefolk", "equus", "forelock"]
     },
     {
       "name": "Avian variant",
       "groups": ["beast", "avian", "winged"],
       "editorIdHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk"],
-      "pluginNameHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk", "feather", "wing", "follower", "custom race", "customrace", "vampire", "child"],
+      "pluginNameHints": ["avian", "harpy", "bird", "birdfolk", "ravenwing", "featherfolk", "pinionfolk", "talonfolk", "feather", "wing", "nestling", "hatchling", "thrall", "follower", "custom race", "customrace", "vampire", "child"],
       "meshPathHints": ["avian", "wing", "feather", "bird", "pinion", "talon"]
     }
   ]

@@ -5074,6 +5074,10 @@ public sealed class ConversionOrchestratorTests
     [InlineData("nature_spirit_vampire_child_follower.esp", "Spriggan variant")]
     [InlineData("hooffolk_child_follower.esp", "Equine variant")]
     [InlineData("talonfolk_customrace.esp", "Avian variant")]
+    [InlineData("mare_thrall_foal_follower.esp", "Equine variant")]
+    [InlineData("nestling_harpy_thrall_patch.esp", "Avian variant")]
+    [InlineData("panther_cub_retainer.esp", "Khajiit variant")]
+    [InlineData("nightborn_saxhleel_thrall.esp", "Argonian variant")]
     public void RaceCompatibilityCatalog_TryInferRaceFromPluginNameContext(
         string pluginName,
         string expectedVariant)
@@ -8687,6 +8691,43 @@ public sealed class NifOutputAndSourceOverrideTests
             [0.80f, 0.92f, 0.50f, morphing, cage, islandControl, null])!;
 
         Assert.True(scales.WidthScale < 1.00d, $"Expected routed cage scaling to prefer the island-mapped arm region instead of blending back toward pelvis expansion. widthScale={scales.WidthScale:F4}");
+    }
+
+    [Fact]
+    public void ComputeCageProjectionScales_UsesIslandSpecificRegionalMorphingWhenAvailable()
+    {
+        var scaleMethod = typeof(LocalExportService).GetMethod("ComputeCageProjectionScales", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(scaleMethod);
+
+        var cage = new DeformationCage(
+            "island-local-morphing",
+            Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["belly"] = new(0.52f, 0.18f, 0.50f, 0.82f, 0.50f, 0.88f, 1.00f, 1.00f, 1.00f, 0.00f)
+            },
+            IslandControls:
+            [
+                new CageIslandControl("torso_panel", 1, ["belly"])
+            ],
+            IslandRegionalMorphing: new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["torso_panel\u001f1"] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["belly"] = 1.04d
+                }
+            });
+        var globalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["belly"] = 1.40d
+        };
+        var islandControl = cage.IslandControls![0];
+
+        var scales = ((double WidthScale, double DepthScale, double HeightScale))scaleMethod!.Invoke(
+            null,
+            [0.52f, 0.50f, 0.50f, globalMorphing, cage, islandControl, null])!;
+
+        Assert.InRange(scales.WidthScale, 1.03d, 1.08d);
+        Assert.True(scales.WidthScale < 1.20d, $"Expected local belly ownership to override the stronger global morph field. widthScale={scales.WidthScale:F4}");
     }
 
     [Fact]
@@ -21974,6 +22015,49 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public async Task BasicPartitionRebuildingService_UsesConservativeRecoveryForNonManifoldTopology()
+    {
+        var mesh = new WeightedMesh(
+            "plate",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "recovery-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "plate_panel",
+                        IslandId: 0,
+                        CageRegions: ["torso"],
+                        EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 6, 3, 2, 6, 5, false, true))
+                ]));
+        var analysis = new MeshAnalysis(
+            "plate",
+            false,
+            1,
+            HasSplitMeshes: true,
+            TopologyIslandSummaries: new Dictionary<string, TopologyIslandSummary>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plate_panel"] = new(
+                    1,
+                    0.24d,
+                    ["nonmanifold-risk"],
+                    EdgeNetworks: [new TopologyIslandEdgeNetworkSummary(0, 6, 3, 2, 6, 5, false, true)],
+                    HasExplicitEdgeNetwork: true,
+                    InteriorEdgeCount: 3,
+                    NonManifoldEdgeCount: 2)
+            });
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "CBBE", CancellationToken.None);
+
+        Assert.Contains("32:Body", result.Partitions, StringComparer.Ordinal);
+        Assert.DoesNotContain("33:Hands", result.Partitions, StringComparer.Ordinal);
+        Assert.DoesNotContain("37:Feet", result.Partitions, StringComparer.Ordinal);
+    }
+
+    [Fact]
     public void BuildPartitionSignalReport_FlagsCoarseRoutingForComplexTopology()
     {
         var method = typeof(LocalExportService).GetMethod("BuildPartitionSignalReport", BindingFlags.NonPublic | BindingFlags.Static);
@@ -22198,6 +22282,27 @@ public sealed class BasicScratchPluginGeneratorServiceTests
         // TES4 flags are at offset 8 (4-byte tag + 4-byte data size).
         var flags = (uint)(bytes[8] | (bytes[9] << 8) | (bytes[10] << 16) | (bytes[11] << 24));
         Assert.True((flags & 0x200u) != 0, "ESL flag (0x200) must be set in TES4 header.");
+    }
+
+    [Fact]
+    public void Generate_IncludesAdditionalMasterHintsInTes4Header()
+    {
+        var service = new BasicScratchPluginGeneratorService();
+
+        var result = service.Generate(
+            "NightboundArmor",
+            "CBBE",
+            ["meshes/slidesmith/cbbe/nightbound_0.nif"],
+            [32],
+            null,
+            masterFileHints: ["Skyrim.esm", "Dawnguard.esm", "CustomRaceFamily.esl", "nightbound_patch.esp"]);
+
+        var (bytes, _) = result!.Value;
+        var pluginText = System.Text.Encoding.ASCII.GetString(bytes);
+        Assert.Contains("Skyrim.esm", pluginText, StringComparison.Ordinal);
+        Assert.Contains("Dawnguard.esm", pluginText, StringComparison.Ordinal);
+        Assert.Contains("CustomRaceFamily.esl", pluginText, StringComparison.Ordinal);
+        Assert.Contains("nightbound_patch.esp", pluginText, StringComparison.Ordinal);
     }
 
     [Fact]

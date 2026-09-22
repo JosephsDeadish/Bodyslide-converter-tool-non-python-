@@ -144,7 +144,8 @@ public sealed record CageIslandAuthoredRegion(
 public sealed record DeformationCage(
     string Mode,
     IReadOnlyDictionary<string, CageRegion>? Regions = null,
-    IReadOnlyList<CageIslandControl>? IslandControls = null);
+    IReadOnlyList<CageIslandControl>? IslandControls = null,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? IslandRegionalMorphing = null);
 public sealed record ConvertedMesh(
     string MeshType,
     string Strategy,
@@ -6255,7 +6256,8 @@ public interface IScratchPluginGeneratorService
         IReadOnlyList<string> convertedNifRelativePaths,
         IReadOnlyList<int> bipedSlots,
         string? groundMeshRelativePath,
-        string? meshType = null);
+        string? meshType = null,
+        IReadOnlyList<string>? masterFileHints = null);
 }
 
 public sealed class ConversionOrchestrator(
@@ -8151,7 +8153,8 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         IReadOnlyList<string> convertedNifRelativePaths,
         IReadOnlyList<int> bipedSlots,
         string? groundMeshRelativePath,
-        string? meshType = null)
+        string? meshType = null,
+        IReadOnlyList<string>? masterFileHints = null)
     {
         if (convertedNifRelativePaths.Count == 0) return null;
 
@@ -8273,7 +8276,8 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
 
         // ── Assemble ESP ──────────────────────────────────────────────────────
         using var ms = new MemoryStream();
-        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: 2), formId: 0, flags: EslFlag);
+        var masterFiles = BuildScratchMasterFileList(masterFileHints);
+        WriteRecord(ms, "TES4", BuildStandaloneTes4Data(numRecords: 2, masterFiles), formId: 0, flags: EslFlag);
         WriteGrup(ms, "ARMA", [armaRecord]);
         WriteGrup(ms, "ARMO", [armoRecord]);
 
@@ -8281,7 +8285,7 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
         return (ms.ToArray(), $"SlideSmith_{safeFileName}.esp");
     }
 
-    private static byte[] BuildStandaloneTes4Data(int numRecords)
+    private static byte[] BuildStandaloneTes4Data(int numRecords, IReadOnlyList<string> masterFiles)
     {
         using var ms = new MemoryStream();
 
@@ -8295,12 +8299,42 @@ internal sealed class BasicScratchPluginGeneratorService : IScratchPluginGenerat
 
         WriteSubrecord(ms, "CNAM", System.Text.Encoding.ASCII.GetBytes("SlideSmith\0"));
 
-        // Declare Skyrim.esm as master so RNAM can reference DefaultRace (0x00000013).
-        // The DATA subrecord after MAST is an 8-byte file-size field; writing 0 is valid.
-        WriteSubrecord(ms, "MAST", System.Text.Encoding.ASCII.GetBytes("Skyrim.esm\0"));
-        WriteSubrecord(ms, "DATA", new byte[8]);
+        foreach (var masterFile in masterFiles)
+        {
+            WriteSubrecord(ms, "MAST", System.Text.Encoding.ASCII.GetBytes(masterFile + '\0'));
+            WriteSubrecord(ms, "DATA", new byte[8]);
+        }
 
         return ms.ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildScratchMasterFileList(IReadOnlyList<string>? masterFileHints)
+    {
+        var ordered = new List<string> { "Skyrim.esm" };
+        if (masterFileHints is null)
+        {
+            return ordered;
+        }
+
+        foreach (var master in masterFileHints
+                     .Where(static name => !string.IsNullOrWhiteSpace(name))
+                     .Select(static name => Path.GetFileName(name.Trim()))
+                     .Where(static name =>
+                         name.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) ||
+                         name.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ||
+                         name.EndsWith(".esl", StringComparison.OrdinalIgnoreCase))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.Equals(master, "Skyrim.esm", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            ordered.Add(master);
+        }
+
+        return ordered;
     }
 
     private static byte[] BuildRecord(string tag, byte[] data, uint formId, uint flags = 0)
@@ -10822,6 +10856,12 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, stabilizationAssessment, physicsRigHints.StrengthenStabilization)
             : featureAdjustedMorphing;
         var islandAwareMorphing = ApplyIslandAwareCageTuning(stabilizedMorphing, effectiveCage);
+        var islandRegionalMorphing = BuildIslandRegionalMorphing(islandAwareMorphing, effectiveCage);
+        if (islandRegionalMorphing.Count > 0)
+        {
+            effectiveCage = effectiveCage with { IslandRegionalMorphing = islandRegionalMorphing };
+        }
+
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, islandAwareMorphing, effectiveCage));
     }
 
@@ -11120,6 +11160,79 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         }
 
         return regionDamping;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> BuildIslandRegionalMorphing(
+        IReadOnlyDictionary<string, double> field,
+        DeformationCage? deformationCage)
+    {
+        if (field.Count == 0 ||
+            deformationCage?.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var regionDamping = BuildIslandAwareRegionDamping(field.Keys, deformationCage);
+        var piecewiseDamping = BuildPiecewiseReconstructionDamping(field.Keys, deformationCage);
+        var ownershipDamping = BuildIslandOwnershipRoutingDamping(field.Keys, deformationCage);
+        var appendageDamping = BuildMultiPieceAppendageRoutingDamping(field.Keys, deformationCage);
+        var result = new Dictionary<string, IReadOnlyDictionary<string, double>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var islandControl in islandControls)
+        {
+            var routedRegions = islandControl.CageRegions
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(field.ContainsKey)
+                .ToArray();
+            if (routedRegions.Length == 0)
+            {
+                continue;
+            }
+
+            var localField = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var region in routedRegions)
+            {
+                var value = field[region];
+                var damping = 1d;
+                if (regionDamping.TryGetValue(region, out var regional))
+                {
+                    damping = Math.Min(damping, regional);
+                }
+
+                if (ownershipDamping.TryGetValue(region, out var ownership))
+                {
+                    damping = Math.Min(damping, ownership);
+                }
+
+                if (appendageDamping.TryGetValue(region, out var appendage))
+                {
+                    damping = Math.Min(damping, appendage);
+                }
+
+                if (Math.Abs(value - 1d) >= 0.18d &&
+                    piecewiseDamping.TryGetValue(region, out var piecewise))
+                {
+                    damping = Math.Min(damping, piecewise);
+                }
+
+                damping = Math.Min(damping, ComputeIslandTopologyDamping(islandControl));
+                damping = Math.Min(damping, 1d - Math.Min(0.12d, islandControl.BoundaryDamping * 0.75d));
+                damping = Math.Min(damping, 1d - Math.Min(0.10d, islandControl.RigidityBias * 0.60d));
+                damping = Math.Clamp(damping, 0d, 1d);
+
+                localField[region] = damping < 1d
+                    ? 1d + ((value - 1d) * damping)
+                    : value;
+            }
+
+            if (localField.Count > 0)
+            {
+                result[BuildIslandRegionalMorphingKey(islandControl.MeshKey, islandControl.IslandId)] = localField;
+            }
+        }
+
+        return result;
     }
 
     private static IReadOnlyDictionary<string, double> BuildMultiPieceAppendageRoutingDamping(
@@ -13394,6 +13507,7 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
     {
         // Select partitions based on mesh type and target body.
         var slots = new HashSet<int>();
+        var useConservativeRecovery = RequiresConservativePartitionRecovery(mesh.DeformationCage, analysis);
 
         if (analysis.IsFootwear)
         {
@@ -13430,8 +13544,11 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
             case "leather":
             case "mixed":
                 slots.Add(32); // Body
-                slots.Add(33); // Hands
-                slots.Add(37); // Feet
+                if (!useConservativeRecovery)
+                {
+                    slots.Add(33); // Hands
+                    slots.Add(37); // Feet
+                }
                 break;
 
             case "cloth":
@@ -13475,6 +13592,21 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
             .ToList();
 
         return Task.FromResult(new PartitionRebuildingResult(true, partitionLabels, removedSlots));
+    }
+
+    private static bool RequiresConservativePartitionRecovery(DeformationCage? deformationCage, MeshAnalysis analysis)
+    {
+        var riskyIslandTopology = deformationCage?.IslandControls?.Any(control =>
+            control.EdgeNetworkSummary?.HasManifoldRisk == true ||
+            control.EdgeNetworkSummary?.NonManifoldEdgeCount > 0) == true;
+        if (riskyIslandTopology)
+        {
+            return true;
+        }
+
+        return analysis.TopologyIslandSummaries?.Values.Any(summary =>
+            summary.NonManifoldEdgeCount > 0 ||
+            summary.EdgeNetworks?.Any(static network => network.HasManifoldRisk || network.NonManifoldEdgeCount > 0) == true) == true;
     }
 
     private static IReadOnlyList<int> DeriveIslandRoutedSlots(DeformationCage? deformationCage, MeshAnalysis analysis)
@@ -18044,7 +18176,8 @@ internal sealed class LocalExportService(
 
             var scratchResult = scratchPluginGen.Generate(
                 armorName, request.TargetBody, pluginNifPaths, bipedSlots, groundMeshRelativePath,
-                meshType: analysis.MeshType);
+                meshType: analysis.MeshType,
+                masterFileHints: pluginAnalysis.ScannedPlugins);
 
             if (scratchResult is var (pluginBytes, pluginFileName))
             {
@@ -21715,6 +21848,10 @@ internal sealed class LocalExportService(
             }
         }
 
+        var effectiveRegionalMorphing = ResolveIslandRegionalMorphing(
+                    regionalMorphing,
+                    deformationCage,
+                    islandControl);
         double widthTotal = 0;
         double depthTotal = 0;
         double heightTotal = 0;
@@ -21736,7 +21873,7 @@ internal sealed class LocalExportService(
                 continue;
             }
 
-            var morph = regionalMorphing.TryGetValue(region, out var factor) && double.IsFinite(factor) && factor > 0.01d
+            var morph = effectiveRegionalMorphing.TryGetValue(region, out var factor) && double.IsFinite(factor) && factor > 0.01d
                 ? factor
                 : 1.0d;
             var effectiveRigidity = Math.Clamp(control.Rigidity + (islandControl?.RigidityBias ?? 0f) + (boundaryLoopControl?.RigidityBias ?? 0f), 0f, 0.95f);
@@ -21789,6 +21926,27 @@ internal sealed class LocalExportService(
             depthScale,
             heightScale);
     }
+
+    private static IReadOnlyDictionary<string, double> ResolveIslandRegionalMorphing(
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        DeformationCage deformationCage,
+        CageIslandControl? islandControl)
+    {
+        if (islandControl is null ||
+            deformationCage.IslandRegionalMorphing is not { Count: > 0 } islandRegionalMorphing)
+        {
+            return regionalMorphing;
+        }
+
+        return islandRegionalMorphing.TryGetValue(
+            BuildIslandRegionalMorphingKey(islandControl.MeshKey, islandControl.IslandId),
+            out var localField)
+            ? localField
+            : regionalMorphing;
+    }
+
+    private static string BuildIslandRegionalMorphingKey(string meshKey, int islandId) =>
+        $"{meshKey?.Trim() ?? string.Empty}\u001f{islandId}";
 
     private static double ComputeIslandProjectionTopologyDamping(
         CageIslandControl islandControl,
