@@ -3244,6 +3244,9 @@ public sealed class MainForm : Form
                         AddReportMetric(reportName, "Generated physics slots", TryReadInt(physicsCompatibility, "GeneratedPhysicsSlotCount"), filePath);
                         AddReportMetric(reportName, "Expected chain depth", TryReadInt(physicsCompatibility, "ExpectedMinimumPhysicsChainDepth"), filePath);
                         AddReportMetric(reportName, "Generated chain depth", TryReadInt(physicsCompatibility, "GeneratedPhysicsChainDepth"), filePath);
+                        AddReportMetric(reportName, "Expected physics families", TryReadInt(physicsCompatibility, "ExpectedMinimumPhysicsFamilyCount"), filePath);
+                        AddReportMetric(reportName, "Generated physics families", TryReadInt(physicsCompatibility, "GeneratedPhysicsFamilyCount"), filePath);
+                        AddReportMetric(reportName, "Collision complexity", TryReadString(physicsCompatibility, "CollisionComplexity"), filePath);
                         AddReportMetric(reportName, "Physics coverage sufficient", FormatBool(TryReadBoolValue(physicsCompatibility, "HasSufficientPhysicsCoverage")), filePath);
                     }
                     break;

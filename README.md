@@ -118,10 +118,11 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 # show supported body types with detection tokens, vertex-count hints,
-# skeleton foundation, and soft-body physics bone reference data
+# skeleton foundation, semantic/collision support regions, and soft-body physics coverage expectations
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
-# show deep reference info for one body (canonical names and common aliases both work)
+# show deep reference info for one body (canonical names and common aliases both work),
+# including semantic regions, collision focus, bilateral expectations, and minimum physics coverage
 dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BBB"
 
 # show available physics profiles
@@ -206,15 +207,17 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
 - `expectedSemanticRegions`
 - `expectedCollisionRegions`
+- `expectedBilateralRegions`
 - `minimumPhysicsSlotCount`
 - `minimumPhysicsChainDepth`
+- `minimumPhysicsFamilyCount`
 - `collisionComplexity` (`none`, `minimal`, `standard`, `extended`)
 - `gender` (`female` or `male`)
 - `bodyOutputPath`
 - `skeletonFoundation`
 - `skeletonFramework`
 
-When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them. Those starter templates now include semantic-region, collision-region, and physics-depth hints so support quality can be strengthened instead of only naming the body and sliders.
+When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them. Those starter templates now include semantic-region, collision-region, bilateral-region, collision-complexity, and minimum physics coverage hints so support quality can be strengthened instead of only naming the body and sliders.
 
 ## Support tiers
 

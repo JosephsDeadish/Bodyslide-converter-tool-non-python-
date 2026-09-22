@@ -1605,6 +1605,9 @@ public sealed record PhysicsCompatibilityReport(
     int GeneratedPhysicsSlotCount,
     int ExpectedMinimumPhysicsChainDepth,
     int GeneratedPhysicsChainDepth,
+    int ExpectedMinimumPhysicsFamilyCount,
+    int GeneratedPhysicsFamilyCount,
+    string CollisionComplexity,
     bool HasSufficientPhysicsCoverage,
     string Summary);
 
@@ -23095,7 +23098,7 @@ internal sealed class LocalExportService(
             issues.Add(new ConversionValidationIssue(
                 "physics-bone-coverage",
                 physicsCompatibility.GeneratedPhysicsSlotCount == 0 ? "high" : "medium",
-                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s) with chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth} for target body '{physicsCompatibility.TargetBody}'."));
+                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {physicsCompatibility.GeneratedPhysicsFamilyCount}/{physicsCompatibility.ExpectedMinimumPhysicsFamilyCount}, and chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth} for target body '{physicsCompatibility.TargetBody}' ({physicsCompatibility.CollisionComplexity} collision complexity)."));
         }
 
         if (poseSimulation.TotalPosesAtRisk > 0)
@@ -25316,30 +25319,39 @@ internal sealed class LocalExportService(
             ? Math.Max(0, profile.MinimumPhysicsChainDepth)
             : 0;
         var generatedPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(generatedPhysicsBones, expectedBones);
+        var expectedMinimumPhysicsFamilyCount = hasProfile
+            ? Math.Max(0, profile.MinimumPhysicsFamilyCount)
+            : 0;
+        var generatedPhysicsFamilyCount = BodySupportMetadataHeuristics.CountPhysicsFamilies(generatedPhysicsBones);
         var hasSufficientPhysicsCoverage = !physicsRequested ||
-                                           !targetBodySupportsPhysics ||
-                                           HasSufficientGeneratedPhysicsCoverage(
+                                               !targetBodySupportsPhysics ||
+                                               HasSufficientGeneratedPhysicsCoverage(
                                                expectedMinimumPhysicsSlotCount,
                                                generatedPhysicsSlotCount,
                                                expectedMinimumPhysicsChainDepth,
-                                               generatedPhysicsChainDepth);
+                                               generatedPhysicsChainDepth,
+                                               expectedMinimumPhysicsFamilyCount,
+                                               generatedPhysicsFamilyCount);
         var isCompatible = !physicsRequested ||
             (targetBodySupportsPhysics && missingBones.Count == 0 && hasRequiredRuntimeConfigs && hasSufficientPhysicsCoverage);
+        var collisionComplexity = hasProfile
+            ? profile.CollisionComplexity
+            : "none";
         var summary = !physicsRequested
             ? "No runtime physics profile was requested for this output."
             : !targetBodySupportsPhysics
-                ? $"Physics profile '{requestedProfile}' was requested, but {targetBody} does not advertise built-in physics-capable bones. Generated runtime configs: {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
-                : missingRuntimeConfigs.Count > 0
-                    ? $"Physics profile '{requestedProfile}' expected runtime config(s) {FormatPhysicsConfigList(expectedRuntimeConfigs)} but only generated {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
-                : missingBones.Count > 0
-                    ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
+                    ? $"Physics profile '{requestedProfile}' was requested, but {targetBody} does not advertise built-in physics-capable bones. Generated runtime configs: {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
+                    : missingRuntimeConfigs.Count > 0
+                        ? $"Physics profile '{requestedProfile}' expected runtime config(s) {FormatPhysicsConfigList(expectedRuntimeConfigs)} but only generated {FormatPhysicsConfigList(generatedRuntimeConfigs)}."
+                    : missingBones.Count > 0
+                        ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
                     : !hasSufficientPhysicsCoverage
-                        ? $"Physics profile '{requestedProfile}' generated only {generatedPhysicsSlotCount}/{expectedMinimumPhysicsSlotCount} expected physics slot(s) with chain depth {generatedPhysicsChainDepth}/{expectedMinimumPhysicsChainDepth} for {targetBody}."
-                    : remappedBones.Count > 0
-                        ? $"Physics profile '{requestedProfile}' is usable, but {remappedBones.Count} physics chain(s) were remapped to fit the target skeleton."
+                            ? $"Physics profile '{requestedProfile}' generated only {generatedPhysicsSlotCount}/{expectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {generatedPhysicsFamilyCount}/{expectedMinimumPhysicsFamilyCount}, and chain depth {generatedPhysicsChainDepth}/{expectedMinimumPhysicsChainDepth} for {targetBody} ({collisionComplexity} collision complexity)."
+                        : remappedBones.Count > 0
+                            ? $"Physics profile '{requestedProfile}' is usable, but {remappedBones.Count} physics chain(s) were remapped to fit the target skeleton."
                         : injectedBones.Count > 0
-                            ? $"Physics profile '{requestedProfile}' matches the target body's advertised physics capability."
-                            : $"Physics profile '{requestedProfile}' did not need explicit injected bones for this output.";
+                                ? $"Physics profile '{requestedProfile}' matches the target body's advertised physics capability."
+                                : $"Physics profile '{requestedProfile}' did not need explicit injected bones for this output.";
 
         return new PhysicsCompatibilityReport(
             targetBody,
@@ -25361,6 +25373,9 @@ internal sealed class LocalExportService(
             generatedPhysicsSlotCount,
             expectedMinimumPhysicsChainDepth,
             generatedPhysicsChainDepth,
+            expectedMinimumPhysicsFamilyCount,
+            generatedPhysicsFamilyCount,
+            collisionComplexity,
             hasSufficientPhysicsCoverage,
             summary);
     }
@@ -25369,9 +25384,12 @@ internal sealed class LocalExportService(
         int expectedMinimumPhysicsSlotCount,
         int generatedPhysicsSlotCount,
         int expectedMinimumPhysicsChainDepth,
-        int generatedPhysicsChainDepth) =>
+        int generatedPhysicsChainDepth,
+        int expectedMinimumPhysicsFamilyCount,
+        int generatedPhysicsFamilyCount) =>
         generatedPhysicsSlotCount >= Math.Max(0, expectedMinimumPhysicsSlotCount) &&
-        generatedPhysicsChainDepth >= Math.Max(0, expectedMinimumPhysicsChainDepth);
+        generatedPhysicsChainDepth >= Math.Max(0, expectedMinimumPhysicsChainDepth) &&
+        generatedPhysicsFamilyCount >= Math.Max(0, expectedMinimumPhysicsFamilyCount);
 
     private static IReadOnlyList<string> GetExpectedRuntimeConfigs(string requestedProfile)
     {

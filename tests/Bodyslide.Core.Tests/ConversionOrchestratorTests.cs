@@ -5348,6 +5348,7 @@ public sealed class ConversionOrchestratorTests
                         ExpectedCollisionRegions: ["breasts", "belly", "thighs"],
                         MinimumPhysicsSlotCount: 3,
                         MinimumPhysicsChainDepth: 2,
+                        MinimumPhysicsFamilyCount: 3,
                         CollisionComplexity: "extended")
                 ]);
             var analysis = new MeshAnalysis("cloth", false, 1);
@@ -5385,8 +5386,11 @@ public sealed class ConversionOrchestratorTests
                 Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsSlotCount").GetInt32());
                 Assert.Equal(2, compatibility.GetProperty("ExpectedMinimumPhysicsChainDepth").GetInt32());
                 Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsChainDepth").GetInt32());
+                Assert.Equal(3, compatibility.GetProperty("ExpectedMinimumPhysicsFamilyCount").GetInt32());
+                Assert.Equal(1, compatibility.GetProperty("GeneratedPhysicsFamilyCount").GetInt32());
+                Assert.Equal("extended", compatibility.GetProperty("CollisionComplexity").GetString());
                 Assert.False(compatibility.GetProperty("HasSufficientPhysicsCoverage").GetBoolean());
-                Assert.Contains("generated only 1/3 expected physics slot", compatibility.GetProperty("Summary").GetString(), StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("family coverage 1/3", compatibility.GetProperty("Summary").GetString(), StringComparison.OrdinalIgnoreCase);
             }
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
