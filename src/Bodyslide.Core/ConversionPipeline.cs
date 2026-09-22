@@ -619,6 +619,22 @@ public sealed record LiveGameExecutionPlan(
     IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
+public sealed record ConversionMatrixProofAxis(
+    string Axis,
+    string Coverage,
+    bool StrictlyProven,
+    IReadOnlyList<string> Signals,
+    IReadOnlyList<string> RequiredArtifacts);
+public sealed record ConversionMatrixProofReport(
+    string TargetBody,
+    string SupportTier,
+    ConversionReadinessAssessment? ConversionReadiness,
+    string ProofCoverage,
+    bool StrictProofReady,
+    IReadOnlyList<string> MissingProofAxes,
+    IReadOnlyList<string> BlockingGaps,
+    IReadOnlyList<ConversionMatrixProofAxis> Axes,
+    IReadOnlyList<string> ReviewArtifacts);
 public sealed record ModStackCrossValidationReport(
     string TargetBody,
     string TargetBodyFamily,
@@ -19381,6 +19397,23 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(liveGameExecutionPath);
 
+        var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan();
+        var conversionMatrixProofPath = Path.Combine(outputDirectory, "conversion-matrix-proof.json");
+        var conversionMatrixProof = BuildConversionMatrixProofReport(
+            request.TargetBody,
+            conversionReadiness,
+            topologyCorrespondence,
+            skeletonMapping,
+            modStackCrossValidation,
+            runtimeValidationPlan,
+            liveGameExecution,
+            windowsUiAutomation);
+        await File.WriteAllTextAsync(
+            conversionMatrixProofPath,
+            JsonSerializer.Serialize(conversionMatrixProof, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(conversionMatrixProofPath);
+
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
             if (File.Exists(zipPath))
@@ -19462,7 +19495,6 @@ internal sealed class LocalExportService(
         outputFiles.Add(desktopWorkflowAutomationPath);
 
         var windowsUiAutomationPath = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
-        var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan();
         await File.WriteAllTextAsync(
             windowsUiAutomationPath,
             JsonSerializer.Serialize(windowsUiAutomation, new JsonSerializerOptions { WriteIndented = true }),
@@ -29410,6 +29442,7 @@ internal sealed class LocalExportService(
             "README.txt",
             "dependency-map.json",
             "conversion-quality.json",
+            "conversion-matrix-proof.json",
             "desktop-workflow-automation.json",
             "in-game-validation.json",
             "live-game-execution.json",
@@ -29446,6 +29479,7 @@ internal sealed class LocalExportService(
          fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
@@ -29679,6 +29713,7 @@ internal sealed class LocalExportService(
     {
         var deploymentArtifacts = new[]
         {
+            "conversion-matrix-proof.json",
             "runtime-validation-plan.json",
             "runtime-validation-harness.json",
             "live-game-execution.json",
@@ -29862,6 +29897,239 @@ internal sealed class LocalExportService(
             Selectors: selectors,
             Steps: steps);
     }
+
+    private static ConversionMatrixProofReport BuildConversionMatrixProofReport(
+        string targetBody,
+        ConversionReadinessAssessment conversionReadiness,
+        TopologyCorrespondenceReport topologyCorrespondence,
+        SkeletonMappingResult skeletonMapping,
+        ModStackCrossValidationReport? modStackCrossValidation,
+        RuntimeValidationExecutionPlan runtimePlan,
+        LiveGameExecutionPlan liveGameExecution,
+        WindowsUiE2EAutomationPlan windowsUiAutomation)
+    {
+        var bodySupportAxis = new ConversionMatrixProofAxis(
+            Axis: "body-support",
+            Coverage: conversionReadiness.TargetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase)
+                ? "catalog-backed"
+                : "partial-or-review-backed",
+            StrictlyProven: conversionReadiness.CanConvert &&
+                            conversionReadiness.CanPhysicsConvert &&
+                            conversionReadiness.TargetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase),
+            Signals:
+            [
+                $"support-tier:{conversionReadiness.SupportTier}",
+                $"target-body-support:{conversionReadiness.TargetBodySupportReliability}",
+                $"release-gate:{conversionReadiness.RecommendedReleaseGate}"
+            ],
+            RequiredArtifacts:
+            [
+                "conversion-quality.json",
+                "in-game-validation.json"
+            ]);
+
+        var topologyAxis = new ConversionMatrixProofAxis(
+            Axis: "topology-transfer",
+            Coverage: topologyCorrespondence.UsesTrueSemanticCorrespondence
+                ? topologyCorrespondence.CorrespondenceScope
+                : "heuristic-correspondence",
+            StrictlyProven: topologyCorrespondence.UsesTrueSemanticCorrespondence &&
+                            !topologyCorrespondence.HeuristicHeavy &&
+                            topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase) &&
+                            !topologyCorrespondence.RequiresManualSemanticReview &&
+                            topologyCorrespondence.MatchedFocusRegionCount >= topologyCorrespondence.CoveredFocusRegionCount,
+            Signals:
+            [
+                $"classification:{topologyCorrespondence.Classification}",
+                $"matching-mode:{topologyCorrespondence.MatchingMode}",
+                $"semantic-status:{topologyCorrespondence.SemanticVertexMatchingStatus}",
+                $"anchor-coverage:{topologyCorrespondence.SemanticAnchorCoverage}"
+            ],
+            RequiredArtifacts:
+            [
+                "topology-correspondence.json",
+                "preview-workbench.html",
+                "conversion-quality.json"
+            ]);
+
+        var skeletonAxis = new ConversionMatrixProofAxis(
+            Axis: "custom-skeleton",
+            Coverage: BuildSourceSkeletonInferenceReliability(skeletonMapping),
+            StrictlyProven: !skeletonMapping.SourceSkeletonUsedSparseInference &&
+                            skeletonMapping.UnsupportedBones.Count == 0 &&
+                            conversionReadiness.SkeletonReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
+                            conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase),
+            Signals:
+            [
+                $"source-skeleton:{skeletonMapping.SourceSkeleton}",
+                $"skeleton-reliability:{conversionReadiness.SkeletonReliability}",
+                $"remap-safety:{conversionReadiness.SkeletonRemapSafety}",
+                $"unsupported-bones:{skeletonMapping.UnsupportedBones.Count}",
+                $"sparse-inference:{skeletonMapping.SourceSkeletonUsedSparseInference}"
+            ],
+            RequiredArtifacts:
+            [
+                "skeleton-compatibility.json",
+                "conversion-quality.json"
+            ]);
+
+        var pluginAxis = new ConversionMatrixProofAxis(
+            Axis: "plugin-modstack",
+            Coverage: modStackCrossValidation is null ? "no-plugin-proof-required" : "plugin-aware",
+            StrictlyProven: modStackCrossValidation is null ||
+                            (!modStackCrossValidation.RequiresLoadOrderValidation &&
+                             !modStackCrossValidation.RequiresPluginPatchReview &&
+                             modStackCrossValidation.AmbiguousPluginCount == 0 &&
+                             modStackCrossValidation.IncompatibleRaceCount == 0),
+            Signals: modStackCrossValidation is null
+                ? ["plugin-free-input"]
+                :
+                [
+                    $"requires-load-order-validation:{modStackCrossValidation.RequiresLoadOrderValidation}",
+                    $"requires-plugin-patch-review:{modStackCrossValidation.RequiresPluginPatchReview}",
+                    $"ambiguous-plugin-count:{modStackCrossValidation.AmbiguousPluginCount}",
+                    $"incompatible-race-count:{modStackCrossValidation.IncompatibleRaceCount}"
+                ],
+            RequiredArtifacts: modStackCrossValidation is null
+                ? ["conversion-quality.json"]
+                :
+                [
+                    "mod-stack-cross-validation.json",
+                    "plugin-patches.json",
+                    "race-compatibility.json"
+                ]);
+
+        var runtimeAxis = new ConversionMatrixProofAxis(
+            Axis: "runtime-automation",
+            Coverage: runtimePlan.ExecutionCoverage,
+            StrictlyProven: runtimePlan.SupportsAutomatedGameExecution &&
+                            !runtimePlan.RequiresExternalGameHarness &&
+                            !runtimePlan.RequiresModdedTestEnvironment,
+            Signals:
+            [
+                $"supports-automated-game-execution:{runtimePlan.SupportsAutomatedGameExecution}",
+                $"requires-external-game-harness:{runtimePlan.RequiresExternalGameHarness}",
+                $"requires-modded-test-environment:{runtimePlan.RequiresModdedTestEnvironment}"
+            ],
+            RequiredArtifacts:
+            [
+                "runtime-validation-plan.json",
+                "runtime-validation-harness.json",
+                "in-game-validation.json"
+            ]);
+
+        var liveGameAxis = new ConversionMatrixProofAxis(
+            Axis: "live-game-execution",
+            Coverage: liveGameExecution.IntegrationCoverage,
+            StrictlyProven: !liveGameExecution.RequiresExternalHarness &&
+                            !liveGameExecution.RequiresWindowsHost &&
+                            liveGameExecution.Probes.Count > 0,
+            Signals:
+            [
+                $"requires-windows-host:{liveGameExecution.RequiresWindowsHost}",
+                $"requires-external-harness:{liveGameExecution.RequiresExternalHarness}",
+                $"validation-save-count:{liveGameExecution.ValidationSaveProfiles.Count}"
+            ],
+            RequiredArtifacts:
+            [
+                "live-game-execution.json",
+                "runtime-validation-plan.json"
+            ]);
+
+        var desktopAxis = new ConversionMatrixProofAxis(
+            Axis: "desktop-e2e",
+            Coverage: windowsUiAutomation.Coverage,
+            StrictlyProven: !windowsUiAutomation.RequiresWindowsHost &&
+                            !windowsUiAutomation.RequiresExternalUiHarness &&
+                            windowsUiAutomation.SupportedFlows.Count > 0,
+            Signals:
+            [
+                $"requires-windows-host:{windowsUiAutomation.RequiresWindowsHost}",
+                $"requires-external-ui-harness:{windowsUiAutomation.RequiresExternalUiHarness}",
+                $"supported-flow-count:{windowsUiAutomation.SupportedFlows.Count}"
+            ],
+            RequiredArtifacts:
+            [
+                "desktop-workflow-automation.json",
+                "windows-ui-e2e-automation.json",
+                "preview-workbench.html"
+            ]);
+
+        var axes = new[]
+        {
+            bodySupportAxis,
+            topologyAxis,
+            skeletonAxis,
+            pluginAxis,
+            runtimeAxis,
+            liveGameAxis,
+            desktopAxis
+        };
+
+        var missingProofAxes = axes
+            .Where(static axis => !axis.StrictlyProven)
+            .Select(static axis => axis.Axis)
+            .ToArray();
+
+        var blockingGaps = axes
+            .Where(static axis => !axis.StrictlyProven)
+            .Select(axis => BuildMatrixProofBlockingGap(axis, topologyCorrespondence, skeletonMapping, modStackCrossValidation, runtimePlan, liveGameExecution, windowsUiAutomation))
+            .Where(static gap => !string.IsNullOrWhiteSpace(gap))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var proofCoverage = missingProofAxes.Length == 0
+            ? "strict-matrix-proof-ready"
+            : missingProofAxes.Length <= 2
+                ? "artifact-backed-with-targeted-gaps"
+                : "artifact-backed-with-major-gaps";
+
+        return new ConversionMatrixProofReport(
+            TargetBody: targetBody,
+            SupportTier: conversionReadiness.SupportTier,
+            ConversionReadiness: conversionReadiness,
+            ProofCoverage: proofCoverage,
+            StrictProofReady: missingProofAxes.Length == 0,
+            MissingProofAxes: missingProofAxes,
+            BlockingGaps: blockingGaps,
+            Axes: axes,
+            ReviewArtifacts: axes
+                .SelectMany(static axis => axis.RequiredArtifacts)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+    }
+
+    private static string BuildMatrixProofBlockingGap(
+        ConversionMatrixProofAxis axis,
+        TopologyCorrespondenceReport topologyCorrespondence,
+        SkeletonMappingResult skeletonMapping,
+        ModStackCrossValidationReport? modStackCrossValidation,
+        RuntimeValidationExecutionPlan runtimePlan,
+        LiveGameExecutionPlan liveGameExecution,
+        WindowsUiE2EAutomationPlan windowsUiAutomation) =>
+        axis.Axis switch
+        {
+            "body-support" => "Target-body support metadata is not yet direct enough to treat this output as universally proven.",
+            "topology-transfer" when topologyCorrespondence.UsesTrueSemanticCorrespondence =>
+                "True semantic correspondence exists, but hard-case focus regions still need manual review before the topology axis is fully proven.",
+            "topology-transfer" =>
+                "Topology transfer still relies on heuristic or partial semantic correspondence for hard-case mesh regions.",
+            "custom-skeleton" when skeletonMapping.SourceSkeletonUsedSparseInference || skeletonMapping.UnsupportedBones.Count > 0 =>
+                "Custom skeleton coverage still depends on sparse inference or leaves unsupported bones unresolved.",
+            "custom-skeleton" =>
+                "Custom skeleton remap safety is not yet strong enough to count as universal proof.",
+            "plugin-modstack" when modStackCrossValidation?.RequiresLoadOrderValidation == true =>
+                "Mixed master/light/plugin-family chains still require real full-load-order validation.",
+            "plugin-modstack" =>
+                "Plugin-family ambiguity or race/plugin review still blocks strict plugin proof.",
+            "runtime-automation" when runtimePlan.RequiresExternalGameHarness || runtimePlan.RequiresModdedTestEnvironment =>
+                "Runtime automation is exported as an external harness contract rather than executed proof inside SlideSmith.",
+            "live-game-execution" when liveGameExecution.RequiresExternalHarness || liveGameExecution.RequiresWindowsHost =>
+                "Live-game validation still requires an external Windows host and launcher-driven harness.",
+            "desktop-e2e" when windowsUiAutomation.RequiresExternalUiHarness || windowsUiAutomation.RequiresWindowsHost =>
+                "Desktop E2E remains an external Windows UI harness plan rather than an executed in-repo proof.",
+            _ => $"Axis '{axis.Axis}' is not yet strictly proven."
+        };
 
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
         InGameValidationReport report,

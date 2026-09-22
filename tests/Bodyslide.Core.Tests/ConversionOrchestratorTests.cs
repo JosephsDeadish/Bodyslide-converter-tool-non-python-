@@ -17780,8 +17780,34 @@ public sealed class RealisticModPackFixtureTests
                 modStackReport.RootElement.GetProperty("RecommendedRuntimeScenarios").EnumerateArray().Select(static item => item.GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.OrdinalIgnoreCase));
 
+            var matrixProofJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json"));
+            Assert.Contains("\"StrictProofReady\": false", matrixProofJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("runtime-automation", matrixProofJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("desktop-e2e", matrixProofJson, StringComparison.OrdinalIgnoreCase);
+            using var matrixProof = JsonDocument.Parse(matrixProofJson);
+            Assert.Equal("Alien Hybrid", matrixProof.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Equal("artifact-backed-with-major-gaps", matrixProof.RootElement.GetProperty("ProofCoverage").GetString());
+            Assert.False(matrixProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
+            Assert.True(matrixProof.RootElement.GetProperty("Axes").GetArrayLength() >= 7);
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "plugin-modstack", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
+                static gap => gap is not null && gap.Contains("external Windows UI harness", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("ReviewArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "windows-ui-e2e-automation.json", StringComparison.OrdinalIgnoreCase));
+
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
+            Assert.Contains("Matrix proof", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Preview", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Support tier", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
@@ -17795,11 +17821,20 @@ public sealed class RealisticModPackFixtureTests
                 desktopAutomation.RootElement.GetProperty("Artifacts").EnumerateArray().Select(static artifact => artifact.GetProperty("DisplayPath").GetString()),
                 static artifact => string.Equals(artifact, "live-game-execution.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("Artifacts").EnumerateArray().Select(static artifact => artifact.GetProperty("DisplayPath").GetString()),
+                static artifact => string.Equals(artifact, "conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
                 static property => string.Equals(property, "Requires load-order validation", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
+                static property => string.Equals(property, "Strict proof ready", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 desktopAutomation.RootElement.GetProperty("SuggestedGuiFlow").EnumerateArray().Select(static step => step.GetProperty("Area").GetString()),
                 static area => string.Equals(area, "Load-order cross-validation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("SuggestedGuiFlow").EnumerateArray().Select(static step => step.GetProperty("Area").GetString()),
+                static area => string.Equals(area, "Matrix proof", StringComparison.OrdinalIgnoreCase));
 
             var previewHtml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "preview-workbench.html"));
             Assert.Contains("data-testid=\"preview-workbench-root\"", previewHtml, StringComparison.Ordinal);

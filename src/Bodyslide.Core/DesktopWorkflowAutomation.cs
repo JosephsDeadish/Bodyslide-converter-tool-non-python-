@@ -413,6 +413,17 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Recommended runtime scenarios", TryReadArray(root, "RecommendedRuntimeScenarios"), filePath);
                     Add(metrics, reportName, "Suggested harness actions", TryReadArray(root, "SuggestedHarnessActions"), filePath);
                     break;
+                case "conversion-matrix-proof.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
+                    Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
+                    Add(metrics, reportName, "Matrix axes", CountNestedArray(root, "Axes"), filePath);
+                    Add(metrics, reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
+                    Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
                 case "topology-correspondence.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
@@ -820,6 +831,18 @@ internal static class DesktopWorkflowAutomation
                 "Check the graded support tier before treating the output as fully automatic; experimental tiers still require manual cleanup or runtime verification.",
                 $"{supportTierMetric.Property}: {supportTierMetric.Value}",
                 supportTierMetric.FilePath,
+                Blocking: true));
+        }
+
+        var matrixProofMetric = FindMetric(reportMetrics, "Strict proof ready", static value => value.Equals("No", StringComparison.OrdinalIgnoreCase))
+                                ?? FindMetric(reportMetrics, "Missing proof axes");
+        if (matrixProofMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Matrix proof",
+                "Open conversion-matrix-proof.json and review which body, topology, skeleton, plugin, runtime, or Desktop proof axes are still blocking a universal-ready claim.",
+                $"{matrixProofMetric.Property}: {matrixProofMetric.Value}",
+                matrixProofMetric.FilePath,
                 Blocking: true));
         }
 
