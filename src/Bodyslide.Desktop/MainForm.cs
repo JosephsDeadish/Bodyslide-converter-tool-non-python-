@@ -3140,6 +3140,10 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
                     AddReportMetric(reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     AddReportMetric(reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
                     AddReportMetric(reportName, "Correction applied", FormatBool(TryReadBoolValue(root, "CorrectionApplied")), filePath);
                     AddReportMetric(reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
@@ -3178,6 +3182,10 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     AddReportMetric(reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     AddReportMetric(reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     if (TryGetProperty(root, "PhysicsCompatibility", out var physicsCompatibility))
                     {
                         AddReportMetric(reportName, "Physics profile", TryReadString(physicsCompatibility, "RequestedProfile"), filePath);
@@ -3192,6 +3200,10 @@ public sealed class MainForm : Form
                 case "in-game-validation.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     AddReportMetric(reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
                     AddReportMetric(reportName, "Sensitive regions", TryReadArray(root, "SensitiveRegions"), filePath);
                     AddReportMetric(reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
@@ -3211,6 +3223,10 @@ public sealed class MainForm : Form
                 case "runtime-validation-plan.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     AddReportMetric(reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
                     AddReportMetric(reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     AddReportMetric(reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);

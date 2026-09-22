@@ -211,6 +211,22 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 
 When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them.
 
+## Support tiers
+
+SlideSmith now emits a graded support tier in its validation outputs so the app does not pretend every successful file export is equally safe:
+
+- `mainstream-automatic` — strong body/skeleton/topology evidence; conversion, physics, and safe-animation signals all look good
+- `advanced-review-required` — conversion is viable, but runtime/body-fit/topology review is still required before release
+- `experimental-manual-cleanup` — conversion can proceed, but sparse skeleton evidence, heuristic-heavy topology, unsupported physics, or extreme body differences still make manual cleanup likely
+
+The generated JSON reports also separate:
+
+- `CanConvert`
+- `CanPhysicsConvert`
+- `CanSafelyAnimate`
+
+Use those fields together with `SupportTier` instead of treating every successful conversion as universally install-ready.
+
 ## Output files
 
 Each successful conversion produces a **Data-relative package** in the output directory. The folder structure maps directly to Skyrim's `Data\` folder so mod managers and manual installs both work without any re-pathing:
@@ -270,8 +286,11 @@ output/
 | `smp-config.xml` | Compatibility/root copy of the generated SMP physics config for inspection or manual relocation |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
-| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
-| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, readiness score/status, and ISO-8601 generation timestamp |
+| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, unsupported bones, source skeleton reliability, physics compatibility, and graded `SupportTier` / `CanConvert` / `CanPhysicsConvert` / `CanSafelyAnimate` signals |
+| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, graded support tier/readiness fields, and ISO-8601 generation timestamp |
+| `in-game-validation.json` | Runtime review plan summary: validation gate, support tier, conversion-readiness fields, scenario matrix, caveats, topology correspondence, and checklist guidance for live animation/body-fit review |
+| `runtime-validation-plan.json` | Release-gate execution plan derived from the in-game validation report; documents what still needs a live game harness or manual runtime pass before the output is truly trusted |
+| `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |

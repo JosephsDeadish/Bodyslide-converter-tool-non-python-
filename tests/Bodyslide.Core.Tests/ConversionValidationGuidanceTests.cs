@@ -402,6 +402,15 @@ public sealed class ConversionValidationGuidanceTests
             ["breasts", "belly", "thighs"],
             ["mouth", "tongue", "throat"],
             ["preview-workbench.html", "in-game-validation.json"],
+            "experimental-manual-cleanup",
+            new ConversionReadinessAssessment(
+                "experimental-manual-cleanup",
+                "UBE currently fits the experimental/manual-cleanup tier.",
+                CanConvert: true,
+                CanPhysicsConvert: true,
+                CanSafelyAnimate: false,
+                SkeletonReliability: "review",
+                RecommendedReleaseGate: "manual-cleanup"),
             ManualCleanupLikely: true,
             RuntimeVerificationRequired: true,
             Caveats:

@@ -305,9 +305,19 @@ public sealed record RuntimeValidationExecutionStep(
     IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease);
+public sealed record ConversionReadinessAssessment(
+    string SupportTier,
+    string Summary,
+    bool CanConvert,
+    bool CanPhysicsConvert,
+    bool CanSafelyAnimate,
+    string SkeletonReliability,
+    string RecommendedReleaseGate);
 public sealed record RuntimeValidationExecutionPlan(
     string TargetBody,
     string ValidationGate,
+    string SupportTier,
+    ConversionReadinessAssessment? ConversionReadiness,
     bool ManualCleanupLikely,
     bool RuntimeVerificationRequired,
     IReadOnlyList<string> Caveats,
@@ -325,6 +335,8 @@ public sealed record InGameValidationReport(
     IReadOnlyList<string> CoreBodyRegions,
     IReadOnlyList<string> SensitiveRegions,
     IReadOnlyList<string> ReviewArtifacts,
+    string SupportTier,
+    ConversionReadinessAssessment? ConversionReadiness,
     bool ManualCleanupLikely,
     bool RuntimeVerificationRequired,
     IReadOnlyList<string> Caveats,
@@ -357,8 +369,17 @@ internal static class InGameValidationGuidance
         entries.Add(new InGameValidationGuidanceEntry(
             "In-game validation",
             summaryPriority,
-            $"Runtime smoke-test gate: {report.ValidationGate}. Core regions: {coreRegions}. Sensitive regions: {sensitiveRegions}.",
+            $"Runtime smoke-test gate: {report.ValidationGate}. Support tier: {report.SupportTier}. Core regions: {coreRegions}. Sensitive regions: {sensitiveRegions}.",
             report.ReviewArtifacts.FirstOrDefault()));
+
+        if (report.ConversionReadiness is not null)
+        {
+            entries.Add(new InGameValidationGuidanceEntry(
+                "Support tier",
+                report.ConversionReadiness.CanSafelyAnimate ? "Info" : "Action",
+                $"{report.ConversionReadiness.Summary} Convert={FormatYesNo(report.ConversionReadiness.CanConvert)}; physics={FormatYesNo(report.ConversionReadiness.CanPhysicsConvert)}; safe animation={FormatYesNo(report.ConversionReadiness.CanSafelyAnimate)}.",
+                report.ReviewArtifacts.FirstOrDefault()));
+        }
 
         foreach (var checkpoint in report.Checklist.Take(Math.Max(0, maxChecklistItems)))
         {
@@ -405,6 +426,8 @@ internal static class InGameValidationGuidance
             var value when string.Equals(value, "info", StringComparison.OrdinalIgnoreCase) => 1,
             _ => 0
         };
+
+    private static string FormatYesNo(bool value) => value ? "yes" : "no";
 }
 
 public static class ConversionValidationPresentation
@@ -1038,6 +1061,8 @@ public sealed record ConversionQualityReport(
     IReadOnlyList<string>? HighRiskPoseRegions = null,
     int MissingNormalCount = 0,
     ConversionValidationSummary? ValidationSummary = null,
+    string SupportTier = "advanced-review-required",
+    ConversionReadinessAssessment? ConversionReadiness = null,
     SourceMorphQualityMetrics? SourceMorphQuality = null,
     SourceAssetSupportMetrics? SourceAssetSupport = null,
     MorphPayloadReuseSummary? PayloadReuse = null,
@@ -18246,6 +18271,34 @@ internal sealed class LocalExportService(
             clipping,
             voxelResult,
             poseSimulation);
+        var conversionReadiness = BuildConversionReadinessAssessment(
+            request.TargetBody,
+            validationSummary,
+            manualCleanupLikely,
+            runtimeVerificationRequired,
+            skeletonMapping,
+            physicsCompatibility,
+            topologyCorrespondence);
+
+        await File.WriteAllTextAsync(
+            skeletonCompatPath,
+            JsonSerializer.Serialize(new
+            {
+                skeletonMapping.SourceSkeleton,
+                skeletonMapping.TargetSkeleton,
+                skeletonMapping.BoneMappings,
+                skeletonMapping.UnsupportedBones,
+                skeletonMapping.SourceSkeletonConfidence,
+                skeletonMapping.SourceSkeletonEvidence,
+                skeletonMapping.SourceSkeletonUsedSparseInference,
+                skeletonMapping.SourceSkeletonCandidates,
+                SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
+                SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
+                PhysicsCompatibility = physicsCompatibility,
+                SupportTier = conversionReadiness.SupportTier,
+                ConversionReadiness = conversionReadiness,
+            }, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
 
         var inGameValidationPath = Path.Combine(outputDirectory, "in-game-validation.json");
         var inGameValidation = BuildInGameValidationReport(
@@ -18258,7 +18311,8 @@ internal sealed class LocalExportService(
             physics,
             poseSimulation,
             worldPhysics,
-            topologyCorrespondence);
+            topologyCorrespondence,
+            conversionReadiness);
         await File.WriteAllTextAsync(
             inGameValidationPath,
             JsonSerializer.Serialize(inGameValidation, new JsonSerializerOptions { WriteIndented = true }),
@@ -18321,6 +18375,8 @@ internal sealed class LocalExportService(
             HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
             MissingNormalCount:        textureSummary.MissingNormals.Count,
             ValidationSummary:         validationSummary,
+            SupportTier:               conversionReadiness.SupportTier,
+            ConversionReadiness:       conversionReadiness,
             SourceMorphQuality:        morphs.SourceMorphQuality,
             SourceAssetSupport:        morphs.SourceAssetSupport,
             PayloadReuse:              payloadReuse,
@@ -26982,7 +27038,8 @@ internal sealed class LocalExportService(
         PhysicsConfig physics,
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics,
-        TopologyCorrespondenceReport topologyCorrespondence)
+        TopologyCorrespondenceReport topologyCorrespondence,
+        ConversionReadinessAssessment conversionReadiness)
     {
         var coreRegions = BuildInGameCoreRegions(targetBody, mesh.RegionalMorphing);
         var sensitiveRegions = BuildInGameSensitiveRegions(targetBody, skeletonMapping.UnsupportedBones);
@@ -27085,6 +27142,8 @@ internal sealed class LocalExportService(
            coreRegions,
            sensitiveRegions,
            reviewArtifacts,
+           conversionReadiness.SupportTier,
+           conversionReadiness,
            manualCleanupLikely,
            runtimeVerificationRequired,
            caveats,
@@ -27151,6 +27210,8 @@ internal sealed class LocalExportService(
         return new RuntimeValidationExecutionPlan(
             report.TargetBody,
             report.ValidationGate,
+            report.SupportTier,
+            report.ConversionReadiness,
             report.ManualCleanupLikely,
             report.RuntimeVerificationRequired,
             report.Caveats,
@@ -27596,6 +27657,98 @@ internal sealed class LocalExportService(
 
         return caveats;
     }
+
+    private static ConversionReadinessAssessment BuildConversionReadinessAssessment(
+        string targetBody,
+        ConversionValidationSummary validationSummary,
+        bool manualCleanupLikely,
+        bool runtimeVerificationRequired,
+        SkeletonMappingResult skeletonMapping,
+        PhysicsCompatibilityReport physicsCompatibility,
+        TopologyCorrespondenceReport topologyCorrespondence)
+    {
+        var skeletonReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
+        var canConvert = !validationSummary.Status.Equals("high-risk", StringComparison.OrdinalIgnoreCase);
+        var canPhysicsConvert = !IsRuntimePhysicsRequested(physicsCompatibility.RequestedProfile) || physicsCompatibility.IsCompatible;
+        var canSafelyAnimate = canConvert &&
+                               canPhysicsConvert &&
+                               !manualCleanupLikely &&
+                               !runtimeVerificationRequired &&
+                               skeletonReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
+                               !topologyCorrespondence.HeuristicHeavy;
+        var supportTier = DetermineSupportTier(
+            canConvert,
+            canPhysicsConvert,
+            canSafelyAnimate,
+            skeletonReliability,
+            topologyCorrespondence,
+            manualCleanupLikely,
+            runtimeVerificationRequired);
+        var releaseGate = canSafelyAnimate
+            ? "ready"
+            : supportTier.Equals("advanced-review-required", StringComparison.OrdinalIgnoreCase)
+                ? "needs-review"
+                : "manual-cleanup";
+
+        return new ConversionReadinessAssessment(
+            supportTier,
+            BuildSupportTierSummary(targetBody, supportTier, canConvert, canPhysicsConvert, canSafelyAnimate, skeletonReliability),
+            canConvert,
+            canPhysicsConvert,
+            canSafelyAnimate,
+            skeletonReliability,
+            releaseGate);
+    }
+
+    private static string DetermineSupportTier(
+        bool canConvert,
+        bool canPhysicsConvert,
+        bool canSafelyAnimate,
+        string skeletonReliability,
+        TopologyCorrespondenceReport topologyCorrespondence,
+        bool manualCleanupLikely,
+        bool runtimeVerificationRequired)
+    {
+        if (!canConvert ||
+            !canPhysicsConvert ||
+            manualCleanupLikely ||
+            topologyCorrespondence.HeuristicHeavy ||
+            skeletonReliability.Equals("provisional", StringComparison.OrdinalIgnoreCase))
+        {
+            return "experimental-manual-cleanup";
+        }
+
+        if (!canSafelyAnimate ||
+            runtimeVerificationRequired ||
+            skeletonReliability.Equals("review", StringComparison.OrdinalIgnoreCase) ||
+            !topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
+        {
+            return "advanced-review-required";
+        }
+
+        return "mainstream-automatic";
+    }
+
+    private static string BuildSupportTierSummary(
+        string targetBody,
+        string supportTier,
+        bool canConvert,
+        bool canPhysicsConvert,
+        bool canSafelyAnimate,
+        string skeletonReliability) =>
+        supportTier switch
+        {
+            "mainstream-automatic" =>
+                $"{targetBody} currently fits the mainstream automatic tier: conversion, physics, and animation signals all look strong with direct skeleton evidence.",
+            "advanced-review-required" =>
+                $"{targetBody} currently fits the advanced review-required tier: conversion is viable, but live review is still required before trusting final animation or topology behavior.",
+            _ =>
+                $"{targetBody} currently fits the experimental/manual-cleanup tier: conversion can proceed={canConvert}, physics-ready={canPhysicsConvert}, safe-animation={canSafelyAnimate}, skeleton reliability={skeletonReliability}."
+        };
+
+    private static bool IsRuntimePhysicsRequested(string requestedProfile) =>
+        !string.IsNullOrWhiteSpace(requestedProfile) &&
+        !requestedProfile.Equals("none", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatSkeletonEvidenceSuffix(IReadOnlyList<string>? evidence) =>
         evidence is { Count: > 0 }

@@ -15275,6 +15275,8 @@ public sealed class RealisticModPackFixtureTests
                                                          row.Property.Equals("Physics (override)", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Can safely animate", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("True semantic correspondence", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.Name.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase));
@@ -15285,6 +15287,41 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Next actions", snapshot.ValidationState.GuidanceTabTitle, StringComparison.OrdinalIgnoreCase);
             Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.StatusLabel));
             Assert.False(string.IsNullOrWhiteSpace(snapshot.ValidationState.OutcomeSummary));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromResults_CapturesMultiResultSupportTierSnapshot()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticModPack");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "nordic", "nordic_cuirass_0.nif");
+        var outputDirectoryOne = Path.Combine(workingDirectory, "output-cbbe");
+        var outputDirectoryTwo = Path.Combine(workingDirectory, "output-3ba");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var resultOne = await orchestrator.ConvertAsync(new ConversionRequest(inputPath, "CBBE", outputDirectoryOne));
+            var resultTwo = await orchestrator.ConvertAsync(new ConversionRequest(inputPath, "3BA", outputDirectoryTwo));
+            Assert.True(resultOne.Success);
+            Assert.True(resultTwo.Success);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromResults([resultOne, resultTwo], Path.Combine(outputDirectoryOne, "preview-workbench.html"));
+
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Items converted", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals("2", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Output", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals(outputDirectoryOne, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Output", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals(outputDirectoryTwo, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("output-cbbe", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("output-3ba", StringComparison.OrdinalIgnoreCase));
+            Assert.True(snapshot.ValidationState.PreviewAvailable);
         }
         finally
         {
@@ -15317,6 +15354,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Target body", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Scenario matrix", StringComparison.OrdinalIgnoreCase) ||
                                                              metric.Property.Equals("Checklist items", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Desktop automation coverage", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("shared-output-contract", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Windows host required", StringComparison.OrdinalIgnoreCase));
@@ -15414,7 +15452,17 @@ public sealed class RealisticModPackFixtureTests
                   "SourceSkeletonCandidates": [
                     { "Label": "ube-extended", "Confidence": 0.61, "Evidence": ["semantic-overlap:3"], "UsedSparseInference": true },
                     { "Label": "digitigrade-beast", "Confidence": 0.42, "Evidence": ["group-overlap:2"], "UsedSparseInference": true }
-                  ]
+                  ],
+                  "SupportTier": "experimental-manual-cleanup",
+                  "ConversionReadiness": {
+                    "SupportTier": "experimental-manual-cleanup",
+                    "Summary": "Sparse custom skeleton evidence still requires manual cleanup.",
+                    "CanConvert": true,
+                    "CanPhysicsConvert": false,
+                    "CanSafelyAnimate": false,
+                    "SkeletonReliability": "provisional",
+                    "RecommendedReleaseGate": "manual-cleanup"
+                  }
                 }
                 """);
 
@@ -15426,7 +15474,13 @@ public sealed class RealisticModPackFixtureTests
                                                              metric.Value.Contains("semantic-overlap", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Source skeleton alternatives", StringComparison.OrdinalIgnoreCase) &&
                                                              metric.Value.Contains("digitigrade-beast", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Can safely animate", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Skeleton review", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
                                                                step.Blocking);
             Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
             Assert.Contains("REVIEW REQUIRED", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
@@ -16904,11 +16958,15 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
             Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"CanConvert\": true", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"CanSafelyAnimate\": false", qualityJson, StringComparison.OrdinalIgnoreCase);
 
             var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
             Assert.Contains("\"ScenarioMatrix\"", inGameJson, StringComparison.Ordinal);
             Assert.Contains("Alien Hybrid", inGameJson, StringComparison.Ordinal);
             Assert.Contains("\"ManualCleanupLikely\": true", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", inGameJson, StringComparison.OrdinalIgnoreCase);
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
             Assert.Contains("\"BlocksRelease\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
@@ -16918,11 +16976,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("\"ExecutionCoverage\": \"plan-only\"", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"RequiresLiveGameExecution\": true", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"SupportsAutomatedGameExecution\": false", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"SupportTier\": \"experimental-manual-cleanup\"", runtimePlanJson, StringComparison.OrdinalIgnoreCase);
 
             var desktopAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "desktop-workflow-automation.json"));
             Assert.Contains("\"SuggestedGuiFlow\"", desktopAutomationJson, StringComparison.Ordinal);
             Assert.Contains("Preview", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Runtime scenarios", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Support tier", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"AutomationContract\"", desktopAutomationJson, StringComparison.Ordinal);
             Assert.Contains("\"SupportsTrueUiEndToEndAutomation\": false", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("\"RequiresManualWinFormsInteraction\": true", desktopAutomationJson, StringComparison.OrdinalIgnoreCase);

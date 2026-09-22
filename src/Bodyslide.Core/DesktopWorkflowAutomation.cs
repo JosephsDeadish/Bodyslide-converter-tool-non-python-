@@ -208,10 +208,14 @@ internal static class DesktopWorkflowAutomation
         var requiresReview = reportMetrics.Any(metric =>
             (metric.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase) &&
              !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("mainstream-automatic", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Sparse source inference", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Source skeleton reliability", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("provisional", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Can safely animate", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Manual cleanup likely", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Heuristic-heavy topology", StringComparison.OrdinalIgnoreCase) &&
@@ -266,6 +270,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
                     Add(metrics, reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Support tier summary", TryReadNestedString(root, "ConversionReadiness", "Summary"), filePath);
                     Add(metrics, reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
                     Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
                     Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
@@ -292,10 +301,19 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Target skeleton", TryReadString(root, "TargetSkeleton"), filePath);
                     Add(metrics, reportName, "Mapped bones", CountNestedArray(root, "BoneMappings"), filePath);
                     Add(metrics, reportName, "Unsupported bones", TryReadArray(root, "UnsupportedBones"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     break;
                 case "in-game-validation.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    Add(metrics, reportName, "Support tier summary", TryReadNestedString(root, "ConversionReadiness", "Summary"), filePath);
                     Add(metrics, reportName, "Manual cleanup likely", FormatBool(TryReadBoolValue(root, "ManualCleanupLikely")), filePath);
                     Add(metrics, reportName, "Runtime verification required", FormatBool(TryReadBoolValue(root, "RuntimeVerificationRequired")), filePath);
                     Add(metrics, reportName, "Core body regions", TryReadArray(root, "CoreBodyRegions"), filePath);
@@ -316,6 +334,10 @@ internal static class DesktopWorkflowAutomation
                 case "runtime-validation-plan.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Validation gate", TryReadString(root, "ValidationGate"), filePath);
+                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
+                    Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
+                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     Add(metrics, reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
                     Add(metrics, reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     Add(metrics, reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
@@ -617,6 +639,18 @@ internal static class DesktopWorkflowAutomation
                 "Open the topology correspondence artifacts and compare the preview against the converted mesh for manual cleanup risk.",
                 $"{topologyMetric.Property}: {topologyMetric.Value}",
                 topologyMetric.FilePath,
+                Blocking: true));
+        }
+
+        var supportTierMetric = FindMetric(reportMetrics, "Support tier", static value => !value.Equals("mainstream-automatic", StringComparison.OrdinalIgnoreCase))
+                                ?? FindMetric(reportMetrics, "Can safely animate", static value => value.Equals("No", StringComparison.OrdinalIgnoreCase));
+        if (supportTierMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Support tier",
+                "Check the graded support tier before treating the output as fully automatic; experimental tiers still require manual cleanup or runtime verification.",
+                $"{supportTierMetric.Property}: {supportTierMetric.Value}",
+                supportTierMetric.FilePath,
                 Blocking: true));
         }
 
