@@ -17807,6 +17807,12 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
                 static coordinate => coordinate is not null && coordinate.StartsWith("runtime-physics:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("hard-case-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("source-skeleton-family:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("target-body-family-", matrixProof.RootElement.GetProperty("MatrixCoordinateKey").GetString(), StringComparison.OrdinalIgnoreCase);
             Assert.True(matrixProof.RootElement.GetProperty("Axes").GetArrayLength() >= 7);
             Assert.Contains(
@@ -17969,16 +17975,36 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
                 static dimension => string.Equals(dimension, "target-body-family", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
+                static dimension => string.Equals(dimension, "hard-case-family", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
+                static dimension => string.Equals(dimension, "source-skeleton-family", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
                 static gap => gap is not null && gap.Contains("broader body coverage", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
+                static gap => gap is not null && gap.Contains("hard-case topology family", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
+                static gap => gap is not null && gap.Contains("source skeleton family", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("DistinctSupportTiers").EnumerateArray().Select(static item => item.GetString()),
                 static tier => string.Equals(tier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
             Assert.Equal(7, packProof.RootElement.GetProperty("Axes").GetArrayLength());
-            Assert.True(packProof.RootElement.GetProperty("MatrixDimensionCoverage").GetArrayLength() >= 9);
+            Assert.True(packProof.RootElement.GetProperty("MatrixDimensionCoverage").GetArrayLength() >= 11);
             Assert.Contains(
                 packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
                 summary => string.Equals(summary.GetProperty("Dimension").GetString(), "plugin-stack", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 1);
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("Dimension").GetString(), "hard-case-family", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 1);
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("Dimension").GetString(), "source-skeleton-family", StringComparison.OrdinalIgnoreCase) &&
                            summary.GetProperty("DistinctValueCount").GetInt32() >= 1);
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
@@ -18007,7 +18033,7 @@ public sealed class RealisticModPackFixtureTests
                 metric => string.Equals(metric.ReportName, "conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase) &&
                           string.Equals(metric.Property, "Matrix dimensions", StringComparison.OrdinalIgnoreCase) &&
                           int.TryParse(metric.Value, out var dimensionCount) &&
-                          dimensionCount >= 9);
+                          dimensionCount >= 11);
         }
         finally
         {

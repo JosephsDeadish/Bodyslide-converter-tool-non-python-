@@ -8273,7 +8273,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         ("target-body", 2),
         ("target-body-family", 2),
         ("topology-family", 2),
+        ("hard-case-family", 3),
         ("skeleton-mode", 2),
+        ("source-skeleton-family", 2),
         ("plugin-stack", 2),
         ("runtime-physics", 2),
         ("runtime-automation", 1),
@@ -8353,7 +8355,9 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             "target-body" => $"Pack proof only covers {distinctValueCount} distinct target body value(s); broader body coverage needs at least {minimumDistinctValueCount}.",
             "target-body-family" => $"Pack proof only covers {distinctValueCount} target body family value(s); broader cross-family proof needs at least {minimumDistinctValueCount}.",
             "topology-family" => $"Pack proof only covers {distinctValueCount} topology family value(s); layered/openwork, multipart, footwear, and other hard-case families still need broader matrix evidence.",
+            "hard-case-family" => $"Pack proof only covers {distinctValueCount} hard-case topology family value(s); layered/openwork, multipart straps/windows, oral/genital sub-pieces, beast/custom appendages, and footwear/world-mesh variants still need broader strict proof.",
             "skeleton-mode" => $"Pack proof only covers {distinctValueCount} skeleton remap mode(s); universal custom-skeleton confidence needs at least {minimumDistinctValueCount} distinct skeleton conditions.",
+            "source-skeleton-family" => $"Pack proof only covers {distinctValueCount} source skeleton family value(s); broader XPMSSE/custom/beast/exotic rig family proof still needs at least {minimumDistinctValueCount}.",
             "plugin-stack" => $"Pack proof only covers {distinctValueCount} plugin-stack mode(s); mixed master/light/plugin-family chains still need broader matrix evidence.",
             "runtime-physics" => $"Pack proof only covers {distinctValueCount} runtime physics mode(s); broader CBPC/SMP/no-physics combinations still need explicit proof.",
             "runtime-automation" => "Pack proof does not yet cover runtime automation modes broadly enough to claim matrix-level runtime evidence.",
@@ -30629,6 +30633,8 @@ internal sealed class LocalExportService(
                     ? "safe-remap"
                     : conversionReadiness.SkeletonRemapSafety;
         var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
+        var hardCaseFamily = BuildTopologyHardCaseFamily(topologyCorrespondence, targetBody);
+        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping);
         var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
             ? "physics-disabled"
             : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
@@ -30639,8 +30645,10 @@ internal sealed class LocalExportService(
             $"target-body-family:{BuildTargetBodyFamily(targetBody)}",
             $"support-tier:{conversionReadiness.SupportTier}",
             $"topology-family:{topologyFamily}",
+            $"hard-case-family:{hardCaseFamily}",
             $"topology-classification:{topologyCorrespondence.Classification}",
             $"skeleton-mode:{skeletonMode}",
+            $"source-skeleton-family:{sourceSkeletonFamily}",
             $"plugin-stack:{pluginMode}",
             $"runtime-physics:{runtimePhysicsMode}",
             $"runtime-automation:{runtimePlan.ExecutionCoverage}",
@@ -30703,6 +30711,141 @@ internal sealed class LocalExportService(
         }
 
         return "core-humanoid";
+    }
+
+    private static string BuildTopologyHardCaseFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
+    {
+        var signals = topologyCorrespondence.FocusRegions
+            .Concat(topologyCorrespondence.UnmatchedFocusRegions)
+            .Concat(topologyCorrespondence.Signals)
+            .Append(targetBody)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray();
+
+        if (signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tongue", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("jaw", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("genital", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("shaft", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("glans", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("foreskin", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("vagina", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("anus", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "oral-genital-subpieces";
+        }
+
+        if (signals.Any(static value => value.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("tail", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("wing", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("horn", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("muzzle", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("snout", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("hoof", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("paw", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("hock", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("equine", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("serp", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("alien", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("canine", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("draconic", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("insectoid", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("aquatic", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "beast-custom-appendages";
+        }
+
+        if (signals.Any(static value => value.Contains("foot", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("boot", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("shoe", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("ground", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "footwear-world-mesh";
+        }
+
+        if (signals.Any(static value => value.Contains("openwork", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("window", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("lattice", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("loop", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("hole", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("boundary", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "layered-openwork";
+        }
+
+        if (signals.Any(static value => value.Contains("strap", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("multipart", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("split", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("island", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Contains("layered", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "multipart-straps-windows";
+        }
+
+        return "core-humanoid";
+    }
+
+    private static string BuildSourceSkeletonMatrixFamily(SkeletonMappingResult skeletonMapping)
+    {
+        var label = skeletonMapping.SourceSkeleton?.Trim();
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return "unknown";
+        }
+
+        var normalized = label.ToLowerInvariant();
+        if (normalized.Contains("sparse", StringComparison.Ordinal) ||
+            skeletonMapping.SourceSkeletonUsedSparseInference)
+        {
+            return "custom-sparse";
+        }
+
+        if (normalized.Contains("sam", StringComparison.Ordinal) ||
+            normalized.Contains("sos", StringComparison.Ordinal) ||
+            normalized.Contains("tng", StringComparison.Ordinal))
+        {
+            return "male-framework";
+        }
+
+        if (normalized.Contains("ube", StringComparison.Ordinal) ||
+            normalized.Contains("cbbe", StringComparison.Ordinal) ||
+            normalized.Contains("bhunp", StringComparison.Ordinal) ||
+            normalized.Contains("unp", StringComparison.Ordinal))
+        {
+            return "female-framework";
+        }
+
+        if (normalized.Contains("xpmsse", StringComparison.Ordinal))
+        {
+            return "xpmsse";
+        }
+
+        if (normalized.Contains("beast", StringComparison.Ordinal) ||
+            normalized.Contains("digitigrade", StringComparison.Ordinal) ||
+            normalized.Contains("equine", StringComparison.Ordinal) ||
+            normalized.Contains("avian", StringComparison.Ordinal) ||
+            normalized.Contains("serp", StringComparison.Ordinal) ||
+            normalized.Contains("draconic", StringComparison.Ordinal) ||
+            normalized.Contains("insectoid", StringComparison.Ordinal) ||
+            normalized.Contains("aquatic", StringComparison.Ordinal) ||
+            normalized.Contains("spriggan", StringComparison.Ordinal) ||
+            normalized.Contains("alien", StringComparison.Ordinal))
+        {
+            return "beast-or-exotic";
+        }
+
+        if (normalized.Contains("fo4", StringComparison.Ordinal) ||
+            normalized.Contains("biped", StringComparison.Ordinal))
+        {
+            return "non-skyrim-biped";
+        }
+
+        return normalized.Replace(' ', '-');
     }
 
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
