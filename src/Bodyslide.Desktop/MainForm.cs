@@ -1044,6 +1044,8 @@ public sealed class MainForm : Form
                     : palette.Foreground;
                 break;
             case TextBox textBox:
+                textBox.BackColor = palette.SurfaceBackground;
+                textBox.ForeColor = palette.Foreground;
                 textBox.BorderStyle = BorderStyle.FixedSingle;
                 break;
             case ListView listView:
@@ -2442,7 +2444,44 @@ public sealed class MainForm : Form
         var effectiveStatus = ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) >= ConversionValidationPresentation.GetGateRank("needs-review")
             ? state.EffectiveStatus
             : "needs-review";
-        return ConversionValidationPresentation.BuildOutcomeSummary(effectiveStatus, 0, 0, 0, state.PreviewAvailable);
+        var (highSeverityCount, mediumSeverityCount, lowSeverityCount) = ExtractValidationIssueCounts(state.OutcomeSummary);
+        return ConversionValidationPresentation.BuildOutcomeSummary(
+            effectiveStatus,
+            highSeverityCount,
+            mediumSeverityCount,
+            lowSeverityCount,
+            state.PreviewAvailable);
+    }
+
+    private static (int HighSeverityCount, int MediumSeverityCount, int LowSeverityCount) ExtractValidationIssueCounts(string? outcomeSummary)
+    {
+        if (string.IsNullOrWhiteSpace(outcomeSummary))
+        {
+            return (0, 0, 0);
+        }
+
+        var marker = "Validation issues:";
+        var markerIndex = outcomeSummary.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return (0, 0, 0);
+        }
+
+        var counts = outcomeSummary[(markerIndex + marker.Length)..]
+            .Split([',', '.', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => int.TryParse(token, out var value) ? value : (int?)null)
+            .Where(static value => value.HasValue)
+            .Select(static value => value!.Value)
+            .Take(3)
+            .ToArray();
+
+        return counts.Length switch
+        {
+            >= 3 => (counts[0], counts[1], counts[2]),
+            2 => (counts[0], counts[1], 0),
+            1 => (counts[0], 0, 0),
+            _ => (0, 0, 0)
+        };
     }
 
     private void UpdatePresetDetails()
