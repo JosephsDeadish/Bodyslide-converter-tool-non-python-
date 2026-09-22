@@ -443,10 +443,13 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
                     Add(metrics, reportName, "Missing matrix dimensions", TryReadArray(root, "MissingMatrixDimensions"), filePath);
+                    Add(metrics, reportName, "Missing matrix combinations", TryReadArray(root, "MissingMatrixCombinations"), filePath);
                     Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
                     Add(metrics, reportName, "Axis summaries", CountNestedArray(root, "Axes"), filePath);
                     Add(metrics, reportName, "Matrix dimensions", CountNestedArray(root, "MatrixDimensionCoverage"), filePath);
                     Add(metrics, reportName, "Matrix dimensions meeting minimum coverage", CountObjectsWithBool(root, "MatrixDimensionCoverage", "MeetsMinimumCoverage", expected: true), filePath);
+                    Add(metrics, reportName, "Matrix combinations", CountNestedArray(root, "MatrixCombinationCoverage"), filePath);
+                    Add(metrics, reportName, "Matrix combinations meeting minimum coverage", CountObjectsWithBool(root, "MatrixCombinationCoverage", "MeetsMinimumCoverage", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
                 case "topology-correspondence.json":
