@@ -158,6 +158,7 @@ public static class RuntimeReadinessReporter
 
         var normalizedSemanticRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedSemanticRegions);
         var normalizedCollisionRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedCollisionRegions);
+        var normalizedBilateralRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedBilateralRegions);
         var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(body.SliderNames);
         var physicsRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.RequiredPhysicsBones.Concat(profile.PhysicsBoneSignatures));
 
@@ -181,6 +182,12 @@ public static class RuntimeReadinessReporter
             {
                 issues.Add($"{body.Name}: expected collision regions are not backed by physics bones.");
             }
+        }
+
+        if (normalizedBilateralRegions.Count > 0 &&
+            !normalizedBilateralRegions.Intersect(normalizedSemanticRegions.Concat(normalizedCollisionRegions), StringComparer.OrdinalIgnoreCase).Any())
+        {
+            issues.Add($"{body.Name}: expected bilateral regions are not backed by semantic or collision regions.");
         }
 
         var normalizedCollisionComplexity = NormalizeCollisionComplexity(profile.CollisionComplexity);
@@ -207,14 +214,25 @@ public static class RuntimeReadinessReporter
             issues.Add($"{body.Name}: minimum physics chain depth {profile.MinimumPhysicsChainDepth} exceeds available chain depth {profile.PhysicsChainDepth}.");
         }
 
+        if (profile.SupportsPhysics && profile.MinimumPhysicsFamilyCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics family count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsFamilyCount > 0 && profile.PhysicsFamilyCount > 0 && profile.MinimumPhysicsFamilyCount > profile.PhysicsFamilyCount)
+        {
+            issues.Add($"{body.Name}: minimum physics family count {profile.MinimumPhysicsFamilyCount} exceeds available family count {profile.PhysicsFamilyCount}.");
+        }
+
         var supportWarnings = LocalExportService.EvaluateTargetBodySupportQuality(
             body.ReferenceTokens,
             body.SliderNames,
             body.AvailablePhysicsBones,
             body.ExpectedSemanticRegions,
             body.ExpectedCollisionRegions,
+            body.ExpectedBilateralRegions,
             body.MinimumPhysicsSlotCount,
             body.MinimumPhysicsChainDepth,
+            body.MinimumPhysicsFamilyCount,
             body.CollisionComplexity,
             !string.IsNullOrWhiteSpace(body.SkeletonFramework) || !string.IsNullOrWhiteSpace(body.SkeletonFoundation),
             body.DefaultPhysics,
@@ -228,6 +246,7 @@ public static class RuntimeReadinessReporter
                 warning.Equals("sliderNames-region-coverage", StringComparison.OrdinalIgnoreCase) ||
                 warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase) ||
                 warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedBilateralRegions-quality", StringComparison.OrdinalIgnoreCase) ||
                 warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase) ||
                 warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase) ||
                 warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase))

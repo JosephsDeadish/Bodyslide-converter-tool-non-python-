@@ -24317,11 +24317,13 @@ public sealed class OutputCompletenessTests
         var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
             referenceTokens: ["thin"],
             sliderNames: ["Body"],
-            physicsBones: ["NPC Belly"],
+            physicsBones: ["NPC L Breast"],
             expectedSemanticRegions: ["breasts"],
             expectedCollisionRegions: ["breasts"],
+            expectedBilateralRegions: ["breasts", "butt"],
             minimumPhysicsSlotCount: 3,
             minimumPhysicsChainDepth: 2,
+            minimumPhysicsFamilyCount: 2,
             collisionComplexity: "extended",
             hasSkeletonMetadata: false,
             requestedPhysicsProfile: "smp");
@@ -24332,8 +24334,10 @@ public sealed class OutputCompletenessTests
         Assert.Contains(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-coverage", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-count", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-pairing-coverage", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -24400,6 +24404,69 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_FlagsMissingLowHighPayloadCoverage()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "PayloadCoverageProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="PayloadCoverageProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\PayloadCoverageProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\PayloadCoverageProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\oracle\</OutputPath>
+                    <OutputFile gender="f" use="true">oracle_good_0.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "PayloadCoverageProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "meshes", "armor", "oracle"));
+            File.WriteAllText(Path.Combine(outputDirectory, "meshes", "armor", "oracle", "oracle_good_0.nif"), "mesh");
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("PayloadCoverageProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("low/high weight coverage", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void EvaluateTargetBodySupportQuality_KnownBuiltInBodyAvoidsNoise()
     {
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("TNG", out var metadata));
@@ -24410,8 +24477,10 @@ public sealed class OutputCompletenessTests
             metadata.AvailablePhysicsBones,
             metadata.ExpectedSemanticRegions,
             metadata.ExpectedCollisionRegions,
+            metadata.ExpectedBilateralRegions,
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
+            metadata.MinimumPhysicsFamilyCount,
             metadata.CollisionComplexity,
             hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
@@ -24442,8 +24511,10 @@ public sealed class OutputCompletenessTests
             metadata.AvailablePhysicsBones,
             metadata.ExpectedSemanticRegions,
             metadata.ExpectedCollisionRegions,
+            metadata.ExpectedBilateralRegions,
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
+            metadata.MinimumPhysicsFamilyCount,
             metadata.CollisionComplexity,
             hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
@@ -24465,8 +24536,10 @@ public sealed class OutputCompletenessTests
             physicsBones: ["HDT Tongue"],
             expectedSemanticRegions: ["mouth", "tongue", "throat", "tail"],
             expectedCollisionRegions: ["mouth", "tongue", "throat", "tail"],
+            expectedBilateralRegions: ["wing"],
             minimumPhysicsSlotCount: 0,
             minimumPhysicsChainDepth: 0,
+            minimumPhysicsFamilyCount: 0,
             collisionComplexity: "extended",
             hasSkeletonMetadata: true,
             requestedPhysicsProfile: "smp",
@@ -24474,6 +24547,7 @@ public sealed class OutputCompletenessTests
             declaredPhysicsProfile: "none");
 
         Assert.Contains(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-count", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-depth", StringComparison.OrdinalIgnoreCase));
@@ -24488,8 +24562,10 @@ public sealed class OutputCompletenessTests
             physicsBones: ["TailSheath", "BeastKnot", "TongueMid"],
             expectedSemanticRegions: ["tail", "genitals", "tongue", "feet"],
             expectedCollisionRegions: ["tail", "genitals", "tongue", "feet"],
+            expectedBilateralRegions: ["feet"],
             minimumPhysicsSlotCount: 3,
             minimumPhysicsChainDepth: 2,
+            minimumPhysicsFamilyCount: 3,
             collisionComplexity: "extended",
             hasSkeletonMetadata: true,
             requestedPhysicsProfile: "smp",
@@ -24737,7 +24813,9 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"sliderNames\": [", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"expectedSemanticRegions\": [", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"expectedCollisionRegions\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"expectedBilateralRegions\": [", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"minimumPhysicsSlotCount\":", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"minimumPhysicsFamilyCount\":", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"collisionComplexity\":", templateJson, StringComparison.Ordinal);
         }
         finally
@@ -24854,6 +24932,8 @@ public sealed class OutputCompletenessTests
                         SkeletonFramework: "xpmsse",
                         ExpectedSemanticRegions: ["breasts", "belly", "thighs"],
                         ExpectedCollisionRegions: ["breasts", "belly", "thighs"],
+                        ExpectedBilateralRegions: ["breasts"],
+                        MinimumPhysicsFamilyCount: 2,
                         CollisionComplexity: "standard")
                 ]);
             var analysis = new MeshAnalysis("plate", false, 1);
@@ -24882,6 +24962,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("referenceTokens-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("sliderNames-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("physicsBones-family-coverage", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("physicsBones-family-count", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -24927,6 +25008,8 @@ public sealed class OutputCompletenessTests
                         SkeletonFramework: "xpmsse",
                         ExpectedSemanticRegions: ["breasts", "tongue", "tail"],
                         ExpectedCollisionRegions: ["breasts", "tongue", "tail"],
+                        ExpectedBilateralRegions: ["breasts", "wing"],
+                        MinimumPhysicsFamilyCount: 3,
                         CollisionComplexity: "extended")
                 ]);
             var analysis = new MeshAnalysis("plate", false, 1);
@@ -25013,7 +25096,9 @@ public sealed class OutputCompletenessTests
             Assert.Contains("AntennaLength", templateJson, StringComparison.Ordinal);
             Assert.Contains("AbdomenLength", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"expectedSemanticRegions\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"expectedBilateralRegions\": [", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"minimumPhysicsChainDepth\":", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"minimumPhysicsFamilyCount\":", templateJson, StringComparison.Ordinal);
         }
         finally
         {

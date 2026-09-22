@@ -27,13 +27,17 @@ internal sealed record BuiltInBodyMetadata(
     string SkeletonFramework,
     IReadOnlyList<string> ExpectedSemanticRegions,
     IReadOnlyList<string> ExpectedCollisionRegions,
+    IReadOnlyList<string> ExpectedBilateralRegions,
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
+    int MinimumPhysicsFamilyCount,
     string CollisionComplexity,
     bool HasExplicitExpectedSemanticRegions,
     bool HasExplicitExpectedCollisionRegions,
+    bool HasExplicitExpectedBilateralRegions,
     bool HasExplicitMinimumPhysicsSlotCount,
     bool HasExplicitMinimumPhysicsChainDepth,
+    bool HasExplicitMinimumPhysicsFamilyCount,
     bool HasExplicitCollisionComplexity)
 {
     public bool HasExplicitSupportMetadata =>
@@ -237,19 +241,27 @@ internal static class BuiltInBodyMetadataCatalog
             BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedCollisionRegions) is { Count: > 0 } expectedCollisionRegions
                 ? expectedCollisionRegions
                 : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures),
+            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedBilateralRegions) is { Count: > 0 } expectedBilateralRegions
+                ? expectedBilateralRegions
+                : BodySupportMetadataHeuristics.InferExpectedBilateralRegions(dto.AvailablePhysicsBones, dto.SliderNames, dto.ExpectedSemanticRegions, dto.ExpectedCollisionRegions),
             dto.MinimumPhysicsSlotCount > 0
                 ? dto.MinimumPhysicsSlotCount
                 : BodySupportMetadataHeuristics.CountPhysicsSlots(dto.AvailablePhysicsBones),
             dto.MinimumPhysicsChainDepth > 0
                 ? dto.MinimumPhysicsChainDepth
                 : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(dto.AvailablePhysicsBones, dto.PhysicsBoneSignatures),
+            dto.MinimumPhysicsFamilyCount > 0
+                ? dto.MinimumPhysicsFamilyCount
+                : BodySupportMetadataHeuristics.CountPhysicsFamilies(dto.AvailablePhysicsBones, dto.PhysicsBoneSignatures),
             string.IsNullOrWhiteSpace(dto.CollisionComplexity)
                 ? BodySupportMetadataHeuristics.InferCollisionComplexity(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures)
                 : dto.CollisionComplexity.Trim(),
             dto.ExpectedSemanticRegions is { Length: > 0 },
             dto.ExpectedCollisionRegions is { Length: > 0 },
+            dto.ExpectedBilateralRegions is { Length: > 0 },
             dto.MinimumPhysicsSlotCount > 0,
             dto.MinimumPhysicsChainDepth > 0,
+            dto.MinimumPhysicsFamilyCount > 0,
             !string.IsNullOrWhiteSpace(dto.CollisionComplexity));
     }
 
@@ -311,8 +323,10 @@ internal static class BuiltInBodyMetadataCatalog
         public string? SkeletonFramework { get; init; }
         public string[]? ExpectedSemanticRegions { get; init; }
         public string[]? ExpectedCollisionRegions { get; init; }
+        public string[]? ExpectedBilateralRegions { get; init; }
         public int MinimumPhysicsSlotCount { get; init; }
         public int MinimumPhysicsChainDepth { get; init; }
+        public int MinimumPhysicsFamilyCount { get; init; }
         public string? CollisionComplexity { get; init; }
     }
 }
@@ -355,6 +369,12 @@ internal static class BodySupportMetadataHeuristics
     {
         var slots = NormalizeSupportRegionList(physicsBones);
         return Math.Max(slots.Count, 0);
+    }
+
+    public static int CountPhysicsFamilies(IEnumerable<string>? physicsBones, IEnumerable<string>? physicsBoneSignatures = null)
+    {
+        return NormalizeSupportRegionList((physicsBones ?? []).Concat(physicsBoneSignatures ?? []))
+            .Count;
     }
 
     public static int EstimatePhysicsChainDepth(IEnumerable<string>? physicsBones, IEnumerable<string>? physicsBoneSignatures = null)
@@ -414,6 +434,20 @@ internal static class BodySupportMetadataHeuristics
         }
 
         return collisionRegions.Count > 0 || slotCount > 0 ? "minimal" : "none";
+    }
+
+    public static IReadOnlyList<string> InferExpectedBilateralRegions(
+        IEnumerable<string>? physicsBones,
+        IEnumerable<string>? sliderNames,
+        IEnumerable<string>? semanticRegions = null,
+        IEnumerable<string>? collisionRegions = null)
+    {
+        return NormalizeSupportRegionList((physicsBones ?? [])
+                .Concat(sliderNames ?? [])
+                .Concat(semanticRegions ?? [])
+                .Concat(collisionRegions ?? []))
+            .Where(static region => region is "breasts" or "butt" or "arms" or "feet" or "wing" or "fin" or "frill" or "horn" or "antenna" or "mandible")
+            .ToArray();
     }
 
     public static string NormalizeSupportRegion(string? value)

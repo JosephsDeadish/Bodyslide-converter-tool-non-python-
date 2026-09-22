@@ -2037,8 +2037,10 @@ public sealed record CustomBodyProfile(
     double DepthToWidthRatioMax = 1.20,
     IReadOnlyList<string>? ExpectedSemanticRegions = null,
     IReadOnlyList<string>? ExpectedCollisionRegions = null,
+    IReadOnlyList<string>? ExpectedBilateralRegions = null,
     int MinimumPhysicsSlotCount = 0,
     int MinimumPhysicsChainDepth = 0,
+    int MinimumPhysicsFamilyCount = 0,
     string? CollisionComplexity = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
@@ -2152,8 +2154,10 @@ public sealed record BodyTechnicalProfileInfo(
     IReadOnlyList<string> PhysicsBoneSignatures,
     IReadOnlyList<string> ExpectedSemanticRegions,
     IReadOnlyList<string> ExpectedCollisionRegions,
+    IReadOnlyList<string> ExpectedBilateralRegions,
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
+    int MinimumPhysicsFamilyCount,
     string CollisionComplexity)
 {
     private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
@@ -2226,6 +2230,8 @@ public sealed record BodyTechnicalProfileInfo(
     public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones.Concat(PhysicsBoneSignatures));
 
     public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones, PhysicsBoneSignatures);
+
+    public int PhysicsFamilyCount => BodySupportMetadataHeuristics.CountPhysicsFamilies(RequiredPhysicsBones, PhysicsBoneSignatures);
 
     private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
         IReadOnlyList<string> requiredBones)
@@ -2412,12 +2418,17 @@ public static class BodyTechnicalProfileCatalog
                     ?? BodySupportMetadataHeuristics.InferExpectedSemanticRegions(customProfile.SliderNames, customProfile.PhysicsBones),
                 customProfile.ExpectedCollisionRegions
                     ?? BodySupportMetadataHeuristics.InferExpectedCollisionRegions(customProfile.PhysicsBones, customProfile.SliderNames),
+                customProfile.ExpectedBilateralRegions
+                    ?? BodySupportMetadataHeuristics.InferExpectedBilateralRegions(customProfile.PhysicsBones, customProfile.SliderNames, customProfile.ExpectedSemanticRegions, customProfile.ExpectedCollisionRegions),
                 customProfile.MinimumPhysicsSlotCount > 0
                     ? customProfile.MinimumPhysicsSlotCount
                     : BodySupportMetadataHeuristics.CountPhysicsSlots(customProfile.PhysicsBones),
                 customProfile.MinimumPhysicsChainDepth > 0
                     ? customProfile.MinimumPhysicsChainDepth
                     : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(customProfile.PhysicsBones),
+                customProfile.MinimumPhysicsFamilyCount > 0
+                    ? customProfile.MinimumPhysicsFamilyCount
+                    : BodySupportMetadataHeuristics.CountPhysicsFamilies(customProfile.PhysicsBones),
                 string.IsNullOrWhiteSpace(customProfile.CollisionComplexity)
                     ? BodySupportMetadataHeuristics.InferCollisionComplexity(customProfile.PhysicsBones, customProfile.SliderNames)
                     : customProfile.CollisionComplexity);
@@ -2438,8 +2449,10 @@ public static class BodyTechnicalProfileCatalog
             metadata.PhysicsBoneSignatures,
             metadata.ExpectedSemanticRegions,
             metadata.ExpectedCollisionRegions,
+            metadata.ExpectedBilateralRegions,
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
+            metadata.MinimumPhysicsFamilyCount,
             metadata.CollisionComplexity);
         return true;
     }
@@ -6073,8 +6086,14 @@ internal static class CustomBodyProfileSupport
                 .Where(static region => !string.IsNullOrWhiteSpace(region))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
+            NormalizeNullableStringList(dto.ExpectedBilateralRegions)?
+                .Select(BodySupportMetadataHeuristics.NormalizeSupportRegion)
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             Math.Max(0, dto.MinimumPhysicsSlotCount),
             Math.Max(0, dto.MinimumPhysicsChainDepth),
+            Math.Max(0, dto.MinimumPhysicsFamilyCount),
             string.IsNullOrWhiteSpace(dto.CollisionComplexity) ? null : dto.CollisionComplexity.Trim());
     }
 
@@ -6157,8 +6176,10 @@ internal static class CustomBodyProfileSupport
         public double DepthToWidthRatioMax { get; init; }
         public string[]? ExpectedSemanticRegions { get; init; }
         public string[]? ExpectedCollisionRegions { get; init; }
+        public string[]? ExpectedBilateralRegions { get; init; }
         public int MinimumPhysicsSlotCount { get; init; }
         public int MinimumPhysicsChainDepth { get; init; }
+        public int MinimumPhysicsFamilyCount { get; init; }
         public string? CollisionComplexity { get; init; }
     }
 }
@@ -23292,8 +23313,18 @@ internal sealed class LocalExportService(
         bool HasBodySlidePayloadFiles(string directoryPath) =>
             HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri");
 
-        static string NormalizeSliderToken(string value) =>
-            new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        static string NormalizeSliderToken(string value)
+        {
+            var trimmed = value.Trim();
+            if (trimmed.EndsWith("_1", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.EndsWith("-1", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.EndsWith(" 1", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmed = trimmed[..^2];
+            }
+
+            return new string(trimmed.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        }
 
         IReadOnlyList<string> ValidateBodySlideSemanticConsistency(string ospPath, string shapeDataDirectory)
         {
@@ -23444,12 +23475,23 @@ internal sealed class LocalExportService(
 
                 var payloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var payloadSliderTokens = new List<string>();
+                var lowWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var highWeightPayloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var bsdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.bsd"))
                 {
                     if (BsdMorphReader.TryRead(bsdPath, out var bsdPayload) && !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
                     {
                         payloadSliderTokens.Add(bsdPayload!.SliderName);
-                        payloadSliderNames.Add(NormalizeSliderToken(bsdPayload!.SliderName));
+                        var normalizedSlider = NormalizeSliderToken(bsdPayload!.SliderName);
+                        payloadSliderNames.Add(normalizedSlider);
+                        if (bsdPayload.IsHighWeight)
+                        {
+                            highWeightPayloadSliderNames.Add(normalizedSlider);
+                        }
+                        else
+                        {
+                            lowWeightPayloadSliderNames.Add(normalizedSlider);
+                        }
                     }
                 }
 
@@ -23457,12 +23499,23 @@ internal sealed class LocalExportService(
                 {
                     if (TriMorphReader.TryRead(triPath, out var triPayload))
                     {
+                        var fileStem = Path.GetFileNameWithoutExtension(triPath) ?? string.Empty;
+                        var isHighWeight = HasHighWeightVariantSuffix(fileStem);
                         foreach (var morph in triPayload!.Morphs)
                         {
                             if (!string.IsNullOrWhiteSpace(morph.Name))
                             {
                                 payloadSliderTokens.Add(morph.Name);
-                                payloadSliderNames.Add(NormalizeSliderToken(morph.Name));
+                                var normalizedSlider = NormalizeSliderToken(morph.Name);
+                                payloadSliderNames.Add(normalizedSlider);
+                                if (isHighWeight)
+                                {
+                                    highWeightPayloadSliderNames.Add(normalizedSlider);
+                                }
+                                else
+                                {
+                                    lowWeightPayloadSliderNames.Add(normalizedSlider);
+                                }
                             }
                         }
                     }
@@ -23480,6 +23533,20 @@ internal sealed class LocalExportService(
                     else if (missingPayloadCoverage.Length > 0)
                     {
                         problems.Add($"ShapeData payloads are missing expected BodySlide sliders: {string.Join(", ", missingPayloadCoverage.Take(4))}");
+                    }
+
+                    var incompleteWeightCoverage = bodySlideProject.Sliders
+                        .Where(expected =>
+                        {
+                            var normalizedExpected = NormalizeSliderToken(expected);
+                            return payloadSliderNames.Contains(normalizedExpected) &&
+                                   !(lowWeightPayloadSliderNames.Contains(normalizedExpected) &&
+                                     highWeightPayloadSliderNames.Contains(normalizedExpected));
+                        })
+                        .ToArray();
+                    if (incompleteWeightCoverage.Length > 0)
+                    {
+                        problems.Add($"ShapeData payloads are missing low/high weight coverage for BodySlide sliders: {string.Join(", ", incompleteWeightCoverage.Take(4))}");
                     }
                 }
 
@@ -24001,8 +24068,10 @@ internal sealed class LocalExportService(
                     builtInMetadata.AvailablePhysicsBones,
                     builtInMetadata.ExpectedSemanticRegions,
                     builtInMetadata.ExpectedCollisionRegions,
+                    builtInMetadata.ExpectedBilateralRegions,
                     builtInMetadata.MinimumPhysicsSlotCount,
                     builtInMetadata.MinimumPhysicsChainDepth,
+                    builtInMetadata.MinimumPhysicsFamilyCount,
                     builtInMetadata.CollisionComplexity,
                     !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFramework) ||
                     !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation),
@@ -24065,8 +24134,10 @@ internal sealed class LocalExportService(
             customProfile.PhysicsBones,
             customProfile.ExpectedSemanticRegions,
             customProfile.ExpectedCollisionRegions,
+            customProfile.ExpectedBilateralRegions,
             customProfile.MinimumPhysicsSlotCount,
             customProfile.MinimumPhysicsChainDepth,
+            customProfile.MinimumPhysicsFamilyCount,
             customProfile.CollisionComplexity,
             hasSkeletonMetadata,
             requestedPhysicsProfile,
@@ -24087,8 +24158,10 @@ internal sealed class LocalExportService(
         IReadOnlyList<string>? physicsBones,
         IReadOnlyList<string>? expectedSemanticRegions,
         IReadOnlyList<string>? expectedCollisionRegions,
+        IReadOnlyList<string>? expectedBilateralRegions,
         int minimumPhysicsSlotCount,
         int minimumPhysicsChainDepth,
+        int minimumPhysicsFamilyCount,
         string? collisionComplexity,
         bool hasSkeletonMetadata,
         string requestedPhysicsProfile,
@@ -24102,6 +24175,9 @@ internal sealed class LocalExportService(
         var collisionRegions = expectedCollisionRegions?.Count > 0
             ? expectedCollisionRegions
             : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(physicsBones, sliderNames);
+        var bilateralRegions = expectedBilateralRegions?.Count > 0
+            ? BodySupportMetadataHeuristics.NormalizeSupportRegionList(expectedBilateralRegions)
+            : BodySupportMetadataHeuristics.InferExpectedBilateralRegions(physicsBones, sliderNames, semanticRegions, collisionRegions);
         var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(sliderNames);
         var qualityWarnings = new List<string>();
 
@@ -24144,6 +24220,10 @@ internal sealed class LocalExportService(
             ? minimumPhysicsChainDepth
             : InferMinimumPhysicsChainDepthExpectation(semanticRegions, collisionRegions, collisionComplexity);
         var actualPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(physicsBones);
+        var actualPhysicsFamilyCount = BodySupportMetadataHeuristics.CountPhysicsFamilies(physicsBones);
+        var effectiveMinimumPhysicsFamilyCount = minimumPhysicsFamilyCount > 0
+            ? minimumPhysicsFamilyCount
+            : InferMinimumPhysicsFamilyExpectation(semanticRegions, collisionRegions, collisionComplexity);
 
         if (semanticRegions.Count < 3)
         {
@@ -24182,6 +24262,11 @@ internal sealed class LocalExportService(
                 qualityWarnings.Add("physicsBones-family-coverage");
             }
 
+            if (actualPhysicsFamilyCount > 0 && actualPhysicsFamilyCount < effectiveMinimumPhysicsFamilyCount)
+            {
+                qualityWarnings.Add("physicsBones-family-count");
+            }
+
             if (actualPhysicsSlotCount > 0 && actualPhysicsSlotCount < effectiveMinimumPhysicsSlotCount)
             {
                 qualityWarnings.Add("physicsBones-slot-coverage");
@@ -24192,7 +24277,12 @@ internal sealed class LocalExportService(
                 qualityWarnings.Add("physicsBones-chain-depth");
             }
 
-            if (HasBilateralCoverageGap(physicsBones, semanticRegions, collisionRegions))
+            if (bilateralRegions.Count == 0 && actualPhysicsSlotCount > 0 && semanticRegions.Count > 0)
+            {
+                qualityWarnings.Add("expectedBilateralRegions-quality");
+            }
+
+            if (HasBilateralCoverageGap(physicsBones, bilateralRegions))
             {
                 qualityWarnings.Add("physicsBones-pairing-coverage");
             }
@@ -24278,12 +24368,18 @@ internal sealed class LocalExportService(
         var inferredExpectedCollisionRegions = profile?.ExpectedCollisionRegions is { Count: > 0 }
             ? profile.ExpectedCollisionRegions
             : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(inferredPhysicsBones, inferredSliderNames, inferredMetadata?.PhysicsBoneSignatures);
+        var inferredExpectedBilateralRegions = profile?.ExpectedBilateralRegions is { Count: > 0 }
+            ? profile.ExpectedBilateralRegions
+            : BodySupportMetadataHeuristics.InferExpectedBilateralRegions(inferredPhysicsBones, inferredSliderNames, inferredExpectedSemanticRegions, inferredExpectedCollisionRegions);
         var inferredMinimumPhysicsSlotCount = profile?.MinimumPhysicsSlotCount > 0
             ? profile.MinimumPhysicsSlotCount
             : Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsSlots(inferredPhysicsBones));
         var inferredMinimumPhysicsChainDepth = profile?.MinimumPhysicsChainDepth > 0
             ? profile.MinimumPhysicsChainDepth
             : Math.Max(1, BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(inferredPhysicsBones, inferredMetadata?.PhysicsBoneSignatures));
+        var inferredMinimumPhysicsFamilyCount = profile?.MinimumPhysicsFamilyCount > 0
+            ? profile.MinimumPhysicsFamilyCount
+            : Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsFamilies(inferredPhysicsBones, inferredMetadata?.PhysicsBoneSignatures));
         var inferredCollisionComplexity = !string.IsNullOrWhiteSpace(profile?.CollisionComplexity)
             ? profile!.CollisionComplexity
             : BodySupportMetadataHeuristics.InferCollisionComplexity(inferredPhysicsBones, inferredSliderNames, inferredMetadata?.PhysicsBoneSignatures);
@@ -24317,8 +24413,10 @@ internal sealed class LocalExportService(
             ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? inferredMetadata?.DepthToWidthRatioMax ?? 1.20,
             ["expectedSemanticRegions"] = inferredExpectedSemanticRegions,
             ["expectedCollisionRegions"] = inferredExpectedCollisionRegions,
+            ["expectedBilateralRegions"] = inferredExpectedBilateralRegions,
             ["minimumPhysicsSlotCount"] = inferredMinimumPhysicsSlotCount,
             ["minimumPhysicsChainDepth"] = inferredMinimumPhysicsChainDepth,
+            ["minimumPhysicsFamilyCount"] = inferredMinimumPhysicsFamilyCount,
             ["collisionComplexity"] = inferredCollisionComplexity
         };
 
@@ -24412,8 +24510,14 @@ internal sealed class LocalExportService(
                 ExtractSuggestedPhysicsBones(physics),
                 DefaultSlidersForSuggestedProfile(detectedBody.Body),
                 inferredMetadata?.PhysicsBoneSignatures),
+            ["expectedBilateralRegions"] = BodySupportMetadataHeuristics.InferExpectedBilateralRegions(
+                ExtractSuggestedPhysicsBones(physics),
+                DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                inferredMetadata?.ExpectedSemanticRegions,
+                inferredMetadata?.ExpectedCollisionRegions),
             ["minimumPhysicsSlotCount"] = Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsSlots(ExtractSuggestedPhysicsBones(physics))),
             ["minimumPhysicsChainDepth"] = Math.Max(1, BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(ExtractSuggestedPhysicsBones(physics), inferredMetadata?.PhysicsBoneSignatures)),
+            ["minimumPhysicsFamilyCount"] = Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsFamilies(ExtractSuggestedPhysicsBones(physics), inferredMetadata?.PhysicsBoneSignatures)),
             ["collisionComplexity"] = BodySupportMetadataHeuristics.InferCollisionComplexity(
                 ExtractSuggestedPhysicsBones(physics),
                 DefaultSlidersForSuggestedProfile(detectedBody.Body),
@@ -25014,6 +25118,35 @@ internal sealed class LocalExportService(
         return depth;
     }
 
+    private static int InferMinimumPhysicsFamilyExpectation(
+        IReadOnlyList<string> semanticRegions,
+        IReadOnlyList<string> collisionRegions,
+        string? collisionComplexity)
+    {
+        var expected = NormalizeCollisionComplexity(collisionComplexity) switch
+        {
+            "extended" => 3,
+            "standard" => 2,
+            _ => 1
+        };
+
+        var regionRichness = semanticRegions
+            .Concat(collisionRegions)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        if (regionRichness >= 4)
+        {
+            expected = Math.Max(expected, 2);
+        }
+
+        if (regionRichness >= 6)
+        {
+            expected = Math.Max(expected, 3);
+        }
+
+        return expected;
+    }
+
     private static string NormalizeCollisionComplexity(string? collisionComplexity) =>
         string.IsNullOrWhiteSpace(collisionComplexity)
             ? "minimal"
@@ -25084,20 +25217,14 @@ internal sealed class LocalExportService(
 
     private static bool HasBilateralCoverageGap(
         IReadOnlyList<string>? physicsBones,
-        IReadOnlyList<string> semanticRegions,
-        IReadOnlyList<string> collisionRegions)
+        IReadOnlyList<string> expectedBilateralRegions)
     {
         if (physicsBones is not { Count: > 0 })
         {
             return false;
         }
 
-        var expectedBilateralRegions = semanticRegions
-            .Concat(collisionRegions)
-            .Where(static region => region is "breasts" or "butt" or "arms" or "feet" or "wing")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        if (expectedBilateralRegions.Length == 0)
+        if (expectedBilateralRegions.Count == 0)
         {
             return false;
         }
