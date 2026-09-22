@@ -8277,6 +8277,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         ("skeleton-mode", 2),
         ("source-skeleton-family", 2),
         ("plugin-stack", 2),
+        ("plugin-family", 2),
+        ("master-chain", 2),
         ("runtime-physics", 2),
         ("runtime-automation", 1),
         ("live-game", 1),
@@ -8359,6 +8361,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             "skeleton-mode" => $"Pack proof only covers {distinctValueCount} skeleton remap mode(s); universal custom-skeleton confidence needs at least {minimumDistinctValueCount} distinct skeleton conditions.",
             "source-skeleton-family" => $"Pack proof only covers {distinctValueCount} source skeleton family value(s); broader XPMSSE/custom/beast/exotic rig family proof still needs at least {minimumDistinctValueCount}.",
             "plugin-stack" => $"Pack proof only covers {distinctValueCount} plugin-stack mode(s); mixed master/light/plugin-family chains still need broader matrix evidence.",
+            "plugin-family" => $"Pack proof only covers {distinctValueCount} plugin family value(s); broader cross-family plugin proof still needs at least {minimumDistinctValueCount} distinct plugin family conditions.",
+            "master-chain" => $"Pack proof only covers {distinctValueCount} master-chain mode(s); mixed master/light/plugin-family chains still need broader master dependency evidence.",
             "runtime-physics" => $"Pack proof only covers {distinctValueCount} runtime physics mode(s); broader CBPC/SMP/no-physics combinations still need explicit proof.",
             "runtime-automation" => "Pack proof does not yet cover runtime automation modes broadly enough to claim matrix-level runtime evidence.",
             "live-game" => "Pack proof does not yet cover live-game execution modes broadly enough to claim matrix-level in-game evidence.",
@@ -30635,6 +30639,8 @@ internal sealed class LocalExportService(
         var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
         var hardCaseFamily = BuildTopologyHardCaseFamily(topologyCorrespondence, targetBody);
         var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping);
+        var pluginFamily = BuildPluginFamilyMatrixMode(modStackCrossValidation);
+        var masterChainMode = BuildMasterChainMatrixMode(modStackCrossValidation);
         var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
             ? "physics-disabled"
             : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
@@ -30650,6 +30656,8 @@ internal sealed class LocalExportService(
             $"skeleton-mode:{skeletonMode}",
             $"source-skeleton-family:{sourceSkeletonFamily}",
             $"plugin-stack:{pluginMode}",
+            $"plugin-family:{pluginFamily}",
+            $"master-chain:{masterChainMode}",
             $"runtime-physics:{runtimePhysicsMode}",
             $"runtime-automation:{runtimePlan.ExecutionCoverage}",
             $"live-game:{liveGameExecution.IntegrationCoverage}",
@@ -30846,6 +30854,46 @@ internal sealed class LocalExportService(
         }
 
         return normalized.Replace(' ', '-');
+    }
+
+    private static string BuildPluginFamilyMatrixMode(ModStackCrossValidationReport? modStackCrossValidation)
+    {
+        if (modStackCrossValidation is null)
+        {
+            return "plugin-free";
+        }
+
+        if (modStackCrossValidation.DistinctMeshFamilyCount <= 0 || modStackCrossValidation.DistinctMeshFamilies.Count == 0)
+        {
+            return "unknown-family";
+        }
+
+        if (modStackCrossValidation.DistinctMeshFamilyCount == 1)
+        {
+            return modStackCrossValidation.DistinctMeshFamilies[0].Trim().ToLowerInvariant().Replace(' ', '-');
+        }
+
+        return "mixed-family";
+    }
+
+    private static string BuildMasterChainMatrixMode(ModStackCrossValidationReport? modStackCrossValidation)
+    {
+        if (modStackCrossValidation is null)
+        {
+            return "plugin-free";
+        }
+
+        if (modStackCrossValidation.AmbiguousPluginCount > 0)
+        {
+            return "ambiguous-light-chain";
+        }
+
+        return modStackCrossValidation.DistinctDeclaredMasterCount switch
+        {
+            <= 0 => "self-contained",
+            1 => modStackCrossValidation.RequiresLoadOrderValidation ? "single-master-load-order" : "single-master",
+            _ => modStackCrossValidation.RequiresLoadOrderValidation ? "mixed-master-chain" : "multi-master"
+        };
     }
 
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
