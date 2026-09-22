@@ -23200,6 +23200,7 @@ internal sealed class LocalExportService(
 
         issues.AddRange(BuildPackageArtifactIssues(
             request,
+            armor,
             outputDirectory,
             outputFiles,
             bodySlideProject,
@@ -24680,15 +24681,19 @@ internal sealed class LocalExportService(
     private static bool HasSideMarker(string boneName, string side) =>
         side.Equals("left", StringComparison.OrdinalIgnoreCase)
             ? boneName.Contains(" left", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains(" l ", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains("_left", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains(".l", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains("_l", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("-l", StringComparison.OrdinalIgnoreCase) ||
               boneName.StartsWith("l ", StringComparison.OrdinalIgnoreCase) ||
               boneName.StartsWith("l_", StringComparison.OrdinalIgnoreCase)
             : boneName.Contains(" right", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains(" r ", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains("_right", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains(".r", StringComparison.OrdinalIgnoreCase) ||
               boneName.Contains("_r", StringComparison.OrdinalIgnoreCase) ||
+              boneName.Contains("-r", StringComparison.OrdinalIgnoreCase) ||
               boneName.StartsWith("r ", StringComparison.OrdinalIgnoreCase) ||
               boneName.StartsWith("r_", StringComparison.OrdinalIgnoreCase);
 

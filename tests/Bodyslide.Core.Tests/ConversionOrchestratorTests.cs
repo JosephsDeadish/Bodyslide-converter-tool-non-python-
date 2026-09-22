@@ -23828,9 +23828,11 @@ public sealed class OutputCompletenessTests
                 [Path.Combine(outputDirectory, "Armor.esp")],
                 [new PluginArmorAddon("ARMA", ["meshes/armor/nordic/cuirass_0.nif"])],
                 "patch");
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
 
             var issues = LocalExportService.BuildPackageArtifactIssues(
                 request,
+                armor,
                 outputDirectory,
                 [],
                 bodySlideProject,
@@ -23888,9 +23890,11 @@ public sealed class OutputCompletenessTests
                 TargetBody: "CBBE",
                 OutputDirectory: outputDirectory,
                 GenerateBodySlideFiles: false);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
 
             var issues = LocalExportService.BuildPackageArtifactIssues(
                 request,
+                armor,
                 outputDirectory,
                 [],
                 new BodySlideProject("UnusedProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
@@ -23956,9 +23960,11 @@ public sealed class OutputCompletenessTests
                 OutputDirectory: outputDirectory,
                 OutputZip: true,
                 GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
 
             var issues = LocalExportService.BuildPackageArtifactIssues(
                 request,
+                armor,
                 outputDirectory,
                 [pluginPath, zipPath],
                 new BodySlideProject("NordicProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
@@ -24044,9 +24050,11 @@ public sealed class OutputCompletenessTests
                 TargetBody: "CBBE",
                 OutputDirectory: outputDirectory,
                 GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
 
             var issues = LocalExportService.BuildPackageArtifactIssues(
                 request,
+                armor,
                 outputDirectory,
                 [],
                 new BodySlideProject("PayloadProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
@@ -24113,9 +24121,11 @@ public sealed class OutputCompletenessTests
                 TargetBody: "CBBE",
                 OutputDirectory: outputDirectory,
                 GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
 
             var issues = LocalExportService.BuildPackageArtifactIssues(
                 request,
+                armor,
                 outputDirectory,
                 [],
                 new BodySlideProject("SemanticProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
@@ -24480,7 +24490,10 @@ public sealed class OutputCompletenessTests
                         PhysicsBones: ["NPC Belly"],
                         PhysicsProfile: "smp",
                         ReferenceTokens: ["thin"],
-                        SkeletonFramework: "xpmsse")
+                        SkeletonFramework: "xpmsse",
+                        ExpectedSemanticRegions: ["breasts", "belly", "thighs"],
+                        ExpectedCollisionRegions: ["breasts", "belly", "thighs"],
+                        CollisionComplexity: "standard")
                 ]);
             var analysis = new MeshAnalysis("plate", false, 1);
             var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
@@ -24507,7 +24520,79 @@ public sealed class OutputCompletenessTests
             Assert.Contains("\"Code\": \"incomplete-target-body-support\"", qualityJson);
             Assert.Contains("referenceTokens-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("sliderNames-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("expectedSemanticRegions-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("physicsBones-family-coverage", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExportAsync_CustomTargetProfileFlagsPairingAndAdvancedDepthGaps()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "ComplexFollower", OutputDirectory: outputDir, PhysicsProfileOverride: "smp");
+            var armor = new ImportedArmor(
+                nifPath,
+                [nifPath],
+                [],
+                [],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        Name: "ComplexFollower",
+                        DetectionTokens: ["complexfollower"],
+                        TextureTokens: [],
+                        PhysicsTokens: ["smp"],
+                        VertexCountMin: 0,
+                        VertexCountMax: 0,
+                        TransformationField: new Dictionary<string, double>(),
+                        SliderNames: ["BreastsShape", "Tongue", "TailBase"],
+                        PhysicsBones: ["NPC L Breast"],
+                        PhysicsProfile: "smp",
+                        ReferenceTokens: ["complex", "follower", "body"],
+                        SkeletonFramework: "xpmsse",
+                        ExpectedSemanticRegions: ["breasts", "tongue", "tail"],
+                        ExpectedCollisionRegions: ["breasts", "tongue", "tail"],
+                        CollisionComplexity: "extended")
+                ]);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("ComplexFollowerProject", "ComplexFollower", ["BreastsShape", "Tongue"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "ComplexFollower", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"incomplete-target-body-support\"", qualityJson);
+            Assert.Contains("physicsBones-pairing-coverage", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("physicsBones-family-depth", qualityJson, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -26877,6 +26962,7 @@ public sealed class BasicWeightTransferServicePhysicsTests
                     InputPath: Path.Combine(outputDirectory, "input.nif"),
                     TargetBody: "CBBE",
                     OutputDirectory: outputDirectory),
+                new ImportedArmor(Path.Combine(outputDirectory, "input.nif"), [Path.Combine(outputDirectory, "input.nif")], [], [], []),
                 outputDirectory,
                 [pluginPatchReportPath, qualityReportPath, previewWorkbenchPath],
                 new BodySlideProject("UnusedProject", "CBBE", [], "<BodySlideProject/>"),
@@ -26888,6 +26974,78 @@ public sealed class BasicWeightTransferServicePhysicsTests
                 && issue.Message.Contains("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(issues, issue => issue.Code.Equals("fomod-missing-root-support-entry", StringComparison.OrdinalIgnoreCase)
                 && issue.Message.Contains("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsWeakTargetSliderRegionCoverage()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "RegionCoverageProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="RegionCoverageProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\RegionCoverageProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\RegionCoverageProject\armor_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\coverage\</OutputPath>
+                    <OutputFile gender="f" use="true">coverage_0.nif</OutputFile>
+                    <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "RegionCoverageProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdPayload("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("RegionCoverageProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase)
+                && issue.Message.Contains("target-body regions", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
