@@ -17171,6 +17171,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
+            Assert.Equal("broad-landmark-backed", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString());
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
@@ -17211,6 +17213,17 @@ public sealed class RealisticModPackFixtureTests
                 runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("RequiresFullLoadOrderLaunch").GetBoolean()),
                 static value => value);
 
+            var liveGameExecutionJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json"));
+            Assert.Contains("\"IntegrationCoverage\": \"external-live-game-harness\"", liveGameExecutionJson, StringComparison.Ordinal);
+            Assert.Contains("launch-skse-or-game-loader", liveGameExecutionJson, StringComparison.OrdinalIgnoreCase);
+            using var liveGameExecution = JsonDocument.Parse(liveGameExecutionJson);
+            Assert.True(liveGameExecution.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
+            Assert.True(liveGameExecution.RootElement.GetProperty("RequiresSkseOrEquivalentLauncher").GetBoolean());
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("DeploymentArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
+            Assert.True(liveGameExecution.RootElement.GetProperty("Probes").GetArrayLength() > 0);
+
             var modStackJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "mod-stack-cross-validation.json"));
             Assert.Contains("\"RequiresLoadOrderValidation\": true", modStackJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Mixed mod-stack load-order sweep", modStackJson, StringComparison.OrdinalIgnoreCase);
@@ -17220,6 +17233,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(modStackReport.RootElement.GetProperty("RequiresLoadOrderValidation").GetBoolean());
             Assert.True(modStackReport.RootElement.GetProperty("DistinctMeshFamilyCount").GetInt32() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("DistinctDeclaredMasterCount").GetInt32() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("DeclaredMasters").GetArrayLength() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("SourceSkeletonCandidates").GetArrayLength() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("ValidationSignals").GetArrayLength() > 0);
             Assert.Contains(
                 modStackReport.RootElement.GetProperty("RecommendedRuntimeScenarios").EnumerateArray().Select(static item => item.GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.OrdinalIgnoreCase));
@@ -17236,6 +17252,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsTrueUiEndToEndAutomation").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresManualWinFormsInteraction").GetBoolean());
             Assert.Contains(
+                desktopAutomation.RootElement.GetProperty("Artifacts").EnumerateArray().Select(static artifact => artifact.GetProperty("DisplayPath").GetString()),
+                static artifact => string.Equals(artifact, "live-game-execution.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 desktopAutomation.RootElement.GetProperty("ReportMetrics").EnumerateArray().Select(static metric => metric.GetProperty("Property").GetString()),
                 static property => string.Equals(property, "Requires load-order validation", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -17247,6 +17266,16 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("preview-automation-model", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"workbench-canvas\"", previewHtml, StringComparison.Ordinal);
             Assert.Contains("data-testid=\"reset-view-button\"", previewHtml, StringComparison.Ordinal);
+            var windowsUiAutomationJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json"));
+            Assert.Contains("\"Coverage\": \"external-windows-ui-harness-ready\"", windowsUiAutomationJson, StringComparison.Ordinal);
+            using var windowsUiAutomation = JsonDocument.Parse(windowsUiAutomationJson);
+            Assert.True(windowsUiAutomation.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
+                static selector => string.Equals(selector, "inputPathTextBox", StringComparison.Ordinal));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
+                static selector => string.Equals(selector, "preview-workbench-root", StringComparison.Ordinal));
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresExternalGameHarness").GetBoolean());
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresModdedTestEnvironment").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresWindowsHost").GetBoolean());

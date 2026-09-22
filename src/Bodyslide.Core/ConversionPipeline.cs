@@ -330,6 +330,27 @@ public sealed record RuntimeAutomationHarness(
     bool RequiresManualAssertion,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<RuntimeAutomationHarnessProbe> Probes);
+public sealed record LiveGameExecutionProbe(
+    string ProbeId,
+    string Scenario,
+    string Priority,
+    IReadOnlyList<string> LaunchActions,
+    IReadOnlyList<string> ExpectedSignals,
+    IReadOnlyList<string> FailureSignals,
+    IReadOnlyList<string> RelatedArtifacts,
+    bool BlocksRelease);
+public sealed record LiveGameExecutionPlan(
+    string TargetBody,
+    string ValidationGate,
+    string IntegrationCoverage,
+    bool RequiresWindowsHost,
+    bool RequiresExternalHarness,
+    bool RequiresSkseOrEquivalentLauncher,
+    bool RequiresDeployedModManagerLoadOrder,
+    IReadOnlyList<string> DeploymentArtifacts,
+    IReadOnlyList<string> LaunchSequence,
+    IReadOnlyList<string> LimitationNotes,
+    IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ModStackCrossValidationReport(
     string TargetBody,
     string TargetBodyFamily,
@@ -344,7 +365,10 @@ public sealed record ModStackCrossValidationReport(
     int DistinctMeshFamilyCount,
     IReadOnlyList<string> DistinctMeshFamilies,
     int DistinctDeclaredMasterCount,
+    IReadOnlyList<string> DeclaredMasters,
     int LinkedArmorFamilyCount,
+    IReadOnlyList<string> SourceSkeletonCandidates,
+    IReadOnlyList<string> ValidationSignals,
     int RaceWarningCount,
     IReadOnlyList<string> RaceWarnings,
     int IncompatibleRaceCount,
@@ -376,6 +400,25 @@ public sealed record RuntimeValidationExecutionPlan(
     IReadOnlyList<string> LimitationNotes,
     RuntimeAutomationHarness? AutomationHarness,
     IReadOnlyList<RuntimeValidationExecutionStep> Steps);
+public sealed record WindowsUiAutomationSelector(
+    string Name,
+    string SelectorType,
+    string SelectorValue,
+    string Purpose);
+public sealed record WindowsUiAutomationStep(
+    string Area,
+    string Action,
+    string TargetSelectorName,
+    string ExpectedSignal,
+    bool Blocking);
+public sealed record WindowsUiE2EAutomationPlan(
+    string Coverage,
+    bool RequiresWindowsHost,
+    bool RequiresExternalUiHarness,
+    bool RequiresEmbeddedPreviewRuntimeForInAppPreview,
+    IReadOnlyList<string> LimitationNotes,
+    IReadOnlyList<WindowsUiAutomationSelector> Selectors,
+    IReadOnlyList<WindowsUiAutomationStep> Steps);
 public sealed record InGameValidationReport(
     string TargetBody,
     string ValidationStatus,
@@ -1126,8 +1169,13 @@ public sealed record TopologyCorrespondenceReport(
     bool HeuristicHeavy,
     string MatchingMode,
     bool UsesTrueSemanticCorrespondence,
+    string CorrespondenceScope,
     string? SemanticAnchorProfile,
     int SemanticAnchorCoverage,
+    int MatchedFocusRegionCount,
+    int CoveredFocusRegionCount,
+    int LandmarkRegionCount,
+    int ObservedTokenCount,
     IReadOnlyList<string> SemanticAnchorEvidence,
     bool RequiresManualSemanticReview,
     IReadOnlyList<string> LimitationNotes,
@@ -13338,6 +13386,24 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             AddPathTokens(cues, Path.GetFileNameWithoutExtension(meshFile));
         }
 
+        foreach (var bodyReferenceFile in armor.BodyReferenceFiles)
+        {
+            AddPathTokens(cues, bodyReferenceFile);
+            AddPathTokens(cues, Path.GetFileNameWithoutExtension(bodyReferenceFile));
+        }
+
+        foreach (var physicsFile in armor.PhysicsFiles)
+        {
+            AddPathTokens(cues, physicsFile);
+            AddPathTokens(cues, Path.GetFileNameWithoutExtension(physicsFile));
+        }
+
+        foreach (var pluginFile in armor.PluginFiles)
+        {
+            AddPathTokens(cues, pluginFile);
+            AddPathTokens(cues, Path.GetFileNameWithoutExtension(pluginFile));
+        }
+
         if (armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
         {
             foreach (var profile in customProfiles)
@@ -18703,6 +18769,14 @@ internal sealed class LocalExportService(
             outputFiles.Add(runtimeHarnessPath);
         }
 
+        var liveGameExecutionPath = Path.Combine(outputDirectory, "live-game-execution.json");
+        var liveGameExecution = BuildLiveGameExecutionPlan(runtimeValidationPlan, modStackCrossValidation);
+        await File.WriteAllTextAsync(
+            liveGameExecutionPath,
+            JsonSerializer.Serialize(liveGameExecution, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(liveGameExecutionPath);
+
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
             if (File.Exists(zipPath))
@@ -18781,6 +18855,14 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(desktopWorkflowSnapshot, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(desktopWorkflowAutomationPath);
+
+        var windowsUiAutomationPath = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
+        var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan();
+        await File.WriteAllTextAsync(
+            windowsUiAutomationPath,
+            JsonSerializer.Serialize(windowsUiAutomation, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(windowsUiAutomationPath);
 
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
@@ -27435,6 +27517,7 @@ internal sealed class LocalExportService(
             "conversion-quality.json",
             "desktop-workflow-automation.json",
             "in-game-validation.json",
+            "live-game-execution.json",
             "runtime-validation-harness.json",
             "runtime-validation-plan.json",
             "skeleton-compatibility.json",
@@ -27442,7 +27525,8 @@ internal sealed class LocalExportService(
             "world-physics.json",
             "preview.html",
             "preview.svg",
-            "preview-workbench.html"
+            "preview-workbench.html",
+            "windows-ui-e2e-automation.json"
         };
 
         if (hasPluginArtifacts)
@@ -27468,6 +27552,7 @@ internal sealed class LocalExportService(
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
@@ -27478,7 +27563,8 @@ internal sealed class LocalExportService(
         fileName.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.html", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("preview.svg", StringComparison.OrdinalIgnoreCase) ||
-        fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+        fileName.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("windows-ui-e2e-automation.json", StringComparison.OrdinalIgnoreCase));
 
     private static InGameValidationReport BuildInGameValidationReport(
         string targetBody,
@@ -27687,6 +27773,119 @@ internal sealed class LocalExportService(
             LimitationNotes: limitationNotes,
             AutomationHarness: automationHarness,
             steps);
+    }
+
+    private static LiveGameExecutionPlan BuildLiveGameExecutionPlan(
+        RuntimeValidationExecutionPlan runtimePlan,
+        ModStackCrossValidationReport? modStackCrossValidation)
+    {
+        var deploymentArtifacts = new[]
+        {
+            "runtime-validation-plan.json",
+            "runtime-validation-harness.json",
+            "live-game-execution.json",
+            "mod-stack-cross-validation.json",
+            "plugin-patches.json",
+            "race-compatibility.json",
+            "skeleton-compatibility.json",
+            "preview-workbench.html"
+        };
+        var launchSequence = new List<string>
+        {
+            "deploy-converted-output-to-modded-profile",
+            "verify-plugin-enable-order",
+            "launch-skse-or-game-loader",
+            "load-validation-save",
+            "dispatch-runtime-scenarios",
+            "capture-host-observations",
+            "persist-release-gate-result"
+        };
+        if (modStackCrossValidation?.RequiresLoadOrderValidation == true)
+        {
+            launchSequence.Insert(2, "apply-full-load-order-profile");
+        }
+
+        var probes = runtimePlan.AutomationHarness?.Probes
+            .Select(probe => new LiveGameExecutionProbe(
+                probe.ProbeId,
+                probe.Objective,
+                probe.Priority,
+                probe.DispatchActions,
+                probe.ExpectedAssertions,
+                probe.FailureSignals,
+                probe.RelatedArtifacts,
+                probe.BlocksRelease))
+            .ToArray() ?? [];
+
+        var limitationNotes = runtimePlan.LimitationNotes
+            .Concat(
+            [
+                "Live-game execution integration is exported as an external harness contract; the app still does not embed or ship an in-process Skyrim runtime runner.",
+                "Windows host automation must provide game-launch control, save selection, and observation capture outside SlideSmith itself."
+            ])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new LiveGameExecutionPlan(
+            runtimePlan.TargetBody,
+            runtimePlan.ValidationGate,
+            "external-live-game-harness",
+            RequiresWindowsHost: true,
+            RequiresExternalHarness: runtimePlan.RequiresExternalGameHarness,
+            RequiresSkseOrEquivalentLauncher: true,
+            RequiresDeployedModManagerLoadOrder: modStackCrossValidation?.RequiresLoadOrderValidation ?? true,
+            DeploymentArtifacts: deploymentArtifacts,
+            LaunchSequence: launchSequence,
+            LimitationNotes: limitationNotes,
+            Probes: probes);
+    }
+
+    private static WindowsUiE2EAutomationPlan BuildWindowsUiE2EAutomationPlan()
+    {
+        var selectors = new[]
+        {
+            new WindowsUiAutomationSelector("main-form", "winforms-name", "mainForm", "Top-level SlideSmith window"),
+            new WindowsUiAutomationSelector("input-path", "winforms-name", "inputPathTextBox", "Primary input path field"),
+            new WindowsUiAutomationSelector("output-path", "winforms-name", "outputPathTextBox", "Primary output path field"),
+            new WindowsUiAutomationSelector("target-body", "winforms-name", "targetBodyComboBox", "Target body selector"),
+            new WindowsUiAutomationSelector("preset-body", "winforms-name", "presetBodyComboBox", "Preset selector"),
+            new WindowsUiAutomationSelector("convert-button", "winforms-name", "convertButton", "Starts conversion"),
+            new WindowsUiAutomationSelector("cancel-button", "winforms-name", "cancelButton", "Cancels active conversion"),
+            new WindowsUiAutomationSelector("load-result-button", "winforms-name", "loadResultButton", "Loads prior result folders"),
+            new WindowsUiAutomationSelector("run-self-check-button", "winforms-name", "runSelfCheckButton", "Runs readiness self-check"),
+            new WindowsUiAutomationSelector("results-tabs", "winforms-name", "resultsTabControl", "Main results tab control"),
+            new WindowsUiAutomationSelector("guidance-list", "winforms-name", "guidanceListView", "Guidance list view"),
+            new WindowsUiAutomationSelector("reports-list", "winforms-name", "reportsListView", "Reports list view"),
+            new WindowsUiAutomationSelector("artifacts-list", "winforms-name", "artifactsListView", "Artifacts list view"),
+            new WindowsUiAutomationSelector("preview-root", "html-data-testid", "preview-workbench-root", "Preview workbench root"),
+            new WindowsUiAutomationSelector("preview-canvas", "html-data-testid", "workbench-canvas", "Preview workbench canvas"),
+            new WindowsUiAutomationSelector("preview-reset-view", "html-data-testid", "reset-view-button", "Preview reset control")
+        };
+
+        var steps = new[]
+        {
+            new WindowsUiAutomationStep("Startup", "Launch desktop app and wait for readiness state", "main-form", "SlideSmith window is visible and interactive", true),
+            new WindowsUiAutomationStep("Input", "Populate input and output fields for a fixture conversion", "input-path", "Input and output paths are accepted without validation errors", true),
+            new WindowsUiAutomationStep("Configuration", "Choose a target body or preset and confirm options", "target-body", "Target selection is reflected in the form state", true),
+            new WindowsUiAutomationStep("Execution", "Start conversion and wait for report artifacts", "convert-button", "Conversion completes and result tabs populate", true),
+            new WindowsUiAutomationStep("Preview", "Open or inspect the embedded preview workbench", "preview-root", "Preview workbench root loads with canvas controls", false),
+            new WindowsUiAutomationStep("Guidance", "Open Next actions and confirm blocking guidance entries", "guidance-list", "Guidance entries reflect review-required runtime or topology steps", true),
+            new WindowsUiAutomationStep("Reports", "Open report metrics and verify runtime/load-order artifacts are listed", "reports-list", "Report list includes runtime, live-game, and mod-stack artifacts", true),
+            new WindowsUiAutomationStep("Artifacts", "Open output artifacts tab and verify generated files are reachable", "artifacts-list", "Artifacts list includes preview and automation JSON outputs", true)
+        };
+
+        return new WindowsUiE2EAutomationPlan(
+            Coverage: "external-windows-ui-harness-ready",
+            RequiresWindowsHost: true,
+            RequiresExternalUiHarness: true,
+            RequiresEmbeddedPreviewRuntimeForInAppPreview: true,
+            LimitationNotes:
+            [
+                "The generated plan exposes stable WinForms Name selectors and preview HTML data-testid selectors, but execution still requires an external Windows UI harness.",
+                "WinForms dialogs, browser/runtime prompts, and true in-process WebView automation are not executed inside the core library or Linux test environment."
+            ],
+            Selectors: selectors,
+            Steps: steps);
     }
 
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
@@ -28015,8 +28214,13 @@ internal sealed class LocalExportService(
             classification.Equals("heuristic-heavy", StringComparison.OrdinalIgnoreCase),
             MatchingMode: semanticAnchors.UsesTrueSemanticCorrespondence ? "topology-semantic-anchors+heuristic" : "heuristic-island-regional",
             UsesTrueSemanticCorrespondence: semanticAnchors.UsesTrueSemanticCorrespondence,
+            CorrespondenceScope: semanticAnchors.CorrespondenceScope,
             SemanticAnchorProfile: semanticAnchors.ProfileName,
             SemanticAnchorCoverage: semanticAnchors.Coverage,
+            MatchedFocusRegionCount: semanticAnchors.MatchedFocusRegionCount,
+            CoveredFocusRegionCount: semanticAnchors.CoveredFocusRegionCount,
+            LandmarkRegionCount: semanticAnchors.LandmarkRegionCount,
+            ObservedTokenCount: semanticAnchors.ObservedTokenCount,
             SemanticAnchorEvidence: semanticAnchors.Evidence,
             RequiresManualSemanticReview: requiresManualSemanticReview,
             LimitationNotes: limitationNotes,
@@ -28044,7 +28248,12 @@ internal sealed class LocalExportService(
     private sealed record SemanticAnchorAssessment(
         string? ProfileName,
         int Coverage,
+        int MatchedFocusRegionCount,
+        int CoveredFocusRegionCount,
+        int LandmarkRegionCount,
+        int ObservedTokenCount,
         bool UsesTrueSemanticCorrespondence,
+        string CorrespondenceScope,
         IReadOnlyList<string> Evidence);
 
     private static SemanticAnchorAssessment BuildSemanticAnchorAssessment(
@@ -28056,7 +28265,7 @@ internal sealed class LocalExportService(
         var observedTokens = BuildSemanticAnchorObservedTokens(armor, targetBody, cageTopology);
         if (!SemanticAnchorCatalog.TryResolveBestProfile(targetBody, observedTokens.Concat(focusRegions), focusRegions, out var profile, out var resolutionEvidence))
         {
-            return new SemanticAnchorAssessment(null, 0, false, []);
+            return new SemanticAnchorAssessment(null, 0, 0, 0, 0, observedTokens.Count, false, "heuristic-only", []);
         }
 
         var evidence = new List<string>(resolutionEvidence);
@@ -28100,10 +28309,22 @@ internal sealed class LocalExportService(
                                              coveredFocusRegions >= 2 &&
                                              coveredLandmarkRegions >= 2 &&
                                              coveredRegions >= Math.Max(2, coveredFocusRegions / 2);
+        var correspondenceScope = usesTrueSemanticCorrespondence
+            ? coveredRegions >= Math.Max(3, focusRegions.Count - 1) && landmarkCoveredRegions >= Math.Max(2, coveredLandmarkRegions)
+                ? "broad-landmark-backed"
+                : "targeted-landmark-backed"
+            : coveredRegions > 0
+                ? "partial-anchor-backed"
+                : "heuristic-only";
         return new SemanticAnchorAssessment(
             profile.Name,
             Math.Min(coveredRegions, landmarkCoveredRegions == 0 ? coveredRegions : landmarkCoveredRegions),
+            coveredRegions,
+            coveredFocusRegions,
+            landmarkCoveredRegions,
+            observedTokens.Count,
             usesTrueSemanticCorrespondence,
+            correspondenceScope,
             evidence);
     }
 
@@ -28123,6 +28344,30 @@ internal sealed class LocalExportService(
             {
                 observedTokens.Add(token);
             }
+        }
+
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            AddSemanticAnchorPathTokens(observedTokens, meshFile);
+            AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(meshFile));
+        }
+
+        foreach (var bodyReferencePath in armor.BodyReferenceFiles)
+        {
+            AddSemanticAnchorPathTokens(observedTokens, bodyReferencePath);
+            AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(bodyReferencePath));
+        }
+
+        foreach (var physicsPath in armor.PhysicsFiles)
+        {
+            AddSemanticAnchorPathTokens(observedTokens, physicsPath);
+            AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(physicsPath));
+        }
+
+        foreach (var pluginPath in armor.PluginFiles)
+        {
+            AddSemanticAnchorPathTokens(observedTokens, pluginPath);
+            AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(pluginPath));
         }
 
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
@@ -28156,6 +28401,22 @@ internal sealed class LocalExportService(
         }
 
         return observedTokens;
+    }
+
+    private static void AddSemanticAnchorPathTokens(ISet<string> observedTokens, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        foreach (var token in path.Split(['\\', '/', '_', '-', ' ', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (token.Length >= 3)
+            {
+                observedTokens.Add(token);
+            }
+        }
     }
 
     private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping)
@@ -28198,7 +28459,7 @@ internal sealed class LocalExportService(
         var notes = new List<string>
         {
             semanticAnchors.UsesTrueSemanticCorrespondence
-                ? $"Topology correspondence now uses the authored semantic anchor profile '{semanticAnchors.ProfileName}' alongside heuristic island and regional matching."
+                ? $"Topology correspondence now uses the authored semantic anchor profile '{semanticAnchors.ProfileName}' alongside heuristic island and regional matching ({semanticAnchors.CorrespondenceScope})."
                 : "Topology matching still relies on heuristic island, boundary, and regional correspondence rather than full authored semantic vertex correspondence."
         };
 
@@ -28227,6 +28488,10 @@ internal sealed class LocalExportService(
             {
                 notes.Add($"Semantic anchor profile '{semanticAnchors.ProfileName}' only covered {semanticAnchors.Coverage} focus region(s), so landmark-backed correspondence is still partial.");
             }
+        }
+        else if (!string.Equals(semanticAnchors.CorrespondenceScope, "broad-landmark-backed", StringComparison.OrdinalIgnoreCase))
+        {
+            notes.Add($"Semantic anchor coverage is currently {semanticAnchors.CorrespondenceScope}, so radically different regions outside the matched focus set may still need manual review.");
         }
 
         return notes;
@@ -28809,7 +29074,12 @@ internal sealed class LocalExportService(
             DistinctMeshFamilyCount: distinctMeshFamilies.Count,
             DistinctMeshFamilies: distinctMeshFamilies,
             DistinctDeclaredMasterCount: declaredMasters.Length,
+            DeclaredMasters: declaredMasters,
             LinkedArmorFamilyCount: linkedArmorFamilies,
+            SourceSkeletonCandidates: skeletonMapping.SourceSkeletonCandidates?
+                .Select(candidate => $"{candidate.Label} ({candidate.Confidence:0.##})")
+                .ToArray() ?? [],
+            ValidationSignals: inGameValidation.TopologyCorrespondence?.Signals ?? [],
             RaceWarningCount: raceCompatibility?.Warnings.Count ?? 0,
             RaceWarnings: raceCompatibility?.Warnings ?? [],
             IncompatibleRaceCount: raceCompatibility?.IncompatibleRaces.Count ?? 0,

@@ -96,10 +96,12 @@ public sealed class MainForm : Form
         "conversion-quality.json",
         "dependency-map.json",
         "in-game-validation.json",
+        "live-game-execution.json",
         "mod-stack-cross-validation.json",
         "runtime-validation-plan.json",
         "runtime-validation-harness.json",
         "desktop-workflow-automation.json",
+        "windows-ui-e2e-automation.json",
         "skeleton-compatibility.json",
         "race-compatibility.json",
         "texture-summary.json",
@@ -134,6 +136,7 @@ public sealed class MainForm : Form
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "1.0";
         Text = $"SlideSmith v{appVersion}";
+        Name = "mainForm";
         Width = 960;
         Height = 760;
         StartPosition = FormStartPosition.CenterScreen;
@@ -186,6 +189,7 @@ public sealed class MainForm : Form
         layout.Controls.Add(CreateSection("Quick import", dropPanel), 0, 0);
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
+        _inputTextBox.Name = "inputPathTextBox";
         _inputTextBox.AllowDrop = true;
         _inputTextBox.DragEnter += OnDragEnter;
         _inputTextBox.DragDrop += OnDragDrop;
@@ -291,6 +295,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label { Text = "Preset (destination body + shape)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 1);
         _presetComboBox = new ComboBox
         {
+            Name = "presetBodyComboBox",
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
         };
@@ -316,6 +321,7 @@ public sealed class MainForm : Form
         leftOptions.Controls.Add(new Label { Text = "To body / destination body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
         _targetComboBox = new ComboBox
         {
+            Name = "targetBodyComboBox",
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDown,
         };
@@ -500,6 +506,7 @@ public sealed class MainForm : Form
         layout.Controls.Add(CreateSection("Conversion setup", conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
+        _outputTextBox.Name = "outputPathTextBox";
         _outputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
         var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += (_, _) => BrowseOutput();
@@ -590,6 +597,7 @@ public sealed class MainForm : Form
         };
         _convertButton = new Button
         {
+            Name = "convertButton",
             Text = "Convert",
             Width = 110,
             Height = 34,
@@ -598,6 +606,7 @@ public sealed class MainForm : Form
         _convertButton.Click += async (_, _) => await ConvertAsync();
         _cancelButton = new Button
         {
+            Name = "cancelButton",
             Text = "Cancel",
             Width = 90,
             Height = 34,
@@ -624,6 +633,7 @@ public sealed class MainForm : Form
         _openOutputButton.Click += (_, _) => OpenOutputDirectory();
         _openPreviewButton = new Button
         {
+            Name = "showPreviewButton",
             Text = "Show preview",
             Width = 110,
             Height = 34,
@@ -633,6 +643,7 @@ public sealed class MainForm : Form
         _openPreviewButton.Click += async (_, _) => await ShowPreviewReportAsync();
         _loadResultButton = new Button
         {
+            Name = "loadResultButton",
             Text = "Load result...",
             Width = 110,
             Height = 34,
@@ -699,6 +710,7 @@ public sealed class MainForm : Form
         _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync();
         _runSelfCheckButton = new Button
         {
+            Name = "runSelfCheckButton",
             Text = "Run self-check",
             Width = 120,
             Height = 34,
@@ -772,6 +784,7 @@ public sealed class MainForm : Form
         };
         _resultsTabControl = new TabControl
         {
+            Name = "resultsTabControl",
             Dock = DockStyle.Fill,
         };
         var logTabPage = new TabPage("Log");
@@ -819,6 +832,7 @@ public sealed class MainForm : Form
         _guidanceTabPage = new TabPage("Next actions");
         _guidanceListView = new ListView
         {
+            Name = "guidanceListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -838,6 +852,7 @@ public sealed class MainForm : Form
         _reportsTabPage = new TabPage("Reports");
         _reportsListView = new ListView
         {
+            Name = "reportsListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
@@ -882,6 +897,7 @@ public sealed class MainForm : Form
         _artifactsTabPage = new TabPage("Files");
         _artifactsListView = new ListView
         {
+            Name = "artifactsListView",
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
