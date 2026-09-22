@@ -3641,13 +3641,24 @@ public sealed class MainForm : Form
         var explicitHighSeverityCount = TryReadIntValue(element, "HighSeverityCount");
         var explicitMediumSeverityCount = TryReadIntValue(element, "MediumSeverityCount");
         var explicitLowSeverityCount = TryReadIntValue(element, "LowSeverityCount");
+        var resultStatuses = results.EnumerateArray()
+            .Select(static item => TryReadString(item, "ValidationStatus"))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value!)
+            .ToArray();
+        var highSeverityCount = explicitHighSeverityCount
+            ?? resultStatuses.Count(static value => ConversionValidationPresentation.GetGateRank(value) >= ConversionValidationPresentation.GetGateRank("high-risk"));
+        var mediumSeverityCount = explicitMediumSeverityCount
+            ?? resultStatuses.Count(static value => ConversionValidationPresentation.GetGateRank(value) == ConversionValidationPresentation.GetGateRank("needs-review"));
+        var lowSeverityCount = explicitLowSeverityCount
+            ?? resultStatuses.Count(static value => ConversionValidationPresentation.GetGateRank(value) == ConversionValidationPresentation.GetGateRank("ready"));
 
         return new ConversionValidationSummary(
             status,
             score,
-            explicitHighSeverityCount ?? 0,
-            explicitMediumSeverityCount ?? 0,
-            explicitLowSeverityCount ?? 0,
+            highSeverityCount,
+            mediumSeverityCount,
+            lowSeverityCount,
             []);
     }
 
