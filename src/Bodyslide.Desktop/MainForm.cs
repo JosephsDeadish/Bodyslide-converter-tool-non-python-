@@ -4561,7 +4561,11 @@ public sealed class MainForm : Form
     private static JsonDocument OpenJsonDocument(string path)
     {
         using var stream = File.OpenRead(path);
-        return JsonDocument.Parse(stream);
+        return JsonDocument.Parse(stream, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = ReportJsonOptions.AllowTrailingCommas,
+            CommentHandling = ReportJsonOptions.ReadCommentHandling
+        });
     }
 
     private static bool IsPreviewDrivenGuidanceCode(string code) =>
