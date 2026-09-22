@@ -19,6 +19,29 @@ internal sealed record SkeletonFrameworkDetectionResult(
 internal static class SkeletonFrameworkCatalog
 {
     private const string ResourceName = "Bodyslide.Core.Data.skeleton-frameworks.json";
+    private static readonly string[] ChainDepthMarkers =
+    [
+        "root",
+        "base",
+        "mid",
+        "tip",
+        "lower",
+        "upper",
+        "segment",
+        "branch",
+        "finger",
+        "tail",
+        "tongue",
+        "throat",
+        "jaw",
+        "mane",
+        "frill",
+        "fin",
+        "whisker",
+        "antenna",
+        "mandible",
+        "wing"
+    ];
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -241,6 +264,8 @@ internal static class SkeletonFrameworkCatalog
         {
             evidence.Add($"context-cues:{contextCueMatches}");
         }
+        var frameworkChainMarkers = ExtractChainDepthMarkers(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
+        var observedChainMarkers = ExtractChainDepthMarkers(condensedBoneNames);
 
         if (prefixMatches == 0 && tokenMatches < framework.MinimumSignatureMatches)
         {
@@ -267,6 +292,14 @@ internal static class SkeletonFrameworkCatalog
             {
                 evidence.Add($"group-overlap:{physicsMatches}");
             }
+            var chainDepthMatches = frameworkChainMarkers.Count == 0 || observedChainMarkers.Count == 0
+                ? 0
+                : observedChainMarkers.Intersect(frameworkChainMarkers, StringComparer.OrdinalIgnoreCase).Count();
+            if (chainDepthMatches > 0 &&
+                (semanticMatches > 0 || physicsMatches > 0 || cueMatches + contextCueMatches > 0))
+            {
+                evidence.Add($"chain-depth:{chainDepthMatches}");
+            }
 
             var semanticScore = semanticMatches >= framework.MinimumSignatureMatches
                 ? semanticMatches * 1.05d
@@ -277,7 +310,11 @@ internal static class SkeletonFrameworkCatalog
             var cueScore = cueMatches + contextCueMatches >= framework.MinimumSignatureMatches
                 ? (cueMatches + contextCueMatches) * 1.10d
                 : 0d;
-            return Math.Max(Math.Max(semanticScore, physicsScore), cueScore);
+            var chainScore = chainDepthMatches >= framework.MinimumSignatureMatches &&
+                             (semanticMatches > 0 || physicsMatches > 0 || cueMatches + contextCueMatches > 0)
+                ? chainDepthMatches * 1.15d
+                : 0d;
+            return Math.Max(Math.Max(semanticScore, physicsScore), Math.Max(cueScore, chainScore));
         }
 
         var semanticKeys = ExtractSemanticKeys(framework.BonePrefixes.Concat(framework.BoneTokens).Concat(framework.DistinctiveSignatures));
@@ -297,8 +334,16 @@ internal static class SkeletonFrameworkCatalog
         {
             evidence.Add($"group-overlap:{physicsOverlap}");
         }
+        var chainDepthOverlap = frameworkChainMarkers.Count == 0 || observedChainMarkers.Count == 0
+            ? 0
+            : observedChainMarkers.Intersect(frameworkChainMarkers, StringComparer.OrdinalIgnoreCase).Count();
+        if (chainDepthOverlap > 0 &&
+            (semanticOverlap > 0 || physicsOverlap > 0 || cueMatches + contextCueMatches > 0))
+        {
+            evidence.Add($"chain-depth:{chainDepthOverlap}");
+        }
 
-        return prefixMatches + (tokenMatches * 0.75d) + ((cueMatches + contextCueMatches) * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d);
+        return prefixMatches + (tokenMatches * 0.75d) + ((cueMatches + contextCueMatches) * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d) + (chainDepthOverlap * 0.60d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)
@@ -366,6 +411,29 @@ internal static class SkeletonFrameworkCatalog
         }
 
         return groups;
+    }
+
+    private static IReadOnlySet<string> ExtractChainDepthMarkers(IEnumerable<string> values)
+    {
+        var markers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            var normalized = NormalizeForMatching(value);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                continue;
+            }
+
+            foreach (var marker in ChainDepthMarkers)
+            {
+                if (normalized.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                {
+                    markers.Add(marker);
+                }
+            }
+        }
+
+        return markers;
     }
 
     private sealed class SkeletonFrameworkMetadataDto

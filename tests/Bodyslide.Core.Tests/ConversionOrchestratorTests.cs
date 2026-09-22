@@ -13901,6 +13901,82 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(detection.Confidence > 0d);
         Assert.Contains(detection.Evidence, evidence => evidence.StartsWith("context-cues:", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void DetectFrameworkDetails_AddsChainDepthEvidenceForNoisySparseBones()
+    {
+        var detection = SkeletonFrameworkCatalog.DetectFrameworkDetails(
+            ["maw_lower_ctrl", "tongue_mid_arc", "throat_upper_swing"],
+            ["female", "oral", "throat", "ube"]);
+
+        Assert.Equal("ube-extended", detection.Label);
+        Assert.True(detection.UsedSparseInference);
+        Assert.Contains(detection.Evidence, evidence => evidence.StartsWith("semantic-overlap:", StringComparison.Ordinal));
+        Assert.Contains(detection.Evidence, evidence => evidence.StartsWith("chain-depth:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SkeletonRemapSafetyClassifier_AllowsStrongSparseMatchToBeSafe()
+    {
+        var candidates = new[]
+        {
+            new SkeletonInferenceCandidate(
+                "ube-extended",
+                0.96d,
+                ["semantic-overlap:3", "ecosystem-cues:2", "chain-depth:3"],
+                true),
+            new SkeletonInferenceCandidate(
+                "digitigrade-beast",
+                0.62d,
+                ["semantic-overlap:1", "ecosystem-cues:1"],
+                true)
+        };
+
+        var safety = SkeletonRemapSafetyClassifier.BuildSafety(
+            mappedBoneCount: 14,
+            unsupportedBoneCount: 0,
+            sourceSkeletonConfidence: 0.96d,
+            usedSparseInference: true,
+            sourceSkeletonCandidates: candidates);
+        var signals = SkeletonRemapSafetyClassifier.BuildSignals(
+            mappedBoneCount: 14,
+            unsupportedBoneCount: 0,
+            sourceSkeletonConfidence: 0.96d,
+            usedSparseInference: true,
+            sourceSkeletonCandidates: candidates,
+            remapSafety: safety);
+
+        Assert.Equal("safe", safety);
+        Assert.Contains("strong-sparse-framework", signals);
+        Assert.Contains("sparse-inference", signals);
+    }
+
+    [Fact]
+    public void SkeletonRemapSafetyClassifier_KeepsWeakSparseMatchProvisional()
+    {
+        var candidates = new[]
+        {
+            new SkeletonInferenceCandidate(
+                "ube-extended",
+                0.84d,
+                ["semantic-overlap:2", "ecosystem-cues:1", "chain-depth:1"],
+                true),
+            new SkeletonInferenceCandidate(
+                "digitigrade-beast",
+                0.68d,
+                ["semantic-overlap:1", "ecosystem-cues:1"],
+                true)
+        };
+
+        var safety = SkeletonRemapSafetyClassifier.BuildSafety(
+            mappedBoneCount: 14,
+            unsupportedBoneCount: 0,
+            sourceSkeletonConfidence: 0.84d,
+            usedSparseInference: true,
+            sourceSkeletonCandidates: candidates);
+
+        Assert.Equal("provisional", safety);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

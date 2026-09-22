@@ -258,6 +258,13 @@ internal static class SkeletonRemapSafetyClassifier
         var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
         var candidateAmbiguity = sourceSkeletonCandidates is { Count: > 1 } &&
                                  candidateGap is null or < 0.12d;
+        var strongSparseMatch = IsStrongSparseMatch(
+            unsupportedBoneCount,
+            unsupportedRatio,
+            sourceSkeletonConfidence,
+            usedSparseInference,
+            sourceSkeletonCandidates,
+            candidateGap);
 
         if (unsupportedBoneCount >= 8 ||
             unsupportedRatio >= 0.35d ||
@@ -266,6 +273,11 @@ internal static class SkeletonRemapSafetyClassifier
             candidateAmbiguity)
         {
             return "unsafe";
+        }
+
+        if (strongSparseMatch)
+        {
+            return "safe";
         }
 
         if (usedSparseInference ||
@@ -290,6 +302,14 @@ internal static class SkeletonRemapSafetyClassifier
         var signals = new List<string>();
         var totalObservedBones = Math.Max(1, mappedBoneCount + unsupportedBoneCount);
         var unsupportedRatio = unsupportedBoneCount / (double)totalObservedBones;
+        var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
+        var strongSparseMatch = IsStrongSparseMatch(
+            unsupportedBoneCount,
+            unsupportedRatio,
+            sourceSkeletonConfidence,
+            usedSparseInference,
+            sourceSkeletonCandidates,
+            candidateGap);
 
         if (unsupportedBoneCount > 0)
         {
@@ -306,7 +326,6 @@ internal static class SkeletonRemapSafetyClassifier
             signals.Add($"low-confidence:{sourceSkeletonConfidence.Value:0.##}");
         }
 
-        var candidateGap = GetCandidateGap(sourceSkeletonCandidates);
         if (sourceSkeletonCandidates is { Count: > 1 } && candidateGap is not null)
         {
             signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
@@ -315,6 +334,11 @@ internal static class SkeletonRemapSafetyClassifier
         if (unsupportedRatio >= 0.15d)
         {
             signals.Add($"unsupported-ratio:{unsupportedRatio:0.##}");
+        }
+
+        if (strongSparseMatch)
+        {
+            signals.Add("strong-sparse-framework");
         }
 
         if (signals.Count == 0)
@@ -343,6 +367,65 @@ internal static class SkeletonRemapSafetyClassifier
         }
 
         return orderedCandidates[0].Confidence - orderedCandidates[1].Confidence;
+    }
+
+    private static bool IsStrongSparseMatch(
+        int unsupportedBoneCount,
+        double unsupportedRatio,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates,
+        double? candidateGap)
+    {
+        if (!usedSparseInference ||
+            unsupportedBoneCount > 0 ||
+            unsupportedRatio >= 0.08d ||
+            sourceSkeletonConfidence is null or < 0.90d ||
+            candidateGap is null or < 0.20d ||
+            sourceSkeletonCandidates is not { Count: > 0 })
+        {
+            return false;
+        }
+
+        var primaryCandidate = sourceSkeletonCandidates
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .First();
+        if (!primaryCandidate.UsedSparseInference)
+        {
+            return false;
+        }
+
+        var semanticOverlap = GetEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
+        var groupOverlap = GetEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
+        var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
+        var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
+                         GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+
+        return semanticOverlap >= 2 &&
+               (chainDepth >= 2 || groupOverlap >= 2 || cueMatches >= 2);
+    }
+
+    private static int GetEvidenceValue(IReadOnlyList<string>? evidence, string prefix)
+    {
+        if (evidence is not { Count: > 0 })
+        {
+            return 0;
+        }
+
+        foreach (var item in evidence)
+        {
+            if (!item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (int.TryParse(item[prefix.Length..], out var value))
+            {
+                return value;
+            }
+        }
+
+        return 0;
     }
 }
 public sealed record PartitionRebuildingResult(bool Rebuilt, IReadOnlyList<string> Partitions, IReadOnlyList<string> RemovedPartitions);
