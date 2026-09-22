@@ -12,6 +12,10 @@ namespace Bodyslide.Desktop;
 public sealed class MainForm : Form
 {
     private static readonly string[] PreviewFileCandidates = ["preview-workbench.html", "preview.html"];
+    private static readonly JsonSerializerOptions ReportJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     private readonly TextBox _inputTextBox;
     private readonly TextBox _outputTextBox;
@@ -4247,7 +4251,7 @@ public sealed class MainForm : Form
         try
         {
             using var stream = File.OpenRead(reportPath);
-            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream);
+            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream, ReportJsonOptions);
             if (report is null)
             {
                 requiresReview = true;
