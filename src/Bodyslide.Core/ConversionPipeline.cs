@@ -23999,8 +23999,19 @@ internal sealed class LocalExportService(
         IReadOnlyList<string>? physicsTokens = null,
         string? declaredPhysicsProfile = null)
     {
+        var semanticRegions = expectedSemanticRegions?.Count > 0
+            ? expectedSemanticRegions
+            : BodySupportMetadataHeuristics.InferExpectedSemanticRegions(sliderNames, physicsBones);
+        var collisionRegions = expectedCollisionRegions?.Count > 0
+            ? expectedCollisionRegions
+            : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(physicsBones, sliderNames);
+        var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(sliderNames);
         var qualityWarnings = new List<string>();
-        if (referenceTokens is { Count: > 0 } && referenceTokens.Count < 3)
+
+        if (referenceTokens is { Count: > 0 } &&
+            referenceTokens.Count < 3 &&
+            semanticRegions.Count < 3 &&
+            collisionRegions.Count < 3)
         {
             qualityWarnings.Add("referenceTokens-quality");
         }
@@ -24015,13 +24026,6 @@ internal sealed class LocalExportService(
             qualityWarnings.Add("skeletonFoundation/skeletonFramework-quality");
         }
 
-        var semanticRegions = expectedSemanticRegions?.Count > 0
-            ? expectedSemanticRegions
-            : BodySupportMetadataHeuristics.InferExpectedSemanticRegions(sliderNames, physicsBones);
-        var collisionRegions = expectedCollisionRegions?.Count > 0
-            ? expectedCollisionRegions
-            : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(physicsBones, sliderNames);
-        var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(sliderNames);
         var effectiveMinimumPhysicsSlotCount = minimumPhysicsSlotCount > 0
             ? minimumPhysicsSlotCount
             : InferMinimumPhysicsSlotExpectation(semanticRegions, collisionRegions, collisionComplexity);

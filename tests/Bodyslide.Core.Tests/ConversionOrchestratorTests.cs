@@ -15646,6 +15646,56 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesStricterRuntimeReviewSignalsThanReadySummary()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "conversion-quality.json"),
+                """
+                {
+                  "ValidationSummary": { "Status": "ready", "Score": 91, "HighSeverityCount": 0, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] }
+                }
+                """);
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "in-game-validation.json"),
+                """
+                {
+                  "TargetBody": "CBBE",
+                  "ValidationGate": "PASS",
+                  "SupportTier": "mainstream-automatic",
+                  "RuntimeVerificationRequired": true,
+                  "ManualCleanupLikely": false,
+                  "ConversionReadiness": {
+                    "CanConvert": true,
+                    "CanPhysicsConvert": true,
+                    "CanSafelyAnimate": true,
+                    "Summary": "Runtime sweep still required."
+                  },
+                  "ScenarioMatrix": [
+                    { "Name": "Core fit sweep", "Priority": "Action", "Regions": ["breasts"], "Checks": ["clip"], "Rationale": "Verify runtime fit." }
+                  ],
+                  "Checklist": []
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
+            Assert.Contains("REVIEW REQUIRED", snapshot.ValidationState.PreviewTabTitle, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesTopologyCorrespondenceMetrics()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
@@ -24148,8 +24198,8 @@ public sealed class OutputCompletenessTests
             referenceTokens: ["thin"],
             sliderNames: ["Body"],
             physicsBones: ["NPC Belly"],
-            expectedSemanticRegions: ["breasts", "belly", "thighs"],
-            expectedCollisionRegions: ["breasts", "belly", "thighs"],
+            expectedSemanticRegions: ["breasts"],
+            expectedCollisionRegions: ["breasts"],
             minimumPhysicsSlotCount: 3,
             minimumPhysicsChainDepth: 2,
             collisionComplexity: "extended",
@@ -24249,10 +24299,35 @@ public sealed class OutputCompletenessTests
             declaredPhysicsProfile: metadata.DefaultPhysics);
 
         Assert.DoesNotContain(warnings, warning => warning.StartsWith("physicsBones-", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(warnings, warning => warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void EvaluateTargetBodySupportQuality_MainstreamBuiltInWithFewReferenceTokensDoesNotWarn()
+    {
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("CBBE", out var metadata));
+        Assert.True(metadata.ReferenceTokens.Count < 3);
+
+        var warnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            metadata.ReferenceTokens,
+            metadata.SliderNames,
+            metadata.AvailablePhysicsBones,
+            metadata.ExpectedSemanticRegions,
+            metadata.ExpectedCollisionRegions,
+            metadata.MinimumPhysicsSlotCount,
+            metadata.MinimumPhysicsChainDepth,
+            metadata.CollisionComplexity,
+            hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
+                                 !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
+            requestedPhysicsProfile: metadata.DefaultPhysics,
+            physicsTokens: metadata.PhysicsTokens,
+            declaredPhysicsProfile: metadata.DefaultPhysics);
+
+        Assert.DoesNotContain(warnings, warning => warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -224,18 +224,28 @@ internal static class DesktopWorkflowAutomation
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Unsupported bones", StringComparison.OrdinalIgnoreCase) &&
              !string.IsNullOrWhiteSpace(metric.Value)));
-        var effectiveStatus = summary?.Status
-            ?? (requiresReview ? "needs-review" : previewAvailable ? "ready" : null);
+        var derivedStatus = requiresReview ? "needs-review" : previewAvailable ? "ready" : null;
+        var effectiveStatus = SelectStricterValidationStatus(summary?.Status, derivedStatus);
         return new DesktopWorkflowValidationState(
             ConversionValidationPresentation.BuildDesktopResultTabTitle("Preview", effectiveStatus),
             ConversionValidationPresentation.BuildDesktopResultTabTitle("Next actions", effectiveStatus),
             ConversionValidationPresentation.BuildDesktopStatusLabel(effectiveStatus, previewAvailable),
             summary is not null
-                ? ConversionValidationPresentation.BuildOutcomeSummary(summary, previewAvailable)
-                : ConversionValidationPresentation.BuildOutcomeSummary(requiresReview ? "needs-review" : previewAvailable ? "ready" : null, 0, 0, 0, previewAvailable),
+                ? ConversionValidationPresentation.BuildOutcomeSummary(
+                    effectiveStatus,
+                    summary.Score,
+                    summary.HighSeverityCount,
+                    summary.MediumSeverityCount + summary.LowSeverityCount,
+                    previewAvailable)
+                : ConversionValidationPresentation.BuildOutcomeSummary(derivedStatus, 0, 0, 0, previewAvailable),
             effectiveStatus,
             previewAvailable);
     }
+
+    private static string? SelectStricterValidationStatus(string? first, string? second) =>
+        ConversionValidationPresentation.GetGateRank(first) >= ConversionValidationPresentation.GetGateRank(second)
+            ? first ?? second
+            : second ?? first;
 
     private static void AppendReportMetrics(
         ICollection<DesktopWorkflowReportMetric> metrics,
