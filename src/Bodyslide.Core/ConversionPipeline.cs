@@ -806,6 +806,8 @@ internal static class ConversionValidationGuidance
                 "Open CalienteTools/BodySlide/ShapeData and confirm the generated reference NIF is present and opens in Outfit Studio, then re-run before release so BodySlide users can preview the outfit correctly.",
             "missing-bodyslide-slider-payload" =>
                 "Inspect CalienteTools/BodySlide/ShapeData for the expected BSD/TRI slider payloads, then rebuild the output before release so BodySlide users do not receive a partial morph package.",
+            "bodyslide-semantic-mismatch" =>
+                "Open the generated BodySlide OSP and ShapeData, then verify the OSP slider list, referenced source NIFs, and BSD/TRI payload slider coverage all agree before shipping the project to BodySlide or Outfit Studio users.",
             "missing-xedit-script" =>
                 "Re-run the conversion and confirm patch-armor.pas is packaged beside plugin-patches.json before release so manual xEdit patch follow-up remains available outside the app.",
             "missing-plugin-patch-report" =>
@@ -923,7 +925,7 @@ internal static class ConversionValidationGuidance
                 ["armor-pack-validation.json", "conversion-quality.json"],
             "missing-bodyslide-osp" =>
                 ["CalienteTools/BodySlide/SliderSets/", "conversion-quality.json"],
-            "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" =>
+            "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or "bodyslide-semantic-mismatch" =>
                 ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
             "missing-xedit-script" or "missing-plugin-patch-report" =>
                 ["plugin-patches.json", "conversion-quality.json"],
@@ -2024,7 +2026,12 @@ public sealed record CustomBodyProfile(
     double HeightToWidthRatioMin = 3.0,
     double HeightToWidthRatioMax = 8.5,
     double DepthToWidthRatioMin = 0.25,
-    double DepthToWidthRatioMax = 1.20);
+    double DepthToWidthRatioMax = 1.20,
+    IReadOnlyList<string>? ExpectedSemanticRegions = null,
+    IReadOnlyList<string>? ExpectedCollisionRegions = null,
+    int MinimumPhysicsSlotCount = 0,
+    int MinimumPhysicsChainDepth = 0,
+    string? CollisionComplexity = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
 public static class BodyTypeCatalog
@@ -2133,7 +2140,12 @@ public sealed record BodyTechnicalProfileInfo(
     /// The physics profile applied automatically for this body. One of: none, cbpc, smp, smp+cbpc.
     /// Any body can use any profile via the Physics override option.
     /// </summary>
-    string DefaultPhysics)
+    string DefaultPhysics,
+    IReadOnlyList<string> ExpectedSemanticRegions,
+    IReadOnlyList<string> ExpectedCollisionRegions,
+    int MinimumPhysicsSlotCount,
+    int MinimumPhysicsChainDepth,
+    string CollisionComplexity)
 {
     private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
         new(@"[^a-z0-9]+", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -2354,6 +2366,10 @@ public sealed record BodyTechnicalProfileInfo(
         {
             yield return sideBone;
         }
+
+        public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones);
+
+        public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones);
     }
 
     private readonly record struct SemanticBoneSlot(
@@ -2381,7 +2397,20 @@ public static class BodyTechnicalProfileCatalog
                 customProfile.SkeletonFoundation ?? customProfile.SkeletonFramework ?? "XPMSSE",
                 customProfile.PhysicsBones ?? [],
                 $"Custom body profile '{customProfile.Name}'.",
-                string.IsNullOrWhiteSpace(customProfile.PhysicsProfile) ? "none" : customProfile.PhysicsProfile);
+                string.IsNullOrWhiteSpace(customProfile.PhysicsProfile) ? "none" : customProfile.PhysicsProfile,
+                customProfile.ExpectedSemanticRegions
+                    ?? BodySupportMetadataHeuristics.InferExpectedSemanticRegions(customProfile.SliderNames, customProfile.PhysicsBones),
+                customProfile.ExpectedCollisionRegions
+                    ?? BodySupportMetadataHeuristics.InferExpectedCollisionRegions(customProfile.PhysicsBones, customProfile.SliderNames),
+                customProfile.MinimumPhysicsSlotCount > 0
+                    ? customProfile.MinimumPhysicsSlotCount
+                    : BodySupportMetadataHeuristics.CountPhysicsSlots(customProfile.PhysicsBones),
+                customProfile.MinimumPhysicsChainDepth > 0
+                    ? customProfile.MinimumPhysicsChainDepth
+                    : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(customProfile.PhysicsBones),
+                string.IsNullOrWhiteSpace(customProfile.CollisionComplexity)
+                    ? BodySupportMetadataHeuristics.InferCollisionComplexity(customProfile.PhysicsBones, customProfile.SliderNames)
+                    : customProfile.CollisionComplexity);
             return true;
         }
 
@@ -2395,7 +2424,12 @@ public static class BodyTechnicalProfileCatalog
             metadata.SkeletonFoundation,
             metadata.AvailablePhysicsBones,
             metadata.Notes,
-            metadata.DefaultPhysics);
+            metadata.DefaultPhysics,
+            metadata.ExpectedSemanticRegions,
+            metadata.ExpectedCollisionRegions,
+            metadata.MinimumPhysicsSlotCount,
+            metadata.MinimumPhysicsChainDepth,
+            metadata.CollisionComplexity);
         return true;
     }
 
@@ -6017,7 +6051,20 @@ internal static class CustomBodyProfileSupport
             heightToWidthRatioMin,
             NormalizeRatioMaximum(dto.HeightToWidthRatioMax, heightToWidthRatioMin, DefaultHeightToWidthRatioMax),
             depthToWidthRatioMin,
-            NormalizeRatioMaximum(dto.DepthToWidthRatioMax, depthToWidthRatioMin, DefaultDepthToWidthRatioMax));
+            NormalizeRatioMaximum(dto.DepthToWidthRatioMax, depthToWidthRatioMin, DefaultDepthToWidthRatioMax),
+            NormalizeNullableStringList(dto.ExpectedSemanticRegions)?
+                .Select(BodySupportMetadataHeuristics.NormalizeSupportRegion)
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            NormalizeNullableStringList(dto.ExpectedCollisionRegions)?
+                .Select(BodySupportMetadataHeuristics.NormalizeSupportRegion)
+                .Where(static region => !string.IsNullOrWhiteSpace(region))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            Math.Max(0, dto.MinimumPhysicsSlotCount),
+            Math.Max(0, dto.MinimumPhysicsChainDepth),
+            string.IsNullOrWhiteSpace(dto.CollisionComplexity) ? null : dto.CollisionComplexity.Trim());
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -6097,6 +6144,11 @@ internal static class CustomBodyProfileSupport
         public double HeightToWidthRatioMax { get; init; }
         public double DepthToWidthRatioMin { get; init; }
         public double DepthToWidthRatioMax { get; init; }
+        public string[]? ExpectedSemanticRegions { get; init; }
+        public string[]? ExpectedCollisionRegions { get; init; }
+        public int MinimumPhysicsSlotCount { get; init; }
+        public int MinimumPhysicsChainDepth { get; init; }
+        public string? CollisionComplexity { get; init; }
     }
 }
 
@@ -23210,6 +23262,95 @@ internal sealed class LocalExportService(
         bool HasBodySlidePayloadFiles(string directoryPath) =>
             HasAnyFile(directoryPath, "*.bsd") || HasAnyFile(directoryPath, "*.tri");
 
+        static string NormalizeSliderToken(string value) =>
+            new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+        IReadOnlyList<string> ValidateBodySlideSemanticConsistency(string ospPath, string shapeDataDirectory)
+        {
+            var problems = new List<string>();
+            if (!File.Exists(ospPath) || !Directory.Exists(shapeDataDirectory))
+            {
+                return problems;
+            }
+
+            try
+            {
+                var document = System.Xml.Linq.XDocument.Load(ospPath);
+                var sliderElements = document.Descendants()
+                    .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                var ospSliderNames = sliderElements
+                    .Select(static element => (string?)element.Attribute("name"))
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Select(static value => value!.Trim())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var missingOspSliders = bodySlideProject.Sliders
+                    .Where(expected => !ospSliderNames.Contains(expected))
+                    .ToArray();
+                if (missingOspSliders.Length > 0)
+                {
+                    problems.Add($"OSP slider list is missing: {string.Join(", ", missingOspSliders.Take(4))}");
+                }
+
+                var sourceFiles = document.Descendants()
+                    .Where(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
+                    .Select(static element => element.Value?.Trim())
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Select(static value => Path.GetFileName(value))
+                    .Where(static value => !string.IsNullOrWhiteSpace(value))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var missingSourceFiles = sourceFiles
+                    .Where(fileName => !File.Exists(Path.Combine(shapeDataDirectory, fileName!)))
+                    .Cast<string>()
+                    .ToArray();
+                if (missingSourceFiles.Length > 0)
+                {
+                    problems.Add($"OSP source references are missing ShapeData NIFs: {string.Join(", ", missingSourceFiles.Take(3))}");
+                }
+
+                var payloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var bsdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.bsd"))
+                {
+                    if (BsdMorphReader.TryRead(bsdPath, out var bsdPayload) && !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
+                    {
+                        payloadSliderNames.Add(NormalizeSliderToken(bsdPayload!.SliderName));
+                    }
+                }
+
+                foreach (var triPath in Directory.EnumerateFiles(shapeDataDirectory, "*.tri"))
+                {
+                    if (TriMorphReader.TryRead(triPath, out var triPayload))
+                    {
+                        foreach (var morph in triPayload!.Morphs)
+                        {
+                            if (!string.IsNullOrWhiteSpace(morph.Name))
+                            {
+                                payloadSliderNames.Add(NormalizeSliderToken(morph.Name));
+                            }
+                        }
+                    }
+                }
+
+                if (payloadSliderNames.Count > 0)
+                {
+                    var missingPayloadCoverage = bodySlideProject.Sliders
+                        .Where(expected => !payloadSliderNames.Contains(NormalizeSliderToken(expected)))
+                        .ToArray();
+                    if (missingPayloadCoverage.Length == bodySlideProject.Sliders.Count && bodySlideProject.Sliders.Count > 0)
+                    {
+                        problems.Add($"ShapeData payloads do not expose any expected BodySlide sliders for '{bodySlideProject.ProjectName}'.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                problems.Add($"OSP/ShapeData validation failed: {ex.Message}");
+            }
+
+            return problems;
+        }
+
         void AddMissingFileIssue(string relativePath, string code, string severity, string message)
         {
             var fullPath = Path.Combine(outputDirectory, relativePath);
@@ -23352,6 +23493,15 @@ internal sealed class LocalExportService(
                     "missing-bodyslide-slider-payload",
                     "medium",
                     $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI slider payload files, so the generated project cannot rebuild slider morphs correctly."));
+            }
+
+            var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, shapeDataDirectory);
+            if (semanticProblems.Count > 0)
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "bodyslide-semantic-mismatch",
+                    "medium",
+                    $"BodySlide project '{bodySlideProject.ProjectName}' has inconsistent OSP/ShapeData content: {string.Join(" | ", semanticProblems.Take(3))}"));
             }
         }
 
@@ -23614,7 +23764,8 @@ internal sealed class LocalExportService(
     private sealed record TargetBodySupportAssessment(
         bool HasBuiltInCoverage,
         CustomBodyProfile? CustomProfile,
-        IReadOnlyList<string> MissingFields);
+        IReadOnlyList<string> MissingFields,
+        IReadOnlyList<string> QualityWarnings);
 
     private static TargetBodySupportAssessment AssessTargetBodySupport(
         ImportedArmor armor,
@@ -23623,7 +23774,7 @@ internal sealed class LocalExportService(
     {
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out _))
         {
-            return new TargetBodySupportAssessment(true, null, []);
+            return new TargetBodySupportAssessment(true, null, [], []);
         }
 
         if (!CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
@@ -23633,18 +23784,28 @@ internal sealed class LocalExportService(
                 null,
                 requestedPhysicsProfile.Equals("none", StringComparison.OrdinalIgnoreCase)
                     ? ["referenceTokens", "sliderNames", "skeletonFoundation/skeletonFramework"]
-                    : ["referenceTokens", "sliderNames", "skeletonFoundation/skeletonFramework", "physicsBones"]);
+                    : ["referenceTokens", "sliderNames", "skeletonFoundation/skeletonFramework", "physicsBones"],
+                []);
         }
 
         var missingFields = new List<string>();
+        var qualityWarnings = new List<string>();
         if (customProfile.ReferenceTokens is not { Count: > 0 })
         {
             missingFields.Add("referenceTokens");
+        }
+        else if (customProfile.ReferenceTokens.Count < 3)
+        {
+            qualityWarnings.Add("referenceTokens-quality");
         }
 
         if (customProfile.SliderNames is not { Count: > 0 })
         {
             missingFields.Add("sliderNames");
+        }
+        else if (customProfile.SliderNames.Count < 3)
+        {
+            qualityWarnings.Add("sliderNames-quality");
         }
 
         var hasSkeletonMetadata =
@@ -23663,7 +23824,45 @@ internal sealed class LocalExportService(
             missingFields.Add("physicsBones");
         }
 
-        return new TargetBodySupportAssessment(false, customProfile, missingFields);
+        var semanticRegions = customProfile.ExpectedSemanticRegions?.Count > 0
+            ? customProfile.ExpectedSemanticRegions
+            : BodySupportMetadataHeuristics.InferExpectedSemanticRegions(customProfile.SliderNames, customProfile.PhysicsBones);
+        var collisionRegions = customProfile.ExpectedCollisionRegions?.Count > 0
+            ? customProfile.ExpectedCollisionRegions
+            : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(customProfile.PhysicsBones, customProfile.SliderNames);
+        var minimumPhysicsSlotCount = customProfile.MinimumPhysicsSlotCount > 0
+            ? customProfile.MinimumPhysicsSlotCount
+            : BodySupportMetadataHeuristics.CountPhysicsSlots(customProfile.PhysicsBones);
+        var minimumPhysicsChainDepth = customProfile.MinimumPhysicsChainDepth > 0
+            ? customProfile.MinimumPhysicsChainDepth
+            : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(customProfile.PhysicsBones);
+        var actualPhysicsSlotCount = BodySupportMetadataHeuristics.CountPhysicsSlots(customProfile.PhysicsBones);
+        var actualPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(customProfile.PhysicsBones);
+
+        if (semanticRegions.Count < 3)
+        {
+            qualityWarnings.Add("expectedSemanticRegions-quality");
+        }
+
+        if (!string.Equals(requestedPhysicsProfile, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            if (collisionRegions.Count == 0)
+            {
+                qualityWarnings.Add("expectedCollisionRegions-quality");
+            }
+
+            if (actualPhysicsSlotCount > 0 && actualPhysicsSlotCount < minimumPhysicsSlotCount)
+            {
+                qualityWarnings.Add("physicsBones-slot-coverage");
+            }
+
+            if (actualPhysicsChainDepth > 0 && actualPhysicsChainDepth < minimumPhysicsChainDepth)
+            {
+                qualityWarnings.Add("physicsBones-chain-depth");
+            }
+        }
+
+        return new TargetBodySupportAssessment(false, customProfile, missingFields, qualityWarnings);
     }
 
     private static bool TryBuildTargetBodyProfileTemplate(
@@ -23677,7 +23876,7 @@ internal sealed class LocalExportService(
         out string json)
     {
         json = string.Empty;
-        if (assessment.HasBuiltInCoverage || assessment.MissingFields.Count == 0 && assessment.CustomProfile is null)
+        if (assessment.HasBuiltInCoverage || (assessment.MissingFields.Count == 0 && assessment.QualityWarnings.Count == 0))
         {
             return false;
         }
@@ -23730,6 +23929,21 @@ internal sealed class LocalExportService(
         var inferredSliderNames = profile?.SliderNames is { Count: > 0 }
             ? profile.SliderNames
             : BuildSuggestedSliderNames(bodySlideProject.Sliders, inferredMetadata, inferredSkeletonFramework, inferredPhysicsBones, targetBody);
+        var inferredExpectedSemanticRegions = profile?.ExpectedSemanticRegions is { Count: > 0 }
+            ? profile.ExpectedSemanticRegions
+            : BodySupportMetadataHeuristics.InferExpectedSemanticRegions(inferredSliderNames, inferredPhysicsBones, (profile?.TransformationField ?? inferredMetadata?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField()).Keys);
+        var inferredExpectedCollisionRegions = profile?.ExpectedCollisionRegions is { Count: > 0 }
+            ? profile.ExpectedCollisionRegions
+            : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(inferredPhysicsBones, inferredSliderNames, inferredMetadata?.PhysicsBoneSignatures);
+        var inferredMinimumPhysicsSlotCount = profile?.MinimumPhysicsSlotCount > 0
+            ? profile.MinimumPhysicsSlotCount
+            : Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsSlots(inferredPhysicsBones));
+        var inferredMinimumPhysicsChainDepth = profile?.MinimumPhysicsChainDepth > 0
+            ? profile.MinimumPhysicsChainDepth
+            : Math.Max(1, BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(inferredPhysicsBones, inferredMetadata?.PhysicsBoneSignatures));
+        var inferredCollisionComplexity = !string.IsNullOrWhiteSpace(profile?.CollisionComplexity)
+            ? profile!.CollisionComplexity
+            : BodySupportMetadataHeuristics.InferCollisionComplexity(inferredPhysicsBones, inferredSliderNames, inferredMetadata?.PhysicsBoneSignatures);
         var (vertexCountMin, vertexCountMax) = GetSuggestedVertexRange(sourceNifSupport);
         var bodyOutputPath = !string.IsNullOrWhiteSpace(profile?.BodyOutputPath)
             ? profile!.BodyOutputPath
@@ -23757,7 +23971,12 @@ internal sealed class LocalExportService(
             ["heightToWidthRatioMin"] = profile?.HeightToWidthRatioMin ?? inferredMetadata?.HeightToWidthRatioMin ?? 3.0,
             ["heightToWidthRatioMax"] = profile?.HeightToWidthRatioMax ?? inferredMetadata?.HeightToWidthRatioMax ?? 8.5,
             ["depthToWidthRatioMin"] = profile?.DepthToWidthRatioMin ?? inferredMetadata?.DepthToWidthRatioMin ?? 0.25,
-            ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? inferredMetadata?.DepthToWidthRatioMax ?? 1.20
+            ["depthToWidthRatioMax"] = profile?.DepthToWidthRatioMax ?? inferredMetadata?.DepthToWidthRatioMax ?? 1.20,
+            ["expectedSemanticRegions"] = inferredExpectedSemanticRegions,
+            ["expectedCollisionRegions"] = inferredExpectedCollisionRegions,
+            ["minimumPhysicsSlotCount"] = inferredMinimumPhysicsSlotCount,
+            ["minimumPhysicsChainDepth"] = inferredMinimumPhysicsChainDepth,
+            ["collisionComplexity"] = inferredCollisionComplexity
         };
 
         json = JsonSerializer.Serialize(
@@ -23836,7 +24055,26 @@ internal sealed class LocalExportService(
             ["heightToWidthRatioMin"] = inferredMetadata?.HeightToWidthRatioMin ?? 3.0,
             ["heightToWidthRatioMax"] = inferredMetadata?.HeightToWidthRatioMax ?? 8.5,
             ["depthToWidthRatioMin"] = inferredMetadata?.DepthToWidthRatioMin ?? 0.25,
-            ["depthToWidthRatioMax"] = inferredMetadata?.DepthToWidthRatioMax ?? 1.20
+            ["depthToWidthRatioMax"] = inferredMetadata?.DepthToWidthRatioMax ?? 1.20,
+            ["expectedSemanticRegions"] = BodySupportMetadataHeuristics.InferExpectedSemanticRegions(
+                BuildSuggestedSliderNames(
+                    DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                    inferredMetadata,
+                    inferredSkeletonFramework,
+                    ExtractSuggestedPhysicsBones(physics),
+                    suggestedName),
+                ExtractSuggestedPhysicsBones(physics),
+                (inferredMetadata?.TransformationField ?? BodyTransformationFieldCatalog.CreateFallbackField()).Keys),
+            ["expectedCollisionRegions"] = BodySupportMetadataHeuristics.InferExpectedCollisionRegions(
+                ExtractSuggestedPhysicsBones(physics),
+                DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                inferredMetadata?.PhysicsBoneSignatures),
+            ["minimumPhysicsSlotCount"] = Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsSlots(ExtractSuggestedPhysicsBones(physics))),
+            ["minimumPhysicsChainDepth"] = Math.Max(1, BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(ExtractSuggestedPhysicsBones(physics), inferredMetadata?.PhysicsBoneSignatures)),
+            ["collisionComplexity"] = BodySupportMetadataHeuristics.InferCollisionComplexity(
+                ExtractSuggestedPhysicsBones(physics),
+                DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                inferredMetadata?.PhysicsBoneSignatures)
         };
 
         json = JsonSerializer.Serialize(
@@ -24268,19 +24506,32 @@ internal sealed class LocalExportService(
             return true;
         }
 
-        if (assessment.MissingFields.Count == 0)
+        if (assessment.MissingFields.Count == 0 && assessment.QualityWarnings.Count == 0)
         {
             return false;
         }
 
         var severity = assessment.MissingFields.Contains("physicsBones", StringComparer.OrdinalIgnoreCase) ||
-                       assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase)
+                       assessment.MissingFields.Contains("skeletonFoundation/skeletonFramework", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.QualityWarnings.Contains("physicsBones-slot-coverage", StringComparer.OrdinalIgnoreCase) ||
+                       assessment.QualityWarnings.Contains("physicsBones-chain-depth", StringComparer.OrdinalIgnoreCase)
             ? "high"
             : "medium";
+        var details = new List<string>();
+        if (assessment.MissingFields.Count > 0)
+        {
+            details.Add($"missing metadata ({string.Join(", ", assessment.MissingFields)})");
+        }
+
+        if (assessment.QualityWarnings.Count > 0)
+        {
+            details.Add($"weak metadata quality ({string.Join(", ", assessment.QualityWarnings)})");
+        }
+
         issue = new ConversionValidationIssue(
             "incomplete-target-body-support",
             severity,
-            $"Custom target body profile '{assessment.CustomProfile.Name}' is missing support metadata ({string.Join(", ", assessment.MissingFields)}). Conversion can proceed, but certainty stays limited until those fields are supplied.");
+            $"Custom target body profile '{assessment.CustomProfile.Name}' has incomplete support coverage: {string.Join("; ", details)}. Conversion can proceed, but certainty stays limited until those fields are supplied or strengthened.");
         return true;
     }
 

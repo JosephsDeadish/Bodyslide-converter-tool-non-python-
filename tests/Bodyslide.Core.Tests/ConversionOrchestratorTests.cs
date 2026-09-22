@@ -14054,6 +14054,11 @@ public sealed class BodyTypeCatalogTests
                 Assert.True(profile.PhysicsBoneMap.ContainsKey("belly"));
             }
             Assert.NotEmpty(profile.PhysicsBoneGroups);
+            Assert.NotEmpty(profile.ExpectedSemanticRegions);
+            Assert.NotEmpty(profile.ExpectedCollisionRegions);
+            Assert.True(profile.MinimumPhysicsSlotCount >= 0);
+            Assert.True(profile.MinimumPhysicsChainDepth >= 0);
+            Assert.False(string.IsNullOrWhiteSpace(profile.CollisionComplexity));
         }
     }
 
@@ -24056,6 +24061,75 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public void BuildPackageArtifactIssues_FlagsBodySlideSemanticMismatch()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "SemanticProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="SemanticProject" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\SemanticProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\SemanticProject\missing_source_0.nif</SourceFile>
+                    <OutputPath>meshes\armor\semantic\</OutputPath>
+                    <OutputFile gender="f" use="true">semantic_0.nif</OutputFile>
+                    <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "SemanticProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "semantic_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdBytes("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                outputDirectory,
+                [],
+                new BodySlideProject("SemanticProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_WhenOutputZipEnabled_ReturnsZipAlongsideGeneratedArtifacts()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -24290,6 +24364,10 @@ public sealed class OutputCompletenessTests
             var templateJson = await File.ReadAllTextAsync(templatePath);
             Assert.Contains("\"name\": \"CustomMystery\"", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"sliderNames\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"expectedSemanticRegions\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"expectedCollisionRegions\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"minimumPhysicsSlotCount\":", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"collisionComplexity\":", templateJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -24368,6 +24446,76 @@ public sealed class OutputCompletenessTests
     }
 
     [Fact]
+    public async Task ExportAsync_ShallowCustomTargetProfile_SurfacesQualityCoverageIssue()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var nifPath = Path.Combine(tmpDir, "cuirass_0.nif");
+        await File.WriteAllBytesAsync(nifPath, new byte[128]);
+
+        try
+        {
+            var service = new LocalExportService(groundMeshGen: null);
+            var outputDir = Path.Combine(tmpDir, "output");
+            Directory.CreateDirectory(outputDir);
+
+            var request = new ConversionRequest(nifPath, "ThinFollower", OutputDirectory: outputDir, PhysicsProfileOverride: "smp");
+            var armor = new ImportedArmor(
+                nifPath,
+                [nifPath],
+                [],
+                [],
+                [],
+                CustomBodyProfiles:
+                [
+                    new CustomBodyProfile(
+                        Name: "ThinFollower",
+                        DetectionTokens: ["thinfollower"],
+                        TextureTokens: [],
+                        PhysicsTokens: ["smp"],
+                        VertexCountMin: 0,
+                        VertexCountMax: 0,
+                        TransformationField: new Dictionary<string, double>(),
+                        SliderNames: ["Body"],
+                        PhysicsBones: ["NPC Belly"],
+                        PhysicsProfile: "smp",
+                        ReferenceTokens: ["thin"],
+                        SkeletonFramework: "xpmsse")
+                ]);
+            var analysis = new MeshAnalysis("plate", false, 1);
+            var mesh = new ConvertedMesh("plate", "direct-copy", 1, new Dictionary<string, double>());
+            var morphs = new MorphSet("low", "high", true);
+            var physics = new PhysicsConfig("smp");
+            var clipping = new ClippingReport(false, [], []);
+            var correction = new CorrectionResult(false, "not-required");
+            var bsProject = new BodySlideProject("ThinFollowerProject", "ThinFollower", ["Belly"], "<BodySlideProject/>");
+            var pluginResult = new PluginAnalysisResult([], [], string.Empty);
+            var textures = new TextureSummary(0, [], [], []);
+            var pose = new PoseSimulationResult([], new Dictionary<string, IReadOnlyList<string>>(), [], 0);
+            var detected = new BodyDetectionReport("CBBE", 0.94, ["vertex-density:high"]);
+            var skel = new SkeletonMappingResult("XPMSSE", "ThinFollower", [], []);
+            var voxel = new VoxelCollisionResult(false, [], new Dictionary<string, double>(), 16);
+
+            var (_, files) = await service.ExportAsync(
+                request, armor, analysis, mesh, morphs, physics,
+                clipping, correction, bsProject, pluginResult,
+                textures, pose, ["step1"],
+                detected, skel, null, voxel,
+                CancellationToken.None);
+
+            var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("\"Code\": \"incomplete-target-body-support\"", qualityJson);
+            Assert.Contains("referenceTokens-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("sliderNames-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("expectedSemanticRegions-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ExportAsync_CustomDetection_WritesDetectedSourceStarterTemplate()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -24418,6 +24566,8 @@ public sealed class OutputCompletenessTests
             Assert.Contains("MandibleSpread", templateJson, StringComparison.Ordinal);
             Assert.Contains("AntennaLength", templateJson, StringComparison.Ordinal);
             Assert.Contains("AbdomenLength", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"expectedSemanticRegions\": [", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"minimumPhysicsChainDepth\":", templateJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -24472,6 +24622,7 @@ public sealed class OutputCompletenessTests
             Assert.Contains("ManeLength", templateJson, StringComparison.Ordinal);
             Assert.Contains("TailBase", templateJson, StringComparison.Ordinal);
             Assert.Contains("\"bodyOutputPath\":", templateJson, StringComparison.Ordinal);
+            Assert.Contains("\"collisionComplexity\":", templateJson, StringComparison.Ordinal);
         }
         finally
         {

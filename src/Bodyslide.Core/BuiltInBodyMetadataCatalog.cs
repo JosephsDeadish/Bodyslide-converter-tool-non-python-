@@ -24,7 +24,12 @@ internal sealed record BuiltInBodyMetadata(
     double DepthToWidthRatioMin,
     double DepthToWidthRatioMax,
     IReadOnlyList<string> PhysicsBoneSignatures,
-    string SkeletonFramework)
+    string SkeletonFramework,
+    IReadOnlyList<string> ExpectedSemanticRegions,
+    IReadOnlyList<string> ExpectedCollisionRegions,
+    int MinimumPhysicsSlotCount,
+    int MinimumPhysicsChainDepth,
+    string CollisionComplexity)
 {
     public BodySignatureTemplate ToSignatureTemplate() =>
         new(
@@ -213,7 +218,22 @@ internal static class BuiltInBodyMetadataCatalog
             dto.DepthToWidthRatioMin,
             dto.DepthToWidthRatioMax,
             NormalizeStringList(dto.PhysicsBoneSignatures),
-            string.IsNullOrWhiteSpace(dto.SkeletonFramework) ? "xpmsse" : dto.SkeletonFramework.Trim());
+            string.IsNullOrWhiteSpace(dto.SkeletonFramework) ? "xpmsse" : dto.SkeletonFramework.Trim(),
+            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedSemanticRegions)
+                .NullIfEmpty()
+                ?? BodySupportMetadataHeuristics.InferExpectedSemanticRegions(dto.SliderNames, dto.AvailablePhysicsBones, dto.TransformationField?.Keys),
+            BodySupportMetadataHeuristics.NormalizeSupportRegionList(dto.ExpectedCollisionRegions)
+                .NullIfEmpty()
+                ?? BodySupportMetadataHeuristics.InferExpectedCollisionRegions(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures),
+            dto.MinimumPhysicsSlotCount > 0
+                ? dto.MinimumPhysicsSlotCount
+                : BodySupportMetadataHeuristics.CountPhysicsSlots(dto.AvailablePhysicsBones),
+            dto.MinimumPhysicsChainDepth > 0
+                ? dto.MinimumPhysicsChainDepth
+                : BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(dto.AvailablePhysicsBones, dto.PhysicsBoneSignatures),
+            string.IsNullOrWhiteSpace(dto.CollisionComplexity)
+                ? BodySupportMetadataHeuristics.InferCollisionComplexity(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures)
+                : dto.CollisionComplexity.Trim());
     }
 
     private static IReadOnlyDictionary<string, double> NormalizeTransformationField(Dictionary<string, double>? rawField)
@@ -272,5 +292,153 @@ internal static class BuiltInBodyMetadataCatalog
         public double DepthToWidthRatioMax { get; init; }
         public string[]? PhysicsBoneSignatures { get; init; }
         public string? SkeletonFramework { get; init; }
+        public string[]? ExpectedSemanticRegions { get; init; }
+        public string[]? ExpectedCollisionRegions { get; init; }
+        public int MinimumPhysicsSlotCount { get; init; }
+        public int MinimumPhysicsChainDepth { get; init; }
+        public string? CollisionComplexity { get; init; }
     }
+}
+
+internal static class BodySupportMetadataHeuristics
+{
+    public static IReadOnlyList<string> NormalizeSupportRegionList(IEnumerable<string>? values) =>
+        values?
+            .Select(NormalizeSupportRegion)
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+    public static IReadOnlyList<string> InferExpectedSemanticRegions(
+        IEnumerable<string>? sliderNames,
+        IEnumerable<string>? physicsBones,
+        IEnumerable<string>? transformRegions = null)
+    {
+        return NormalizeSupportRegionList((sliderNames ?? [])
+            .Concat(physicsBones ?? [])
+            .Concat(transformRegions ?? []));
+    }
+
+    public static IReadOnlyList<string> InferExpectedCollisionRegions(
+        IEnumerable<string>? physicsBones,
+        IEnumerable<string>? sliderNames,
+        IEnumerable<string>? physicsBoneSignatures = null)
+    {
+        var physicsRegions = NormalizeSupportRegionList((physicsBones ?? []).Concat(physicsBoneSignatures ?? []));
+        if (physicsRegions.Count > 0)
+        {
+            return physicsRegions;
+        }
+
+        return NormalizeSupportRegionList(sliderNames);
+    }
+
+    public static int CountPhysicsSlots(IEnumerable<string>? physicsBones)
+    {
+        var slots = NormalizeSupportRegionList(physicsBones);
+        return Math.Max(slots.Count, 0);
+    }
+
+    public static int EstimatePhysicsChainDepth(IEnumerable<string>? physicsBones, IEnumerable<string>? physicsBoneSignatures = null)
+    {
+        var tokens = (physicsBones ?? [])
+            .Concat(physicsBoneSignatures ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        if (tokens.Length == 0)
+        {
+            return 0;
+        }
+
+        var depth = 1;
+        foreach (var token in tokens)
+        {
+            var lower = token.Trim().ToLowerInvariant();
+            if (lower.Contains("01", StringComparison.Ordinal) ||
+                lower.Contains("mid", StringComparison.Ordinal) ||
+                lower.Contains("upper", StringComparison.Ordinal) ||
+                lower.Contains("root", StringComparison.Ordinal) ||
+                lower.Contains("base", StringComparison.Ordinal))
+            {
+                depth = Math.Max(depth, 2);
+            }
+
+            if (lower.Contains("02", StringComparison.Ordinal) ||
+                lower.Contains("03", StringComparison.Ordinal) ||
+                lower.Contains("tip", StringComparison.Ordinal) ||
+                lower.Contains("lower", StringComparison.Ordinal) ||
+                lower.Contains("outer", StringComparison.Ordinal) ||
+                lower.Contains("inner", StringComparison.Ordinal))
+            {
+                depth = Math.Max(depth, 3);
+            }
+        }
+
+        return depth;
+    }
+
+    public static string InferCollisionComplexity(
+        IEnumerable<string>? physicsBones,
+        IEnumerable<string>? sliderNames,
+        IEnumerable<string>? physicsBoneSignatures = null)
+    {
+        var collisionRegions = InferExpectedCollisionRegions(physicsBones, sliderNames, physicsBoneSignatures);
+        var chainDepth = EstimatePhysicsChainDepth(physicsBones, physicsBoneSignatures);
+        var slotCount = CountPhysicsSlots(physicsBones);
+        if (collisionRegions.Count >= 6 || slotCount >= 6 || chainDepth >= 3)
+        {
+            return "extended";
+        }
+
+        if (collisionRegions.Count >= 3 || slotCount >= 3 || chainDepth >= 2)
+        {
+            return "standard";
+        }
+
+        return collisionRegions.Count > 0 || slotCount > 0 ? "minimal" : "none";
+    }
+
+    public static string NormalizeSupportRegion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var v = value.Trim();
+        return v switch
+        {
+            var text when text.Contains("breast", StringComparison.OrdinalIgnoreCase) || text.Contains("pec", StringComparison.OrdinalIgnoreCase) => "breasts",
+            var text when text.Contains("belly", StringComparison.OrdinalIgnoreCase) || text.Contains("abdomen", StringComparison.OrdinalIgnoreCase) || text.Contains("waist", StringComparison.OrdinalIgnoreCase) => "belly",
+            var text when text.Contains("butt", StringComparison.OrdinalIgnoreCase) || text.Contains("glute", StringComparison.OrdinalIgnoreCase) || text.Contains("hip", StringComparison.OrdinalIgnoreCase) => "butt",
+            var text when text.Contains("thigh", StringComparison.OrdinalIgnoreCase) || text.Contains("upperleg", StringComparison.OrdinalIgnoreCase) => "thighs",
+            var text when text.Contains("calf", StringComparison.OrdinalIgnoreCase) => "calves",
+            var text when text.Contains("pelvis", StringComparison.OrdinalIgnoreCase) => "pelvis",
+            var text when text.Contains("chest", StringComparison.OrdinalIgnoreCase) => "chest",
+            var text when text.Contains("shoulder", StringComparison.OrdinalIgnoreCase) || text.Contains("clavicle", StringComparison.OrdinalIgnoreCase) => "shoulders",
+            var text when text.Contains("arm", StringComparison.OrdinalIgnoreCase) && !text.Contains("arma", StringComparison.OrdinalIgnoreCase) => "arms",
+            var text when text.Contains("jaw", StringComparison.OrdinalIgnoreCase) => "jaw",
+            var text when text.Contains("tongue", StringComparison.OrdinalIgnoreCase) => "tongue",
+            var text when text.Contains("throat", StringComparison.OrdinalIgnoreCase) => "throat",
+            var text when text.Contains("mouth", StringComparison.OrdinalIgnoreCase) => "mouth",
+            var text when text.Contains("vagina", StringComparison.OrdinalIgnoreCase) || text.Contains("labia", StringComparison.OrdinalIgnoreCase) => "vagina",
+            var text when text.Contains("anus", StringComparison.OrdinalIgnoreCase) => "anus",
+            var text when text.Contains("genital", StringComparison.OrdinalIgnoreCase) || text.Contains("shaft", StringComparison.OrdinalIgnoreCase) || text.Contains("glans", StringComparison.OrdinalIgnoreCase) || text.Contains("foreskin", StringComparison.OrdinalIgnoreCase) || text.Contains("sheath", StringComparison.OrdinalIgnoreCase) || text.Contains("scrot", StringComparison.OrdinalIgnoreCase) || text.Contains("knot", StringComparison.OrdinalIgnoreCase) || text.Contains("balls", StringComparison.OrdinalIgnoreCase) => "genitals",
+            var text when text.Contains("tail", StringComparison.OrdinalIgnoreCase) => "tail",
+            var text when text.Contains("paw", StringComparison.OrdinalIgnoreCase) || text.Contains("hoof", StringComparison.OrdinalIgnoreCase) || text.Contains("hock", StringComparison.OrdinalIgnoreCase) || text.Contains("foot", StringComparison.OrdinalIgnoreCase) || text.Contains("talon", StringComparison.OrdinalIgnoreCase) => "feet",
+            var text when text.Contains("wing", StringComparison.OrdinalIgnoreCase) || text.Contains("feather", StringComparison.OrdinalIgnoreCase) => "wing",
+            var text when text.Contains("fin", StringComparison.OrdinalIgnoreCase) => "fin",
+            var text when text.Contains("frill", StringComparison.OrdinalIgnoreCase) => "frill",
+            var text when text.Contains("antenna", StringComparison.OrdinalIgnoreCase) || text.Contains("feeler", StringComparison.OrdinalIgnoreCase) => "antenna",
+            var text when text.Contains("mandible", StringComparison.OrdinalIgnoreCase) => "mandible",
+            var text when text.Contains("horn", StringComparison.OrdinalIgnoreCase) => "horn",
+            var text when text.Contains("branch", StringComparison.OrdinalIgnoreCase) || text.Contains("vine", StringComparison.OrdinalIgnoreCase) || text.Contains("tendril", StringComparison.OrdinalIgnoreCase) => "branch",
+            var text when text.Contains("mane", StringComparison.OrdinalIgnoreCase) || text.Contains("forelock", StringComparison.OrdinalIgnoreCase) => "mane",
+            _ => string.Empty
+        };
+    }
+
+    private static IReadOnlyList<string>? NullIfEmpty(this IReadOnlyList<string> values) =>
+        values.Count == 0 ? null : values;
 }

@@ -204,12 +204,17 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `zapSliderNames`
 - `physicsBones`
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
+- `expectedSemanticRegions`
+- `expectedCollisionRegions`
+- `minimumPhysicsSlotCount`
+- `minimumPhysicsChainDepth`
+- `collisionComplexity` (`none`, `minimal`, `standard`, `extended`)
 - `gender` (`female` or `male`)
 - `bodyOutputPath`
 - `skeletonFoundation`
 - `skeletonFramework`
 
-When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them.
+When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them. Those starter templates now include semantic-region, collision-region, and physics-depth hints so support quality can be strengthened instead of only naming the body and sliders.
 
 ## Support tiers
 
