@@ -13398,11 +13398,8 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             AddPathTokens(cues, Path.GetFileNameWithoutExtension(physicsFile));
         }
 
-        foreach (var pluginFile in armor.PluginFiles)
-        {
-            AddPathTokens(cues, pluginFile);
-            AddPathTokens(cues, Path.GetFileNameWithoutExtension(pluginFile));
-        }
+        AddPathTokens(cues, armor.SourcePath);
+        AddPathTokens(cues, Path.GetFileNameWithoutExtension(armor.SourcePath));
 
         if (armor.CustomBodyProfiles is { Count: > 0 } customProfiles)
         {
@@ -28364,11 +28361,8 @@ internal sealed class LocalExportService(
             AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(physicsPath));
         }
 
-        foreach (var pluginPath in armor.PluginFiles)
-        {
-            AddSemanticAnchorPathTokens(observedTokens, pluginPath);
-            AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(pluginPath));
-        }
+        AddSemanticAnchorPathTokens(observedTokens, armor.SourcePath);
+        AddSemanticAnchorPathTokens(observedTokens, Path.GetFileNameWithoutExtension(armor.SourcePath));
 
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
         {
