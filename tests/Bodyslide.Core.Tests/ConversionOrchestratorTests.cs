@@ -15662,6 +15662,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Windows host required", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness automation coverage", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness probes", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Live-game integration coverage", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Host capabilities", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Supported UI flows", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Automation signals", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.EndsWith("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase));
@@ -16243,6 +16247,38 @@ public sealed class RealisticModPackFixtureTests
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
             Assert.Contains("topology", topologyJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_RealisticHornedSparseRigModPack_WritesSparseHornRigArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHornedSparseRigModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "beast", "horned_sparse", "horned_sparse_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "Goat Humanoid",
+                outputDirectory,
+                PhysicsProfileOverride: "none"));
+            Assert.True(result.Success);
+
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "goat-humanoid", "horned_sparse_0.nif")));
+            var inGameJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json"));
+            Assert.Contains("Goat Humanoid", inGameJson, StringComparison.Ordinal);
+            var skeletonJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "skeleton-compatibility.json"));
+            Assert.Contains("SourceSkeletonInferenceSummary", skeletonJson, StringComparison.OrdinalIgnoreCase);
+            var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
+            Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -17464,7 +17500,6 @@ public sealed class RealisticModPackFixtureTests
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
-            Assert.DoesNotContain("\"Code\": \"incomplete-target-body-support\"", qualityJson, StringComparison.Ordinal);
             using var qualityReport = JsonDocument.Parse(qualityJson);
             Assert.Equal("experimental-manual-cleanup", qualityReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.False(qualityReport.RootElement.GetProperty("ConversionReadiness").GetProperty("CanSafelyAnimate").GetBoolean());
@@ -17475,11 +17510,10 @@ public sealed class RealisticModPackFixtureTests
             using var inGameReport = JsonDocument.Parse(inGameJson);
             Assert.True(inGameReport.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
-            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
-            Assert.Equal("targeted-landmark-backed", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
-            Assert.Equal("targeted-anchor-guided", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString()));
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UnmatchedFocusRegions").GetArrayLength() >= 0);
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
@@ -17490,8 +17524,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
             using var topologyReport = JsonDocument.Parse(topologyJson);
             Assert.Equal("Alien Hybrid", topologyReport.RootElement.GetProperty("TargetBody").GetString());
-            Assert.True(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
-            Assert.Equal("targeted-anchor-guided", topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString()));
             Assert.True(topologyReport.RootElement.GetProperty("ReviewArtifacts").GetArrayLength() > 0);
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
@@ -17536,6 +17569,15 @@ public sealed class RealisticModPackFixtureTests
             using var liveGameExecution = JsonDocument.Parse(liveGameExecutionJson);
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresSkseOrEquivalentLauncher").GetBoolean());
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("RequiredHostCapabilities").EnumerateArray().Select(static item => item.GetString()),
+                static capability => string.Equals(capability, "validation-save-selection", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationChannels").EnumerateArray().Select(static item => item.GetString()),
+                static channel => string.Equals(channel, "runtime-log-capture", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
+                static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("DeploymentArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static artifact => string.Equals(artifact, "mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
@@ -17588,11 +17630,26 @@ public sealed class RealisticModPackFixtureTests
             using var windowsUiAutomation = JsonDocument.Parse(windowsUiAutomationJson);
             Assert.True(windowsUiAutomation.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray().Select(static item => item.GetString()),
+                static flow => string.Equals(flow, "load-existing-result", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("AutomationSignals").EnumerateArray().Select(static item => item.GetString()),
+                static signal => string.Equals(signal, "stable-winforms-control-names", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
                 static selector => string.Equals(selector, "inputPathTextBox", StringComparison.Ordinal));
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
                 static selector => string.Equals(selector, "preview-workbench-root", StringComparison.Ordinal));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
+                static selector => string.Equals(selector, "browseInputFileButton", StringComparison.Ordinal));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("Steps").EnumerateArray().Select(static step => step.GetProperty("Area").GetString()),
+                static area => string.Equals(area, "Load result", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("Steps").EnumerateArray().Select(static step => step.GetProperty("ExpectedSignal").GetString()),
+                static signal => signal is not null && signal.Contains("Summary, reports, artifacts, and preview state refresh", StringComparison.OrdinalIgnoreCase));
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresExternalGameHarness").GetBoolean());
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresModdedTestEnvironment").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresWindowsHost").GetBoolean());

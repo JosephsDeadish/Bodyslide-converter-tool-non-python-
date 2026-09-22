@@ -1,0 +1,30 @@
+{
+  "name": "HornedSparseRig",
+  "aliases": [
+    "Caprine Sparse",
+    "Goatkin Sparse"
+  ],
+  "referenceTokens": [
+    "horned",
+    "goat",
+    "caprine",
+    "sparse"
+  ],
+  "sliderNames": [
+    "HornSpread",
+    "HornCurl",
+    "Belly",
+    "Thighs"
+  ],
+  "physicsBones": [
+    "GoatHorn.L",
+    "GoatHorn.R",
+    "HornTip.L",
+    "HornTip.R"
+  ],
+  "physicsProfile": "none",
+  "gender": "female",
+  "skeletonFoundation": "Horned beast-humanoid skeleton",
+  "skeletonFramework": "horned-humanoid",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+}
