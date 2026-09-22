@@ -17654,6 +17654,22 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(runtimePlan.RootElement.GetProperty("RequiresModdedTestEnvironment").GetBoolean());
             Assert.True(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.False(desktopAutomation.RootElement.GetProperty("AutomationContract").GetProperty("SupportsAutomatedWebViewInteraction").GetBoolean());
+
+            using var armorPackValidation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "armor-pack-validation.json")));
+            Assert.Equal("high-risk", armorPackValidation.RootElement.GetProperty("PackReadinessStatus").GetString());
+            Assert.True(armorPackValidation.RootElement.GetProperty("NonMainstreamSupportCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("ManualCleanupLikelyCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("RuntimeVerificationRequiredCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("ExternalGameHarnessCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("ExternalUiHarnessCount").GetInt32() > 0);
+            var packItem = armorPackValidation.RootElement.GetProperty("Items").EnumerateArray().Single();
+            Assert.Equal("experimental-manual-cleanup", packItem.GetProperty("SupportTier").GetString());
+            Assert.Equal("high-risk", packItem.GetProperty("ValidationStatus").GetString());
+            Assert.True(packItem.GetProperty("ManualCleanupLikely").GetBoolean());
+            Assert.True(packItem.GetProperty("RuntimeVerificationRequired").GetBoolean());
+            Assert.False(packItem.GetProperty("CanSafelyAnimate").GetBoolean());
+            Assert.True(packItem.GetProperty("RequiresExternalGameHarness").GetBoolean());
+            Assert.True(packItem.GetProperty("RequiresExternalUiHarness").GetBoolean());
         }
         finally
         {

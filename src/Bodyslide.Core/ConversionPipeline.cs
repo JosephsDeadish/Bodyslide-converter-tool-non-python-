@@ -1282,7 +1282,13 @@ public sealed record ArmorPackValidationItem(
     IReadOnlyList<string> IssueMessages,
     string? DetectedSourceBody = null,
     string? MeshType = null,
-    string? Strategy = null);
+    string? Strategy = null,
+    string? SupportTier = null,
+    bool ManualCleanupLikely = false,
+    bool RuntimeVerificationRequired = false,
+    bool? CanSafelyAnimate = null,
+    bool RequiresExternalGameHarness = false,
+    bool RequiresExternalUiHarness = false);
 public sealed record ArmorPackValidationReport(
     string ConversionLabel,
     string TargetBody,
@@ -1294,6 +1300,11 @@ public sealed record ArmorPackValidationReport(
     int ReadyCount,
     int NeedsReviewCount,
     int HighRiskCount,
+    int NonMainstreamSupportCount,
+    int ManualCleanupLikelyCount,
+    int RuntimeVerificationRequiredCount,
+    int ExternalGameHarnessCount,
+    int ExternalUiHarnessCount,
     int MissingQualityReportCount,
     double? AverageValidationScore,
     IReadOnlyList<ArmorPackValidationIssueCount> TopIssueCodes,
@@ -7767,6 +7778,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     ValidationStatus = validationItem?.ValidationStatus,
                     ValidationScore = validationItem?.ValidationScore,
                     IssueCodes = validationItem?.IssueCodes,
+                    SupportTier = validationItem?.SupportTier,
+                    ManualCleanupLikely = validationItem?.ManualCleanupLikely,
+                    RuntimeVerificationRequired = validationItem?.RuntimeVerificationRequired,
+                    RequiresExternalGameHarness = validationItem?.RequiresExternalGameHarness,
+                    RequiresExternalUiHarness = validationItem?.RequiresExternalUiHarness,
                 };
             }).ToList(),
         };
@@ -7802,6 +7818,22 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     ?? (File.Exists(Path.Combine(result.OutputDirectory, "conversion-quality.json"))
                         ? "unclassified"
                         : "missing-quality-report");
+            var supportTier = qualityReport?.SupportTier ?? qualityReport?.ConversionReadiness?.SupportTier;
+            var manualCleanupLikely = qualityReport?.ManualCleanupLikely ?? false;
+            var runtimeVerificationRequired = qualityReport?.RuntimeVerificationRequired ?? false;
+            var canSafelyAnimate = qualityReport?.ConversionReadiness?.CanSafelyAnimate;
+            var requiresExternalGameHarness = TryReadRuntimeValidationPlanRequirement(
+                result.OutputDirectory,
+                static plan => plan.RequiresExternalGameHarness);
+            var requiresExternalUiHarness = TryReadWindowsUiAutomationRequirement(
+                result.OutputDirectory,
+                static plan => plan.RequiresExternalUiHarness);
+            validationStatus = DeriveArmorPackValidationStatus(
+                validationStatus,
+                supportTier,
+                manualCleanupLikely,
+                runtimeVerificationRequired,
+                canSafelyAnimate);
 
             items.Add(new ArmorPackValidationItem(
                 MeshFile: Path.GetFileName(meshFile),
@@ -7813,13 +7845,25 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 IssueMessages: issueMessages,
                 DetectedSourceBody: qualityReport?.DetectedSourceBody,
                 MeshType: qualityReport?.MeshType,
-                Strategy: qualityReport?.Strategy));
+                Strategy: qualityReport?.Strategy,
+                SupportTier: supportTier,
+                ManualCleanupLikely: manualCleanupLikely,
+                RuntimeVerificationRequired: runtimeVerificationRequired,
+                CanSafelyAnimate: canSafelyAnimate,
+                RequiresExternalGameHarness: requiresExternalGameHarness,
+                RequiresExternalUiHarness: requiresExternalUiHarness));
         }
 
         var qualityReportCount = items.Count(item => item.ValidationScore.HasValue);
         var readyCount = items.Count(item => item.ValidationStatus.Equals("ready", StringComparison.OrdinalIgnoreCase));
         var needsReviewCount = items.Count(item => item.ValidationStatus.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
         var highRiskCount = items.Count(item => item.ValidationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase));
+        var nonMainstreamSupportCount = items.Count(item => !string.IsNullOrWhiteSpace(item.SupportTier) &&
+                                                             !item.SupportTier.Equals("mainstream-automatic", StringComparison.OrdinalIgnoreCase));
+        var manualCleanupLikelyCount = items.Count(item => item.ManualCleanupLikely);
+        var runtimeVerificationRequiredCount = items.Count(item => item.RuntimeVerificationRequired);
+        var externalGameHarnessCount = items.Count(item => item.RequiresExternalGameHarness);
+        var externalUiHarnessCount = items.Count(item => item.RequiresExternalUiHarness);
         var missingQualityReportCount = items.Count(item => item.ValidationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase));
         double? averageValidationScore = qualityReportCount > 0
             ? Math.Round(items.Where(item => item.ValidationScore.HasValue).Average(item => item.ValidationScore!.Value), 1)
@@ -7845,6 +7889,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             ReadyCount: readyCount,
             NeedsReviewCount: needsReviewCount,
             HighRiskCount: highRiskCount,
+            NonMainstreamSupportCount: nonMainstreamSupportCount,
+            ManualCleanupLikelyCount: manualCleanupLikelyCount,
+            RuntimeVerificationRequiredCount: runtimeVerificationRequiredCount,
+            ExternalGameHarnessCount: externalGameHarnessCount,
+            ExternalUiHarnessCount: externalUiHarnessCount,
             MissingQualityReportCount: missingQualityReportCount,
             AverageValidationScore: averageValidationScore,
             TopIssueCodes: topIssueCodes,
@@ -7875,6 +7924,92 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         catch
         {
             return null;
+        }
+    }
+
+    private static string DeriveArmorPackValidationStatus(
+        string validationStatus,
+        string? supportTier,
+        bool manualCleanupLikely,
+        bool runtimeVerificationRequired,
+        bool? canSafelyAnimate)
+    {
+        if (validationStatus.Equals("failed", StringComparison.OrdinalIgnoreCase) ||
+            validationStatus.Equals("high-risk", StringComparison.OrdinalIgnoreCase) ||
+            validationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase) ||
+            validationStatus.Equals("unclassified", StringComparison.OrdinalIgnoreCase))
+        {
+            return validationStatus;
+        }
+
+        if (manualCleanupLikely ||
+            canSafelyAnimate == false ||
+            string.Equals(supportTier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase))
+        {
+            return "high-risk";
+        }
+
+        if (runtimeVerificationRequired ||
+            (!string.IsNullOrWhiteSpace(supportTier) &&
+             !string.Equals(supportTier, "mainstream-automatic", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "needs-review";
+        }
+
+        return validationStatus;
+    }
+
+    private static bool TryReadRuntimeValidationPlanRequirement(
+        string outputDirectory,
+        Func<RuntimeValidationExecutionPlan, bool> selector)
+    {
+        var path = Path.Combine(outputDirectory, "runtime-validation-plan.json");
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            var report = JsonSerializer.Deserialize<RuntimeValidationExecutionPlan>(
+                File.ReadAllText(path),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+
+            return report is not null && selector(report);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadWindowsUiAutomationRequirement(
+        string outputDirectory,
+        Func<WindowsUiE2EAutomationPlan, bool> selector)
+    {
+        var path = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            var report = JsonSerializer.Deserialize<WindowsUiE2EAutomationPlan>(
+                File.ReadAllText(path),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                });
+
+            return report is not null && selector(report);
+        }
+        catch
+        {
+            return false;
         }
     }
 
