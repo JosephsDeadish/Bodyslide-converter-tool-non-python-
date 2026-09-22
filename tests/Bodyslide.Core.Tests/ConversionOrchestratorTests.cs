@@ -13601,6 +13601,11 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("digitigrade-beast", SkeletonFrameworkCatalog.DetectFramework(["TailNub", "PawPad.L", "SheathNode"]));
         Assert.Equal("avian-humanoid", SkeletonFrameworkCatalog.DetectFramework(["PinionFoldCtrl.L", "TalonRearCtrl.R"]));
         Assert.Equal("serpentine-humanoid", SkeletonFrameworkCatalog.DetectFramework(["CoilNub", "SerpentJaw"]));
+        Assert.Equal("draconic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["BarbNubCtrl", "DrakeCrestFlex"]));
+        Assert.Equal("horned-humanoid", SkeletonFrameworkCatalog.DetectFramework(["GoatHornSpiral", "ClovenRearPad"]));
+        Assert.Equal("spriggan-branch", SkeletonFrameworkCatalog.DetectFramework(["BriarSwingCtrl", "RootTwigGrip"]));
+        Assert.Equal("insectoid-humanoid", SkeletonFrameworkCatalog.DetectFramework(["ChitinCrestCtrl", "AbdomenSegmentTip"]));
+        Assert.Equal("aquatic-humanoid", SkeletonFrameworkCatalog.DetectFramework(["SirenFrillCtrl", "KoiWhiskerAim"]));
 
         var sparse = SkeletonFrameworkCatalog.DetectFrameworkDetails(["MawLatch", "TongueBlade", "WombCore"]);
         Assert.Equal("ube-extended", sparse.Label);
@@ -13624,6 +13629,31 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Equal("serpentine-humanoid", sparseSerpentine.Label);
         Assert.True(sparseSerpentine.UsedSparseInference);
         Assert.Contains(sparseSerpentine.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseDraconic = SkeletonFrameworkCatalog.DetectFrameworkDetails(["BarbNubCtrl", "DrakeCrestFlex"]);
+        Assert.Equal("draconic-humanoid", sparseDraconic.Label);
+        Assert.True(sparseDraconic.UsedSparseInference);
+        Assert.Contains(sparseDraconic.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseHorned = SkeletonFrameworkCatalog.DetectFrameworkDetails(["GoatHornSpiral", "ClovenRearPad"]);
+        Assert.Equal("horned-humanoid", sparseHorned.Label);
+        Assert.True(sparseHorned.UsedSparseInference);
+        Assert.Contains(sparseHorned.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseSpriggan = SkeletonFrameworkCatalog.DetectFrameworkDetails(["BriarSwingCtrl", "RootTwigGrip"]);
+        Assert.Equal("spriggan-branch", sparseSpriggan.Label);
+        Assert.True(sparseSpriggan.UsedSparseInference);
+        Assert.Contains(sparseSpriggan.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseInsectoid = SkeletonFrameworkCatalog.DetectFrameworkDetails(["ChitinCrestCtrl", "AbdomenSegmentTip"]);
+        Assert.Equal("insectoid-humanoid", sparseInsectoid.Label);
+        Assert.True(sparseInsectoid.UsedSparseInference);
+        Assert.Contains(sparseInsectoid.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
+
+        var sparseAquatic = SkeletonFrameworkCatalog.DetectFrameworkDetails(["SirenFrillCtrl", "KoiWhiskerAim"]);
+        Assert.Equal("aquatic-humanoid", sparseAquatic.Label);
+        Assert.True(sparseAquatic.UsedSparseInference);
+        Assert.Contains(sparseAquatic.Evidence, evidence => evidence.StartsWith("ecosystem-cues:", StringComparison.Ordinal));
     }
 }
 

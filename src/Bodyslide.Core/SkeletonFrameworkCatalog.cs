@@ -132,8 +132,8 @@ internal static class SkeletonFrameworkCatalog
         }
 
         return detections
-            .OrderByDescending(static entry => entry.Detection.Confidence)
-            .ThenBy(static entry => entry.Detection.UsedSparseInference)
+            .OrderBy(static entry => entry.Detection.UsedSparseInference)
+            .ThenByDescending(static entry => entry.Detection.Confidence)
             .ThenByDescending(static entry => entry.Score)
             .Select(static entry => entry.Detection)
             .DistinctBy(static detection => detection.Label, StringComparer.OrdinalIgnoreCase)
