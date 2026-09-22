@@ -223,6 +223,15 @@ public static class RuntimeReadinessReporter
             issues.Add($"{body.Name}: minimum physics family count {profile.MinimumPhysicsFamilyCount} exceeds available family count {profile.PhysicsFamilyCount}.");
         }
 
+        if (profile.SupportsPhysics && profile.MinimumRuntimePhysicsNodeCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum runtime physics node count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumRuntimePhysicsNodeCount > 0 && profile.PhysicsNodeCount > 0 && profile.MinimumRuntimePhysicsNodeCount > profile.PhysicsNodeCount)
+        {
+            issues.Add($"{body.Name}: minimum runtime physics node count {profile.MinimumRuntimePhysicsNodeCount} exceeds available node count {profile.PhysicsNodeCount}.");
+        }
+
         var supportWarnings = LocalExportService.EvaluateTargetBodySupportQuality(
             body.ReferenceTokens,
             body.SliderNames,
@@ -233,6 +242,7 @@ public static class RuntimeReadinessReporter
             body.MinimumPhysicsSlotCount,
             body.MinimumPhysicsChainDepth,
             body.MinimumPhysicsFamilyCount,
+            body.MinimumRuntimePhysicsNodeCount,
             body.CollisionComplexity,
             !string.IsNullOrWhiteSpace(body.SkeletonFramework) || !string.IsNullOrWhiteSpace(body.SkeletonFoundation),
             body.DefaultPhysics,

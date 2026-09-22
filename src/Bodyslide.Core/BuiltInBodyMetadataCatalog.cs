@@ -31,6 +31,7 @@ internal sealed record BuiltInBodyMetadata(
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
     int MinimumPhysicsFamilyCount,
+    int MinimumRuntimePhysicsNodeCount,
     string CollisionComplexity,
     bool HasExplicitExpectedSemanticRegions,
     bool HasExplicitExpectedCollisionRegions,
@@ -38,6 +39,7 @@ internal sealed record BuiltInBodyMetadata(
     bool HasExplicitMinimumPhysicsSlotCount,
     bool HasExplicitMinimumPhysicsChainDepth,
     bool HasExplicitMinimumPhysicsFamilyCount,
+    bool HasExplicitMinimumRuntimePhysicsNodeCount,
     bool HasExplicitCollisionComplexity)
 {
     public bool HasExplicitSupportMetadata =>
@@ -253,6 +255,15 @@ internal static class BuiltInBodyMetadataCatalog
             dto.MinimumPhysicsFamilyCount > 0
                 ? dto.MinimumPhysicsFamilyCount
                 : BodySupportMetadataHeuristics.CountPhysicsFamilies(dto.AvailablePhysicsBones, dto.PhysicsBoneSignatures),
+            dto.MinimumRuntimePhysicsNodeCount > 0
+                ? dto.MinimumRuntimePhysicsNodeCount
+                : BodySupportMetadataHeuristics.InferMinimumRuntimePhysicsNodeCount(
+                    dto.AvailablePhysicsBones,
+                    dto.SliderNames,
+                    dto.PhysicsBoneSignatures,
+                    dto.ExpectedSemanticRegions,
+                    dto.ExpectedCollisionRegions,
+                    dto.CollisionComplexity),
             string.IsNullOrWhiteSpace(dto.CollisionComplexity)
                 ? BodySupportMetadataHeuristics.InferCollisionComplexity(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures)
                 : dto.CollisionComplexity.Trim(),
@@ -262,6 +273,7 @@ internal static class BuiltInBodyMetadataCatalog
             dto.MinimumPhysicsSlotCount > 0,
             dto.MinimumPhysicsChainDepth > 0,
             dto.MinimumPhysicsFamilyCount > 0,
+            dto.MinimumRuntimePhysicsNodeCount > 0,
             !string.IsNullOrWhiteSpace(dto.CollisionComplexity));
     }
 
@@ -327,6 +339,7 @@ internal static class BuiltInBodyMetadataCatalog
         public int MinimumPhysicsSlotCount { get; init; }
         public int MinimumPhysicsChainDepth { get; init; }
         public int MinimumPhysicsFamilyCount { get; init; }
+        public int MinimumRuntimePhysicsNodeCount { get; init; }
         public string? CollisionComplexity { get; init; }
     }
 }
@@ -375,6 +388,15 @@ internal static class BodySupportMetadataHeuristics
     {
         return NormalizeSupportRegionList((physicsBones ?? []).Concat(physicsBoneSignatures ?? []))
             .Count;
+    }
+
+    public static int CountDistinctPhysicsNodes(IEnumerable<string>? physicsBones)
+    {
+        return (physicsBones ?? [])
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
     }
 
     public static int EstimatePhysicsChainDepth(IEnumerable<string>? physicsBones, IEnumerable<string>? physicsBoneSignatures = null)
@@ -435,6 +457,69 @@ internal static class BodySupportMetadataHeuristics
 
         return collisionRegions.Count > 0 || slotCount > 0 ? "minimal" : "none";
     }
+
+    public static int InferMinimumRuntimePhysicsNodeCount(
+        IEnumerable<string>? physicsBones,
+        IEnumerable<string>? sliderNames,
+        IEnumerable<string>? physicsBoneSignatures = null,
+        IEnumerable<string>? expectedSemanticRegions = null,
+        IEnumerable<string>? expectedCollisionRegions = null,
+        string? collisionComplexity = null)
+    {
+        var actualNodeCount = CountDistinctPhysicsNodes(physicsBones);
+        if (actualNodeCount == 0)
+        {
+            return 0;
+        }
+
+        var semanticRegions = NormalizeSupportRegionList(expectedSemanticRegions);
+        if (semanticRegions.Count == 0)
+        {
+            semanticRegions = InferExpectedSemanticRegions(sliderNames, physicsBones);
+        }
+
+        var collisionRegions = NormalizeSupportRegionList(expectedCollisionRegions);
+        if (collisionRegions.Count == 0)
+        {
+            collisionRegions = InferExpectedCollisionRegions(physicsBones, sliderNames, physicsBoneSignatures);
+        }
+
+        var normalizedCollisionComplexity = string.IsNullOrWhiteSpace(collisionComplexity)
+            ? InferCollisionComplexity(physicsBones, sliderNames, physicsBoneSignatures)
+            : collisionComplexity.Trim();
+        var familyCount = CountPhysicsFamilies(physicsBones, physicsBoneSignatures);
+        var slotCount = CountPhysicsSlots(physicsBones);
+        var chainDepth = EstimatePhysicsChainDepth(physicsBones, physicsBoneSignatures);
+
+        var minimum = NormalizeCollisionComplexity(normalizedCollisionComplexity) switch
+        {
+            "extended" => Math.Max(3, Math.Min(actualNodeCount, Math.Max(2, familyCount))),
+            "standard" => Math.Max(2, Math.Min(actualNodeCount, Math.Max(2, Math.Min(4, familyCount + 1)))),
+            "minimal" => 1,
+            _ => 0
+        };
+
+        if (chainDepth >= 3 && actualNodeCount >= 4)
+        {
+            minimum = Math.Max(minimum, 4);
+        }
+
+        if ((collisionRegions.Count >= 4 || semanticRegions.Count >= 5 || slotCount >= 4) && actualNodeCount >= 5)
+        {
+            minimum = Math.Max(minimum, 5);
+        }
+
+        return Math.Min(actualNodeCount, minimum);
+    }
+
+    private static string NormalizeCollisionComplexity(string value) =>
+        value.Trim().ToLowerInvariant() switch
+        {
+            "extended" => "extended",
+            "standard" => "standard",
+            "minimal" => "minimal",
+            _ => "none"
+        };
 
     public static IReadOnlyList<string> InferExpectedBilateralRegions(
         IEnumerable<string>? physicsBones,

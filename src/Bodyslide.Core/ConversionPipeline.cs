@@ -1608,6 +1608,8 @@ public sealed record PhysicsCompatibilityReport(
     int GeneratedPhysicsChainDepth,
     int ExpectedMinimumPhysicsFamilyCount,
     int GeneratedPhysicsFamilyCount,
+    int ExpectedMinimumRuntimePhysicsNodeCount,
+    int GeneratedRuntimePhysicsNodeCount,
     string CollisionComplexity,
     bool HasSufficientPhysicsCoverage,
     string Summary);
@@ -1632,10 +1634,12 @@ public sealed record TargetBodySupportReport(
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
     int MinimumPhysicsFamilyCount,
+    int MinimumRuntimePhysicsNodeCount,
     string CollisionComplexity,
     int PhysicsSlotCount,
     int PhysicsChainDepth,
     int PhysicsFamilyCount,
+    int PhysicsNodeCount,
     IReadOnlyList<string> MissingFields,
     IReadOnlyList<string> QualityWarnings);
 
@@ -2072,6 +2076,7 @@ public sealed record CustomBodyProfile(
     int MinimumPhysicsSlotCount = 0,
     int MinimumPhysicsChainDepth = 0,
     int MinimumPhysicsFamilyCount = 0,
+    int MinimumRuntimePhysicsNodeCount = 0,
     string? CollisionComplexity = null);
 
 /// <summary>Public catalog of all body types that the detection engine recognises.</summary>
@@ -2189,6 +2194,7 @@ public sealed record BodyTechnicalProfileInfo(
     int MinimumPhysicsSlotCount,
     int MinimumPhysicsChainDepth,
     int MinimumPhysicsFamilyCount,
+    int MinimumRuntimePhysicsNodeCount,
     string CollisionComplexity)
 {
     private static readonly System.Text.RegularExpressions.Regex SemanticBoneSanitizer =
@@ -2259,10 +2265,9 @@ public sealed record BodyTechnicalProfileInfo(
                     StringComparer.OrdinalIgnoreCase);
 
     public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones.Concat(PhysicsBoneSignatures));
-
     public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones, PhysicsBoneSignatures);
-
     public int PhysicsFamilyCount => BodySupportMetadataHeuristics.CountPhysicsFamilies(RequiredPhysicsBones, PhysicsBoneSignatures);
+    public int PhysicsNodeCount => BodySupportMetadataHeuristics.CountDistinctPhysicsNodes(RequiredPhysicsBones);
 
     private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
         IReadOnlyList<string> requiredBones)
@@ -2460,6 +2465,15 @@ public static class BodyTechnicalProfileCatalog
                 customProfile.MinimumPhysicsFamilyCount > 0
                     ? customProfile.MinimumPhysicsFamilyCount
                     : BodySupportMetadataHeuristics.CountPhysicsFamilies(customProfile.PhysicsBones),
+                customProfile.MinimumRuntimePhysicsNodeCount > 0
+                    ? customProfile.MinimumRuntimePhysicsNodeCount
+                    : BodySupportMetadataHeuristics.InferMinimumRuntimePhysicsNodeCount(
+                        customProfile.PhysicsBones,
+                        customProfile.SliderNames,
+                        null,
+                        customProfile.ExpectedSemanticRegions,
+                        customProfile.ExpectedCollisionRegions,
+                        customProfile.CollisionComplexity),
                 string.IsNullOrWhiteSpace(customProfile.CollisionComplexity)
                     ? BodySupportMetadataHeuristics.InferCollisionComplexity(customProfile.PhysicsBones, customProfile.SliderNames)
                     : customProfile.CollisionComplexity);
@@ -2484,6 +2498,7 @@ public static class BodyTechnicalProfileCatalog
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
             metadata.MinimumPhysicsFamilyCount,
+            metadata.MinimumRuntimePhysicsNodeCount,
             metadata.CollisionComplexity);
         return true;
     }
@@ -6125,6 +6140,7 @@ internal static class CustomBodyProfileSupport
             Math.Max(0, dto.MinimumPhysicsSlotCount),
             Math.Max(0, dto.MinimumPhysicsChainDepth),
             Math.Max(0, dto.MinimumPhysicsFamilyCount),
+            Math.Max(0, dto.MinimumRuntimePhysicsNodeCount),
             string.IsNullOrWhiteSpace(dto.CollisionComplexity) ? null : dto.CollisionComplexity.Trim());
     }
 
@@ -6211,6 +6227,7 @@ internal static class CustomBodyProfileSupport
         public int MinimumPhysicsSlotCount { get; init; }
         public int MinimumPhysicsChainDepth { get; init; }
         public int MinimumPhysicsFamilyCount { get; init; }
+        public int MinimumRuntimePhysicsNodeCount { get; init; }
         public string? CollisionComplexity { get; init; }
     }
 }
@@ -23135,7 +23152,7 @@ internal sealed class LocalExportService(
             issues.Add(new ConversionValidationIssue(
                 "physics-bone-coverage",
                 physicsCompatibility.GeneratedPhysicsSlotCount == 0 ? "high" : "medium",
-                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {physicsCompatibility.GeneratedPhysicsFamilyCount}/{physicsCompatibility.ExpectedMinimumPhysicsFamilyCount}, and chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth} for target body '{physicsCompatibility.TargetBody}' ({physicsCompatibility.CollisionComplexity} collision complexity)."));
+                $"Requested physics profile '{physicsCompatibility.RequestedProfile}' generated only {physicsCompatibility.GeneratedPhysicsSlotCount}/{physicsCompatibility.ExpectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {physicsCompatibility.GeneratedPhysicsFamilyCount}/{physicsCompatibility.ExpectedMinimumPhysicsFamilyCount}, chain depth {physicsCompatibility.GeneratedPhysicsChainDepth}/{physicsCompatibility.ExpectedMinimumPhysicsChainDepth}, and node coverage {physicsCompatibility.GeneratedRuntimePhysicsNodeCount}/{physicsCompatibility.ExpectedMinimumRuntimePhysicsNodeCount} for target body '{physicsCompatibility.TargetBody}' ({physicsCompatibility.CollisionComplexity} collision complexity)."));
         }
 
         if (poseSimulation.TotalPosesAtRisk > 0)
@@ -23401,6 +23418,7 @@ internal sealed class LocalExportService(
                     out var expectedMinimumPhysicsSlotCount,
                     out var expectedMinimumPhysicsChainDepth,
                     out var expectedMinimumPhysicsFamilyCount,
+                    out _,
                     out var targetCollisionComplexity);
                 var missingOspSliders = bodySlideProject.Sliders
                     .Where(expected => !ospSliderNames.Contains(expected))
@@ -23714,6 +23732,10 @@ internal sealed class LocalExportService(
                 .SelectMany(ReadPhysicsNodeNamesFromConfigFile)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            var generatedPhysicsBoneNames = existingPhysicsConfigPaths
+                .SelectMany(ReadPhysicsBoneNamesFromConfigFile)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             if (generatedPhysicsNodes.Length == 0)
             {
                 problems.Add("No bone or physics-group names could be read from the generated SMP/CBPC config files.");
@@ -23746,6 +23768,13 @@ internal sealed class LocalExportService(
                 problems.Add($"Runtime config coverage exposes only {generatedPhysicsSlotCount}/{targetProfile.MinimumPhysicsSlotCount} expected physics slot(s).");
             }
 
+            var generatedPhysicsNodeCount = generatedPhysicsBoneNames.Length;
+            if (targetProfile.MinimumRuntimePhysicsNodeCount > 0 &&
+                generatedPhysicsNodeCount < targetProfile.MinimumRuntimePhysicsNodeCount)
+            {
+                problems.Add($"Runtime config coverage exposes only {generatedPhysicsNodeCount}/{targetProfile.MinimumRuntimePhysicsNodeCount} expected runtime physics node(s).");
+            }
+
             var expectedPhysicsBones = targetProfile.RequiredPhysicsBones
                 .Concat(targetProfile.PhysicsBoneSignatures)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -23775,10 +23804,11 @@ internal sealed class LocalExportService(
             }
 
             var xml = File.ReadAllText(path);
-            var nodes = new List<string>();
+            var nodes = ReadPhysicsBoneNamesFromXml(xml).ToList();
+
             foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                          xml,
-                         @"<bone\s+name=""([^""]+)""",
+                         @"<(\w+Physics)>",
                          System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
             {
                 var name = match.Groups[1].Value;
@@ -23788,9 +23818,25 @@ internal sealed class LocalExportService(
                 }
             }
 
+            return nodes;
+        }
+
+        static IReadOnlyList<string> ReadPhysicsBoneNamesFromConfigFile(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return [];
+            }
+
+            return ReadPhysicsBoneNamesFromXml(File.ReadAllText(path));
+        }
+
+        static IReadOnlyList<string> ReadPhysicsBoneNamesFromXml(string xml)
+        {
+            var nodes = new List<string>();
             foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(
                          xml,
-                         @"<(\w+Physics)>",
+                         @"<bone\s+name=""([^""]+)""",
                          System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled))
             {
                 var name = match.Groups[1].Value;
@@ -24253,6 +24299,7 @@ internal sealed class LocalExportService(
                     builtInMetadata.MinimumPhysicsSlotCount,
                     builtInMetadata.MinimumPhysicsChainDepth,
                     builtInMetadata.MinimumPhysicsFamilyCount,
+                    builtInMetadata.MinimumRuntimePhysicsNodeCount,
                     builtInMetadata.CollisionComplexity,
                     !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFramework) ||
                     !string.IsNullOrWhiteSpace(builtInMetadata.SkeletonFoundation),
@@ -24319,6 +24366,7 @@ internal sealed class LocalExportService(
             customProfile.MinimumPhysicsSlotCount,
             customProfile.MinimumPhysicsChainDepth,
             customProfile.MinimumPhysicsFamilyCount,
+            customProfile.MinimumRuntimePhysicsNodeCount,
             customProfile.CollisionComplexity,
             hasSkeletonMetadata,
             requestedPhysicsProfile,
@@ -24343,6 +24391,7 @@ internal sealed class LocalExportService(
         int minimumPhysicsSlotCount,
         int minimumPhysicsChainDepth,
         int minimumPhysicsFamilyCount,
+        int minimumRuntimePhysicsNodeCount,
         string? collisionComplexity,
         bool hasSkeletonMetadata,
         string requestedPhysicsProfile,
@@ -24402,9 +24451,19 @@ internal sealed class LocalExportService(
             : InferMinimumPhysicsChainDepthExpectation(semanticRegions, collisionRegions, collisionComplexity);
         var actualPhysicsChainDepth = BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(physicsBones);
         var actualPhysicsFamilyCount = BodySupportMetadataHeuristics.CountPhysicsFamilies(physicsBones);
+        var actualPhysicsNodeCount = BodySupportMetadataHeuristics.CountDistinctPhysicsNodes(physicsBones);
         var effectiveMinimumPhysicsFamilyCount = minimumPhysicsFamilyCount > 0
             ? minimumPhysicsFamilyCount
             : InferMinimumPhysicsFamilyExpectation(semanticRegions, collisionRegions, collisionComplexity);
+        var effectiveMinimumRuntimePhysicsNodeCount = minimumRuntimePhysicsNodeCount > 0
+            ? minimumRuntimePhysicsNodeCount
+            : BodySupportMetadataHeuristics.InferMinimumRuntimePhysicsNodeCount(
+                physicsBones,
+                sliderNames,
+                null,
+                semanticRegions,
+                collisionRegions,
+                collisionComplexity);
 
         if (semanticRegions.Count < 3)
         {
@@ -24456,6 +24515,11 @@ internal sealed class LocalExportService(
             if (actualPhysicsChainDepth > 0 && actualPhysicsChainDepth < effectiveMinimumPhysicsChainDepth)
             {
                 qualityWarnings.Add("physicsBones-chain-depth");
+            }
+
+            if (actualPhysicsNodeCount > 0 && actualPhysicsNodeCount < effectiveMinimumRuntimePhysicsNodeCount)
+            {
+                qualityWarnings.Add("physicsBones-node-count");
             }
 
             if (bilateralRegions.Count == 0 && actualPhysicsSlotCount > 0 && semanticRegions.Count > 0)
@@ -24561,6 +24625,15 @@ internal sealed class LocalExportService(
         var inferredMinimumPhysicsFamilyCount = profile?.MinimumPhysicsFamilyCount > 0
             ? profile.MinimumPhysicsFamilyCount
             : Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsFamilies(inferredPhysicsBones, inferredMetadata?.PhysicsBoneSignatures));
+        var inferredMinimumRuntimePhysicsNodeCount = profile?.MinimumRuntimePhysicsNodeCount > 0
+            ? profile.MinimumRuntimePhysicsNodeCount
+            : Math.Max(1, BodySupportMetadataHeuristics.InferMinimumRuntimePhysicsNodeCount(
+                inferredPhysicsBones,
+                inferredSliderNames,
+                inferredMetadata?.PhysicsBoneSignatures,
+                inferredExpectedSemanticRegions,
+                inferredExpectedCollisionRegions,
+                profile?.CollisionComplexity ?? inferredMetadata?.CollisionComplexity));
         var inferredCollisionComplexity = !string.IsNullOrWhiteSpace(profile?.CollisionComplexity)
             ? profile!.CollisionComplexity
             : BodySupportMetadataHeuristics.InferCollisionComplexity(inferredPhysicsBones, inferredSliderNames, inferredMetadata?.PhysicsBoneSignatures);
@@ -24598,6 +24671,7 @@ internal sealed class LocalExportService(
             ["minimumPhysicsSlotCount"] = inferredMinimumPhysicsSlotCount,
             ["minimumPhysicsChainDepth"] = inferredMinimumPhysicsChainDepth,
             ["minimumPhysicsFamilyCount"] = inferredMinimumPhysicsFamilyCount,
+            ["minimumRuntimePhysicsNodeCount"] = inferredMinimumRuntimePhysicsNodeCount,
             ["collisionComplexity"] = inferredCollisionComplexity
         };
 
@@ -24699,6 +24773,13 @@ internal sealed class LocalExportService(
             ["minimumPhysicsSlotCount"] = Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsSlots(ExtractSuggestedPhysicsBones(physics))),
             ["minimumPhysicsChainDepth"] = Math.Max(1, BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(ExtractSuggestedPhysicsBones(physics), inferredMetadata?.PhysicsBoneSignatures)),
             ["minimumPhysicsFamilyCount"] = Math.Max(1, BodySupportMetadataHeuristics.CountPhysicsFamilies(ExtractSuggestedPhysicsBones(physics), inferredMetadata?.PhysicsBoneSignatures)),
+            ["minimumRuntimePhysicsNodeCount"] = Math.Max(1, BodySupportMetadataHeuristics.InferMinimumRuntimePhysicsNodeCount(
+                ExtractSuggestedPhysicsBones(physics),
+                DefaultSlidersForSuggestedProfile(detectedBody.Body),
+                inferredMetadata?.PhysicsBoneSignatures,
+                inferredMetadata?.ExpectedSemanticRegions,
+                inferredMetadata?.ExpectedCollisionRegions,
+                inferredMetadata?.CollisionComplexity)),
             ["collisionComplexity"] = BodySupportMetadataHeuristics.InferCollisionComplexity(
                 ExtractSuggestedPhysicsBones(physics),
                 DefaultSlidersForSuggestedProfile(detectedBody.Body),
@@ -25211,11 +25292,13 @@ internal sealed class LocalExportService(
         out int minimumPhysicsSlotCount,
         out int minimumPhysicsChainDepth,
         out int minimumPhysicsFamilyCount,
+        out int minimumRuntimePhysicsNodeCount,
         out string collisionComplexity)
     {
         minimumPhysicsSlotCount = 0;
         minimumPhysicsChainDepth = 0;
         minimumPhysicsFamilyCount = 0;
+        minimumRuntimePhysicsNodeCount = 0;
         collisionComplexity = "minimal";
 
         if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
@@ -25223,6 +25306,7 @@ internal sealed class LocalExportService(
             minimumPhysicsSlotCount = Math.Max(0, customProfile.MinimumPhysicsSlotCount);
             minimumPhysicsChainDepth = Math.Max(0, customProfile.MinimumPhysicsChainDepth);
             minimumPhysicsFamilyCount = Math.Max(0, customProfile.MinimumPhysicsFamilyCount);
+            minimumRuntimePhysicsNodeCount = Math.Max(0, customProfile.MinimumRuntimePhysicsNodeCount);
             collisionComplexity = NormalizeCollisionComplexity(customProfile.CollisionComplexity);
             return true;
         }
@@ -25232,6 +25316,7 @@ internal sealed class LocalExportService(
             minimumPhysicsSlotCount = Math.Max(0, metadata.MinimumPhysicsSlotCount);
             minimumPhysicsChainDepth = Math.Max(0, metadata.MinimumPhysicsChainDepth);
             minimumPhysicsFamilyCount = Math.Max(0, metadata.MinimumPhysicsFamilyCount);
+            minimumRuntimePhysicsNodeCount = Math.Max(0, metadata.MinimumRuntimePhysicsNodeCount);
             collisionComplexity = NormalizeCollisionComplexity(metadata.CollisionComplexity);
             return true;
         }
@@ -25505,6 +25590,10 @@ internal sealed class LocalExportService(
             ? Math.Max(0, profile.MinimumPhysicsFamilyCount)
             : 0;
         var generatedPhysicsFamilyCount = BodySupportMetadataHeuristics.CountPhysicsFamilies(generatedPhysicsBones);
+        var expectedMinimumRuntimePhysicsNodeCount = hasProfile
+            ? Math.Max(0, profile.MinimumRuntimePhysicsNodeCount)
+            : 0;
+        var generatedRuntimePhysicsNodeCount = BodySupportMetadataHeuristics.CountDistinctPhysicsNodes(generatedPhysicsBones);
         var hasSufficientPhysicsCoverage = !physicsRequested ||
                                                !targetBodySupportsPhysics ||
                                                HasSufficientGeneratedPhysicsCoverage(
@@ -25513,7 +25602,9 @@ internal sealed class LocalExportService(
                                                expectedMinimumPhysicsChainDepth,
                                                generatedPhysicsChainDepth,
                                                expectedMinimumPhysicsFamilyCount,
-                                               generatedPhysicsFamilyCount);
+                                               generatedPhysicsFamilyCount,
+                                               expectedMinimumRuntimePhysicsNodeCount,
+                                               generatedRuntimePhysicsNodeCount);
         var isCompatible = !physicsRequested ||
             (targetBodySupportsPhysics && missingBones.Count == 0 && hasRequiredRuntimeConfigs && hasSufficientPhysicsCoverage);
         var collisionComplexity = hasProfile
@@ -25528,7 +25619,7 @@ internal sealed class LocalExportService(
                     : missingBones.Count > 0
                         ? $"Physics profile '{requestedProfile}' is missing {missingBones.Count} required target bone(s)."
                     : !hasSufficientPhysicsCoverage
-                            ? $"Physics profile '{requestedProfile}' generated only {generatedPhysicsSlotCount}/{expectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {generatedPhysicsFamilyCount}/{expectedMinimumPhysicsFamilyCount}, and chain depth {generatedPhysicsChainDepth}/{expectedMinimumPhysicsChainDepth} for {targetBody} ({collisionComplexity} collision complexity)."
+                            ? $"Physics profile '{requestedProfile}' generated only {generatedPhysicsSlotCount}/{expectedMinimumPhysicsSlotCount} expected physics slot(s), family coverage {generatedPhysicsFamilyCount}/{expectedMinimumPhysicsFamilyCount}, chain depth {generatedPhysicsChainDepth}/{expectedMinimumPhysicsChainDepth}, and node coverage {generatedRuntimePhysicsNodeCount}/{expectedMinimumRuntimePhysicsNodeCount} for {targetBody} ({collisionComplexity} collision complexity)."
                         : remappedBones.Count > 0
                             ? $"Physics profile '{requestedProfile}' is usable, but {remappedBones.Count} physics chain(s) were remapped to fit the target skeleton."
                         : injectedBones.Count > 0
@@ -25557,6 +25648,8 @@ internal sealed class LocalExportService(
             generatedPhysicsChainDepth,
             expectedMinimumPhysicsFamilyCount,
             generatedPhysicsFamilyCount,
+            expectedMinimumRuntimePhysicsNodeCount,
+            generatedRuntimePhysicsNodeCount,
             collisionComplexity,
             hasSufficientPhysicsCoverage,
             summary);
@@ -25617,10 +25710,12 @@ internal sealed class LocalExportService(
             hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsSlotCount) : 0,
             hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsChainDepth) : 0,
             hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsFamilyCount) : 0,
+            hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumRuntimePhysicsNodeCount) : 0,
             hasTechnicalProfile ? technicalProfile!.CollisionComplexity : "none",
             hasTechnicalProfile ? technicalProfile!.PhysicsSlotCount : 0,
             hasTechnicalProfile ? technicalProfile!.PhysicsChainDepth : 0,
             hasTechnicalProfile ? technicalProfile!.PhysicsFamilyCount : 0,
+            hasTechnicalProfile ? technicalProfile!.PhysicsNodeCount : 0,
             assessment.MissingFields,
             assessment.QualityWarnings);
     }
@@ -25633,6 +25728,7 @@ internal sealed class LocalExportService(
         profile.MinimumPhysicsSlotCount > 0 &&
         profile.MinimumPhysicsChainDepth > 0 &&
         profile.MinimumPhysicsFamilyCount > 0 &&
+        profile.MinimumRuntimePhysicsNodeCount > 0 &&
         !string.IsNullOrWhiteSpace(profile.CollisionComplexity);
 
     private static bool HasSufficientGeneratedPhysicsCoverage(
@@ -25641,10 +25737,13 @@ internal sealed class LocalExportService(
         int expectedMinimumPhysicsChainDepth,
         int generatedPhysicsChainDepth,
         int expectedMinimumPhysicsFamilyCount,
-        int generatedPhysicsFamilyCount) =>
+        int generatedPhysicsFamilyCount,
+        int expectedMinimumRuntimePhysicsNodeCount,
+        int generatedRuntimePhysicsNodeCount) =>
         generatedPhysicsSlotCount >= Math.Max(0, expectedMinimumPhysicsSlotCount) &&
         generatedPhysicsChainDepth >= Math.Max(0, expectedMinimumPhysicsChainDepth) &&
-        generatedPhysicsFamilyCount >= Math.Max(0, expectedMinimumPhysicsFamilyCount);
+        generatedPhysicsFamilyCount >= Math.Max(0, expectedMinimumPhysicsFamilyCount) &&
+        generatedRuntimePhysicsNodeCount >= Math.Max(0, expectedMinimumRuntimePhysicsNodeCount);
 
     private static IReadOnlyList<string> GetExpectedRuntimeConfigs(string requestedProfile)
     {

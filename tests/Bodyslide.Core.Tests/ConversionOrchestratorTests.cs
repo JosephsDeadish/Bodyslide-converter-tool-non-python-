@@ -24453,6 +24453,7 @@ public sealed class OutputCompletenessTests
 
             var runtimeIssue = Assert.Single(issues, issue => issue.Code.Equals("physics-config-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("collision-sensitive region families", runtimeIssue.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("runtime physics node", runtimeIssue.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -24473,6 +24474,7 @@ public sealed class OutputCompletenessTests
             minimumPhysicsSlotCount: 3,
             minimumPhysicsChainDepth: 2,
             minimumPhysicsFamilyCount: 2,
+            minimumRuntimePhysicsNodeCount: 4,
             collisionComplexity: "extended",
             hasSkeletonMetadata: false,
             requestedPhysicsProfile: "smp");
@@ -24486,6 +24488,7 @@ public sealed class OutputCompletenessTests
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-family-count", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-chain-depth", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Equals("physicsBones-node-count", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(warnings, warning => warning.Equals("physicsBones-pairing-coverage", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -24630,6 +24633,7 @@ public sealed class OutputCompletenessTests
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
             metadata.MinimumPhysicsFamilyCount,
+            metadata.MinimumRuntimePhysicsNodeCount,
             metadata.CollisionComplexity,
             hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
@@ -24664,6 +24668,7 @@ public sealed class OutputCompletenessTests
             metadata.MinimumPhysicsSlotCount,
             metadata.MinimumPhysicsChainDepth,
             metadata.MinimumPhysicsFamilyCount,
+            metadata.MinimumRuntimePhysicsNodeCount,
             metadata.CollisionComplexity,
             hasSkeletonMetadata: !string.IsNullOrWhiteSpace(metadata.SkeletonFramework) ||
                                  !string.IsNullOrWhiteSpace(metadata.SkeletonFoundation),
@@ -24689,6 +24694,7 @@ public sealed class OutputCompletenessTests
             minimumPhysicsSlotCount: 0,
             minimumPhysicsChainDepth: 0,
             minimumPhysicsFamilyCount: 0,
+            minimumRuntimePhysicsNodeCount: 0,
             collisionComplexity: "extended",
             hasSkeletonMetadata: true,
             requestedPhysicsProfile: "smp",
@@ -24715,6 +24721,7 @@ public sealed class OutputCompletenessTests
             minimumPhysicsSlotCount: 3,
             minimumPhysicsChainDepth: 2,
             minimumPhysicsFamilyCount: 3,
+            minimumRuntimePhysicsNodeCount: 4,
             collisionComplexity: "extended",
             hasSkeletonMetadata: true,
             requestedPhysicsProfile: "smp",
