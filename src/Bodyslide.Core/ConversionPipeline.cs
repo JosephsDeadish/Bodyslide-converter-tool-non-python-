@@ -30537,6 +30537,7 @@ internal sealed class LocalExportService(
         }
 
         var candidateGap = GetSkeletonCandidateGap(sourceSkeletonCandidates);
+        var primaryCandidate = GetPrimarySkeletonCandidate(sourceSkeletonCandidates);
         if (sourceSkeletonCandidates is { Count: > 1 } && candidateGap is not null)
         {
             signals.Add($"candidate-gap:{candidateGap.Value:0.##}");
@@ -30544,11 +30545,11 @@ internal sealed class LocalExportService(
 
         if (primaryCandidate is not null)
         {
-            var semanticOverlap = GetEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
-            var groupOverlap = GetEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
-            var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
-            var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
-                             GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+            var semanticOverlap = GetSkeletonEvidenceValue(primaryCandidate.Evidence, "semantic-overlap:");
+            var groupOverlap = GetSkeletonEvidenceValue(primaryCandidate.Evidence, "group-overlap:");
+            var chainDepth = GetSkeletonEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
+            var cueMatches = GetSkeletonEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
+                             GetSkeletonEvidenceValue(primaryCandidate.Evidence, "context-cues:");
             if (semanticOverlap > 0)
             {
                 signals.Add($"semantic-overlap:{semanticOverlap}");
@@ -30584,6 +30585,18 @@ internal sealed class LocalExportService(
         return signals;
     }
 
+    private static SkeletonInferenceCandidate? GetPrimarySkeletonCandidate(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
+    {
+        if (sourceSkeletonCandidates is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        return sourceSkeletonCandidates
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .First();
+    }
+
     private static double? GetSkeletonCandidateGap(IReadOnlyList<SkeletonInferenceCandidate>? sourceSkeletonCandidates)
     {
         if (sourceSkeletonCandidates is not { Count: > 1 })
@@ -30601,6 +30614,29 @@ internal sealed class LocalExportService(
         }
 
         return orderedCandidates[0].Confidence - orderedCandidates[1].Confidence;
+    }
+
+    private static int GetSkeletonEvidenceValue(IReadOnlyList<string>? evidence, string prefix)
+    {
+        if (evidence is not { Count: > 0 })
+        {
+            return 0;
+        }
+
+        foreach (var item in evidence)
+        {
+            if (!item.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (int.TryParse(item[prefix.Length..], out var value))
+            {
+                return value;
+            }
+        }
+
+        return 0;
     }
 
     private static string BuildSourceSkeletonInferenceReliability(SkeletonMappingResult skeletonMapping) =>
@@ -30807,6 +30843,7 @@ internal sealed class LocalExportService(
     {
         var skeletonReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping);
         var skeletonRemapSafety = skeletonMapping.AutomaticRemapSafety;
+        var targetBodySupportReliability = BuildTargetBodySupportReliability(targetBodySupportAssessment);
         var canConvert = !validationSummary.Status.Equals("high-risk", StringComparison.OrdinalIgnoreCase);
         var canPhysicsConvert = !IsRuntimePhysicsRequested(physicsCompatibility.RequestedProfile) || physicsCompatibility.IsCompatible;
         var canSafelyAnimate = canConvert &&

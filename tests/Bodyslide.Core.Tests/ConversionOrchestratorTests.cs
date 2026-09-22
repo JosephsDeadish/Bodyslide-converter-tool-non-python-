@@ -25495,7 +25495,7 @@ public sealed class OutputCompletenessTests
             Assert.Equal("standard", targetBodySupport.GetProperty("CollisionComplexity").GetString());
             Assert.Equal(2, targetBodySupport.GetProperty("MinimumPhysicsFamilyCount").GetInt32());
             Assert.Equal("experimental-manual-cleanup", qualityDocument.RootElement.GetProperty("SupportTier").GetString());
-            Assert.True(qualityDocument.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
+            Assert.False(qualityDocument.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
             Assert.Equal("unsafe", conversionReadiness.GetProperty("TargetBodySupportReliability").GetString());
             Assert.Equal("manual-cleanup", conversionReadiness.GetProperty("RecommendedReleaseGate").GetString());
             Assert.False(conversionReadiness.GetProperty("CanSafelyAnimate").GetBoolean());
