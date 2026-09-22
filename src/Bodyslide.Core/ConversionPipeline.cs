@@ -8258,6 +8258,33 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         "desktop-e2e"
     ];
 
+    private static string InferMatrixPackTargetBodyFamily(string targetBody)
+    {
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            var familyCue = metadata.ReferenceTokens
+                .Concat(metadata.DetectionTokens)
+                .Concat(metadata.Aliases)
+                .FirstOrDefault(token =>
+                    token.Contains("feline", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("canine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("equine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("avian", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("serpentine", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("aquatic", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("draconic", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("insectoid", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("beast", StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains("alien", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(familyCue))
+            {
+                return familyCue;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(targetBody) ? "generic" : targetBody;
+    }
+
     private static ConversionMatrixPackProofReport BuildConversionMatrixPackProofReport(
         IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
         string targetBody,
@@ -8293,7 +8320,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 MeshFile: Path.GetFileName(meshFile),
                 OutputDirectory: result.OutputDirectory,
                 TargetBody: targetBody,
-                TargetBodyFamily: BuildTargetBodyFamily(targetBody),
+                TargetBodyFamily: InferMatrixPackTargetBodyFamily(targetBody),
                 SupportTier: qualityReport?.SupportTier ?? qualityReport?.ConversionReadiness?.SupportTier ?? "unknown",
                 MatrixCoordinateKey: "missing-proof-report",
                 MatrixCoordinates: [],
