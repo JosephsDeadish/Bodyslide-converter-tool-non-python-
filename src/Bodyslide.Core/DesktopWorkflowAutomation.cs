@@ -47,7 +47,7 @@ internal static class DesktopWorkflowAutomation
             FindCommonDirectory(outputDirectories));
         var validationState = BuildValidationState(outputDirectories, previewPath, reportMetrics);
         var automationContract = BuildAutomationContract(validationState);
-        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, BuildSuggestedGuiFlow(reportMetrics, validationState, automationContract), validationState, automationContract);
+        return new DesktopWorkflowAutomationSnapshot(summaryRows, reportMetrics, artifacts, BuildSuggestedGuiFlow(reportMetrics, artifacts, validationState, automationContract), validationState, automationContract);
     }
 
     public static DesktopWorkflowAutomationSnapshot BuildFromOutputDirectory(
@@ -72,7 +72,7 @@ internal static class DesktopWorkflowAutomation
             [],
             reportMetrics,
             BuildArtifacts(files, outputDirectory),
-            BuildSuggestedGuiFlow(reportMetrics, validationState, automationContract),
+            BuildSuggestedGuiFlow(reportMetrics, BuildArtifacts(files, outputDirectory), validationState, automationContract),
             validationState,
             automationContract);
     }
@@ -590,6 +590,7 @@ internal static class DesktopWorkflowAutomation
 
     private static IReadOnlyList<DesktopWorkflowAutomationStep> BuildSuggestedGuiFlow(
         IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
+        IReadOnlyList<DesktopWorkflowArtifact> artifacts,
         DesktopWorkflowValidationState validationState,
         DesktopAutomationContract automationContract)
     {
@@ -609,6 +610,16 @@ internal static class DesktopWorkflowAutomation
                 Blocking: string.Equals(validationState.EffectiveStatus, "needs-review", StringComparison.OrdinalIgnoreCase) ||
                           string.Equals(validationState.EffectiveStatus, "high-risk", StringComparison.OrdinalIgnoreCase))
         };
+
+        if (artifacts.Count > 0)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Files tab",
+                "Open the Files tab or use Load result... to inspect the generated artifacts directly from the Desktop workflow.",
+                $"{artifacts.Count} output artifact(s) detected",
+                artifacts[0].FullPath,
+                Blocking: false));
+        }
 
         if (!automationContract.SupportsTrueUiEndToEndAutomation)
         {
@@ -701,6 +712,50 @@ internal static class DesktopWorkflowAutomation
                 Blocking: false));
         }
 
+        var packagingMetric = FindMetric(reportMetrics, "Pack status")
+                              ?? FindMetric(reportMetrics, "Avg validation score");
+        if (packagingMetric is not null)
+        {
+            var packagingReady = packagingMetric.Value.Equals("READY", StringComparison.OrdinalIgnoreCase) ||
+                                 packagingMetric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase);
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Packaging",
+                "Open armor-pack-validation.json before packaging or sharing the output so the Desktop workflow matches the validated release state.",
+                $"{packagingMetric.Property}: {packagingMetric.Value}",
+                packagingMetric.FilePath,
+                Blocking: !packagingReady));
+        }
+
+        if (HasArtifact(artifacts, artifact =>
+                artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase) &&
+                artifact.DisplayPath.Contains("BodySlide", StringComparison.OrdinalIgnoreCase)))
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "BodySlide",
+                "Open the generated BodySlide OSP/ShapeData artifacts and confirm the Desktop output still builds correctly in BodySlide or Outfit Studio.",
+                "BodySlide slider assets detected",
+                FindArtifactPath(artifacts, artifact =>
+                    artifact.DisplayPath.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
+                    artifact.DisplayPath.Contains("ShapeData", StringComparison.OrdinalIgnoreCase)),
+                Blocking: false));
+        }
+
+        if (HasArtifact(artifacts, artifact =>
+                artifact.Name.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
+                artifact.Name.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
+                artifact.Name.EndsWith("_SlidesmithPatch.esp", StringComparison.OrdinalIgnoreCase)))
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Plugin patch",
+                "Open the generated plugin-patch artifacts and verify the rewritten mesh paths or manual xEdit follow-up before release.",
+                "Plugin patch artifacts detected",
+                FindArtifactPath(artifacts, artifact =>
+                    artifact.Name.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
+                    artifact.Name.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
+                    artifact.Name.EndsWith("_SlidesmithPatch.esp", StringComparison.OrdinalIgnoreCase)),
+                Blocking: true));
+        }
+
         return steps;
     }
 
@@ -750,6 +805,16 @@ internal static class DesktopWorkflowAutomation
 
     private static string? FindMetricFile(IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics, string property) =>
         FindMetric(reportMetrics, property)?.FilePath;
+
+    private static bool HasArtifact(
+        IReadOnlyList<DesktopWorkflowArtifact> artifacts,
+        Func<DesktopWorkflowArtifact, bool> predicate) =>
+        artifacts.Any(predicate);
+
+    private static string? FindArtifactPath(
+        IReadOnlyList<DesktopWorkflowArtifact> artifacts,
+        Func<DesktopWorkflowArtifact, bool> predicate) =>
+        artifacts.FirstOrDefault(predicate)?.FullPath;
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
     {

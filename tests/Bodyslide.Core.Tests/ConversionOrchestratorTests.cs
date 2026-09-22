@@ -15619,6 +15619,53 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_CapturesPackagingPluginAndBodySlideSteps()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets"));
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "DemoArmor"));
+            File.WriteAllText(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets", "demo.osp"), "<SliderSetInfo />");
+            File.WriteAllText(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "DemoArmor", "demo.tri"), "tri");
+            File.WriteAllText(Path.Combine(outputDirectory, "plugin-patches.json"), "{ }");
+            File.WriteAllText(Path.Combine(outputDirectory, "patch-armor.pas"), "// xEdit");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "armor-pack-validation.json"),
+                """
+                {
+                  "TargetBody": "3BA",
+                  "ConversionLabel": "demo",
+                  "PackReadinessStatus": "needs-review",
+                  "TotalCount": 1,
+                  "QualityReportCount": 1,
+                  "AverageValidationScore": 58
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Files tab", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Packaging", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("BodySlide", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Plugin patch", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
+            Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_RealisticEquineBeastFrameworkModPack_WritesNonCanineBeastArtifacts()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticEquineBeastFrameworkModPack");
