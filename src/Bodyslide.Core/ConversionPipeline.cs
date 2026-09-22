@@ -23323,6 +23323,13 @@ internal sealed class LocalExportService(
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var generatedSliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(bodySlideProject.Sliders);
                 var targetSupportRegions = ResolveTargetSupportRegions(armor, request.TargetBody);
+                var targetCollisionRegions = ResolveTargetCollisionRegions(armor, request.TargetBody);
+                var targetHasExtendedCoverageExpectation = TryGetTargetBodySupportExpectation(
+                    armor,
+                    request.TargetBody,
+                    out var expectedMinimumPhysicsSlotCount,
+                    out var expectedMinimumPhysicsChainDepth,
+                    out var targetCollisionComplexity);
                 var missingOspSliders = bodySlideProject.Sliders
                     .Where(expected => !ospSliderNames.Contains(expected))
                     .ToArray();
@@ -23436,10 +23443,12 @@ internal sealed class LocalExportService(
                 }
 
                 var payloadSliderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var payloadSliderTokens = new List<string>();
                 foreach (var bsdPath in Directory.EnumerateFiles(shapeDataDirectory, "*.bsd"))
                 {
                     if (BsdMorphReader.TryRead(bsdPath, out var bsdPayload) && !string.IsNullOrWhiteSpace(bsdPayload?.SliderName))
                     {
+                        payloadSliderTokens.Add(bsdPayload!.SliderName);
                         payloadSliderNames.Add(NormalizeSliderToken(bsdPayload!.SliderName));
                     }
                 }
@@ -23452,6 +23461,7 @@ internal sealed class LocalExportService(
                         {
                             if (!string.IsNullOrWhiteSpace(morph.Name))
                             {
+                                payloadSliderTokens.Add(morph.Name);
                                 payloadSliderNames.Add(NormalizeSliderToken(morph.Name));
                             }
                         }
@@ -23473,9 +23483,15 @@ internal sealed class LocalExportService(
                     }
                 }
 
+                var generatedPayloadRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(payloadSliderTokens);
+                var generatedSupportRegions = generatedSliderRegions
+                    .Concat(generatedPayloadRegions)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
                 if (targetSupportRegions.Count > 0)
                 {
-                    var coveredRegions = generatedSliderRegions
+                    var coveredRegions = generatedSupportRegions
                         .Intersect(targetSupportRegions, StringComparer.OrdinalIgnoreCase)
                         .ToArray();
                     if (coveredRegions.Length == 0)
@@ -23488,6 +23504,59 @@ internal sealed class LocalExportService(
                             .Except(coveredRegions, StringComparer.OrdinalIgnoreCase)
                             .ToArray();
                         problems.Add($"Generated sliders only cover {coveredRegions.Length}/{targetSupportRegions.Count} expected target-body regions; missing: {string.Join(", ", missingRegions.Take(4))}");
+                    }
+                }
+
+                if (targetCollisionRegions.Count > 0)
+                {
+                    var coveredCollisionRegions = generatedSupportRegions
+                        .Intersect(targetCollisionRegions, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (coveredCollisionRegions.Length == 0)
+                    {
+                        problems.Add($"Generated sliders/payloads do not cover any collision-sensitive target-body regions expected for '{request.TargetBody}': {string.Join(", ", targetCollisionRegions)}");
+                    }
+                    else if (targetCollisionRegions.Count >= 2 &&
+                             coveredCollisionRegions.Length < Math.Min(2, targetCollisionRegions.Count))
+                    {
+                        var missingCollisionRegions = targetCollisionRegions
+                            .Except(coveredCollisionRegions, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        problems.Add($"Generated sliders/payloads only cover {coveredCollisionRegions.Length}/{targetCollisionRegions.Count} collision-sensitive target-body regions; missing: {string.Join(", ", missingCollisionRegions.Take(4))}");
+                    }
+                }
+
+                if (targetHasExtendedCoverageExpectation)
+                {
+                    var advancedTargetRegions = targetSupportRegions
+                        .Concat(targetCollisionRegions)
+                        .Where(IsAdvancedSupportRegion)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (advancedTargetRegions.Length > 0)
+                    {
+                        var advancedCoveredRegions = generatedSupportRegions
+                            .Intersect(advancedTargetRegions, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        if (advancedCoveredRegions.Length == 0)
+                        {
+                            problems.Add($"Generated BodySlide support does not cover any advanced target-body regions for '{request.TargetBody}': {string.Join(", ", advancedTargetRegions)}");
+                        }
+                        else
+                        {
+                            var advancedCoverageFloor = expectedMinimumPhysicsChainDepth >= 2 ||
+                                                        expectedMinimumPhysicsSlotCount >= 3 ||
+                                                        string.Equals(targetCollisionComplexity, "extended", StringComparison.OrdinalIgnoreCase)
+                                ? Math.Min(2, advancedTargetRegions.Length)
+                                : 1;
+                            if (advancedCoveredRegions.Length < advancedCoverageFloor)
+                            {
+                                var missingAdvancedRegions = advancedTargetRegions
+                                    .Except(advancedCoveredRegions, StringComparer.OrdinalIgnoreCase)
+                                    .ToArray();
+                                problems.Add($"Generated BodySlide support only covers {advancedCoveredRegions.Length}/{advancedTargetRegions.Length} advanced target-body regions; missing: {string.Join(", ", missingAdvancedRegions.Take(4))}");
+                            }
+                        }
                     }
                 }
             }
@@ -24831,6 +24900,58 @@ internal sealed class LocalExportService(
                 : BodySupportMetadataHeuristics.NormalizeSupportRegionList(metadata.SliderNames)
             : [];
     }
+
+    private static IReadOnlyList<string> ResolveTargetCollisionRegions(ImportedArmor armor, string targetBody)
+    {
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            if (customProfile.ExpectedCollisionRegions is { Count: > 0 })
+            {
+                return customProfile.ExpectedCollisionRegions;
+            }
+
+            return BodySupportMetadataHeuristics.InferExpectedCollisionRegions(customProfile.PhysicsBones, customProfile.SliderNames);
+        }
+
+        return BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata)
+            ? metadata.ExpectedCollisionRegions.Count > 0
+                ? metadata.ExpectedCollisionRegions
+                : BodySupportMetadataHeuristics.InferExpectedCollisionRegions(metadata.AvailablePhysicsBones, metadata.SliderNames, metadata.PhysicsBoneSignatures)
+            : [];
+    }
+
+    private static bool TryGetTargetBodySupportExpectation(
+        ImportedArmor armor,
+        string targetBody,
+        out int minimumPhysicsSlotCount,
+        out int minimumPhysicsChainDepth,
+        out string collisionComplexity)
+    {
+        minimumPhysicsSlotCount = 0;
+        minimumPhysicsChainDepth = 0;
+        collisionComplexity = "minimal";
+
+        if (CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile))
+        {
+            minimumPhysicsSlotCount = Math.Max(0, customProfile.MinimumPhysicsSlotCount);
+            minimumPhysicsChainDepth = Math.Max(0, customProfile.MinimumPhysicsChainDepth);
+            collisionComplexity = NormalizeCollisionComplexity(customProfile.CollisionComplexity);
+            return true;
+        }
+
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            minimumPhysicsSlotCount = Math.Max(0, metadata.MinimumPhysicsSlotCount);
+            minimumPhysicsChainDepth = Math.Max(0, metadata.MinimumPhysicsChainDepth);
+            collisionComplexity = NormalizeCollisionComplexity(metadata.CollisionComplexity);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsAdvancedSupportRegion(string region) =>
+        region is "mouth" or "jaw" or "tongue" or "throat" or "genitals" or "vagina" or "anus" or "tail" or "wing" or "feet";
 
     private static int InferMinimumPhysicsSlotExpectation(
         IReadOnlyList<string> semanticRegions,

@@ -206,6 +206,36 @@ public static class RuntimeReadinessReporter
         {
             issues.Add($"{body.Name}: minimum physics chain depth {profile.MinimumPhysicsChainDepth} exceeds available chain depth {profile.PhysicsChainDepth}.");
         }
+
+        var supportWarnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            body.ReferenceTokens,
+            body.SliderNames,
+            body.AvailablePhysicsBones,
+            body.ExpectedSemanticRegions,
+            body.ExpectedCollisionRegions,
+            body.MinimumPhysicsSlotCount,
+            body.MinimumPhysicsChainDepth,
+            body.CollisionComplexity,
+            !string.IsNullOrWhiteSpace(body.SkeletonFramework) || !string.IsNullOrWhiteSpace(body.SkeletonFoundation),
+            body.DefaultPhysics,
+            body.PhysicsTokens,
+            body.DefaultPhysics,
+            body.HasExplicitSupportMetadata);
+        var structuralWarnings = supportWarnings
+            .Where(static warning =>
+                warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("sliderNames-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("sliderNames-region-coverage", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (structuralWarnings.Length > 0)
+        {
+            issues.Add($"{body.Name}: support metadata quality warnings: {string.Join(", ", structuralWarnings.Take(5))}");
+        }
     }
 
     private static string NormalizeCollisionComplexity(string? collisionComplexity) =>
