@@ -111,9 +111,13 @@ public static class RuntimeReadinessReporter
 
         foreach (var body in BuiltInBodyMetadataCatalog.All.OrderBy(static body => body.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var requiredBones = BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile)
-                ? profile.RequiredPhysicsBones
-                : Array.Empty<string>();
+            if (!BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+            {
+                issues.Add($"Built-in body '{body.Name}' is missing its technical profile.");
+                continue;
+            }
+
+            var requiredBones = profile.RequiredPhysicsBones;
             foreach (var bone in body.AvailablePhysicsBones
                          .Concat(requiredBones)
                          .Distinct(StringComparer.OrdinalIgnoreCase))
@@ -125,6 +129,8 @@ public static class RuntimeReadinessReporter
 
                 issues.Add($"{body.Name}: physics bone '{bone}' is not covered by skeleton framework '{body.SkeletonFramework}'");
             }
+
+            ValidateSupportMetadataConsistency(body, profile, issues);
         }
 
         foreach (var rule in RaceCompatibilityCatalog.BodyRules.OrderBy(static rule => rule.Body, StringComparer.OrdinalIgnoreCase))
@@ -139,6 +145,73 @@ public static class RuntimeReadinessReporter
 
         return issues;
     }
+
+    private static void ValidateSupportMetadataConsistency(
+        BuiltInBodyMetadata body,
+        BodyTechnicalProfileInfo profile,
+        List<string> issues)
+    {
+        if (!body.HasExplicitSupportMetadata)
+        {
+            issues.Add($"{body.Name}: built-in support metadata is inferred instead of explicit.");
+        }
+
+        var normalizedSemanticRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedSemanticRegions);
+        var normalizedCollisionRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedCollisionRegions);
+        var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(body.SliderNames);
+        var physicsRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.RequiredPhysicsBones.Concat(profile.PhysicsBoneSignatures));
+
+        if (normalizedSemanticRegions.Count == 0)
+        {
+            issues.Add($"{body.Name}: expected semantic regions are empty.");
+        }
+        else if (!sliderRegions.Intersect(normalizedSemanticRegions, StringComparer.OrdinalIgnoreCase).Any() &&
+                 !physicsRegions.Intersect(normalizedSemanticRegions, StringComparer.OrdinalIgnoreCase).Any())
+        {
+            issues.Add($"{body.Name}: expected semantic regions are not backed by sliderNames or physics bones.");
+        }
+
+        if (profile.SupportsPhysics)
+        {
+            if (normalizedCollisionRegions.Count == 0)
+            {
+                issues.Add($"{body.Name}: expected collision regions are empty despite physics support.");
+            }
+            else if (!physicsRegions.Intersect(normalizedCollisionRegions, StringComparer.OrdinalIgnoreCase).Any())
+            {
+                issues.Add($"{body.Name}: expected collision regions are not backed by physics bones.");
+            }
+        }
+
+        var normalizedCollisionComplexity = NormalizeCollisionComplexity(profile.CollisionComplexity);
+        if (normalizedCollisionComplexity is not ("none" or "minimal" or "standard" or "extended"))
+        {
+            issues.Add($"{body.Name}: collision complexity '{profile.CollisionComplexity}' is invalid.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumPhysicsSlotCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics slot count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsSlotCount > 0 && profile.PhysicsSlotCount > 0 && profile.MinimumPhysicsSlotCount > profile.PhysicsSlotCount)
+        {
+            issues.Add($"{body.Name}: minimum physics slot count {profile.MinimumPhysicsSlotCount} exceeds available slot count {profile.PhysicsSlotCount}.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumPhysicsChainDepth <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics chain depth must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsChainDepth > 0 && profile.PhysicsChainDepth > 0 && profile.MinimumPhysicsChainDepth > profile.PhysicsChainDepth)
+        {
+            issues.Add($"{body.Name}: minimum physics chain depth {profile.MinimumPhysicsChainDepth} exceeds available chain depth {profile.PhysicsChainDepth}.");
+        }
+    }
+
+    private static string NormalizeCollisionComplexity(string? collisionComplexity) =>
+        string.IsNullOrWhiteSpace(collisionComplexity)
+            ? "none"
+            : collisionComplexity.Trim().ToLowerInvariant();
 
     private static RuntimeReadinessCheck CreateExecutableCheck(string? currentExePath)
     {

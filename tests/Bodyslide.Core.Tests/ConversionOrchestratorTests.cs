@@ -14071,9 +14071,24 @@ public sealed class BodyTypeCatalogTests
             Assert.NotEmpty(profile.PhysicsBoneGroups);
             Assert.NotEmpty(profile.ExpectedSemanticRegions);
             Assert.NotEmpty(profile.ExpectedCollisionRegions);
-            Assert.True(profile.MinimumPhysicsSlotCount >= 0);
-            Assert.True(profile.MinimumPhysicsChainDepth >= 0);
-            Assert.False(string.IsNullOrWhiteSpace(profile.CollisionComplexity));
+            Assert.True(profile.MinimumPhysicsSlotCount > 0);
+            Assert.True(profile.MinimumPhysicsChainDepth > 0);
+            Assert.InRange(profile.MinimumPhysicsSlotCount, 1, Math.Max(1, profile.PhysicsSlotCount));
+            Assert.InRange(profile.MinimumPhysicsChainDepth, 1, Math.Max(1, profile.PhysicsChainDepth));
+            Assert.Contains(profile.CollisionComplexity, new[] { "minimal", "standard", "extended" }, StringComparer.OrdinalIgnoreCase);
+
+            var semanticRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedSemanticRegions);
+            var collisionRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedCollisionRegions);
+            var sliderRegions = BuiltInBodyMetadataCatalog.TryGet(body, out var metadata)
+                ? BodySupportMetadataHeuristics.NormalizeSupportRegionList(metadata.SliderNames)
+                : [];
+            var physicsRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.RequiredPhysicsBones.Concat(profile.PhysicsBoneSignatures));
+
+            Assert.True(semanticRegions.Intersect(sliderRegions, StringComparer.OrdinalIgnoreCase).Any() ||
+                        semanticRegions.Intersect(physicsRegions, StringComparer.OrdinalIgnoreCase).Any(),
+                $"Expected semantic regions for '{body}' should be backed by slider names or physics bones.");
+            Assert.True(collisionRegions.Intersect(physicsRegions, StringComparer.OrdinalIgnoreCase).Any(),
+                $"Expected collision regions for '{body}' should be backed by physics bones.");
         }
     }
 

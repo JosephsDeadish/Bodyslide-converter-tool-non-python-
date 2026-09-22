@@ -2141,6 +2141,7 @@ public sealed record BodyTechnicalProfileInfo(
     /// Any body can use any profile via the Physics override option.
     /// </summary>
     string DefaultPhysics,
+    IReadOnlyList<string> PhysicsBoneSignatures,
     IReadOnlyList<string> ExpectedSemanticRegions,
     IReadOnlyList<string> ExpectedCollisionRegions,
     int MinimumPhysicsSlotCount,
@@ -2214,9 +2215,9 @@ public sealed record BodyTechnicalProfileInfo(
                         .ToList(),
                     StringComparer.OrdinalIgnoreCase);
 
-    public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones);
+    public int PhysicsSlotCount => BodySupportMetadataHeuristics.CountPhysicsSlots(RequiredPhysicsBones.Concat(PhysicsBoneSignatures));
 
-    public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones);
+    public int PhysicsChainDepth => BodySupportMetadataHeuristics.EstimatePhysicsChainDepth(RequiredPhysicsBones, PhysicsBoneSignatures);
 
     private static IReadOnlyDictionary<string, PhysicsBoneSemanticDefinition> BuildSemanticPhysicsBoneMap(
         IReadOnlyList<string> requiredBones)
@@ -2398,6 +2399,7 @@ public static class BodyTechnicalProfileCatalog
                 customProfile.PhysicsBones ?? [],
                 $"Custom body profile '{customProfile.Name}'.",
                 string.IsNullOrWhiteSpace(customProfile.PhysicsProfile) ? "none" : customProfile.PhysicsProfile,
+                [],
                 customProfile.ExpectedSemanticRegions
                     ?? BodySupportMetadataHeuristics.InferExpectedSemanticRegions(customProfile.SliderNames, customProfile.PhysicsBones),
                 customProfile.ExpectedCollisionRegions
@@ -2425,6 +2427,7 @@ public static class BodyTechnicalProfileCatalog
             metadata.AvailablePhysicsBones,
             metadata.Notes,
             metadata.DefaultPhysics,
+            metadata.PhysicsBoneSignatures,
             metadata.ExpectedSemanticRegions,
             metadata.ExpectedCollisionRegions,
             metadata.MinimumPhysicsSlotCount,
