@@ -1165,7 +1165,8 @@ public sealed record ConversionQualityReport(
     PluginRewriteVerificationReport? PluginRewriteVerification = null,
     PartitionSignalReport? PartitionSignals = null,
     CageTopologyReport? CageTopology = null,
-    IReadOnlyList<string>? SuggestedBodyProfileArtifacts = null);
+    IReadOnlyList<string>? SuggestedBodyProfileArtifacts = null,
+    TargetBodySupportReport? TargetBodySupport = null);
 
 public sealed record TopologyCorrespondenceReport(
     string Classification,
@@ -1610,6 +1611,33 @@ public sealed record PhysicsCompatibilityReport(
     string CollisionComplexity,
     bool HasSufficientPhysicsCoverage,
     string Summary);
+
+public sealed record TargetBodySupportReport(
+    string TargetBody,
+    bool HasBuiltInCoverage,
+    bool HasCustomProfile,
+    bool HasExplicitSupportMetadata,
+    string RequestedPhysicsProfile,
+    string SkeletonFoundation,
+    string SkeletonFramework,
+    bool SupportsPhysics,
+    string DefaultPhysics,
+    IReadOnlyList<string> ReferenceTokens,
+    IReadOnlyList<string> SliderNames,
+    IReadOnlyList<string> RequiredPhysicsBones,
+    IReadOnlyList<string> PhysicsBoneSignatures,
+    IReadOnlyList<string> ExpectedSemanticRegions,
+    IReadOnlyList<string> ExpectedCollisionRegions,
+    IReadOnlyList<string> ExpectedBilateralRegions,
+    int MinimumPhysicsSlotCount,
+    int MinimumPhysicsChainDepth,
+    int MinimumPhysicsFamilyCount,
+    string CollisionComplexity,
+    int PhysicsSlotCount,
+    int PhysicsChainDepth,
+    int PhysicsFamilyCount,
+    IReadOnlyList<string> MissingFields,
+    IReadOnlyList<string> QualityWarnings);
 
 public sealed record PreviewWorkbenchPayload(
     string MeshFile,
@@ -18116,6 +18144,16 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(dependencyMapPath);
 
+        var targetBodySupportAssessment = AssessTargetBodySupport(
+            armor,
+            request.TargetBody,
+            physics.Profile);
+        var targetBodySupport = BuildTargetBodySupportReport(
+            armor,
+            request.TargetBody,
+            physics.Profile,
+            targetBodySupportAssessment);
+
         // Write skeleton-compatibility.json — full bone mapping report so users know
         // exactly which bones mapped, which were unsupported, and which skeletons were detected.
         var skeletonCompatPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
@@ -18140,6 +18178,7 @@ internal sealed class LocalExportService(
                 SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
+                TargetBodySupport = targetBodySupport,
             }, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(skeletonCompatPath);
@@ -18461,10 +18500,6 @@ internal sealed class LocalExportService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var targetBodySupportAssessment = AssessTargetBodySupport(
-            armor,
-            request.TargetBody,
-            physics.Profile);
         if (targetBodySupportAssessment.HasBuiltInCoverage && targetBodySupportAssessment.QualityWarnings.Count > 0)
         {
             qualityWarnings = qualityWarnings
@@ -18801,6 +18836,7 @@ internal sealed class LocalExportService(
                 SourceSkeletonInferenceReliability = BuildSourceSkeletonInferenceReliability(skeletonMapping),
                 SourceSkeletonInferenceSummary = BuildSourceSkeletonInferenceSummary(skeletonMapping),
                 PhysicsCompatibility = physicsCompatibility,
+                TargetBodySupport = targetBodySupport,
                 SupportTier = conversionReadiness.SupportTier,
                 ConversionReadiness = conversionReadiness,
             }, new JsonSerializerOptions { WriteIndented = true }),
@@ -18949,7 +18985,8 @@ internal sealed class LocalExportService(
             PluginRewriteVerification: pluginRewriteVerification,
             PartitionSignals:          partitionSignals,
             CageTopology:              cageTopology,
-            SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts);
+            SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts,
+            TargetBodySupport:         targetBodySupport);
         var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
@@ -25524,6 +25561,79 @@ internal sealed class LocalExportService(
             hasSufficientPhysicsCoverage,
             summary);
     }
+
+    private static TargetBodySupportReport BuildTargetBodySupportReport(
+        ImportedArmor armor,
+        string targetBody,
+        string requestedPhysicsProfile,
+        TargetBodySupportAssessment assessment)
+    {
+        var normalizedRequestedPhysicsProfile = PhysicsProfileCatalog.TryNormalize(requestedPhysicsProfile, out var normalizedPhysicsProfile)
+            ? normalizedPhysicsProfile
+            : requestedPhysicsProfile;
+        var hasBuiltInMetadata = BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata);
+        var hasTechnicalProfile = BodyTechnicalProfileCatalog.TryGet(armor, targetBody, out var technicalProfile);
+        var customProfile = assessment.CustomProfile;
+        var hasExplicitSupportMetadata = assessment.HasBuiltInCoverage
+            ? hasBuiltInMetadata && builtInMetadata!.HasExplicitSupportMetadata
+            : HasExplicitCustomTargetBodySupportMetadata(customProfile);
+        var referenceTokens = assessment.HasBuiltInCoverage
+            ? builtInMetadata?.ReferenceTokens ?? []
+            : customProfile?.ReferenceTokens ?? [];
+        var sliderNames = assessment.HasBuiltInCoverage
+            ? builtInMetadata?.SliderNames ?? []
+            : customProfile?.SliderNames ?? [];
+        var skeletonFramework = assessment.HasBuiltInCoverage
+            ? builtInMetadata?.SkeletonFramework ?? string.Empty
+            : customProfile?.SkeletonFramework ?? string.Empty;
+        var skeletonFoundation = hasTechnicalProfile
+            ? technicalProfile!.SkeletonFoundation
+            : assessment.HasBuiltInCoverage
+                ? builtInMetadata?.SkeletonFoundation ?? string.Empty
+                : customProfile?.SkeletonFoundation ?? string.Empty;
+        var defaultPhysics = hasTechnicalProfile
+            ? technicalProfile!.DefaultPhysics
+            : assessment.HasBuiltInCoverage
+                ? builtInMetadata?.DefaultPhysics ?? "none"
+                : customProfile?.PhysicsProfile ?? "none";
+
+        return new TargetBodySupportReport(
+            targetBody,
+            assessment.HasBuiltInCoverage,
+            customProfile is not null,
+            hasExplicitSupportMetadata,
+            normalizedRequestedPhysicsProfile,
+            skeletonFoundation,
+            skeletonFramework,
+            hasTechnicalProfile && technicalProfile!.SupportsPhysics,
+            defaultPhysics,
+            referenceTokens,
+            sliderNames,
+            hasTechnicalProfile ? technicalProfile!.RequiredPhysicsBones : [],
+            hasTechnicalProfile ? technicalProfile!.PhysicsBoneSignatures : [],
+            hasTechnicalProfile ? technicalProfile!.ExpectedSemanticRegions : [],
+            hasTechnicalProfile ? technicalProfile!.ExpectedCollisionRegions : [],
+            hasTechnicalProfile ? technicalProfile!.ExpectedBilateralRegions : [],
+            hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsSlotCount) : 0,
+            hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsChainDepth) : 0,
+            hasTechnicalProfile ? Math.Max(0, technicalProfile!.MinimumPhysicsFamilyCount) : 0,
+            hasTechnicalProfile ? technicalProfile!.CollisionComplexity : "none",
+            hasTechnicalProfile ? technicalProfile!.PhysicsSlotCount : 0,
+            hasTechnicalProfile ? technicalProfile!.PhysicsChainDepth : 0,
+            hasTechnicalProfile ? technicalProfile!.PhysicsFamilyCount : 0,
+            assessment.MissingFields,
+            assessment.QualityWarnings);
+    }
+
+    private static bool HasExplicitCustomTargetBodySupportMetadata(CustomBodyProfile? profile) =>
+        profile is not null &&
+        profile.ExpectedSemanticRegions is { Count: > 0 } &&
+        profile.ExpectedCollisionRegions is { Count: > 0 } &&
+        profile.ExpectedBilateralRegions is { Count: > 0 } &&
+        profile.MinimumPhysicsSlotCount > 0 &&
+        profile.MinimumPhysicsChainDepth > 0 &&
+        profile.MinimumPhysicsFamilyCount > 0 &&
+        !string.IsNullOrWhiteSpace(profile.CollisionComplexity);
 
     private static bool HasSufficientGeneratedPhysicsCoverage(
         int expectedMinimumPhysicsSlotCount,

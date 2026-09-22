@@ -5296,6 +5296,7 @@ public sealed class ConversionOrchestratorTests
             var reportPath = Path.Combine(outputDirectory, "skeleton-compatibility.json");
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
             var compatibility = document.RootElement.GetProperty("PhysicsCompatibility");
+            Assert.True(document.RootElement.TryGetProperty("TargetBodySupport", out var targetBodySupport), document.RootElement.GetRawText());
             Assert.True(compatibility.GetProperty("TargetBodySupportsPhysics").GetBoolean());
             Assert.Contains(
                 compatibility.GetProperty("ExpectedBones").EnumerateArray().Select(static item => item.GetString()),
@@ -5304,6 +5305,14 @@ public sealed class ConversionOrchestratorTests
                 "does not advertise built-in physics-capable bones",
                 compatibility.GetProperty("Summary").GetString(),
                 StringComparison.OrdinalIgnoreCase);
+            Assert.True(targetBodySupport.GetProperty("HasCustomProfile").GetBoolean());
+            Assert.Equal("smp", targetBodySupport.GetProperty("RequestedPhysicsProfile").GetString());
+            Assert.Equal("tng-extended-physics", targetBodySupport.GetProperty("SkeletonFramework").GetString());
+            Assert.Contains(
+                targetBodySupport.GetProperty("RequiredPhysicsBones").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "NPC L Pec", StringComparison.OrdinalIgnoreCase));
+            Assert.True(targetBodySupport.GetProperty("ExpectedSemanticRegions").GetArrayLength() > 0);
+            Assert.Equal(0, targetBodySupport.GetProperty("MissingFields").GetArrayLength());
         }
         finally
         {
@@ -24946,6 +24955,21 @@ public sealed class OutputCompletenessTests
             var qualityJson = await File.ReadAllTextAsync(files.Single(path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase)));
             Assert.Contains("\"Code\": \"unknown-target-body-support\"", qualityJson);
             Assert.Contains("without target-specific metadata", qualityJson, StringComparison.OrdinalIgnoreCase);
+            using var qualityDocument = JsonDocument.Parse(qualityJson);
+            var targetBodySupport = qualityDocument.RootElement.GetProperty("TargetBodySupport");
+            Assert.Equal("CustomMystery", targetBodySupport.GetProperty("TargetBody").GetString());
+            Assert.False(targetBodySupport.GetProperty("HasBuiltInCoverage").GetBoolean());
+            Assert.False(targetBodySupport.GetProperty("HasCustomProfile").GetBoolean());
+            Assert.Equal("none", targetBodySupport.GetProperty("RequestedPhysicsProfile").GetString());
+            Assert.Contains(
+                targetBodySupport.GetProperty("MissingFields").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "referenceTokens", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                targetBodySupport.GetProperty("MissingFields").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "sliderNames", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                targetBodySupport.GetProperty("MissingFields").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "skeletonFoundation/skeletonFramework", StringComparison.OrdinalIgnoreCase));
             var templatePath = Path.Combine(outputDir, "target-body-template.slidesmith-body.json");
             Assert.True(File.Exists(templatePath));
             var templateJson = await File.ReadAllTextAsync(templatePath);
@@ -25103,6 +25127,18 @@ public sealed class OutputCompletenessTests
             Assert.Contains("sliderNames-quality", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("physicsBones-family-coverage", qualityJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("physicsBones-family-count", qualityJson, StringComparison.OrdinalIgnoreCase);
+            using var qualityDocument = JsonDocument.Parse(qualityJson);
+            var targetBodySupport = qualityDocument.RootElement.GetProperty("TargetBodySupport");
+            Assert.True(targetBodySupport.GetProperty("HasCustomProfile").GetBoolean());
+            Assert.False(targetBodySupport.GetProperty("HasExplicitSupportMetadata").GetBoolean());
+            Assert.Equal("standard", targetBodySupport.GetProperty("CollisionComplexity").GetString());
+            Assert.Equal(2, targetBodySupport.GetProperty("MinimumPhysicsFamilyCount").GetInt32());
+            Assert.Contains(
+                targetBodySupport.GetProperty("QualityWarnings").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "referenceTokens-quality", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                targetBodySupport.GetProperty("QualityWarnings").EnumerateArray().Select(static item => item.GetString()),
+                value => string.Equals(value, "physicsBones-family-count", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
