@@ -1069,7 +1069,7 @@ public sealed class MainForm : Form
                     : palette.Foreground;
                 break;
             case TextBox textBox:
-                textBox.BackColor = palette.SurfaceBackground;
+                textBox.BackColor = palette.InputBackground;
                 textBox.ForeColor = palette.Foreground;
                 textBox.BorderStyle = BorderStyle.FixedSingle;
                 break;
@@ -4217,7 +4217,7 @@ public sealed class MainForm : Form
         try
         {
             using var stream = File.OpenRead(reportPath);
-            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream, ReportJsonOptions);
+            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream, options: ReportJsonOptions);
             if (report is null)
             {
                 requiresReview = true;
