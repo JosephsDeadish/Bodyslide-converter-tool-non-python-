@@ -435,13 +435,18 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Strict proof ready count", TryReadIntValue(root, "StrictProofReadyCount"), filePath);
                     Add(metrics, reportName, "Non-strict proof count", TryReadIntValue(root, "NonStrictProofCount"), filePath);
                     Add(metrics, reportName, "Unique matrix coordinates", TryReadIntValue(root, "UniqueMatrixCoordinateCount"), filePath);
+                    Add(metrics, reportName, "Target bodies", TryReadArray(root, "DistinctTargetBodies"), filePath);
+                    Add(metrics, reportName, "Unique target bodies", TryReadIntValue(root, "UniqueTargetBodyCount"), filePath);
                     Add(metrics, reportName, "Target body families", TryReadArray(root, "DistinctTargetBodyFamilies"), filePath);
                     Add(metrics, reportName, "Support tiers", TryReadArray(root, "DistinctSupportTiers"), filePath);
                     Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
                     Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
+                    Add(metrics, reportName, "Missing matrix dimensions", TryReadArray(root, "MissingMatrixDimensions"), filePath);
                     Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
                     Add(metrics, reportName, "Axis summaries", CountNestedArray(root, "Axes"), filePath);
+                    Add(metrics, reportName, "Matrix dimensions", CountNestedArray(root, "MatrixDimensionCoverage"), filePath);
+                    Add(metrics, reportName, "Matrix dimensions meeting minimum coverage", CountObjectsWithBool(root, "MatrixDimensionCoverage", "MeetsMinimumCoverage", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
                 case "topology-correspondence.json":

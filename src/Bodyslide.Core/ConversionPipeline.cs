@@ -1620,6 +1620,12 @@ public sealed record ConversionMatrixPackProofAxisSummary(
     int MissingCount,
     IReadOnlyList<string> CoverageModes,
     IReadOnlyList<string> ReviewArtifacts);
+public sealed record ConversionMatrixPackDimensionCoverage(
+    string Dimension,
+    int DistinctValueCount,
+    int MinimumDistinctValueCount,
+    bool MeetsMinimumCoverage,
+    IReadOnlyList<string> DistinctValues);
 public sealed record ConversionMatrixPackProofItem(
     string MeshFile,
     string OutputDirectory,
@@ -1639,15 +1645,19 @@ public sealed record ConversionMatrixPackProofReport(
     int StrictProofReadyCount,
     int NonStrictProofCount,
     int UniqueMatrixCoordinateCount,
+    int UniqueTargetBodyCount,
     int UniqueTargetBodyFamilyCount,
     string ProofCoverage,
     bool StrictProofReady,
     IReadOnlyList<string> MatrixCoordinateKeys,
+    IReadOnlyList<string> DistinctTargetBodies,
     IReadOnlyList<string> DistinctTargetBodyFamilies,
     IReadOnlyList<string> DistinctSupportTiers,
     IReadOnlyList<string> MissingProofAxes,
+    IReadOnlyList<string> MissingMatrixDimensions,
     IReadOnlyList<string> BlockingGaps,
     IReadOnlyList<ConversionMatrixPackProofAxisSummary> Axes,
+    IReadOnlyList<ConversionMatrixPackDimensionCoverage> MatrixDimensionCoverage,
     IReadOnlyList<string> ReviewArtifacts,
     IReadOnlyList<ConversionMatrixPackProofItem> Items,
     DateTimeOffset GeneratedAt);
@@ -8258,6 +8268,19 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         "desktop-e2e"
     ];
 
+    private static readonly (string Dimension, int MinimumDistinctValueCount)[] RequiredMatrixPackDimensions =
+    [
+        ("target-body", 2),
+        ("target-body-family", 2),
+        ("topology-family", 2),
+        ("skeleton-mode", 2),
+        ("plugin-stack", 2),
+        ("runtime-physics", 2),
+        ("runtime-automation", 1),
+        ("live-game", 1),
+        ("desktop-ui", 1)
+    ];
+
     private static string InferMatrixPackTargetBodyFamily(string targetBody)
     {
         if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
@@ -8284,6 +8307,60 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         return string.IsNullOrWhiteSpace(targetBody) ? "generic" : targetBody;
     }
+
+    private static Dictionary<string, HashSet<string>> CollectMatrixCoordinateDimensions(IEnumerable<IReadOnlyList<string>> coordinateSets)
+    {
+        var dimensions = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var coordinates in coordinateSets)
+        {
+            foreach (var coordinate in coordinates)
+            {
+                if (string.IsNullOrWhiteSpace(coordinate))
+                {
+                    continue;
+                }
+
+                var separatorIndex = coordinate.IndexOf(':');
+                if (separatorIndex <= 0 || separatorIndex >= coordinate.Length - 1)
+                {
+                    continue;
+                }
+
+                var dimension = coordinate[..separatorIndex].Trim();
+                var value = coordinate[(separatorIndex + 1)..].Trim();
+                if (dimension.Length == 0 || value.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!dimensions.TryGetValue(dimension, out var values))
+                {
+                    values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    dimensions[dimension] = values;
+                }
+
+                values.Add(value);
+            }
+        }
+
+        return dimensions;
+    }
+
+    private static string BuildMatrixDimensionBlockingGap(string dimension, int distinctValueCount, int minimumDistinctValueCount) =>
+        dimension switch
+        {
+            "target-body" => $"Pack proof only covers {distinctValueCount} distinct target body value(s); broader body coverage needs at least {minimumDistinctValueCount}.",
+            "target-body-family" => $"Pack proof only covers {distinctValueCount} target body family value(s); broader cross-family proof needs at least {minimumDistinctValueCount}.",
+            "topology-family" => $"Pack proof only covers {distinctValueCount} topology family value(s); layered/openwork, multipart, footwear, and other hard-case families still need broader matrix evidence.",
+            "skeleton-mode" => $"Pack proof only covers {distinctValueCount} skeleton remap mode(s); universal custom-skeleton confidence needs at least {minimumDistinctValueCount} distinct skeleton conditions.",
+            "plugin-stack" => $"Pack proof only covers {distinctValueCount} plugin-stack mode(s); mixed master/light/plugin-family chains still need broader matrix evidence.",
+            "runtime-physics" => $"Pack proof only covers {distinctValueCount} runtime physics mode(s); broader CBPC/SMP/no-physics combinations still need explicit proof.",
+            "runtime-automation" => "Pack proof does not yet cover runtime automation modes broadly enough to claim matrix-level runtime evidence.",
+            "live-game" => "Pack proof does not yet cover live-game execution modes broadly enough to claim matrix-level in-game evidence.",
+            "desktop-ui" => "Pack proof does not yet cover Desktop automation modes broadly enough to claim matrix-level UI evidence.",
+            _ => $"Pack proof does not yet meet the minimum distinct coverage for matrix dimension '{dimension}'."
+        };
 
     private static ConversionMatrixPackProofReport BuildConversionMatrixPackProofReport(
         IReadOnlyList<(string MeshFile, ConversionResult Result)> resultsWithPaths,
@@ -8340,6 +8417,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var distinctTargetBodies = items
+            .Select(item => item.TargetBody)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var distinctTargetBodyFamilies = items
             .Select(item => item.TargetBodyFamily)
             .Where(value => !string.IsNullOrWhiteSpace(value))
@@ -8364,6 +8447,32 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .ToList();
         var reviewArtifacts = reports
             .SelectMany(report => report.ReviewArtifacts)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var matrixDimensions = CollectMatrixCoordinateDimensions(items.Select(item => item.MatrixCoordinates));
+        var matrixDimensionCoverage = RequiredMatrixPackDimensions
+            .Select(requirement =>
+            {
+                var values = matrixDimensions.TryGetValue(requirement.Dimension, out var coveredValues)
+                    ? coveredValues.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList()
+                    : new List<string>();
+                return new ConversionMatrixPackDimensionCoverage(
+                    Dimension: requirement.Dimension,
+                    DistinctValueCount: values.Count,
+                    MinimumDistinctValueCount: requirement.MinimumDistinctValueCount,
+                    MeetsMinimumCoverage: values.Count >= requirement.MinimumDistinctValueCount,
+                    DistinctValues: values);
+            })
+            .ToList();
+        var missingMatrixDimensions = matrixDimensionCoverage
+            .Where(static summary => !summary.MeetsMinimumCoverage)
+            .Select(static summary => summary.Dimension)
+            .ToList();
+        blockingGaps.AddRange(matrixDimensionCoverage
+            .Where(static summary => !summary.MeetsMinimumCoverage)
+            .Select(summary => BuildMatrixDimensionBlockingGap(summary.Dimension, summary.DistinctValueCount, summary.MinimumDistinctValueCount)));
+        blockingGaps = blockingGaps
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -8399,10 +8508,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             .ToList();
 
         var strictProofReadyCount = items.Count(item => item.StrictProofReady);
-        var strictProofReady = items.Count > 0 && strictProofReadyCount == items.Count;
+        var strictProofReady = items.Count > 0 &&
+                               strictProofReadyCount == items.Count &&
+                               missingMatrixDimensions.Count == 0;
         var proofCoverage = strictProofReady
             ? "strict-pack-proof-ready"
-            : strictProofReadyCount > 0 || matrixCoordinateKeys.Count > 1 || items.Count > 1
+            : strictProofReadyCount > 0 || matrixCoordinateKeys.Count > 1 || items.Count > 1 || missingMatrixDimensions.Count < RequiredMatrixPackDimensions.Length
                 ? "artifact-backed-with-pack-gaps"
                 : "artifact-backed-with-major-pack-gaps";
 
@@ -8413,15 +8524,19 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             StrictProofReadyCount: strictProofReadyCount,
             NonStrictProofCount: items.Count - strictProofReadyCount,
             UniqueMatrixCoordinateCount: matrixCoordinateKeys.Count,
+            UniqueTargetBodyCount: distinctTargetBodies.Count,
             UniqueTargetBodyFamilyCount: distinctTargetBodyFamilies.Count,
             ProofCoverage: proofCoverage,
             StrictProofReady: strictProofReady,
             MatrixCoordinateKeys: matrixCoordinateKeys,
+            DistinctTargetBodies: distinctTargetBodies,
             DistinctTargetBodyFamilies: distinctTargetBodyFamilies,
             DistinctSupportTiers: distinctSupportTiers,
             MissingProofAxes: missingProofAxes,
+            MissingMatrixDimensions: missingMatrixDimensions,
             BlockingGaps: blockingGaps,
             Axes: axes,
+            MatrixDimensionCoverage: matrixDimensionCoverage,
             ReviewArtifacts: reviewArtifacts,
             Items: items,
             GeneratedAt: DateTimeOffset.UtcNow);

@@ -17952,6 +17952,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(packProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
             Assert.True(packProof.RootElement.GetProperty("NonStrictProofCount").GetInt32() > 0);
             Assert.True(packProof.RootElement.GetProperty("UniqueMatrixCoordinateCount").GetInt32() > 0);
+            Assert.Equal(1, packProof.RootElement.GetProperty("UniqueTargetBodyCount").GetInt32());
+            Assert.Contains(
+                packProof.RootElement.GetProperty("DistinctTargetBodies").EnumerateArray().Select(static item => item.GetString()),
+                static body => string.Equals(body, "Alien Hybrid", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 packProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
                 static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
@@ -17959,9 +17963,23 @@ public sealed class RealisticModPackFixtureTests
                 packProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
                 static axis => string.Equals(axis, "desktop-e2e", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
+                static dimension => string.Equals(dimension, "target-body", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MissingMatrixDimensions").EnumerateArray().Select(static item => item.GetString()),
+                static dimension => string.Equals(dimension, "target-body-family", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packProof.RootElement.GetProperty("BlockingGaps").EnumerateArray().Select(static item => item.GetString()),
+                static gap => gap is not null && gap.Contains("broader body coverage", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 packProof.RootElement.GetProperty("DistinctSupportTiers").EnumerateArray().Select(static item => item.GetString()),
                 static tier => string.Equals(tier, "experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
             Assert.Equal(7, packProof.RootElement.GetProperty("Axes").GetArrayLength());
+            Assert.True(packProof.RootElement.GetProperty("MatrixDimensionCoverage").GetArrayLength() >= 9);
+            Assert.Contains(
+                packProof.RootElement.GetProperty("MatrixDimensionCoverage").EnumerateArray(),
+                summary => string.Equals(summary.GetProperty("Dimension").GetString(), "plugin-stack", StringComparison.OrdinalIgnoreCase) &&
+                           summary.GetProperty("DistinctValueCount").GetInt32() >= 1);
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
@@ -17978,6 +17996,18 @@ public sealed class RealisticModPackFixtureTests
                 step => string.Equals(step.Area, "Matrix proof", StringComparison.OrdinalIgnoreCase) &&
                         step.ArtifactPath is not null &&
                         step.ArtifactPath.EndsWith("conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Missing matrix dimensions", StringComparison.OrdinalIgnoreCase) &&
+                          metric.Value is not null &&
+                          metric.Value.Contains("target-body", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "conversion-matrix-pack-proof.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Matrix dimensions", StringComparison.OrdinalIgnoreCase) &&
+                          int.TryParse(metric.Value, out var dimensionCount) &&
+                          dimensionCount >= 9);
         }
         finally
         {
