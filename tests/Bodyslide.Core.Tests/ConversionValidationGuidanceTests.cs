@@ -207,6 +207,36 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildRaceCompatibilityStep_PreservesWarningOnlyCases()
+    {
+        var step = LocalExportService.BuildRaceCompatibilityStep(new RaceCompatibilityReport(
+            true,
+            ["Argonian variant uses Vanilla Beast compatibility and still needs runtime review."],
+            []));
+
+        Assert.StartsWith("race-compat:warnings=", step, StringComparison.Ordinal);
+        Assert.Contains("Argonian variant", step, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("race-compat:ok", step, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RequiresMixedModStackValidation_IgnoresMeshOnlyExoticTargetsWithoutPluginOrRaceEvidence()
+    {
+        Assert.False(LocalExportService.RequiresMixedModStackValidation(
+            pluginAnalysis: null,
+            raceCompatibility: null,
+            targetBody: "Equine Humanoid"));
+
+        Assert.True(LocalExportService.RequiresMixedModStackValidation(
+            new PluginAnalysisResult(
+                ScannedPlugins: ["equineHarness.esp"],
+                ArmorAddons: [],
+                PatchGuidance: string.Empty),
+            raceCompatibility: null,
+            targetBody: "Equine Humanoid"));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPhysicsCapabilityMismatchAndRemapCases()
     {
         var summary = new ConversionValidationSummary(

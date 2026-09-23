@@ -68,11 +68,12 @@ internal static class DesktopWorkflowAutomation
         var reportMetrics = BuildReportMetrics([outputDirectory], outputDirectory);
         var validationState = BuildValidationState([outputDirectory], previewPath, reportMetrics);
         var automationContract = BuildAutomationContract(validationState);
+        var artifacts = BuildArtifacts(files, outputDirectory);
         return new DesktopWorkflowAutomationSnapshot(
-            [],
+            BuildSummaryRowsFromOutputDirectory(outputDirectory, files.Length, reportMetrics, validationState),
             reportMetrics,
-            BuildArtifacts(files, outputDirectory),
-            BuildSuggestedGuiFlow(reportMetrics, BuildArtifacts(files, outputDirectory), validationState, automationContract),
+            artifacts,
+            BuildSuggestedGuiFlow(reportMetrics, artifacts, validationState, automationContract),
             validationState,
             automationContract);
     }
@@ -108,6 +109,40 @@ internal static class DesktopWorkflowAutomation
             rows.Add(new("Output files", result.OutputFiles.Count.ToString()));
         }
 
+        return rows;
+    }
+
+    private static IReadOnlyList<DesktopWorkflowSummaryRow> BuildSummaryRowsFromOutputDirectory(
+        string outputDirectory,
+        int outputFileCount,
+        IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
+        DesktopWorkflowValidationState validationState)
+    {
+        var rows = new List<DesktopWorkflowSummaryRow>
+        {
+            new("Output", outputDirectory)
+        };
+
+        if (!string.IsNullOrWhiteSpace(validationState.StatusLabel))
+        {
+            rows.Add(new("Desktop status", validationState.StatusLabel));
+        }
+
+        if (!AppendMetricRow(rows, reportMetrics, "Validation gate") &&
+            !string.IsNullOrWhiteSpace(validationState.EffectiveStatus))
+        {
+            rows.Add(new("Validation gate", ConversionValidationPresentation.GetGateLabel(validationState.EffectiveStatus)));
+        }
+        AppendMetricRow(rows, reportMetrics, "Target body");
+        AppendMetricRow(rows, reportMetrics, "Detected source body");
+        AppendMetricRow(rows, reportMetrics, "Conversion strategy");
+        AppendMetricRow(rows, reportMetrics, "Physics profile");
+        AppendMetricRow(rows, reportMetrics, "Support tier");
+        AppendMetricRow(rows, reportMetrics, "Can safely animate");
+        AppendMetricRow(rows, reportMetrics, "Manual cleanup likely");
+        AppendMetricRow(rows, reportMetrics, "Runtime verification required");
+        AppendMetricRow(rows, reportMetrics, "Scenario highlights");
+        rows.Add(new("Output files", outputFileCount.ToString()));
         return rows;
     }
 
@@ -168,6 +203,22 @@ internal static class DesktopWorkflowAutomation
         }
 
         row = default!;
+        return false;
+    }
+
+    private static bool AppendMetricRow(
+        ICollection<DesktopWorkflowSummaryRow> rows,
+        IReadOnlyList<DesktopWorkflowReportMetric> reportMetrics,
+        string propertyName)
+    {
+        var metric = reportMetrics.FirstOrDefault(metric =>
+            metric.Property.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+        if (metric is not null && !string.IsNullOrWhiteSpace(metric.Value))
+        {
+            rows.Add(new DesktopWorkflowSummaryRow(metric.Property, metric.Value));
+            return true;
+        }
+
         return false;
     }
 

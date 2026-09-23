@@ -38,6 +38,47 @@ public sealed class ConversionOrchestratorTests
         }
     }
 
+    [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_ReconstructsSummaryRows()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-summary-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "conversion-quality.json"),
+                """
+                {
+                  "DetectedSourceBody": "CBBE",
+                  "TargetBody": "Feline Humanoid",
+                  "Strategy": "cage+shrinkwrap",
+                  "PhysicsProfile": "smp",
+                  "SupportTier": "experimental-manual-cleanup",
+                  "ManualCleanupLikely": true,
+                  "RuntimeVerificationRequired": true,
+                  "ValidationSummary": { "Status": "needs-review", "Score": 61, "HighSeverityCount": 1, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] }
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.NotEmpty(snapshot.SummaryRows);
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Output", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals(outputDirectory, StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Validation gate", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Contains("REVIEW", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals("experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
 
     [Fact]
     public void PluginPatches_LinkedArmorAddonsWithUnsupportedSourceNifs_ReportSpecificVerificationIssue()
@@ -16254,6 +16295,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(inGameJsonPath));
             var inGameJson = await File.ReadAllTextAsync(inGameJsonPath);
             Assert.Contains("Equine stride and rear sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Mixed mod-stack load-order sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(Path.Combine(outputDirectory, "mod-stack-cross-validation.json")));
             var smpXml = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "smp-config.xml"));
             Assert.Contains("TailSheath", smpXml, StringComparison.Ordinal);
             Assert.Contains("BeastKnot", smpXml, StringComparison.Ordinal);

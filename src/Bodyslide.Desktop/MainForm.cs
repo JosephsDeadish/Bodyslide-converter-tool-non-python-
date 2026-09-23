@@ -1941,8 +1941,10 @@ public sealed class MainForm : Form
 
         UpdatePathActionStates();
         _ = await LoadPreviewInAppAsync(previewPath);
-        PopulateReportsTab(selectedFolder);
-        PopulateArtifactsTab(selectedFolder);
+        var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(selectedFolder, previewPath);
+        PopulateSummaryTab(snapshot.SummaryRows);
+        PopulateReportsTab(snapshot.ReportMetrics);
+        PopulateArtifactsTab(snapshot.Artifacts);
         var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
         ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
         _resultsTabControl.SelectedTab = guidanceNeedsReview ? _guidanceTabPage : _previewTabPage;
@@ -2037,9 +2039,13 @@ public sealed class MainForm : Form
 
     private void PopulateSummaryTab(IReadOnlyList<ConversionResult> results)
     {
-        var snapshot = DesktopWorkflowAutomation.BuildFromResults(results, _lastPreviewPath);
+        PopulateSummaryTab(DesktopWorkflowAutomation.BuildFromResults(results, _lastPreviewPath).SummaryRows);
+    }
+
+    private void PopulateSummaryTab(IReadOnlyList<DesktopWorkflowSummaryRow> summaryRows)
+    {
         _summaryListView.Items.Clear();
-        foreach (var row in snapshot.SummaryRows)
+        foreach (var row in summaryRows)
         {
             _summaryListView.Items.Add(new ListViewItem([row.Property, row.Value]));
         }
@@ -4364,7 +4370,7 @@ public sealed class MainForm : Form
                     entry.Area,
                     string.IsNullOrWhiteSpace(priority) ? "Info" : priority,
                     entry.Details,
-                    ResolveGuidanceTargetPath(outputDirectory, previewPath, "pose-risk", entry.ArtifactPath ?? reportPath));
+                    ResolveInGameGuidanceTargetPath(outputDirectory, previewPath, entry.ArtifactPath, reportPath));
             }
         }
         catch (Exception ex)
@@ -4580,6 +4586,35 @@ public sealed class MainForm : Form
             File.Exists(previewPath))
         {
             return previewPath;
+        }
+
+        return fallbackPath;
+    }
+
+    private static string ResolveInGameGuidanceTargetPath(
+        string outputDirectory,
+        string? previewPath,
+        string? artifactPath,
+        string fallbackPath)
+    {
+        if (!string.IsNullOrWhiteSpace(artifactPath))
+        {
+            if (!string.IsNullOrWhiteSpace(previewPath) &&
+                Path.GetFileName(artifactPath).Equals(Path.GetFileName(previewPath), StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(previewPath))
+            {
+                return previewPath;
+            }
+
+            if (Path.IsPathRooted(artifactPath) && (File.Exists(artifactPath) || Directory.Exists(artifactPath)))
+            {
+                return artifactPath;
+            }
+
+            if (ResolveExistingGuidancePath(outputDirectory, artifactPath) is { } resolvedArtifactPath)
+            {
+                return resolvedArtifactPath;
+            }
         }
 
         return fallbackPath;

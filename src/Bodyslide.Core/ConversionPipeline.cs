@@ -7074,14 +7074,7 @@ public sealed class ConversionOrchestrator(
             {
                 ReportStage("Checking plugin race compatibility", 4);
                 raceCompatibility = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
-                if (raceCompatibility.IncompatibleRaces.Count > 0)
-                {
-                    steps.Add($"race-compat:warnings={string.Join(',', raceCompatibility.IncompatibleRaces)}");
-                }
-                else
-                {
-                    steps.Add("race-compat:ok");
-                }
+                steps.Add(LocalExportService.BuildRaceCompatibilityStep(raceCompatibility));
             }
 
             ReportStage("Detecting source body", 5);
@@ -26807,6 +26800,21 @@ internal sealed class LocalExportService(
             ? "none"
             : string.Join(", ", configs);
 
+    internal static string BuildRaceCompatibilityStep(RaceCompatibilityReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        var warnings = report.Warnings
+            .Concat(report.IncompatibleRaces)
+            .Where(static warning => !string.IsNullOrWhiteSpace(warning))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return warnings.Length == 0
+            ? "race-compat:ok"
+            : $"race-compat:warnings={JsonSerializer.Serialize(warnings)}";
+    }
+
     private static IReadOnlyList<string> ExtractRaceCompatibilityWarnings(IReadOnlyList<string> steps)
     {
         const string prefix = "race-compat:warnings=";
@@ -26816,7 +26824,23 @@ internal sealed class LocalExportService(
             return [];
         }
 
-        return warningStep[prefix.Length..]
+        var encodedWarnings = warningStep[prefix.Length..];
+        try
+        {
+            var warnings = JsonSerializer.Deserialize<string[]>(encodedWarnings);
+            if (warnings is { Length: > 0 })
+            {
+                return warnings
+                    .Where(static warning => !string.IsNullOrWhiteSpace(warning))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return encodedWarnings
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -32594,7 +32618,7 @@ internal sealed class LocalExportService(
            .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
            .ToArray();
 
-    private static bool RequiresMixedModStackValidation(
+    internal static bool RequiresMixedModStackValidation(
         PluginAnalysisResult? pluginAnalysis,
         RaceCompatibilityReport? raceCompatibility,
         string targetBody)
@@ -32604,6 +32628,16 @@ internal sealed class LocalExportService(
         var armorRecordCount = pluginAnalysis?.ArmorRecords?.Count ?? 0;
         var ambiguousPluginCount = pluginAnalysis?.AmbiguousPlugins?.Count ?? 0;
         var raceRisk = (raceCompatibility?.Warnings?.Count ?? 0) > 0 || (raceCompatibility?.IncompatibleRaces?.Count ?? 0) > 0;
+        var hasPluginOrRaceEvidence = pluginCount > 0 ||
+                                      addonCount > 0 ||
+                                      armorRecordCount > 0 ||
+                                      ambiguousPluginCount > 0 ||
+                                      raceCompatibility is not null;
+        if (!hasPluginOrRaceEvidence)
+        {
+            return false;
+        }
+
         return pluginCount >= 2 ||
                addonCount >= 2 ||
                armorRecordCount >= 2 ||
@@ -32633,7 +32667,7 @@ internal sealed class LocalExportService(
         ConversionReadinessAssessment conversionReadiness,
         InGameValidationReport inGameValidation)
     {
-        if (pluginAnalysis is null && raceCompatibility is null)
+        if (!RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody))
         {
             return null;
         }
