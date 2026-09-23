@@ -2455,14 +2455,7 @@ public sealed class MainForm : Form
             return null;
         }
 
-        var value = comboBox.SelectedItem?.ToString();
-        if (string.IsNullOrWhiteSpace(value) &&
-            comboBox.DropDownStyle is not ComboBoxStyle.DropDownList)
-        {
-            value = comboBox.Text;
-        }
-
-        return DesktopWorkflowSupport.ReadOptionalSelection(value);
+        return DesktopWorkflowSupport.ReadOptionalSelection(comboBox.SelectedItem?.ToString());
     }
 
     private static string? ReadOptionalPathValue(string? path) =>
