@@ -171,6 +171,19 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void DesktopSmokeTestContract_ManualSerialize_UsesMismatchStatusWhenTabsDoNotMatchExpectedDesktopLayout()
+    {
+        var json = DesktopSmokeTestContract.Serialize("SlideSmith Desktop", 4, 3, 2, 1, DesktopSmokeTestContract.ExpectedDesktopTabCount - 1);
+
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, root.GetProperty("status").GetString());
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount - 1, root.GetProperty("tabs").GetInt32());
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabs").GetInt32());
+    }
+
+    [Fact]
     public void DesktopSmokeTestContract_CreateReady_UsesCatalogCountsAndExpectedDesktopTabCount()
     {
         const int expectedDesktopTabs = DesktopSmokeTestContract.ExpectedDesktopTabCount;

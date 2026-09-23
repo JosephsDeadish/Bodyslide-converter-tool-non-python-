@@ -77,4 +77,67 @@ public sealed class DesktopUiSettingsStoreTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Save_AllowsConcurrentWritersAndLeavesValidJson()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+
+        try
+        {
+            var settingsPath = Path.Combine(workingDirectory, "ui-settings.json");
+            var firstProfile = Path.Combine(workingDirectory, "first-profile.json");
+            var secondProfile = Path.Combine(workingDirectory, "second-profile.json");
+            File.WriteAllText(firstProfile, "{ }");
+            File.WriteAllText(secondProfile, "{ }");
+
+            var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var saveTasks = new[]
+            {
+                Task.Run(async () =>
+                {
+                    await startGate.Task;
+                    for (var attempt = 0; attempt < 10; attempt++)
+                    {
+                        DesktopUiSettingsStore.Save(settingsPath, new DesktopUiSettings("Dark", [firstProfile]));
+                    }
+                }),
+                Task.Run(async () =>
+                {
+                    await startGate.Task;
+                    for (var attempt = 0; attempt < 10; attempt++)
+                    {
+                        DesktopUiSettingsStore.Save(settingsPath, new DesktopUiSettings("Light", [secondProfile]));
+                    }
+                })
+            };
+
+            startGate.SetResult();
+            await Task.WhenAll(saveTasks);
+
+            var loaded = DesktopUiSettingsStore.Load(settingsPath);
+            Assert.True(
+                loaded.Theme is "Dark" or "Light",
+                $"Expected theme to be either Dark or Light but was '{loaded.Theme ?? "<null>"}'.");
+
+            var customProfilePaths = Assert.IsAssignableFrom<IReadOnlyList<string>>(loaded.CustomProfilePaths);
+            Assert.Single(customProfilePaths);
+            Assert.True(
+                customProfilePaths[0] is var selectedProfile &&
+                (selectedProfile == firstProfile || selectedProfile == secondProfile),
+                $"Expected saved profile path to be either '{firstProfile}' or '{secondProfile}' but was '{customProfilePaths[0]}'.");
+
+            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            var root = document.RootElement;
+            Assert.True(
+                root.GetProperty("theme").GetString() is "Dark" or "Light",
+                "Expected persisted theme to be either Dark or Light.");
+            Assert.Single(root.GetProperty("customProfilePaths").EnumerateArray());
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }

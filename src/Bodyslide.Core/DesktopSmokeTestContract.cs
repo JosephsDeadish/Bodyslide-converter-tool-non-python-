@@ -63,9 +63,13 @@ public static class DesktopSmokeTestContract
         int physics,
         int tabs)
     {
+        var status = tabs == ExpectedDesktopTabCount
+            ? ReadyStatus
+            : LayoutMismatchStatus;
+
         return JsonSerializer.Serialize(new
         {
-            status = ReadyStatus,
+            status,
             title,
             presets,
             targets,
