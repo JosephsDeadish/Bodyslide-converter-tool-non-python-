@@ -101,6 +101,8 @@ public sealed class MainForm : Form
     private readonly List<string> _customProfilePaths = [];
     private UiTheme _currentTheme;
     private bool _suppressThemeSelectionChanged;
+    private bool _allowUserMainSplitOverride;
+    private bool _userAdjustedMainSplit;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -178,6 +180,13 @@ public sealed class MainForm : Form
         };
         _mainSplitContainer.Panel1.AutoScroll = true;
         _mainSplitContainer.SizeChanged += (_, _) => UpdateMainSplitLayout();
+        _mainSplitContainer.SplitterMoved += (_, _) =>
+        {
+            if (_allowUserMainSplitOverride)
+            {
+                _userAdjustedMainSplit = true;
+            }
+        };
         Controls.Add(_mainSplitContainer);
 
         _topLayoutPanel = new TableLayoutPanel
@@ -1081,6 +1090,7 @@ public sealed class MainForm : Form
             UpdateResponsiveLayout();
             UpdateMainSplitLayout();
         };
+        Shown += (_, _) => _allowUserMainSplitOverride = true;
     }
 
     internal DesktopSmokeTestSummary GetSmokeTestSummary()
@@ -1183,7 +1193,9 @@ public sealed class MainForm : Form
                 _topLayoutPanel.GetPreferredSize(new Size(widthBudget, 0)).Height + 16);
         }
 
-        var splitterDistance = Math.Clamp(preferredPanel1Height, MainSplitPanel1Minimum, maxSplitterDistance);
+        var splitterDistance = _userAdjustedMainSplit
+            ? Math.Clamp(_mainSplitContainer.SplitterDistance, MainSplitPanel1Minimum, maxSplitterDistance)
+            : Math.Clamp(preferredPanel1Height, MainSplitPanel1Minimum, maxSplitterDistance);
         if (_mainSplitContainer.SplitterDistance != splitterDistance)
         {
             _mainSplitContainer.SplitterDistance = splitterDistance;
