@@ -62,6 +62,7 @@ public sealed class MainForm : Form
     private readonly Label _sourceDetailsLabel;
     private readonly Label _physicsDetailsLabel;
     private readonly ProgressBar _progressBar;
+    private readonly SplitContainer _mainSplitContainer;
     private readonly TabControl _resultsTabControl;
     private readonly TabPage _previewTabPage;
     private readonly Panel _previewPanel;
@@ -120,6 +121,10 @@ public sealed class MainForm : Form
         "plugin-patches.json",
     ];
 
+    private const int MainSplitPreferredDistance = 560;
+    private const int MainSplitPanel1Minimum = 360;
+    private const int MainSplitPanel2Minimum = 220;
+
     private enum UiTheme
     {
         Light,
@@ -163,17 +168,15 @@ public sealed class MainForm : Form
             ShowAlways = true,
         };
 
-        var mainSplitContainer = new SplitContainer
+        _mainSplitContainer = new SplitContainer
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
             SplitterWidth = 8,
-            Panel1MinSize = 360,
-            Panel2MinSize = 220,
-            SplitterDistance = 560,
         };
-        mainSplitContainer.Panel1.AutoScroll = true;
-        Controls.Add(mainSplitContainer);
+        _mainSplitContainer.Panel1.AutoScroll = true;
+        _mainSplitContainer.SizeChanged += (_, _) => UpdateMainSplitLayout();
+        Controls.Add(_mainSplitContainer);
 
         var layout = new TableLayoutPanel
         {
@@ -193,7 +196,7 @@ public sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        mainSplitContainer.Panel1.Controls.Add(layout);
+        _mainSplitContainer.Panel1.Controls.Add(layout);
 
         var dropPanel = new Panel
         {
@@ -985,10 +988,11 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
+        _mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
 
         RefreshModeState();
         UpdateResponsiveLayout();
+        UpdateMainSplitLayout();
         UpdatePresetDetails();
         UpdateTargetDetails();
         UpdateSourceDetails();
@@ -1009,7 +1013,11 @@ public sealed class MainForm : Form
         _suppressThemeSelectionChanged = false;
         ApplyTheme(_currentTheme);
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
-        SizeChanged += (_, _) => UpdateResponsiveLayout();
+        SizeChanged += (_, _) =>
+        {
+            UpdateResponsiveLayout();
+            UpdateMainSplitLayout();
+        };
     }
 
     internal DesktopSmokeTestSummary GetSmokeTestSummary()
@@ -1070,6 +1078,38 @@ public sealed class MainForm : Form
         finally
         {
             _conversionOptionsPanel.ResumeLayout(performLayout: true);
+        }
+    }
+
+    private void UpdateMainSplitLayout()
+    {
+        if (_mainSplitContainer.IsDisposed)
+        {
+            return;
+        }
+
+        var availableHeight = _mainSplitContainer.ClientSize.Height - _mainSplitContainer.SplitterWidth;
+        if (availableHeight < MainSplitPanel1Minimum + MainSplitPanel2Minimum)
+        {
+            return;
+        }
+
+        var panel2Minimum = Math.Min(MainSplitPanel2Minimum, availableHeight - MainSplitPanel1Minimum);
+        var maxSplitterDistance = Math.Max(MainSplitPanel1Minimum, availableHeight - panel2Minimum);
+        var splitterDistance = Math.Clamp(MainSplitPreferredDistance, MainSplitPanel1Minimum, maxSplitterDistance);
+        if (_mainSplitContainer.SplitterDistance != splitterDistance)
+        {
+            _mainSplitContainer.SplitterDistance = splitterDistance;
+        }
+
+        if (_mainSplitContainer.Panel1MinSize != MainSplitPanel1Minimum)
+        {
+            _mainSplitContainer.Panel1MinSize = MainSplitPanel1Minimum;
+        }
+
+        if (_mainSplitContainer.Panel2MinSize != panel2Minimum)
+        {
+            _mainSplitContainer.Panel2MinSize = panel2Minimum;
         }
     }
 
