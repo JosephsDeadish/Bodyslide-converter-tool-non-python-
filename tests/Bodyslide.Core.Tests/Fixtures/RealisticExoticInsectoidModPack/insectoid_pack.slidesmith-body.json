@@ -34,5 +34,5 @@
   "gender": "female",
   "skeletonFoundation": "Insectoid chitin-wing skeleton",
   "skeletonFramework": "insectoid-humanoid",
-  "bodyOutputPath": "meshes\actors\character\character assets\"
+  "bodyOutputPath": "meshes\\insectoid\\hive\\"
 }

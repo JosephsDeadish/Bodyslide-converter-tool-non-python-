@@ -153,6 +153,60 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void DesktopSmokeTestContract_EmitsRequiredStatusAndCountFields()
+    {
+        var json = DesktopSmokeTestContract.Serialize("SlideSmith Desktop", 4, 3, 2, 1, 6);
+
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.Equal(DesktopSmokeTestContract.ReadyStatus, root.GetProperty("status").GetString());
+        Assert.Equal("SlideSmith Desktop", root.GetProperty("title").GetString());
+        Assert.Equal(4, root.GetProperty("presets").GetInt32());
+        Assert.Equal(3, root.GetProperty("targets").GetInt32());
+        Assert.Equal(2, root.GetProperty("profiles").GetInt32());
+        Assert.Equal(1, root.GetProperty("physics").GetInt32());
+        Assert.Equal(6, root.GetProperty("tabs").GetInt32());
+    }
+
+    [Fact]
+    public void FixtureBodyProfiles_ParseAndMatchTheirBodySlideOutputPaths()
+    {
+        var fixtureRoot = GetFixtureRoot();
+        foreach (var profilePath in Directory.EnumerateFiles(fixtureRoot, "*.slidesmith-body.json", SearchOption.AllDirectories))
+        {
+            using var profile = System.Text.Json.JsonDocument.Parse(File.ReadAllText(profilePath));
+            if (!profile.RootElement.TryGetProperty("bodyOutputPath", out var bodyOutputPathElement))
+            {
+                continue;
+            }
+
+            var sliderSetDirectory = Path.Combine(Path.GetDirectoryName(profilePath)!, "CalienteTools", "BodySlide", "SliderSets");
+            if (!Directory.Exists(sliderSetDirectory))
+            {
+                continue;
+            }
+
+            var ospPaths = Directory.EnumerateFiles(sliderSetDirectory, "*.osp", SearchOption.TopDirectoryOnly).ToArray();
+            Assert.NotEmpty(ospPaths);
+
+            var bodyOutputPath = bodyOutputPathElement.GetString();
+            Assert.False(string.IsNullOrWhiteSpace(bodyOutputPath));
+
+            foreach (var ospPath in ospPaths)
+            {
+                var ospText = File.ReadAllText(ospPath);
+                var match = System.Text.RegularExpressions.Regex.Match(ospText, "<OutputPath>(.*?)</OutputPath>");
+                Assert.True(match.Success, $"Missing OutputPath in {ospPath}.");
+                Assert.Equal(
+                    match.Groups[1].Value,
+                    bodyOutputPath,
+                    ignoreCase: true);
+            }
+        }
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPhysicsCapabilityMismatchAndRemapCases()
     {
         var summary = new ConversionValidationSummary(
@@ -223,6 +277,13 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Contains(actions, action => action.Contains("full master chain", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string GetFixtureRoot([System.Runtime.CompilerServices.CallerFilePath] string currentFilePath = "")
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(currentFilePath)!,
+            "Fixtures");
     }
 
     [Fact]

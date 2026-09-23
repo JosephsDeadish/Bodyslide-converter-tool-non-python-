@@ -28,5 +28,5 @@
   "gender": "female",
   "skeletonFoundation": "Avian Humanoid",
   "skeletonFramework": "avian-humanoid",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\avian_sparse\\"
 }

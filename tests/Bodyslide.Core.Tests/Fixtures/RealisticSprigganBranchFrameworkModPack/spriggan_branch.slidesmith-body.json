@@ -43,5 +43,5 @@
   "gender": "female",
   "skeletonFoundation": "Branch or vine creature-humanoid skeleton",
   "skeletonFramework": "spriggan-branch",
-  "bodyOutputPath": "meshes\actors\character\character assets\"
+  "bodyOutputPath": "meshes\\armor\\sprigganbranch\\"
 }

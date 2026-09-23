@@ -18,6 +18,8 @@ internal sealed record SkeletonFrameworkDetectionResult(
 
 internal static class SkeletonFrameworkCatalog
 {
+    private const double ExactSignatureDetectionScoreOffset = 100d;
+
     private const string ResourceName = "Bodyslide.Core.Data.skeleton-frameworks.json";
     private static readonly string[] ChainDepthMarkers =
     [
@@ -142,7 +144,7 @@ internal static class SkeletonFrameworkCatalog
                     .Select(signature => $"signature:{signature}")
                     .ToArray();
                 var confidence = Math.Min(1d, 0.7d + (matches / (double)Math.Max(signatures.Length, 1)));
-                detections.Add((100d + matches, new SkeletonFrameworkDetectionResult(
+                detections.Add((ExactSignatureDetectionScoreOffset + matches, new SkeletonFrameworkDetectionResult(
                     framework.Label,
                     Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
                     matchedSignatures,

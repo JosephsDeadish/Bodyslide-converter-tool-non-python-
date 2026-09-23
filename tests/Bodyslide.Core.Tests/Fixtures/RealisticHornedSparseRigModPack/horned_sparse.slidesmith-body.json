@@ -26,5 +26,5 @@
   "gender": "female",
   "skeletonFoundation": "Horned beast-humanoid skeleton",
   "skeletonFramework": "horned-humanoid",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\horned_sparse\\"
 }

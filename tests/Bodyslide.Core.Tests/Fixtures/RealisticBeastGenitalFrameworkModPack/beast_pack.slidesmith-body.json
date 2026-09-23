@@ -8,5 +8,5 @@
   "gender": "female",
   "skeletonFoundation": "Canine beast-humanoid skeleton",
   "skeletonFramework": "digitigrade-beast",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\lykaios\\"
 }

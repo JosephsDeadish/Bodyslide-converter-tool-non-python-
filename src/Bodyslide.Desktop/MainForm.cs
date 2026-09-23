@@ -985,16 +985,13 @@ public sealed class MainForm : Form
 
     internal string GetSmokeTestSummaryJson()
     {
-        return JsonSerializer.Serialize(new
-        {
-            status = "ok",
-            title = Text,
-            presets = _presetComboBox.Items.Count,
-            targets = _targetComboBox.Items.Count,
-            profiles = _profileComboBox.Items.Count,
-            physics = _physicsComboBox.Items.Count,
-            tabs = _resultsTabControl.TabPages.Count
-        });
+        return DesktopSmokeTestContract.Serialize(
+            Text,
+            _presetComboBox.Items.Count,
+            _targetComboBox.Items.Count,
+            _profileComboBox.Items.Count,
+            _physicsComboBox.Items.Count,
+            _resultsTabControl.TabPages.Count);
     }
 
     private static GroupBox CreateSection(string title, Control content)
@@ -2174,7 +2171,8 @@ public sealed class MainForm : Form
                     previewPath);
             }
 
-            if (entries.Count > 0)
+            var actionableEntries = entries.ToArray();
+            if (actionableEntries.Length > 0)
             {
                 var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
                     ? previewPath
@@ -2182,7 +2180,7 @@ public sealed class MainForm : Form
                 Add(
                     "Overall status",
                     gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
-                    BuildGuidanceOverview(entries, requiresReview, gateStatus),
+                    BuildGuidanceOverview(actionableEntries, requiresReview, gateStatus),
                     guidanceTarget);
             }
 
@@ -4344,12 +4342,7 @@ public sealed class MainForm : Form
         try
         {
             using var stream = File.OpenRead(reportPath);
-            using var reportDocument = JsonDocument.Parse(stream, new JsonDocumentOptions
-            {
-                AllowTrailingCommas = ReportJsonOptions.AllowTrailingCommas,
-                CommentHandling = ReportJsonOptions.ReadCommentHandling
-            });
-            var report = reportDocument.RootElement.Deserialize<InGameValidationReport>(ReportJsonOptions);
+            var report = JsonSerializer.Deserialize<InGameValidationReport>(stream, ReportJsonOptions);
             if (report is null)
             {
                 requiresReview = true;

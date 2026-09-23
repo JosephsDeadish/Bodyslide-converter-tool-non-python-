@@ -42,5 +42,5 @@
   "gender": "female",
   "skeletonFoundation": "Avian winged-humanoid skeleton",
   "skeletonFramework": "avian-humanoid",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\avian\\"
 }

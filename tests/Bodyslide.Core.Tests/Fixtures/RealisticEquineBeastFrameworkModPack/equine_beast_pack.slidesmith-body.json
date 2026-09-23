@@ -38,5 +38,5 @@
   "gender": "female",
   "skeletonFoundation": "Equine beast-humanoid skeleton",
   "skeletonFramework": "equine-humanoid",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\equine\\"
 }

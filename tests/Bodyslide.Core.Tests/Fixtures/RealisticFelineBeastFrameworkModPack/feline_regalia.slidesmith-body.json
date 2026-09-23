@@ -43,5 +43,5 @@
   "gender": "female",
   "skeletonFoundation": "Feline beast-humanoid skeleton",
   "skeletonFramework": "digitigrade-beast",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\feline\\"
 }

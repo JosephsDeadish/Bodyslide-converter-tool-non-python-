@@ -26,5 +26,5 @@
   "gender": "female",
   "skeletonFoundation": "Serpentine Humanoid",
   "skeletonFramework": "serpentine-humanoid",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\beast\\serpentine_sparse\\"
 }

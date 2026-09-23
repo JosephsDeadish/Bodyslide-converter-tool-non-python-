@@ -34,5 +34,5 @@
   "gender": "male",
   "skeletonFoundation": "TNG Extended",
   "skeletonFramework": "tng-extended",
-  "bodyOutputPath": "meshes\actors\character\character assets\"
+  "bodyOutputPath": "meshes\\armor\\gentleman\\"
 }

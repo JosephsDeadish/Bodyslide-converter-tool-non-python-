@@ -31,5 +31,5 @@
   "gender": "male",
   "skeletonFoundation": "SOS",
   "skeletonFramework": "xpmsse-male-smp",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\male/sos\\variant\\"
 }

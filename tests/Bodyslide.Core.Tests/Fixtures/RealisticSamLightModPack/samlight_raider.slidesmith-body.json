@@ -29,5 +29,5 @@
   "gender": "male",
   "skeletonFoundation": "SAM Light",
   "skeletonFramework": "sam-light",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\male/samlight\\variant\\"
 }

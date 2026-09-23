@@ -27,5 +27,5 @@
   "gender": "male",
   "skeletonFoundation": "XPMSSE",
   "skeletonFramework": "xpmsse-male-smp",
-  "bodyOutputPath": "meshes\\actors\\character\\character assets\\"
+  "bodyOutputPath": "meshes\\male/himbo\\variant\\"
 }
