@@ -170,6 +170,31 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void DesktopSmokeTestContract_CreateReady_UsesCatalogCountsAndExpectedDesktopTabCount()
+    {
+        const int expectedDesktopTabs = 10;
+
+        var payload = DesktopSmokeTestContract.CreateReady("SlideSmith Desktop", expectedDesktopTabs);
+        var json = DesktopSmokeTestContract.Serialize(payload);
+
+        Assert.Equal(DesktopSmokeTestContract.ReadyStatus, payload.Status);
+        Assert.Equal("SlideSmith Desktop", payload.Title);
+        Assert.Equal(PresetCatalog.All.Count, payload.Presets);
+        Assert.Equal(BodyTypeCatalog.All.Count, payload.Targets);
+        Assert.Equal(DeformationProfileModifier.All.Count, payload.Profiles);
+        Assert.Equal(PhysicsProfileCatalog.All.Count, payload.Physics);
+        Assert.Equal(expectedDesktopTabs, payload.Tabs);
+
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal(PresetCatalog.All.Count, root.GetProperty("presets").GetInt32());
+        Assert.Equal(BodyTypeCatalog.All.Count, root.GetProperty("targets").GetInt32());
+        Assert.Equal(DeformationProfileModifier.All.Count, root.GetProperty("profiles").GetInt32());
+        Assert.Equal(PhysicsProfileCatalog.All.Count, root.GetProperty("physics").GetInt32());
+        Assert.Equal(expectedDesktopTabs, root.GetProperty("tabs").GetInt32());
+    }
+
+    [Fact]
     public void FixtureBodyProfiles_ParseAndMatchTheirBodySlideOutputPaths()
     {
         var fixtureRoot = GetFixtureRoot();

@@ -985,13 +985,7 @@ public sealed class MainForm : Form
 
     internal string GetSmokeTestSummaryJson()
     {
-        return DesktopSmokeTestContract.Serialize(
-            Text,
-            _presetComboBox.Items.Count,
-            _targetComboBox.Items.Count,
-            _profileComboBox.Items.Count,
-            _physicsComboBox.Items.Count,
-            _resultsTabControl.TabPages.Count);
+        return DesktopSmokeTestContract.Serialize(Text, _resultsTabControl.TabPages.Count);
     }
 
     private static GroupBox CreateSection(string title, Control content)
