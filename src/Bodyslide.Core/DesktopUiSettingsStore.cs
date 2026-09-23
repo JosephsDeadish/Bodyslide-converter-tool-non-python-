@@ -21,6 +21,12 @@ public static class DesktopUiSettingsStore
         WriteIndented = true,
     };
 
+    public static string GetDefaultSettingsPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlideSmith",
+            "ui-settings.json");
+
     public static DesktopUiSettings Load(string settingsPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(settingsPath);

@@ -79,6 +79,18 @@ public sealed class DesktopUiSettingsStoreTests
     }
 
     [Fact]
+    public void GetDefaultSettingsPath_UsesSlideSmithLocalApplicationDataLocation()
+    {
+        var path = DesktopUiSettingsStore.GetDefaultSettingsPath();
+        var expectedRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        Assert.False(string.IsNullOrWhiteSpace(path));
+        Assert.Equal("ui-settings.json", Path.GetFileName(path));
+        Assert.Equal("SlideSmith", new DirectoryInfo(Path.GetDirectoryName(path)!).Name);
+        Assert.StartsWith(expectedRoot, path, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Save_AllowsConcurrentWritersAndLeavesValidJson()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

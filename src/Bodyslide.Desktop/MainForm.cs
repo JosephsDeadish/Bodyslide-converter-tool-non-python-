@@ -1406,7 +1406,15 @@ public sealed class MainForm : Form
                         ? [.. _customProfilePaths]
                         : []));
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            AppendLog($"Failed to save UI settings: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            AppendLog($"Failed to save UI settings: {ex.Message}");
+        }
+        catch (JsonException ex)
         {
             AppendLog($"Failed to save UI settings: {ex.Message}");
         }
@@ -1444,11 +1452,7 @@ public sealed class MainForm : Form
         return true;
     }
 
-    private static string GetUiSettingsPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SlideSmith",
-            "ui-settings.json");
+    private static string GetUiSettingsPath() => DesktopUiSettingsStore.GetDefaultSettingsPath();
 
     private static UiTheme GetSystemPreferredTheme()
     {
@@ -1789,7 +1793,10 @@ public sealed class MainForm : Form
             return;
         }
 
-        PruneMissingCustomProfiles("conversion");
+        if (PruneMissingCustomProfiles("conversion"))
+        {
+            return;
+        }
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
