@@ -88,6 +88,7 @@ public sealed class MainForm : Form
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
     private readonly ToolTip _optionToolTip;
+    private readonly TableLayoutPanel _topLayoutPanel;
     private readonly TableLayoutPanel _conversionOptionsPanel;
     private readonly GroupBox _destinationSetupGroupBox;
     private readonly GroupBox _sourceHintsGroupBox;
@@ -179,7 +180,7 @@ public sealed class MainForm : Form
         _mainSplitContainer.SizeChanged += (_, _) => UpdateMainSplitLayout();
         Controls.Add(_mainSplitContainer);
 
-        var layout = new TableLayoutPanel
+        _topLayoutPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 1,
@@ -188,16 +189,16 @@ public sealed class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(12),
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _mainSplitContainer.Panel1.Controls.Add(layout);
+        _topLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _topLayoutPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _mainSplitContainer.Panel1.Controls.Add(_topLayoutPanel);
 
         var dropPanel = new Panel
         {
@@ -215,7 +216,7 @@ public sealed class MainForm : Form
             Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
         };
         dropPanel.Controls.Add(dropLabel);
-        layout.Controls.Add(CreateSection("Quick import", dropPanel), 0, 0);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", dropPanel), 0, 0);
 
         var inputRow = CreateThreeColumnRow("Input", out _inputTextBox);
         _inputTextBox.Name = "inputPathTextBox";
@@ -263,7 +264,7 @@ public sealed class MainForm : Form
         inputActions.Controls.Add(_inspectInputButton);
         inputActions.Controls.Add(_openInputButton);
         inputRow.Controls.Add(inputActions, 2, 0);
-        layout.Controls.Add(inputRow, 0, 1);
+        _topLayoutPanel.Controls.Add(inputRow, 0, 1);
 
         var modeRow = new TableLayoutPanel
         {
@@ -342,7 +343,7 @@ public sealed class MainForm : Form
         };
         modeRow.Controls.Add(_modeStatusLabel, 0, 2);
         modeRow.SetColumnSpan(_modeStatusLabel, 2);
-        layout.Controls.Add(modeRow, 0, 2);
+        _topLayoutPanel.Controls.Add(modeRow, 0, 2);
 
         _conversionOptionsPanel = new TableLayoutPanel
         {
@@ -470,7 +471,7 @@ public sealed class MainForm : Form
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        _destinationSetupGroupBox = CreateSection("Destination setup (what you want to build)", leftOptions);
+        _destinationSetupGroupBox = CreateAutoSizeSection("Destination setup (what you want to build)", leftOptions);
         _conversionOptionsPanel.Controls.Add(_destinationSetupGroupBox, 0, 0);
 
         var rightOptions = new TableLayoutPanel
@@ -591,9 +592,9 @@ public sealed class MainForm : Form
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
         rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
 
-        _sourceHintsGroupBox = CreateSection("Source hints, output overrides, and support files", rightOptions);
+        _sourceHintsGroupBox = CreateAutoSizeSection("Source hints, output overrides, and support files", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
-        layout.Controls.Add(CreateSection("Conversion setup", _conversionOptionsPanel), 0, 3);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion setup", _conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
@@ -601,14 +602,14 @@ public sealed class MainForm : Form
         var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += (_, _) => BrowseOutput();
         outputRow.Controls.Add(browseOutputButton, 2, 0);
-        layout.Controls.Add(outputRow, 0, 4);
+        _topLayoutPanel.Controls.Add(outputRow, 0, 4);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
         _cachePathTextBox.PlaceholderText = "Custom path for .conversion-learning-cache.json";
         var browseCacheButton = new Button { Text = "Browse...", AutoSize = true };
         browseCacheButton.Click += (_, _) => BrowseCachePath();
         cacheRow.Controls.Add(browseCacheButton, 2, 0);
-        layout.Controls.Add(cacheRow, 0, 5);
+        _topLayoutPanel.Controls.Add(cacheRow, 0, 5);
 
         var customProfilesPanel = new TableLayoutPanel
         {
@@ -663,7 +664,7 @@ public sealed class MainForm : Form
         customProfileActions.Controls.Add(_removeCustomProfileButton);
         customProfileActions.Controls.Add(_clearCustomProfilesButton);
         customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
-        layout.Controls.Add(CreateSection("Custom profiles", customProfilesPanel), 0, 6);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Custom profiles", customProfilesPanel), 0, 6);
 
         var primaryActionRow = new FlowLayoutPanel
         {
@@ -861,7 +862,7 @@ public sealed class MainForm : Form
         }, 0, 0);
         actionLayout.Controls.Add(primaryActionRow, 0, 1);
         actionLayout.Controls.Add(secondaryActionRow, 0, 2);
-        layout.Controls.Add(CreateSection("Actions", actionLayout), 0, 7);
+        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Actions", actionLayout), 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -1105,6 +1106,21 @@ public sealed class MainForm : Form
         };
     }
 
+    private static GroupBox CreateAutoSizeSection(string title, Control content)
+    {
+        content.Dock = DockStyle.Top;
+        return new GroupBox
+        {
+            Text = title,
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(10),
+            Margin = new Padding(0, 8, 0, 0),
+            Controls = { content }
+        };
+    }
+
     private void UpdateResponsiveLayout()
     {
         var useSingleColumn = ClientSize.Width < 1500 ||
@@ -1158,7 +1174,16 @@ public sealed class MainForm : Form
 
         var panel2Minimum = Math.Min(MainSplitPanel2Minimum, availableHeight - MainSplitPanel1Minimum);
         var maxSplitterDistance = Math.Max(MainSplitPanel1Minimum, availableHeight - panel2Minimum);
-        var splitterDistance = Math.Clamp(MainSplitPreferredDistance, MainSplitPanel1Minimum, maxSplitterDistance);
+        var preferredPanel1Height = MainSplitPreferredDistance;
+        if (!_topLayoutPanel.IsDisposed)
+        {
+            var widthBudget = Math.Max(0, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
+            preferredPanel1Height = Math.Max(
+                MainSplitPanel1Minimum,
+                _topLayoutPanel.GetPreferredSize(new Size(widthBudget, 0)).Height + 16);
+        }
+
+        var splitterDistance = Math.Clamp(preferredPanel1Height, MainSplitPanel1Minimum, maxSplitterDistance);
         if (_mainSplitContainer.SplitterDistance != splitterDistance)
         {
             _mainSplitContainer.SplitterDistance = splitterDistance;
