@@ -15574,6 +15574,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Classification").GetString(),
                 new[] { "direct", "review-backed", "heuristic-heavy" });
+            Assert.Contains(
+                qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Evidence").EnumerateArray().Select(static item => item.GetString()),
+                static evidence => evidence is not null && evidence.StartsWith("candidate-count:", StringComparison.OrdinalIgnoreCase));
 
             using var observationTemplateJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-observation-bundle.template.json")));
             Assert.Equal("pending-external-harness", observationTemplateJson.RootElement.GetProperty("Status").GetString());
@@ -18034,6 +18037,12 @@ public sealed class RealisticModPackFixtureTests
                 liveGameExecution.RootElement.GetProperty("ObservationChannels").EnumerateArray().Select(static item => item.GetString()),
                 static channel => string.Equals(channel, "runtime-log-capture", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationChannels").EnumerateArray().Select(static item => item.GetString()),
+                static channel => string.Equals(channel, "bone-transform-tracking", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationChannels").EnumerateArray().Select(static item => item.GetString()),
+                static channel => string.Equals(channel, "partition-slot-snapshot", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
                 static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -18042,11 +18051,28 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("DeploymentArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static artifact => string.Equals(artifact, "mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("DeploymentArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "runtime-observation-bundle.template.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(liveGameExecution.RootElement.GetProperty("ScenarioProfiles").GetArrayLength() > 0);
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
                 static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
             Assert.True(liveGameExecution.RootElement.GetProperty("Probes").GetArrayLength() > 0);
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("HostEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "bone-transform-traces/", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("HostEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "partition-slot-snapshots/", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Scenarios").EnumerateArray().SelectMany(static scenario =>
+                    scenario.GetProperty("RequiredSuccessSignals").EnumerateArray().Select(static item => item.GetString())),
+                static signal => string.Equals(signal, "bone-deformation-stable", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Scenarios").EnumerateArray().SelectMany(static scenario =>
+                    scenario.GetProperty("BlockingFailureSignals").EnumerateArray().Select(static item => item.GetString())),
+                static signal => string.Equals(signal, "mesh-clipping-regression", StringComparison.OrdinalIgnoreCase));
 
             var modStackJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "mod-stack-cross-validation.json"));
             Assert.Contains("\"RequiresLoadOrderValidation\": true", modStackJson, StringComparison.OrdinalIgnoreCase);
@@ -18104,6 +18130,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
                 static axis => string.Equals(axis, "plugin-modstack", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("Axes").EnumerateArray()
+                    .Where(static axis => string.Equals(axis.GetProperty("Axis").GetString(), "strict-layout", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(static axis => axis.GetProperty("Signals").EnumerateArray().Select(static item => item.GetString())),
+                static signal => signal is not null && signal.StartsWith("strict-layout-ready:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static item => item.GetString()),
                 static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
@@ -23407,6 +23438,45 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains(report.TopologyWarnings!, warning => warning.Contains("collapsed a 4-island topology", StringComparison.OrdinalIgnoreCase));
         Assert.False(report.StrictOwnershipLayoutReady);
         Assert.Contains(report.OwnershipLayoutViolations ?? [], warning => warning.Contains("strict layout violation", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildTopologyStabilityAssessment_TightensVarianceThresholdForComplexMultiIslandTopologies()
+    {
+        var method = typeof(LocalExportService).GetMethod("BuildTopologyStabilityAssessment", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var regionalMorphing = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tail"] = 1.23d,
+            ["wings"] = 0.77d
+        };
+        var topology = new CageTopologyReport(
+            IslandCount: 4,
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 16,
+            UsesEstimatedMemberships: true,
+            InteriorEdgeCount: 6,
+            NonManifoldEdgeCount: 0,
+            Islands:
+            [
+                new CageIslandMembershipSummary("hardcase_0.nif", 0, 24, 6, true, ["tail"]),
+                new CageIslandMembershipSummary("hardcase_0.nif", 1, 24, 6, true, ["left-wing"]),
+                new CageIslandMembershipSummary("hardcase_0.nif", 2, 24, 6, true, ["right-wing"]),
+                new CageIslandMembershipSummary("hardcase_0.nif", 3, 24, 6, true, ["chest"])
+            ]);
+
+        var assessment = method!.Invoke(null, [regionalMorphing, new[] { "tail", "wings" }, topology, null]);
+        var radicalRisk = (bool)assessment!.GetType().GetProperty("RadicalTopologyRisk")!.GetValue(assessment)!;
+        var boundaryRisk = (string)assessment.GetType().GetProperty("BoundaryRisk")!.GetValue(assessment)!;
+        var highVarianceRegions = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetProperty("HighVarianceRegions")!.GetValue(assessment));
+        var signals = Assert.IsAssignableFrom<IReadOnlyList<string>>(assessment.GetType().GetProperty("Signals")!.GetValue(assessment));
+
+        Assert.True(radicalRisk);
+        Assert.Equal("high", boundaryRisk);
+        Assert.Contains("tail", highVarianceRegions, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(signals, signal => signal.Contains("tightened-variance-threshold", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(signals, signal => signal.Contains("multi-island-topology", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -29584,6 +29654,20 @@ public sealed class CorrectionFeedbackLoopTests
         Assert.True(result["chest"] < 1.24d);
     }
 
+    [Fact]
+    public void BuildIslandOwnershipRoutingDamping_DampsAmbiguousOwnershipRegionsMoreThanUniqueRegions()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("BuildIslandOwnershipRoutingDamping", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var regions = new[] { "chest", "arms" };
+        var baseline = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [regions, CreateMultiIslandOwnershipCage()]));
+        var result = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [regions, CreateAmbiguousMultiIslandOwnershipCage()]));
+
+        Assert.True(result["chest"] < baseline["chest"]);
+        Assert.True(result["chest"] < result["arms"]);
+    }
+
     // Mesh conversion service that forces high regional morphing to trigger clipping.
     private sealed class ForcedClippingMeshConversionService : IMeshConversionService
     {
@@ -29650,6 +29734,46 @@ public sealed class CorrectionFeedbackLoopTests
                 new CageIslandControl(
                     MeshKey: "ownership-mesh",
                     IslandId: 1,
+                    CageRegions: ["arms"],
+                    WidthScaleBias: 0.94f,
+                    DepthScaleBias: 0.94f,
+                    HeightScaleBias: 0.94f)
+            ]);
+
+    private static DeformationCage CreateAmbiguousMultiIslandOwnershipCage() =>
+        new(
+            "hybrid-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = new(0.78f, 0.24f),
+                ["arms"] = new(0.92f, 0.10f, 0.92f, 0.18f, 0.50f, 0.58f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "ambiguous-ownership-mesh",
+                    IslandId: 0,
+                    CageRegions: ["chest"],
+                    SemanticLabels: ["window-frame-island"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(0, ["chest"], IsHole: true)
+                    ],
+                    AuthoredRegions:
+                    [
+                        new CageIslandAuthoredRegion("chest", new CageRegion(0.76f, 0.22f), LoopIndex: 0, IsHole: true)
+                    ]),
+                new CageIslandControl(
+                    MeshKey: "ambiguous-ownership-mesh",
+                    IslandId: 1,
+                    CageRegions: ["chest"],
+                    SemanticLabels: ["bridge-strap-island"],
+                    BoundaryLoops:
+                    [
+                        new CageIslandBoundaryLoopControl(1, ["chest"])
+                    ]),
+                new CageIslandControl(
+                    MeshKey: "ambiguous-ownership-mesh",
+                    IslandId: 2,
                     CageRegions: ["arms"],
                     WidthScaleBias: 0.94f,
                     DepthScaleBias: 0.94f,

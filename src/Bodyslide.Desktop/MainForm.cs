@@ -325,6 +325,7 @@ public sealed class MainForm : Form
             Name = "presetBodyComboBox",
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            MinimumSize = new Size(260, 0),
         };
         foreach (var preset in PresetCatalog.All.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -352,6 +353,7 @@ public sealed class MainForm : Form
             Name = "targetBodyComboBox",
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDown,
+            MinimumSize = new Size(260, 0),
         };
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
         {
@@ -441,6 +443,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            MinimumSize = new Size(260, 0),
         };
         _profileComboBox.Items.Add("(auto)");
         foreach (var profile in DeformationProfileModifier.All.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
@@ -455,6 +458,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDown,
+            MinimumSize = new Size(260, 0),
         };
         _sourceComboBox.Items.Add("(auto)");
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
@@ -479,6 +483,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            MinimumSize = new Size(260, 0),
         };
         _physicsComboBox.Items.Add("(auto)");
         foreach (var profile in PhysicsProfileCatalog.All)
@@ -502,6 +507,7 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            MinimumSize = new Size(260, 0),
         };
         _worldModeComboBox.Items.Add("(auto)");
         foreach (var worldMode in WorldDropModeCatalog.All)
@@ -828,6 +834,7 @@ public sealed class MainForm : Form
         {
             Name = "resultsTabControl",
             Dock = DockStyle.Fill,
+            Multiline = true,
         };
         var logTabPage = new TabPage("Log") { Name = "logTabPage" };
         logTabPage.Controls.Add(_logTextBox);
@@ -1030,7 +1037,8 @@ public sealed class MainForm : Form
 
     private void UpdateResponsiveLayout()
     {
-        var useSingleColumn = ClientSize.Width < 1380;
+        var useSingleColumn = ClientSize.Width < 1500 ||
+                              _conversionOptionsPanel.DisplayRectangle.Width < 1100;
 
         _conversionOptionsPanel.SuspendLayout();
         try
