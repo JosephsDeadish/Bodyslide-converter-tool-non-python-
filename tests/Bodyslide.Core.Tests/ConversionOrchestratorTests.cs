@@ -15563,10 +15563,19 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "in-game-validation.json")));
+            Assert.True(File.Exists(Path.Combine(outputDirectory, "runtime-observation-bundle.template.json")));
 
             using var inGameJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "in-game-validation.json")));
             Assert.True(inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.Equal("SAM Light", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
+
+            using var qualityJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
+            Assert.True(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Confidence").GetDouble() >= 0.75d);
+            Assert.False(string.IsNullOrWhiteSpace(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Classification").GetString()));
+
+            using var observationTemplateJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-observation-bundle.template.json")));
+            Assert.Equal("pending-external-harness", observationTemplateJson.RootElement.GetProperty("Status").GetString());
+            Assert.True(observationTemplateJson.RootElement.GetProperty("Scenarios").GetArrayLength() > 0);
         }
         finally
         {
@@ -16585,6 +16594,8 @@ public sealed class RealisticModPackFixtureTests
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticAnchorProfile\": \"Spriggan\"", topologyJson, StringComparison.Ordinal);
             Assert.Contains("branch", topologyJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"CorrespondenceStability\"", topologyJson, StringComparison.Ordinal);
+            Assert.Contains("\"BoundaryRisk\"", topologyJson, StringComparison.Ordinal);
         }
         finally
         {
@@ -18007,9 +18018,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresSkseOrEquivalentLauncher").GetBoolean());
             Assert.Equal("skyrim-live-game-external-runner", liveGameExecution.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Equal("pending-external-harness", liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Status").GetString());
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("BootstrapContract").GetProperty("ResultArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static artifact => string.Equals(artifact, "runtime-observation-bundle", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("RequiredOutputArtifacts").EnumerateArray().Select(static item => item.GetString()),
+                static artifact => string.Equals(artifact, "runtime-observation-bundle.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("RequiredHostCapabilities").EnumerateArray().Select(static item => item.GetString()),
                 static capability => string.Equals(capability, "validation-save-selection", StringComparison.OrdinalIgnoreCase));
@@ -23388,6 +23403,8 @@ public sealed class ConversionReadmeGeneratorTests
         Assert.Contains("explicit-boundary-tracking", report.TopologyLabels ?? []);
         Assert.NotNull(report.TopologyWarnings);
         Assert.Contains(report.TopologyWarnings!, warning => warning.Contains("collapsed a 4-island topology", StringComparison.OrdinalIgnoreCase));
+        Assert.False(report.StrictOwnershipLayoutReady);
+        Assert.Contains(report.OwnershipLayoutViolations ?? [], warning => warning.Contains("strict layout violation", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

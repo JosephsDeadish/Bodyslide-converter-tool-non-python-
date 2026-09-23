@@ -232,6 +232,15 @@ public sealed record SkeletonInferenceCandidate(
     double Confidence,
     IReadOnlyList<string> Evidence,
     bool UsedSparseInference);
+public sealed record SkeletonRemapCertaintyReport(
+    string Classification,
+    double Confidence,
+    int DirectMatchCount,
+    int FallbackMatchCount,
+    int UnsupportedBoneCount,
+    bool UsedSparseInference,
+    bool HasAmbiguousDetection,
+    IReadOnlyList<string> Evidence);
 public sealed record SkeletonMappingResult(
     string SourceSkeleton,
     string TargetSkeleton,
@@ -242,7 +251,8 @@ public sealed record SkeletonMappingResult(
     bool SourceSkeletonUsedSparseInference = false,
     IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null,
     string AutomaticRemapSafety = "safe",
-    IReadOnlyList<string>? AutomaticRemapSignals = null);
+    IReadOnlyList<string>? AutomaticRemapSignals = null,
+    SkeletonRemapCertaintyReport? RemapCertainty = null);
 
 internal static class SkeletonRemapSafetyClassifier
 {
@@ -622,6 +632,22 @@ public sealed record LiveGameExecutionProbe(
     IReadOnlyList<string> FailureSignals,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease);
+public sealed record RuntimeObservationScenarioContract(
+    string Scenario,
+    string ValidationSaveProfile,
+    IReadOnlyList<string> RequiredSuccessSignals,
+    IReadOnlyList<string> BlockingFailureSignals,
+    IReadOnlyList<string> EvidenceArtifacts,
+    bool BlocksRelease);
+public sealed record RuntimeObservationBundleContract(
+    string Status,
+    string HarnessKind,
+    string ContractVersion,
+    IReadOnlyList<string> RequiredGlobalSignals,
+    IReadOnlyList<string> RequiredOutputArtifacts,
+    IReadOnlyList<string> HostEvidenceArtifacts,
+    IReadOnlyList<RuntimeObservationScenarioContract> Scenarios,
+    IReadOnlyList<string> Notes);
 public sealed record LiveGameExecutionPlan(
     string TargetBody,
     string ValidationGate,
@@ -637,6 +663,7 @@ public sealed record LiveGameExecutionPlan(
     IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
     ExternalHarnessBootstrapContract BootstrapContract,
+    RuntimeObservationBundleContract ObservationBundleContract,
     IReadOnlyList<LiveGameExecutionScenarioProfile> ScenarioProfiles,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ConversionMatrixProofAxis(
@@ -1448,7 +1475,9 @@ public sealed record PartitionSignalReport(
     int TopologyInteriorEdgeCount = 0,
     int TopologyNonManifoldEdgeCount = 0,
     IReadOnlyList<string>? TopologyLabels = null,
-    IReadOnlyList<string>? TopologyWarnings = null);
+    IReadOnlyList<string>? TopologyWarnings = null,
+    bool StrictOwnershipLayoutReady = true,
+    IReadOnlyList<string>? OwnershipLayoutViolations = null);
 
 public sealed record ConversionQualityReport(
     string DetectedSourceBody,
@@ -1473,6 +1502,7 @@ public sealed record ConversionQualityReport(
     IReadOnlyList<string>? SourceSkeletonEvidence = null,
     bool SourceSkeletonUsedSparseInference = false,
     IReadOnlyList<SkeletonInferenceCandidate>? SourceSkeletonCandidates = null,
+    SkeletonRemapCertaintyReport? SkeletonRemapCertainty = null,
     bool TopologyMismatchRisk = false,
     bool ManualCleanupLikely = false,
     bool RuntimeVerificationRequired = false,
@@ -1522,7 +1552,13 @@ public sealed record TopologyCorrespondenceReport(
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<string> Signals,
     IReadOnlyList<string> FocusRegions,
-    IReadOnlyList<string> Recommendations);
+    IReadOnlyList<string> Recommendations,
+    bool RadicalTopologyRisk = false,
+    string CorrespondenceStability = "stable",
+    string BoundaryRisk = "low",
+    int HighVarianceRegionCount = 0,
+    IReadOnlyList<string>? HighVarianceRegions = null,
+    IReadOnlyList<string>? StabilitySignals = null);
 
 public sealed record CageTopologyReport(
     int IslandCount,
@@ -14430,6 +14466,12 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             sourceFrameworkDetection.UsedSparseInference,
             sourceFrameworkCandidates,
             remapSafety);
+        var remapCertainty = BuildSkeletonRemapCertainty(
+            mappings,
+            unsupportedBones,
+            sourceSkeletonConfidence,
+            sourceFrameworkDetection.UsedSparseInference,
+            sourceFrameworkCandidates);
 
         return new SkeletonMappingResult(
             sourceSkeleton,
@@ -14441,7 +14483,64 @@ internal sealed class BasicSkeletonMappingService : ISkeletonMappingService
             SourceSkeletonUsedSparseInference: sourceFrameworkDetection.UsedSparseInference,
             SourceSkeletonCandidates: sourceFrameworkCandidates,
             AutomaticRemapSafety: remapSafety,
-            AutomaticRemapSignals: remapSignals);
+            AutomaticRemapSignals: remapSignals,
+            RemapCertainty: remapCertainty);
+    }
+
+    private static SkeletonRemapCertaintyReport BuildSkeletonRemapCertainty(
+        IReadOnlyList<SkeletonBoneMapping> mappings,
+        IReadOnlyList<string> unsupportedBones,
+        double? sourceSkeletonConfidence,
+        bool usedSparseInference,
+        IReadOnlyList<SkeletonInferenceCandidate> sourceSkeletonCandidates)
+    {
+        var directMatchCount = mappings.Count(static mapping =>
+            mapping.SourceBone.Equals(mapping.TargetBone, StringComparison.OrdinalIgnoreCase));
+        var fallbackMatchCount = Math.Max(0, mappings.Count - directMatchCount);
+        var ambiguousDetection = sourceSkeletonCandidates.Count >= 2 &&
+                                 Math.Abs(sourceSkeletonCandidates[0].Confidence - sourceSkeletonCandidates[1].Confidence) <= 0.12d;
+        var evidence = new List<string>
+        {
+            $"direct-matches:{directMatchCount}",
+            $"fallback-matches:{fallbackMatchCount}",
+            $"unsupported-bones:{unsupportedBones.Count}"
+        };
+        if (sourceSkeletonConfidence.HasValue)
+        {
+            evidence.Add($"source-confidence:{Math.Round(sourceSkeletonConfidence.Value, 2, MidpointRounding.AwayFromZero):0.00}");
+        }
+
+        if (usedSparseInference)
+        {
+            evidence.Add("sparse-inference");
+        }
+
+        if (ambiguousDetection)
+        {
+            evidence.Add("ambiguous-framework-candidates");
+        }
+
+        var penalty = Math.Min(0.45d, fallbackMatchCount * 0.04d)
+                      + Math.Min(0.55d, unsupportedBones.Count * 0.12d)
+                      + (usedSparseInference ? 0.12d : 0d)
+                      + (ambiguousDetection ? 0.08d : 0d)
+                      + (sourceSkeletonConfidence.HasValue ? Math.Max(0d, (0.90d - sourceSkeletonConfidence.Value) * 0.30d) : 0.08d);
+        var confidence = Math.Max(0.10d, Math.Min(0.99d, 1d - penalty));
+        var classification = confidence >= 0.90d && unsupportedBones.Count == 0
+            ? "direct"
+            : confidence >= 0.75d && unsupportedBones.Count <= Math.Max(1, mappings.Count / 4)
+                ? "review-backed"
+                : "heuristic-heavy";
+
+        return new SkeletonRemapCertaintyReport(
+            classification,
+            Math.Round(confidence, 2, MidpointRounding.AwayFromZero),
+            directMatchCount,
+            fallbackMatchCount,
+            unsupportedBones.Count,
+            usedSparseInference,
+            ambiguousDetection,
+            evidence);
     }
 
     internal static IReadOnlyList<string> BuildSkeletonInferenceContextCues(ImportedArmor armor, string? parsedSkeletonLabel, string? targetBody = null)
@@ -19903,6 +20002,12 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(liveGameExecution, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(liveGameExecutionPath);
+        var runtimeObservationBundleTemplatePath = Path.Combine(outputDirectory, "runtime-observation-bundle.template.json");
+        await File.WriteAllTextAsync(
+            runtimeObservationBundleTemplatePath,
+            JsonSerializer.Serialize(liveGameExecution.ObservationBundleContract, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(runtimeObservationBundleTemplatePath);
 
         var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan();
         var conversionMatrixProofPath = Path.Combine(outputDirectory, "conversion-matrix-proof.json");
@@ -19911,6 +20016,7 @@ internal sealed class LocalExportService(
             conversionReadiness,
             topologyCorrespondence,
             skeletonMapping,
+            partitionSignals,
             modStackCrossValidation,
             physicsCompatibility,
             runtimeValidationPlan,
@@ -19955,6 +20061,7 @@ internal sealed class LocalExportService(
             SourceSkeletonEvidence:    skeletonMapping.SourceSkeletonEvidence,
             SourceSkeletonUsedSparseInference: skeletonMapping.SourceSkeletonUsedSparseInference,
             SourceSkeletonCandidates:  skeletonMapping.SourceSkeletonCandidates,
+            SkeletonRemapCertainty:    skeletonMapping.RemapCertainty,
             TopologyMismatchRisk:      topologyMismatchRisk,
             ManualCleanupLikely:       manualCleanupLikely,
             RuntimeVerificationRequired: runtimeVerificationRequired,
@@ -29339,6 +29446,7 @@ internal sealed class LocalExportService(
         }
 
         var topologyWarnings = new List<string>();
+        var ownershipLayoutViolations = new List<string>();
         if (topologyInfo is not null &&
             finalSlots.Count <= 1 &&
             topologyInfo.IslandCount >= 2)
@@ -29350,6 +29458,8 @@ internal sealed class LocalExportService(
                 topologyInfo.Labels.Contains("window-boundary-risk", StringComparer.OrdinalIgnoreCase) ||
                 topologyInfo.InteriorEdgeCount > 0)
             {
+                ownershipLayoutViolations.Add(
+                    $"strict layout violation: {topologyInfo.IslandCount}-island topology{topologyLabelText} collapsed into coarse slot coverage {string.Join(", ", finalSlots)}.");
                 topologyWarnings.Add(
                     $"manual review: partition routing collapsed a {topologyInfo.IslandCount}-island topology{topologyLabelText} into coarse slot coverage {string.Join(", ", finalSlots)}.");
             }
@@ -29364,11 +29474,40 @@ internal sealed class LocalExportService(
         {
             topologyWarnings.Add(
                 $"manual review: partition routing was built on topology with {topologyInfo.NonManifoldEdgeCount} non-manifold edge signal(s), so BSDismember coverage should be checked in NifSkope or Outfit Studio.");
+            if (finalSlots.Count <= Math.Max(1, Math.Min(2, topologyInfo.IslandCount / 2)))
+            {
+                ownershipLayoutViolations.Add(
+                    $"strict layout violation: topology reported {topologyInfo.NonManifoldEdgeCount} non-manifold edge signal(s) but exported slot coverage stayed coarse ({string.Join(", ", finalSlots)}).");
+            }
+        }
+
+        if (topologyInfo is not null &&
+            topologyInfo.IslandCount >= 3 &&
+            regions.Count >= 2 &&
+            finalSlots.Count <= 1)
+        {
+            ownershipLayoutViolations.Add(
+                $"strict layout violation: {regions.Count} routed regions across {topologyInfo.IslandCount} islands resolved to only {Math.Max(finalSlots.Count, unknownFinalPartitions.Count)} exported partition grouping(s).");
+        }
+
+        if (topologyInfo is not null &&
+            (missingSourceSlots.Count > 0 || missingPluginSlots.Count > 0) &&
+            topologyInfo.IslandCount >= 2)
+        {
+            ownershipLayoutViolations.Add(
+                "strict layout violation: slot loss occurred on a multi-island topology, so exported mesh layout no longer preserves the observed ownership split strongly enough for strict proof.");
         }
 
         if (topologyWarnings.Count > 0)
         {
             warnings.AddRange(topologyWarnings);
+        }
+
+        ownershipLayoutViolations = [.. ownershipLayoutViolations
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+        if (ownershipLayoutViolations.Count > 0)
+        {
+            warnings.AddRange(ownershipLayoutViolations);
         }
 
         return new PartitionSignalReport(
@@ -29385,7 +29524,9 @@ internal sealed class LocalExportService(
             TopologyInteriorEdgeCount: topologyInfo?.InteriorEdgeCount ?? 0,
             TopologyNonManifoldEdgeCount: topologyInfo?.NonManifoldEdgeCount ?? 0,
             TopologyLabels: topologyInfo?.Labels ?? [],
-            TopologyWarnings: topologyWarnings);
+            TopologyWarnings: topologyWarnings,
+            StrictOwnershipLayoutReady: ownershipLayoutViolations.Count == 0,
+            OwnershipLayoutViolations: ownershipLayoutViolations);
     }
 
     private sealed record PartitionTopologyStepInfo(
@@ -30016,6 +30157,7 @@ internal sealed class LocalExportService(
             "desktop-workflow-automation.json",
             "in-game-validation.json",
             "live-game-execution.json",
+            "runtime-observation-bundle.template.json",
             "topology-correspondence.json",
             "runtime-validation-harness.json",
             "runtime-validation-plan.json",
@@ -30053,6 +30195,7 @@ internal sealed class LocalExportService(
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("runtime-observation-bundle.template.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
@@ -30337,7 +30480,11 @@ internal sealed class LocalExportService(
                 : "standard-load-order-validation-save"
         };
         var scenarioProfiles = BuildLiveGameScenarioProfiles(runtimePlan, validationSaveProfiles);
-
+        var observationBundleContract = BuildRuntimeObservationBundleContract(
+            validationSaveProfiles,
+            scenarioProfiles,
+            runtimePlan,
+            probes: runtimePlan.AutomationHarness?.Probes ?? []);
         var probes = runtimePlan.AutomationHarness?.Probes
             .Select(probe => new LiveGameExecutionProbe(
                 probe.ProbeId,
@@ -30369,7 +30516,8 @@ internal sealed class LocalExportService(
                 "runtime-validation-harness.json",
                 "conversion-matrix-proof.json",
                 "mod-stack-cross-validation.json",
-                "preview-workbench.html"
+                "preview-workbench.html",
+                "runtime-observation-bundle.template.json"
             ],
             LaunchActions: launchSequence,
             SuccessSignals:
@@ -30387,6 +30535,7 @@ internal sealed class LocalExportService(
                 "runtime-validation-harness.json",
                 "conversion-matrix-proof.json",
                 "runtime-observation-bundle",
+                "runtime-observation-bundle.template.json",
                 "release-gate-result"
             ]);
 
@@ -30405,8 +30554,69 @@ internal sealed class LocalExportService(
             ValidationSaveProfiles: validationSaveProfiles,
             LimitationNotes: limitationNotes,
             BootstrapContract: bootstrapContract,
+            ObservationBundleContract: observationBundleContract,
             ScenarioProfiles: scenarioProfiles,
             Probes: probes);
+    }
+
+    private static RuntimeObservationBundleContract BuildRuntimeObservationBundleContract(
+        IReadOnlyList<string> validationSaveProfiles,
+        IReadOnlyList<LiveGameExecutionScenarioProfile> scenarioProfiles,
+        RuntimeValidationExecutionPlan runtimePlan,
+        IReadOnlyList<RuntimeAutomationHarnessProbe> probes)
+    {
+        var scenarioContracts = scenarioProfiles
+            .Select(profile =>
+            {
+                var matchingProbe = probes.FirstOrDefault(probe =>
+                    probe.Objective.Contains(profile.Name, StringComparison.OrdinalIgnoreCase) ||
+                    profile.Name.Contains(probe.Objective, StringComparison.OrdinalIgnoreCase));
+                return new RuntimeObservationScenarioContract(
+                    Scenario: profile.Name,
+                    ValidationSaveProfile: profile.ValidationSaveProfile,
+                    RequiredSuccessSignals: matchingProbe?.ExpectedAssertions ?? profile.SuccessSignals,
+                    BlockingFailureSignals: matchingProbe?.FailureSignals ?? [],
+                    EvidenceArtifacts: profile.RelatedArtifacts,
+                    BlocksRelease: profile.BlocksRelease);
+            })
+            .ToArray();
+
+        var requiredGlobalSignals = new[]
+        {
+            "windows-host-connected",
+            "validation-save-loaded",
+            "runtime-scenarios-dispatched",
+            "host-observations-captured",
+            "release-gate-result-persisted"
+        };
+
+        return new RuntimeObservationBundleContract(
+            Status: "pending-external-harness",
+            HarnessKind: "skyrim-live-game-external-runner",
+            ContractVersion: "1.0",
+            RequiredGlobalSignals: requiredGlobalSignals,
+            RequiredOutputArtifacts:
+            [
+                "runtime-observation-bundle.json",
+                "conversion-matrix-proof.json",
+                "live-game-execution.json",
+                "runtime-validation-plan.json"
+            ],
+            HostEvidenceArtifacts:
+            [
+                "host-summary.txt",
+                "screenshots/",
+                "runtime-logs/",
+                "load-order-snapshot.txt"
+            ],
+            Scenarios: scenarioContracts,
+            Notes:
+            [
+                $"Validation save profiles expected: {string.Join(", ", validationSaveProfiles)}",
+                runtimePlan.RequiresExternalGameHarness
+                    ? "External harness execution is required before this bundle can be promoted from template to proof."
+                    : "External harness execution is optional, but recorded observations still strengthen runtime proof."
+            ]);
     }
 
     private static WindowsUiE2EAutomationPlan BuildWindowsUiE2EAutomationPlan()
@@ -30633,6 +30843,7 @@ internal sealed class LocalExportService(
         ConversionReadinessAssessment conversionReadiness,
         TopologyCorrespondenceReport topologyCorrespondence,
         SkeletonMappingResult skeletonMapping,
+        PartitionSignalReport? partitionSignals,
         ModStackCrossValidationReport? modStackCrossValidation,
         PhysicsCompatibilityReport physicsCompatibility,
         RuntimeValidationExecutionPlan runtimePlan,
@@ -30672,7 +30883,11 @@ internal sealed class LocalExportService(
                 $"semantic-status:{topologyCorrespondence.SemanticVertexMatchingStatus}",
                 $"anchor-coverage:{topologyCorrespondence.SemanticAnchorCoverage}",
                 $"hard-case-family:{topologyCorrespondence.HardCaseFamily}",
-                $"strict-transfer-ready:{topologyCorrespondence.StrictTransferReady}"
+                $"strict-transfer-ready:{topologyCorrespondence.StrictTransferReady}",
+                $"correspondence-stability:{topologyCorrespondence.CorrespondenceStability}",
+                $"radical-topology-risk:{topologyCorrespondence.RadicalTopologyRisk}",
+                $"boundary-risk:{topologyCorrespondence.BoundaryRisk}",
+                $"strict-layout-ready:{partitionSignals?.StrictOwnershipLayoutReady ?? true}"
             ],
             RequiredArtifacts:
             [
@@ -30683,9 +30898,10 @@ internal sealed class LocalExportService(
 
         var skeletonAxis = new ConversionMatrixProofAxis(
             Axis: "custom-skeleton",
-            Coverage: BuildSourceSkeletonInferenceReliability(skeletonMapping),
+            Coverage: skeletonMapping.RemapCertainty?.Classification ?? BuildSourceSkeletonInferenceReliability(skeletonMapping),
             StrictlyProven: !skeletonMapping.SourceSkeletonUsedSparseInference &&
                             skeletonMapping.UnsupportedBones.Count == 0 &&
+                            string.Equals(skeletonMapping.RemapCertainty?.Classification, "direct", StringComparison.OrdinalIgnoreCase) &&
                             conversionReadiness.SkeletonReliability.Equals("direct", StringComparison.OrdinalIgnoreCase) &&
                             conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase),
             Signals:
@@ -30694,7 +30910,9 @@ internal sealed class LocalExportService(
                 $"skeleton-reliability:{conversionReadiness.SkeletonReliability}",
                 $"remap-safety:{conversionReadiness.SkeletonRemapSafety}",
                 $"unsupported-bones:{skeletonMapping.UnsupportedBones.Count}",
-                $"sparse-inference:{skeletonMapping.SourceSkeletonUsedSparseInference}"
+                $"sparse-inference:{skeletonMapping.SourceSkeletonUsedSparseInference}",
+                $"remap-certainty:{skeletonMapping.RemapCertainty?.Classification ?? "unknown"}",
+                $"remap-confidence:{skeletonMapping.RemapCertainty?.Confidence ?? 0d:0.00}"
             ],
             RequiredArtifacts:
             [
@@ -30759,12 +30977,15 @@ internal sealed class LocalExportService(
                 $"requires-windows-host:{liveGameExecution.RequiresWindowsHost}",
                 $"requires-external-harness:{liveGameExecution.RequiresExternalHarness}",
                 $"validation-save-count:{liveGameExecution.ValidationSaveProfiles.Count}",
-                $"scenario-profile-count:{liveGameExecution.ScenarioProfiles.Count}"
+                $"scenario-profile-count:{liveGameExecution.ScenarioProfiles.Count}",
+                $"observation-contract-status:{liveGameExecution.ObservationBundleContract.Status}",
+                $"observation-scenario-count:{liveGameExecution.ObservationBundleContract.Scenarios.Count}"
             ],
             RequiredArtifacts:
             [
                 "live-game-execution.json",
-                "runtime-validation-plan.json"
+                "runtime-validation-plan.json",
+                "runtime-observation-bundle.template.json"
             ]);
 
         var desktopAxis = new ConversionMatrixProofAxis(
@@ -30862,10 +31083,14 @@ internal sealed class LocalExportService(
             "body-support" => "Target-body support metadata is not yet direct enough to treat this output as universally proven.",
             "topology-transfer" when topologyCorrespondence.UsesTrueSemanticCorrespondence =>
                 "True semantic correspondence exists, but hard-case focus regions still need manual review before the topology axis is fully proven.",
+            "topology-transfer" when !string.Equals(topologyCorrespondence.CorrespondenceStability, "stable", StringComparison.OrdinalIgnoreCase) =>
+                "Topology transfer still shows radical-divergence or boundary-stability risk across hard-case focus regions.",
             "topology-transfer" =>
                 "Topology transfer still relies on heuristic or partial semantic correspondence for hard-case mesh regions.",
             "custom-skeleton" when skeletonMapping.SourceSkeletonUsedSparseInference || skeletonMapping.UnsupportedBones.Count > 0 =>
                 "Custom skeleton coverage still depends on sparse inference or leaves unsupported bones unresolved.",
+            "custom-skeleton" when !string.Equals(skeletonMapping.RemapCertainty?.Classification, "direct", StringComparison.OrdinalIgnoreCase) =>
+                "Custom skeleton remap certainty still depends on fallback chains or ambiguous framework evidence.",
             "custom-skeleton" =>
                 "Custom skeleton remap safety is not yet strong enough to count as universal proof.",
             "plugin-modstack" when modStackCrossValidation?.RequiresLoadOrderValidation == true =>
@@ -30876,6 +31101,8 @@ internal sealed class LocalExportService(
                 "Runtime automation is exported as an external harness contract rather than executed proof inside SlideSmith.",
             "live-game-execution" when liveGameExecution.RequiresExternalHarness || liveGameExecution.RequiresWindowsHost =>
                 "Live-game validation still requires an external Windows host and launcher-driven harness.",
+            "live-game-execution" when liveGameExecution.ObservationBundleContract.Scenarios.Count == 0 =>
+                "Live-game proof is missing a concrete observation-bundle contract for scenario result capture.",
             "desktop-e2e" when windowsUiAutomation.RequiresExternalUiHarness || windowsUiAutomation.RequiresWindowsHost =>
                 "Desktop E2E remains an external Windows UI harness plan rather than an executed in-repo proof.",
             _ => $"Axis '{axis.Axis}' is not yet strictly proven."
@@ -30902,8 +31129,10 @@ internal sealed class LocalExportService(
                     : "plugin-aware";
         var skeletonMode = skeletonMapping.SourceSkeletonUsedSparseInference
             ? "sparse-inference"
-            : skeletonMapping.UnsupportedBones.Count > 0
-                ? "partial-remap"
+                : string.Equals(skeletonMapping.RemapCertainty?.Classification, "review-backed", StringComparison.OrdinalIgnoreCase)
+                    ? "fallback-remap-review"
+                : skeletonMapping.UnsupportedBones.Count > 0
+                    ? "partial-remap"
                 : conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase)
                     ? "safe-remap"
                     : conversionReadiness.SkeletonRemapSafety;
@@ -31501,6 +31730,7 @@ internal sealed class LocalExportService(
 
         var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
         var semanticAnchors = BuildSemanticAnchorAssessment(armor, targetBody, focusRegions, cageTopology);
+        var stability = BuildTopologyStabilityAssessment(regionalMorphing, focusRegions, cageTopology, payloadReuse);
         var hardCaseFamily = BuildTopologyHardCaseFamily(focusRegions.Concat(signals).Append(targetBody));
         if (semanticAnchors.UsesTrueSemanticCorrespondence)
         {
@@ -31529,6 +31759,17 @@ internal sealed class LocalExportService(
             penalty += 0.06d;
         }
 
+        if (stability.RadicalTopologyRisk)
+        {
+            signals.Add("radical-topology-risk");
+            penalty += 0.10d;
+        }
+
+        foreach (var stabilitySignal in stability.Signals)
+        {
+            signals.Add(stabilitySignal);
+        }
+
         signals = [.. signals.Distinct(StringComparer.OrdinalIgnoreCase)];
         var confidence = Math.Max(0.15d, Math.Min(0.99d, 1d - penalty));
         var classification = confidence < 0.60d || topologyMismatchRisk || payloadReuse?.ExtremelyAdaptedVariantCount > 0
@@ -31539,7 +31780,8 @@ internal sealed class LocalExportService(
         var requiresManualSemanticReview = classification is not "aligned" ||
                                            topologyMismatchRisk ||
                                            payloadReuse?.ExtremelyAdaptedVariantCount > 0 ||
-                                           !semanticAnchors.UsesTrueSemanticCorrespondence;
+                                           !semanticAnchors.UsesTrueSemanticCorrespondence ||
+                                           stability.RadicalTopologyRisk;
         var unmatchedFocusRegions = focusRegions
             .Except(semanticAnchors.MatchedFocusRegions, StringComparer.OrdinalIgnoreCase)
             .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
@@ -31575,7 +31817,13 @@ internal sealed class LocalExportService(
             LimitationNotes: limitationNotes,
             signals,
             focusRegions,
-            recommendations);
+            recommendations,
+            RadicalTopologyRisk: stability.RadicalTopologyRisk,
+            CorrespondenceStability: stability.CorrespondenceStability,
+            BoundaryRisk: stability.BoundaryRisk,
+            HighVarianceRegionCount: stability.HighVarianceRegions.Count,
+            HighVarianceRegions: stability.HighVarianceRegions,
+            StabilitySignals: stability.Signals);
     }
 
     private static IReadOnlyList<string> BuildTopologyCorrespondenceFocusRegions(
@@ -31605,6 +31853,64 @@ internal sealed class LocalExportService(
         string CorrespondenceScope,
         IReadOnlyList<string> Evidence,
         IReadOnlyList<string> MatchedFocusRegions);
+
+    private sealed record TopologyStabilityAssessment(
+        bool RadicalTopologyRisk,
+        string CorrespondenceStability,
+        string BoundaryRisk,
+        IReadOnlyList<string> HighVarianceRegions,
+        IReadOnlyList<string> Signals);
+
+    private static TopologyStabilityAssessment BuildTopologyStabilityAssessment(
+        IReadOnlyDictionary<string, double> regionalMorphing,
+        IReadOnlyList<string> focusRegions,
+        CageTopologyReport? cageTopology,
+        MorphPayloadReuseSummary? payloadReuse)
+    {
+        var highVarianceRegions = regionalMorphing
+            .Where(pair => Math.Abs(pair.Value - 1d) >= 0.28d &&
+                           (focusRegions.Count == 0 || focusRegions.Contains(pair.Key, StringComparer.OrdinalIgnoreCase)))
+            .OrderByDescending(pair => Math.Abs(pair.Value - 1d))
+            .Select(static pair => pair.Key)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToArray();
+        var boundaryRisk = cageTopology is null
+            ? "unknown"
+            : cageTopology.NonManifoldEdgeCount > 0 || cageTopology.BoundaryLoopCount >= 3
+                ? "high"
+                : cageTopology.BoundaryLoopCount >= 2 || cageTopology.UsesEstimatedMemberships
+                    ? "medium"
+                    : "low";
+        var radicalTopologyRisk =
+            highVarianceRegions.Length >= 3 ||
+            payloadReuse?.ExtremelyAdaptedVariantCount > 0 ||
+            (cageTopology is not null &&
+             (cageTopology.NonManifoldEdgeCount > 0 ||
+              (cageTopology.IslandCount >= 3 && cageTopology.BoundaryLoopCount >= 2)));
+        var correspondenceStability = radicalTopologyRisk
+            ? "radical-divergence"
+            : highVarianceRegions.Length >= 2 || string.Equals(boundaryRisk, "medium", StringComparison.OrdinalIgnoreCase)
+                ? "review"
+                : "stable";
+        var signals = new List<string>();
+        if (highVarianceRegions.Length > 0)
+        {
+            signals.Add($"high-variance-regions:{string.Join("+", highVarianceRegions.Select(NormalizeInGameRegion))}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(boundaryRisk))
+        {
+            signals.Add($"boundary-risk:{boundaryRisk}");
+        }
+
+        return new TopologyStabilityAssessment(
+            radicalTopologyRisk,
+            correspondenceStability,
+            boundaryRisk,
+            highVarianceRegions,
+            signals);
+    }
 
     private static SemanticAnchorAssessment BuildSemanticAnchorAssessment(
         ImportedArmor armor,
