@@ -1194,14 +1194,6 @@ public sealed class MainForm : Form
                 _topLayoutPanel.GetPreferredSize(new Size(widthBudget, 0)).Height + 16);
         }
 
-        var splitterDistance = _userAdjustedMainSplit
-            ? Math.Clamp(_mainSplitContainer.SplitterDistance, panel1Minimum, maxSplitterDistance)
-            : Math.Clamp(preferredPanel1Height, panel1Minimum, maxSplitterDistance);
-        if (_mainSplitContainer.SplitterDistance != splitterDistance)
-        {
-            _mainSplitContainer.SplitterDistance = splitterDistance;
-        }
-
         if (_mainSplitContainer.Panel1MinSize != panel1Minimum)
         {
             _mainSplitContainer.Panel1MinSize = panel1Minimum;
@@ -1210,6 +1202,14 @@ public sealed class MainForm : Form
         if (_mainSplitContainer.Panel2MinSize != panel2Minimum)
         {
             _mainSplitContainer.Panel2MinSize = panel2Minimum;
+        }
+
+        var splitterDistance = _userAdjustedMainSplit
+            ? Math.Clamp(_mainSplitContainer.SplitterDistance, panel1Minimum, maxSplitterDistance)
+            : Math.Clamp(preferredPanel1Height, panel1Minimum, maxSplitterDistance);
+        if (_mainSplitContainer.SplitterDistance != splitterDistance)
+        {
+            _mainSplitContainer.SplitterDistance = splitterDistance;
         }
     }
 
