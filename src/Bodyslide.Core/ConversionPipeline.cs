@@ -31620,6 +31620,7 @@ internal sealed class LocalExportService(
 
         var evidence = new List<string>(resolutionEvidence);
         var matchedFocusRegions = new List<string>();
+        var topologyContextTokens = BuildTopologySemanticContextTokens(cageTopology);
         var coveredRegions = 0;
         var landmarkCoveredRegions = 0;
         foreach (var region in focusRegions)
@@ -31633,7 +31634,9 @@ internal sealed class LocalExportService(
                 observedTokens.Any(token =>
                     token.Contains(anchor, StringComparison.OrdinalIgnoreCase) ||
                     anchor.Contains(token, StringComparison.OrdinalIgnoreCase)));
-            if (string.IsNullOrWhiteSpace(matchedAnchor))
+            var matchedByTopologyContext = string.IsNullOrWhiteSpace(matchedAnchor) &&
+                                          HasTopologyContextForFocusRegion(region, topologyContextTokens);
+            if (string.IsNullOrWhiteSpace(matchedAnchor) && !matchedByTopologyContext)
             {
                 continue;
             }
@@ -31647,8 +31650,12 @@ internal sealed class LocalExportService(
             }
 
             evidence.Add(hasLandmarks
-                ? $"{region}:{matchedAnchor}:landmarks={landmarks!.Count}"
-                : $"{region}:{matchedAnchor}");
+                ? matchedByTopologyContext
+                    ? $"{region}:topology-context:landmarks={landmarks!.Count}"
+                    : $"{region}:{matchedAnchor}:landmarks={landmarks!.Count}"
+                : matchedByTopologyContext
+                    ? $"{region}:topology-context"
+                    : $"{region}:{matchedAnchor}");
         }
 
         var coveredFocusRegions = focusRegions.Count(region => profile.Anchors.ContainsKey(region));
@@ -31679,6 +31686,76 @@ internal sealed class LocalExportService(
             correspondenceScope,
             evidence,
             matchedFocusRegions);
+    }
+
+    private static IReadOnlySet<string> BuildTopologySemanticContextTokens(CageTopologyReport? cageTopology)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (cageTopology is null)
+        {
+            return tokens;
+        }
+
+        foreach (var value in cageTopology.Islands
+                     .SelectMany(static island => island.CageRegions
+                         .Concat(island.SemanticLabels ?? []))
+                     .Where(static value => !string.IsNullOrWhiteSpace(value)))
+        {
+            tokens.Add(value);
+            AddSemanticAnchorPathTokens(tokens, value);
+        }
+
+        return tokens;
+    }
+
+    private static bool HasTopologyContextForFocusRegion(string region, IReadOnlySet<string> topologyContextTokens)
+    {
+        if (string.IsNullOrWhiteSpace(region) || topologyContextTokens.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var candidate in BuildSemanticRegionContextTokens(region))
+        {
+            if (topologyContextTokens.Any(token =>
+                    token.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    token.Contains(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    candidate.Contains(token, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IReadOnlySet<string> BuildSemanticRegionContextTokens(string region)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            region.Trim()
+        };
+
+        AddSemanticAnchorPathTokens(tokens, region);
+
+        var trimmed = region.Trim();
+        if (trimmed.EndsWith("s", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 3)
+        {
+            tokens.Add(trimmed[..^1]);
+            AddSemanticAnchorPathTokens(tokens, trimmed[..^1]);
+        }
+        else if (trimmed.Length > 2)
+        {
+            tokens.Add($"{trimmed}s");
+            AddSemanticAnchorPathTokens(tokens, $"{trimmed}s");
+        }
+
+        return tokens
+            .Where(static token =>
+                !string.IsNullOrWhiteSpace(token) &&
+                token.Length >= 3 &&
+                token is not "left" and not "right" and not "upper" and not "lower" and not "mid" and not "inner" and not "outer")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string BuildSemanticVertexMatchingStatus(

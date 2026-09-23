@@ -23391,6 +23391,41 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public void HasTopologyContextForFocusRegion_UsesExplicitIslandRegionsAndSemanticLabels()
+    {
+        var buildTokensMethod = typeof(LocalExportService).GetMethod("BuildTopologySemanticContextTokens", BindingFlags.NonPublic | BindingFlags.Static);
+        var hasContextMethod = typeof(LocalExportService).GetMethod("HasTopologyContextForFocusRegion", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildTokensMethod);
+        Assert.NotNull(hasContextMethod);
+
+        var cageTopology = new CageTopologyReport(
+            IslandCount: 3,
+            BoundaryLoopCount: 2,
+            BoundaryVertexCount: 12,
+            UsesEstimatedMemberships: false,
+            InteriorEdgeCount: 4,
+            NonManifoldEdgeCount: 0,
+            Islands:
+            [
+                new CageIslandMembershipSummary("mermaid_sparse_context_0.nif", 0, 42, 8, true, ["tail"], ["tail-fin-island"]),
+                new CageIslandMembershipSummary("mermaid_sparse_context_0.nif", 1, 36, 6, true, ["left-wing"], ["pectoral-fin-island"]),
+                new CageIslandMembershipSummary("mermaid_sparse_context_0.nif", 2, 28, 4, true, ["mouth"], ["oral-frill-island"])
+            ]);
+
+        var tokens = Assert.IsAssignableFrom<IReadOnlySet<string>>(buildTokensMethod!.Invoke(null, [cageTopology]));
+        Assert.Contains("tail", tokens, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("wing", tokens, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("mouth", tokens, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("pectoral", tokens, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("frill", tokens, StringComparer.OrdinalIgnoreCase);
+
+        Assert.True((bool)hasContextMethod!.Invoke(null, ["tail", tokens])!);
+        Assert.True((bool)hasContextMethod.Invoke(null, ["wing", tokens])!);
+        Assert.True((bool)hasContextMethod.Invoke(null, ["mouth", tokens])!);
+        Assert.False((bool)hasContextMethod.Invoke(null, ["genitals", tokens])!);
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithIndependentIslandTopology_AddsTopologyPartitionReviewIssue()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
