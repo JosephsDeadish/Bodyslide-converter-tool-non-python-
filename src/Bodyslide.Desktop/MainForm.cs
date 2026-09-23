@@ -2448,9 +2448,21 @@ public sealed class MainForm : Form
         _logTextBox.Clear();
     }
 
-    private static string? ReadOptionalComboValue(ComboBox comboBox)
+    private static string? ReadOptionalComboValue(ComboBox? comboBox)
     {
-        return DesktopWorkflowSupport.ReadOptionalSelection(comboBox.SelectedItem?.ToString());
+        if (comboBox is null || comboBox.IsDisposed)
+        {
+            return null;
+        }
+
+        var value = comboBox.SelectedItem?.ToString();
+        if (string.IsNullOrWhiteSpace(value) &&
+            comboBox.DropDownStyle is not ComboBoxStyle.DropDownList)
+        {
+            value = comboBox.Text;
+        }
+
+        return DesktopWorkflowSupport.ReadOptionalSelection(value);
     }
 
     private static string? ReadOptionalPathValue(string? path) =>
@@ -2568,6 +2580,11 @@ public sealed class MainForm : Form
 
     private void UpdatePhysicsDetails()
     {
+        if (_physicsDetailsLabel is null)
+        {
+            return;
+        }
+
         var effectiveTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
         var selectedPhysics = ReadOptionalComboValue(_physicsComboBox);
         if (PhysicsProfileCatalog.TryNormalize(selectedPhysics, out var normalizedOverride))
