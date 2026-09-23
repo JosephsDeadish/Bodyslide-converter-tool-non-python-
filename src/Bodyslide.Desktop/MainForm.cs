@@ -1196,28 +1196,8 @@ public sealed class MainForm : Form
                 new JsonSerializerOptions { WriteIndented = true });
             tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
             File.WriteAllText(tempPath, json);
-            if (OperatingSystem.IsWindows() && File.Exists(settingsPath))
-            {
-                try
-                {
-                    File.Replace(tempPath, settingsPath, destinationBackupFileName: null);
-                }
-                catch (FileNotFoundException)
-                {
-                    File.Move(tempPath, settingsPath, overwrite: true);
-                }
-                catch (IOException) when (!File.Exists(settingsPath))
-                {
-                    File.Move(tempPath, settingsPath, overwrite: true);
-                }
-
-                tempPath = null;
-            }
-            else
-            {
-                File.Move(tempPath, settingsPath, overwrite: true);
-                tempPath = null;
-            }
+            File.Move(tempPath, settingsPath, overwrite: true);
+            tempPath = null;
         }
         catch (Exception ex)
         {
