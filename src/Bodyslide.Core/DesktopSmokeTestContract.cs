@@ -10,11 +10,27 @@ public sealed record DesktopSmokeTestSummary(
     [property: JsonPropertyName("targets")] int Targets,
     [property: JsonPropertyName("profiles")] int Profiles,
     [property: JsonPropertyName("physics")] int Physics,
-    [property: JsonPropertyName("tabs")] int Tabs);
+    [property: JsonPropertyName("tabs")] int Tabs,
+    [property: JsonPropertyName("expectedTabs")] int ExpectedTabs);
 
 public static class DesktopSmokeTestContract
 {
     public const string ReadyStatus = "ok";
+    public const string LayoutMismatchStatus = "layout-mismatch";
+    public const int ExpectedDesktopTabCount = 10;
+
+    public static DesktopSmokeTestSummary Create(string title, int tabs)
+    {
+        return new DesktopSmokeTestSummary(
+            tabs == ExpectedDesktopTabCount ? ReadyStatus : LayoutMismatchStatus,
+            title,
+            PresetCatalog.All.Count,
+            BodyTypeCatalog.All.Count,
+            DeformationProfileModifier.All.Count,
+            PhysicsProfileCatalog.All.Count,
+            tabs,
+            ExpectedDesktopTabCount);
+    }
 
     public static DesktopSmokeTestSummary CreateReady(string title, int tabs)
     {
@@ -25,7 +41,8 @@ public static class DesktopSmokeTestContract
             BodyTypeCatalog.All.Count,
             DeformationProfileModifier.All.Count,
             PhysicsProfileCatalog.All.Count,
-            tabs);
+            tabs,
+            ExpectedDesktopTabCount);
     }
 
     public static string Serialize(DesktopSmokeTestSummary payload)
@@ -35,7 +52,7 @@ public static class DesktopSmokeTestContract
 
     public static string Serialize(string title, int tabs)
     {
-        return Serialize(CreateReady(title, tabs));
+        return Serialize(Create(title, tabs));
     }
 
     public static string Serialize(
@@ -54,7 +71,8 @@ public static class DesktopSmokeTestContract
             targets,
             profiles,
             physics,
-            tabs
+            tabs,
+            expectedTabs = ExpectedDesktopTabCount
         });
     }
 }

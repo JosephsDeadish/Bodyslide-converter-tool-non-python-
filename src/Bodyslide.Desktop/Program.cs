@@ -1,3 +1,4 @@
+using Bodyslide.Core;
 using System.Windows.Forms;
 
 namespace Bodyslide.Desktop;
@@ -41,8 +42,9 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             using var form = new MainForm();
             form.CreateControl();
-            Console.WriteLine(form.GetSmokeTestSummaryJson());
-            return 0;
+            var summary = form.GetSmokeTestSummary();
+            Console.WriteLine(DesktopSmokeTestContract.Serialize(summary));
+            return summary.Status == DesktopSmokeTestContract.ReadyStatus ? 0 : 1;
         }
         catch (Exception ex)
         {

@@ -983,9 +983,14 @@ public sealed class MainForm : Form
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
     }
 
+    internal DesktopSmokeTestSummary GetSmokeTestSummary()
+    {
+        return DesktopSmokeTestContract.Create(Text, _resultsTabControl.TabPages.Count);
+    }
+
     internal string GetSmokeTestSummaryJson()
     {
-        return DesktopSmokeTestContract.Serialize(Text, _resultsTabControl.TabPages.Count);
+        return DesktopSmokeTestContract.Serialize(GetSmokeTestSummary());
     }
 
     private static GroupBox CreateSection(string title, Control content)
