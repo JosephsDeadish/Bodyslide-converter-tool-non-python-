@@ -12375,11 +12375,11 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             if (owners.Any(HasExtremeAppendageSignature) || IsExtremeAppendageRegion(region))
             {
                 damping = Math.Min(damping, ownerCount == 1 ? 0.80d : 0.88d);
+            }
 
-                if (owners.Any(control => control.EdgeNetworkSummary?.HasManifoldRisk == true))
-                {
-                    damping = Math.Min(damping, ownerCount == 1 ? 0.74d : 0.82d);
-                }
+            if (owners.Any(control => control.EdgeNetworkSummary?.HasManifoldRisk == true))
+            {
+                damping = Math.Min(damping, ownerCount == 1 ? 0.74d : 0.82d);
             }
 
             if (damping < 0.999d)

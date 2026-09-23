@@ -3529,6 +3529,57 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public void ApplyIslandAwareCageTuning_DampsManifoldRiskyNonAppendageIslandsInOwnershipRouting()
+    {
+        var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["chest"] = 1.28d,
+            ["arms"] = 1.06d
+        };
+
+        var safeCage = new DeformationCage(
+            "ownership-cage",
+            new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chest"] = new(0.86f, 0.20f),
+                ["arms"] = new(0.92f, 0.12f)
+            },
+            [
+                new CageIslandControl(
+                    MeshKey: "corset-window-mesh",
+                    IslandId: 0,
+                    CageRegions: ["chest"],
+                    SemanticLabels: ["window-frame-island"],
+                    EdgeNetworkSummary: new TopologyIslandEdgeNetworkSummary(0, 12, 8, 0, 10, 4, false, false)),
+                new CageIslandControl(
+                    MeshKey: "sleeve-mesh",
+                    IslandId: 1,
+                    CageRegions: ["arms"])
+            ]);
+
+        var riskyCage = safeCage with
+        {
+            IslandControls =
+            [
+                safeCage.IslandControls![0] with
+                {
+                    EdgeNetworkSummary = new TopologyIslandEdgeNetworkSummary(0, 12, 8, 1, 10, 5, false, true)
+                },
+                safeCage.IslandControls[1]
+            ]
+        };
+
+        var safeResult = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method!.Invoke(null, [field, safeCage]));
+        var riskyResult = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(method.Invoke(null, [field, riskyCage]));
+
+        Assert.True(riskyResult["chest"] < safeResult["chest"]);
+        Assert.Equal(safeResult["arms"], riskyResult["arms"], 6);
+    }
+
+    [Fact]
     public void ApplyIslandAwareCageTuning_DampsMultiPieceAppendageFamiliesAcrossSharedMesh()
     {
         var method = typeof(StrategyMeshConversionService).GetMethod("ApplyIslandAwareCageTuning", BindingFlags.NonPublic | BindingFlags.Static);
