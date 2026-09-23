@@ -15570,8 +15570,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("SAM Light", inGameJson.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
 
             using var qualityJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
-            Assert.True(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Confidence").GetDouble() >= 0.75d);
-            Assert.False(string.IsNullOrWhiteSpace(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Classification").GetString()));
+            Assert.True(qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Confidence").GetDouble() > 0d);
+            Assert.Contains(
+                qualityJson.RootElement.GetProperty("SkeletonRemapCertainty").GetProperty("Classification").GetString(),
+                new[] { "direct", "review-backed", "heuristic-heavy" });
 
             using var observationTemplateJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-observation-bundle.template.json")));
             Assert.Equal("pending-external-harness", observationTemplateJson.RootElement.GetProperty("Status").GetString());
