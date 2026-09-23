@@ -1238,7 +1238,6 @@ public sealed class MainForm : Form
         _currentTheme = theme;
         ApplyTheme(theme);
         SaveUiSettings();
-        AppendLog($"Theme switched to {theme} mode.");
     }
 
     private void ApplyTheme(UiTheme theme)
@@ -1956,7 +1955,10 @@ public sealed class MainForm : Form
             return;
         }
 
-        PruneMissingCustomProfiles("inspection");
+        if (PruneMissingCustomProfiles("inspection"))
+        {
+            return;
+        }
 
         try
         {
