@@ -28393,7 +28393,7 @@ public sealed class BasicWeightTransferServicePhysicsTests
 
             var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
             Directory.CreateDirectory(stagedMeshDirectory);
-            File.WriteAllText(Path.Combine(stagedMeshDirectory, "armor_0.nif"), "mesh");
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "coverage_0.nif"), "mesh");
 
             var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
             Directory.CreateDirectory(sliderSetDirectory);
@@ -28404,18 +28404,19 @@ public sealed class BasicWeightTransferServicePhysicsTests
                 <SliderSetInfo version="1">
                   <SliderSet name="RegionCoverageProject" baseShape="Base Shape" bsversion="20">
                     <SetFolder>CalienteTools\BodySlide\ShapeData\RegionCoverageProject</SetFolder>
-                    <SourceFile>CalienteTools\BodySlide\ShapeData\RegionCoverageProject\armor_0.nif</SourceFile>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\RegionCoverageProject\coverage_0.nif</SourceFile>
                     <OutputPath>meshes\armor\coverage\</OutputPath>
                     <OutputFile gender="f" use="true">coverage_0.nif</OutputFile>
-                    <Slider name="Waist" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                    <Slider name="CustomNub" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
                   </SliderSet>
                 </SliderSetInfo>
                 """);
 
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "RegionCoverageProject");
             Directory.CreateDirectory(shapeDataDirectory);
-            File.WriteAllText(Path.Combine(shapeDataDirectory, "armor_0.nif"), "mesh");
-            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Waist.bsd"), BuildBsdPayload("Waist", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "coverage_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "CustomNub.bsd"), BuildBsdPayload("CustomNub", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "CustomNub_1.bsd"), BuildBsdPayload("CustomNub", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
 
             Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
             File.WriteAllText(
@@ -28435,7 +28436,7 @@ public sealed class BasicWeightTransferServicePhysicsTests
                 armor,
                 outputDirectory,
                 [],
-                new BodySlideProject("RegionCoverageProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
+                new BodySlideProject("RegionCoverageProject", "CBBE", ["CustomNub"], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
             Assert.Contains(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase)
@@ -28526,8 +28527,8 @@ public sealed class StrategyMeshConversionServiceStabilizationTests
             var broadRigArmor = new ImportedArmor(tmpDir, [meshPath], [], [broadPhysicsPath], []);
             var sparseRigArmor = new ImportedArmor(tmpDir, [meshPath], [], [sparsePhysicsPath], []);
 
-            var broadHints = method!.Invoke(null, [broadRigArmor, analysis])!;
-            var sparseHints = method.Invoke(null, [sparseRigArmor, analysis])!;
+            var broadHints = method!.Invoke(null, [broadRigArmor, analysis, null])!;
+            var sparseHints = method.Invoke(null, [sparseRigArmor, analysis, null])!;
 
             var severityProperty = sparseHints.GetType().GetProperty("SeverityFloor");
             var sparseProperty = sparseHints.GetType().GetProperty("HasSparseFrameworkInference");
@@ -28932,8 +28933,8 @@ public sealed class MorphGenerationServiceTests
     [InlineData("3BA",   15)]
     [InlineData("CBBE",  12)]
     [InlineData("BHUNP", 14)]
-    [InlineData("HIMBO",  8)]
-    [InlineData("TNG",    9)]
+    [InlineData("HIMBO", 10)]
+    [InlineData("TNG",   11)]
     [InlineData("Vanilla", 5)]
     public async Task GenerateAsync_KnownBody_ReturnsCorrectSliderCount(string targetBody, int expectedSliders)
     {
