@@ -436,9 +436,9 @@ internal static class SkeletonRemapSafetyClassifier
     {
         if (!usedSparseInference ||
             unsupportedBoneCount > 0 ||
-            unsupportedRatio >= 0.08d ||
-            sourceSkeletonConfidence is null or < 0.90d ||
-            candidateGap is null or < 0.20d ||
+            unsupportedRatio >= 0.05d ||
+            sourceSkeletonConfidence is null or < 0.92d ||
+            candidateGap is null or < 0.24d ||
             sourceSkeletonCandidates is not { Count: > 0 })
         {
             return false;
@@ -455,9 +455,12 @@ internal static class SkeletonRemapSafetyClassifier
         var chainDepth = GetEvidenceValue(primaryCandidate.Evidence, "chain-depth:");
         var cueMatches = GetEvidenceValue(primaryCandidate.Evidence, "ecosystem-cues:") +
                          GetEvidenceValue(primaryCandidate.Evidence, "context-cues:");
+        var sparseEvidenceScore = semanticOverlap + groupOverlap + chainDepth + cueMatches;
 
-        return semanticOverlap >= 2 &&
-               (chainDepth >= 2 || groupOverlap >= 2 || cueMatches >= 2);
+        return semanticOverlap >= 3 &&
+               sparseEvidenceScore >= 6 &&
+               cueMatches >= 1 &&
+               (chainDepth >= 2 || groupOverlap >= 2);
     }
 
     private static bool IsWeakSparseMatch(
@@ -584,6 +587,13 @@ public sealed record RuntimeAutomationHarnessProbe(
     bool BlocksRelease,
     bool RequiresManualAssertion,
     bool RequiresFullLoadOrderLaunch);
+public sealed record LiveGameExecutionScenarioProfile(
+    string Name,
+    string ValidationSaveProfile,
+    IReadOnlyList<string> DispatchActions,
+    IReadOnlyList<string> SuccessSignals,
+    IReadOnlyList<string> RelatedArtifacts,
+    bool BlocksRelease);
 public sealed record ExternalHarnessBootstrapContract(
     string HarnessKind,
     string ContractVersion,
@@ -627,6 +637,7 @@ public sealed record LiveGameExecutionPlan(
     IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
     ExternalHarnessBootstrapContract BootstrapContract,
+    IReadOnlyList<LiveGameExecutionScenarioProfile> ScenarioProfiles,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ConversionMatrixProofAxis(
     string Axis,
@@ -710,6 +721,12 @@ public sealed record WindowsUiAutomationStep(
     string TargetSelectorName,
     string ExpectedSignal,
     bool Blocking);
+public sealed record WindowsUiE2EFlowProfile(
+    string Name,
+    string EntryPointSelector,
+    IReadOnlyList<string> RequiredSelectors,
+    IReadOnlyList<string> RelatedArtifacts,
+    bool BlocksRelease);
 public sealed record WindowsUiE2EAutomationPlan(
     string Coverage,
     bool RequiresWindowsHost,
@@ -720,6 +737,7 @@ public sealed record WindowsUiE2EAutomationPlan(
     IReadOnlyList<string> LimitationNotes,
     ExternalHarnessBootstrapContract BootstrapContract,
     IReadOnlyList<WindowsUiAutomationSelector> Selectors,
+    IReadOnlyList<WindowsUiE2EFlowProfile> FlowProfiles,
     IReadOnlyList<WindowsUiAutomationStep> Steps);
 public sealed record InGameValidationReport(
     string TargetBody,
@@ -1493,6 +1511,8 @@ public sealed record TopologyCorrespondenceReport(
     IReadOnlyList<string> SemanticAnchorEvidence,
     IReadOnlyList<string> UnmatchedFocusRegions,
     bool RequiresManualSemanticReview,
+    string HardCaseFamily,
+    bool StrictTransferReady,
     IReadOnlyList<string> LimitationNotes,
     IReadOnlyList<string> Signals,
     IReadOnlyList<string> FocusRegions,
@@ -30256,10 +30276,12 @@ internal sealed class LocalExportService(
         {
             "neutral-smoke-test-save",
             "combat-stress-save",
+            "world-grounding-validation-save",
             modStackCrossValidation?.RequiresLoadOrderValidation == true
                 ? "full-load-order-integration-save"
                 : "standard-load-order-validation-save"
         };
+        var scenarioProfiles = BuildLiveGameScenarioProfiles(runtimePlan, validationSaveProfiles);
 
         var probes = runtimePlan.AutomationHarness?.Probes
             .Select(probe => new LiveGameExecutionProbe(
@@ -30328,6 +30350,7 @@ internal sealed class LocalExportService(
             ValidationSaveProfiles: validationSaveProfiles,
             LimitationNotes: limitationNotes,
             BootstrapContract: bootstrapContract,
+            ScenarioProfiles: scenarioProfiles,
             Probes: probes);
     }
 
@@ -30429,6 +30452,7 @@ internal sealed class LocalExportService(
                 "ui-selector-resolution-log",
                 "ui-run-summary"
             ]);
+        var flowProfiles = BuildWindowsUiFlowProfiles();
 
         return new WindowsUiE2EAutomationPlan(
             Coverage: "external-windows-ui-harness-ready",
@@ -30460,8 +30484,94 @@ internal sealed class LocalExportService(
             ],
             BootstrapContract: bootstrapContract,
             Selectors: selectors,
+            FlowProfiles: flowProfiles,
             Steps: steps);
     }
+
+    private static IReadOnlyList<LiveGameExecutionScenarioProfile> BuildLiveGameScenarioProfiles(
+        RuntimeValidationExecutionPlan runtimePlan,
+        IReadOnlyList<string> validationSaveProfiles)
+    {
+        var defaultSmokeSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Equals("neutral-smoke-test-save", StringComparison.OrdinalIgnoreCase)) ?? validationSaveProfiles.First();
+        var combatSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Equals("combat-stress-save", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
+        var groundingSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Equals("world-grounding-validation-save", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
+        var loadOrderSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Contains("load-order", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
+
+        return runtimePlan.AutomationHarness?.Probes
+            .Select(probe => new LiveGameExecutionScenarioProfile(
+                Name: probe.Objective,
+                ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
+                DispatchActions: probe.DispatchActions,
+                SuccessSignals: probe.ExpectedAssertions,
+                RelatedArtifacts: probe.RelatedArtifacts,
+                BlocksRelease: probe.BlocksRelease))
+            .ToArray() ?? [];
+    }
+
+    private static string DetermineValidationSaveProfile(
+        RuntimeAutomationHarnessProbe probe,
+        string defaultSmokeSave,
+        string combatSave,
+        string groundingSave,
+        string loadOrderSave)
+    {
+        if (probe.RequiresFullLoadOrderLaunch)
+        {
+            return loadOrderSave;
+        }
+
+        if (probe.Objective.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+            probe.FocusRegions.Any(static region => region.Contains("foot", StringComparison.OrdinalIgnoreCase) ||
+                                                    region.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+                                                    region.Contains("ground", StringComparison.OrdinalIgnoreCase)))
+        {
+            return groundingSave;
+        }
+
+        if (probe.Objective.Contains("combat", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("stress", StringComparison.OrdinalIgnoreCase) ||
+            probe.DispatchActions.Any(static action => action.Contains("combat", StringComparison.OrdinalIgnoreCase) ||
+                                                       action.Contains("sprint", StringComparison.OrdinalIgnoreCase) ||
+                                                       action.Contains("jump", StringComparison.OrdinalIgnoreCase)))
+        {
+            return combatSave;
+        }
+
+        return defaultSmokeSave;
+    }
+
+    private static IReadOnlyList<WindowsUiE2EFlowProfile> BuildWindowsUiFlowProfiles() =>
+    [
+        new(
+            Name: "fixture-smoke-conversion",
+            EntryPointSelector: "main-form",
+            RequiredSelectors: ["main-form", "input-path", "output-path", "target-body", "convert-button", "summary-list", "reports-list"],
+            RelatedArtifacts: ["conversion-quality.json", "in-game-validation.json", "preview-workbench.html"],
+            BlocksRelease: true),
+        new(
+            Name: "result-reload-review",
+            EntryPointSelector: "load-result-button",
+            RequiredSelectors: ["load-result-button", "summary-list", "guidance-list", "reports-list", "artifacts-list"],
+            RelatedArtifacts: ["desktop-workflow-automation.json", "conversion-matrix-proof.json", "live-game-execution.json"],
+            BlocksRelease: true),
+        new(
+            Name: "custom-profile-roundtrip",
+            EntryPointSelector: "load-custom-profile-button",
+            RequiredSelectors: ["load-custom-profile-button", "save-profile-button", "custom-profiles-list", "target-body"],
+            RelatedArtifacts: ["desktop-workflow-automation.json", "conversion-quality.json"],
+            BlocksRelease: false),
+        new(
+            Name: "batch-all-bodies-review",
+            EntryPointSelector: "all-bodies",
+            RequiredSelectors: ["all-bodies", "target-batch", "convert-button", "reports-list", "artifacts-list"],
+            RelatedArtifacts: ["conversion-quality.json", "runtime-validation-plan.json", "windows-ui-e2e-automation.json"],
+            BlocksRelease: false)
+    ];
 
     private static ConversionMatrixProofReport BuildConversionMatrixProofReport(
         string targetBody,
@@ -30499,17 +30609,15 @@ internal sealed class LocalExportService(
             Coverage: topologyCorrespondence.UsesTrueSemanticCorrespondence
                 ? topologyCorrespondence.CorrespondenceScope
                 : "heuristic-correspondence",
-            StrictlyProven: topologyCorrespondence.UsesTrueSemanticCorrespondence &&
-                            !topologyCorrespondence.HeuristicHeavy &&
-                            topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase) &&
-                            !topologyCorrespondence.RequiresManualSemanticReview &&
-                            topologyCorrespondence.MatchedFocusRegionCount >= topologyCorrespondence.CoveredFocusRegionCount,
+            StrictlyProven: topologyCorrespondence.StrictTransferReady,
             Signals:
             [
                 $"classification:{topologyCorrespondence.Classification}",
                 $"matching-mode:{topologyCorrespondence.MatchingMode}",
                 $"semantic-status:{topologyCorrespondence.SemanticVertexMatchingStatus}",
-                $"anchor-coverage:{topologyCorrespondence.SemanticAnchorCoverage}"
+                $"anchor-coverage:{topologyCorrespondence.SemanticAnchorCoverage}",
+                $"hard-case-family:{topologyCorrespondence.HardCaseFamily}",
+                $"strict-transfer-ready:{topologyCorrespondence.StrictTransferReady}"
             ],
             RequiredArtifacts:
             [
@@ -30575,7 +30683,8 @@ internal sealed class LocalExportService(
             [
                 $"supports-automated-game-execution:{runtimePlan.SupportsAutomatedGameExecution}",
                 $"requires-external-game-harness:{runtimePlan.RequiresExternalGameHarness}",
-                $"requires-modded-test-environment:{runtimePlan.RequiresModdedTestEnvironment}"
+                $"requires-modded-test-environment:{runtimePlan.RequiresModdedTestEnvironment}",
+                $"automation-probe-count:{runtimePlan.AutomationHarness?.Probes.Count ?? 0}"
             ],
             RequiredArtifacts:
             [
@@ -30594,7 +30703,8 @@ internal sealed class LocalExportService(
             [
                 $"requires-windows-host:{liveGameExecution.RequiresWindowsHost}",
                 $"requires-external-harness:{liveGameExecution.RequiresExternalHarness}",
-                $"validation-save-count:{liveGameExecution.ValidationSaveProfiles.Count}"
+                $"validation-save-count:{liveGameExecution.ValidationSaveProfiles.Count}",
+                $"scenario-profile-count:{liveGameExecution.ScenarioProfiles.Count}"
             ],
             RequiredArtifacts:
             [
@@ -30612,7 +30722,8 @@ internal sealed class LocalExportService(
             [
                 $"requires-windows-host:{windowsUiAutomation.RequiresWindowsHost}",
                 $"requires-external-ui-harness:{windowsUiAutomation.RequiresExternalUiHarness}",
-                $"supported-flow-count:{windowsUiAutomation.SupportedFlows.Count}"
+                $"supported-flow-count:{windowsUiAutomation.SupportedFlows.Count}",
+                $"flow-profile-count:{windowsUiAutomation.FlowProfiles.Count}"
             ],
             RequiredArtifacts:
             [
@@ -30772,13 +30883,7 @@ internal sealed class LocalExportService(
 
     private static string BuildTopologyMatrixFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
     {
-        var signals = topologyCorrespondence.FocusRegions
-            .Concat(topologyCorrespondence.UnmatchedFocusRegions)
-            .Concat(topologyCorrespondence.Signals)
-            .Append(targetBody)
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Select(static value => value.Trim())
-            .ToArray();
+        var signals = BuildTopologyClassificationSignals(topologyCorrespondence, targetBody);
 
         if (signals.Any(static value => value.Contains("oral", StringComparison.OrdinalIgnoreCase) ||
                                       value.Contains("mouth", StringComparison.OrdinalIgnoreCase) ||
@@ -30826,12 +30931,21 @@ internal sealed class LocalExportService(
         return "core-humanoid";
     }
 
-    private static string BuildTopologyHardCaseFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
-    {
-        var signals = topologyCorrespondence.FocusRegions
+    private static string BuildTopologyHardCaseFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody) =>
+        BuildTopologyHardCaseFamily(BuildTopologyClassificationSignals(topologyCorrespondence, targetBody));
+
+    private static IReadOnlyList<string> BuildTopologyClassificationSignals(TopologyCorrespondenceReport topologyCorrespondence, string targetBody) =>
+        topologyCorrespondence.FocusRegions
             .Concat(topologyCorrespondence.UnmatchedFocusRegions)
             .Concat(topologyCorrespondence.Signals)
             .Append(targetBody)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .ToArray();
+
+    private static string BuildTopologyHardCaseFamily(IEnumerable<string> signalValues)
+    {
+        var signals = signalValues
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Select(static value => value.Trim())
             .ToArray();
@@ -31332,6 +31446,7 @@ internal sealed class LocalExportService(
 
         var focusRegions = BuildTopologyCorrespondenceFocusRegions(regionalMorphing, clipping, voxelResult, poseSimulation);
         var semanticAnchors = BuildSemanticAnchorAssessment(armor, targetBody, focusRegions, cageTopology);
+        var hardCaseFamily = BuildTopologyHardCaseFamily(focusRegions.Concat(signals).Append(targetBody));
         if (semanticAnchors.UsesTrueSemanticCorrespondence)
         {
             signals.Add($"semantic-anchor-coverage:{semanticAnchors.Coverage}");
@@ -31341,6 +31456,22 @@ internal sealed class LocalExportService(
         {
             signals.Add($"partial-semantic-anchor-coverage:{semanticAnchors.Coverage}");
             penalty = Math.Max(0d, penalty - 0.04d);
+        }
+
+        if (!hardCaseFamily.Equals("core-humanoid", StringComparison.OrdinalIgnoreCase) &&
+            !semanticAnchors.UsesTrueSemanticCorrespondence)
+        {
+            signals.Add("hard-case-without-semantic-anchors");
+            penalty += 0.08d;
+        }
+
+        if ((hardCaseFamily.Equals("layered-openwork", StringComparison.OrdinalIgnoreCase) ||
+             hardCaseFamily.Equals("multipart-straps-windows", StringComparison.OrdinalIgnoreCase) ||
+             hardCaseFamily.Equals("footwear-world-mesh", StringComparison.OrdinalIgnoreCase)) &&
+            semanticAnchors.Coverage < 2)
+        {
+            signals.Add("hard-case-needs-broad-anchor-coverage");
+            penalty += 0.06d;
         }
 
         signals = [.. signals.Distinct(StringComparer.OrdinalIgnoreCase)];
@@ -31358,6 +31489,12 @@ internal sealed class LocalExportService(
             .Except(semanticAnchors.MatchedFocusRegions, StringComparer.OrdinalIgnoreCase)
             .OrderBy(static region => region, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var strictTransferReady = IsStrictTopologyTransferReady(
+            hardCaseFamily,
+            classification,
+            confidence,
+            semanticAnchors,
+            unmatchedFocusRegions);
         var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse, semanticAnchors);
         var recommendations = BuildTopologyCorrespondenceRecommendations(classification, focusRegions, requiresManualSemanticReview);
 
@@ -31378,6 +31515,8 @@ internal sealed class LocalExportService(
             SemanticAnchorEvidence: semanticAnchors.Evidence,
             UnmatchedFocusRegions: unmatchedFocusRegions,
             RequiresManualSemanticReview: requiresManualSemanticReview,
+            HardCaseFamily: hardCaseFamily,
+            StrictTransferReady: strictTransferReady,
             LimitationNotes: limitationNotes,
             signals,
             focusRegions,
@@ -31500,6 +31639,44 @@ internal sealed class LocalExportService(
                 : semanticAnchors.MatchedFocusRegionCount > 0
                     ? "partial-anchor-guided"
                     : "heuristic-regional";
+
+    private static bool IsStrictTopologyTransferReady(
+        string hardCaseFamily,
+        string classification,
+        double confidence,
+        SemanticAnchorAssessment semanticAnchors,
+        IReadOnlyList<string> unmatchedFocusRegions)
+    {
+        if (!semanticAnchors.UsesTrueSemanticCorrespondence ||
+            !classification.Equals("aligned", StringComparison.OrdinalIgnoreCase) ||
+            unmatchedFocusRegions.Count > 0)
+        {
+            return false;
+        }
+
+        var matchedAllCoveredFocusRegions = semanticAnchors.CoveredFocusRegionCount == 0 ||
+                                           semanticAnchors.MatchedFocusRegionCount >= semanticAnchors.CoveredFocusRegionCount;
+        if (!matchedAllCoveredFocusRegions)
+        {
+            return false;
+        }
+
+        return hardCaseFamily switch
+        {
+            "oral-genital-subpieces" or "beast-custom-appendages" =>
+                confidence >= 0.90d &&
+                semanticAnchors.Coverage >= 2 &&
+                semanticAnchors.LandmarkRegionCount >= 2,
+            "layered-openwork" or "multipart-straps-windows" or "footwear-world-mesh" =>
+                confidence >= 0.92d &&
+                semanticAnchors.Coverage >= 3 &&
+                semanticAnchors.LandmarkRegionCount >= 2 &&
+                semanticAnchors.MatchedFocusRegionCount >= Math.Max(2, semanticAnchors.CoveredFocusRegionCount),
+            _ =>
+                confidence >= 0.82d &&
+                semanticAnchors.Coverage >= 2
+        };
+    }
 
     private static IReadOnlySet<string> BuildSemanticAnchorObservedTokens(
         ImportedArmor armor,
@@ -32226,6 +32403,29 @@ internal sealed class LocalExportService(
                ["idle", "crouch", "jump", "preview compare"],
                topologyCorrespondence.FocusRegions.Count > 0 ? topologyCorrespondence.FocusRegions : coreRegions,
                ["conversion-quality.json", "preview-workbench.html", "morphs.json"]));
+        }
+
+        if (topologyCorrespondence.HardCaseFamily.Equals("layered-openwork", StringComparison.OrdinalIgnoreCase) ||
+            topologyCorrespondence.HardCaseFamily.Equals("multipart-straps-windows", StringComparison.OrdinalIgnoreCase))
+        {
+            scenarios.Add(new InGameValidationScenario(
+               "Layered/openwork seam sweep",
+               topologyCorrespondence.StrictTransferReady ? "Action" : "High",
+               $"Hard-case topology family '{topologyCorrespondence.HardCaseFamily}' was detected for {targetBody}; verify seams, openings, windows, and multipart edge continuity under pose changes.",
+               ["idle", "turn", "crouch", "jump / landing"],
+               topologyCorrespondence.FocusRegions.Count > 0 ? topologyCorrespondence.FocusRegions : coreRegions,
+               ["topology-correspondence.json", "preview-workbench.html", "conversion-quality.json"]));
+        }
+
+        if (topologyCorrespondence.HardCaseFamily.Equals("footwear-world-mesh", StringComparison.OrdinalIgnoreCase))
+        {
+            scenarios.Add(new InGameValidationScenario(
+               "Footwear grounding and drop sweep",
+               topologyCorrespondence.StrictTransferReady ? "Action" : "High",
+               $"Footwear/world-mesh topology was detected for {targetBody}; verify heel placement, sole grounding, and dropped-world collision behavior.",
+               ["walk", "sprint", "jump / landing", "drop item"],
+               topologyCorrespondence.FocusRegions.Count > 0 ? topologyCorrespondence.FocusRegions : lowerBodyRegions.Count > 0 ? lowerBodyRegions : coreRegions,
+               ["world-physics.json", "topology-correspondence.json", "preview-workbench.html"]));
         }
 
         if (wingRegions.Count > 0 || targetBody.Contains("avian", StringComparison.OrdinalIgnoreCase))

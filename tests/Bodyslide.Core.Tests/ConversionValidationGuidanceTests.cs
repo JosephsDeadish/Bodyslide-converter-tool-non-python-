@@ -437,6 +437,8 @@ public sealed class ConversionValidationGuidanceTests
                 ["mouth:HDT Jaw"],
                 ["thighs"],
                 true,
+                "oral-genital-subpieces",
+                false,
                 ["Topology matching remains heuristic."],
                 ["topology-mismatch-risk"],
                 ["belly", "thighs"],
