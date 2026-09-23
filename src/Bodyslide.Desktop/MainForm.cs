@@ -1188,6 +1188,7 @@ public sealed class MainForm : Form
             {
                 Directory.CreateDirectory(settingsDirectory);
             }
+            using var settingsLock = AcquireExclusiveThemeSettingsLock(settingsPath);
             var json = JsonSerializer.Serialize(
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -1231,6 +1232,29 @@ public sealed class MainForm : Form
                 catch
                 {
                 }
+            }
+        }
+    }
+
+    private static FileStream AcquireExclusiveThemeSettingsLock(string settingsPath)
+    {
+        var lockPath = $"{settingsPath}.lock";
+        const int maxAttempts = 20;
+        const int retryDelayMilliseconds = 50;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(retryDelayMilliseconds);
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(retryDelayMilliseconds);
             }
         }
     }
