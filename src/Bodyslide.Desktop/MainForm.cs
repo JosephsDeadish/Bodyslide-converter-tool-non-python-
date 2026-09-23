@@ -1177,33 +1177,34 @@ public sealed class MainForm : Form
         }
 
         var availableHeight = _mainSplitContainer.ClientSize.Height - _mainSplitContainer.SplitterWidth;
-        if (availableHeight < MainSplitPanel1Minimum + MainSplitPanel2Minimum)
+        if (availableHeight <= 0)
         {
             return;
         }
 
-        var panel2Minimum = Math.Min(MainSplitPanel2Minimum, availableHeight - MainSplitPanel1Minimum);
-        var maxSplitterDistance = Math.Max(MainSplitPanel1Minimum, availableHeight - panel2Minimum);
+        var panel1Minimum = Math.Min(MainSplitPanel1Minimum, Math.Max(0, availableHeight - 1));
+        var panel2Minimum = Math.Min(MainSplitPanel2Minimum, Math.Max(0, availableHeight - panel1Minimum));
+        var maxSplitterDistance = Math.Max(panel1Minimum, availableHeight - panel2Minimum);
         var preferredPanel1Height = MainSplitPreferredDistance;
         if (!_topLayoutPanel.IsDisposed)
         {
             var widthBudget = Math.Max(0, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
             preferredPanel1Height = Math.Max(
-                MainSplitPanel1Minimum,
+                panel1Minimum,
                 _topLayoutPanel.GetPreferredSize(new Size(widthBudget, 0)).Height + 16);
         }
 
         var splitterDistance = _userAdjustedMainSplit
-            ? Math.Clamp(_mainSplitContainer.SplitterDistance, MainSplitPanel1Minimum, maxSplitterDistance)
-            : Math.Clamp(preferredPanel1Height, MainSplitPanel1Minimum, maxSplitterDistance);
+            ? Math.Clamp(_mainSplitContainer.SplitterDistance, panel1Minimum, maxSplitterDistance)
+            : Math.Clamp(preferredPanel1Height, panel1Minimum, maxSplitterDistance);
         if (_mainSplitContainer.SplitterDistance != splitterDistance)
         {
             _mainSplitContainer.SplitterDistance = splitterDistance;
         }
 
-        if (_mainSplitContainer.Panel1MinSize != MainSplitPanel1Minimum)
+        if (_mainSplitContainer.Panel1MinSize != panel1Minimum)
         {
-            _mainSplitContainer.Panel1MinSize = MainSplitPanel1Minimum;
+            _mainSplitContainer.Panel1MinSize = panel1Minimum;
         }
 
         if (_mainSplitContainer.Panel2MinSize != panel2Minimum)
