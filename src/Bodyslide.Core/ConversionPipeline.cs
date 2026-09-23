@@ -666,6 +666,7 @@ public sealed record ModStackCrossValidationReport(
     string SourceSkeletonRemapSafety,
     bool RequiresLoadOrderValidation,
     bool RequiresPluginPatchReview,
+    bool RequiresCompoundCertaintySweep,
     int ScannedPluginCount,
     int ArmorAddonCount,
     int ArmorRecordCount,
@@ -677,6 +678,7 @@ public sealed record ModStackCrossValidationReport(
     int LinkedArmorFamilyCount,
     IReadOnlyList<string> SourceSkeletonCandidates,
     IReadOnlyList<string> ValidationSignals,
+    IReadOnlyList<string> CompoundCertaintySignals,
     int RaceWarningCount,
     IReadOnlyList<string> RaceWarnings,
     int IncompatibleRaceCount,
@@ -1061,6 +1063,8 @@ internal static class ConversionValidationGuidance
                 "Open skeleton-compatibility.json, conversion-quality.json, and in-game-validation.json, review the provisional remap signals against the real rig, and keep the result in review-required status until the skeleton match is verified.",
             "unsafe-skeleton-remap" =>
                 "Open skeleton-compatibility.json, conversion-quality.json, and preview-workbench.html, treat the automatic skeleton remap as unsafe, and switch to a closer framework/profile or manual Outfit Studio cleanup before release.",
+            "compound-hardcase-certainty" =>
+                "Open topology-correspondence.json, skeleton-compatibility.json, mod-stack-cross-validation.json, and preview-workbench.html, then validate the full load-order combination in-game before trusting this hardest-case topology/custom-rig/plugin-stack conversion.",
             "physics-profile-unsupported" =>
                 "Open skeleton-compatibility.json, compare the requested physics profile against the target body's advertised capability and generated runtime configs, then switch to a physics-capable body/skeleton or set Physics to None before release.",
             "physics-config-mismatch" =>
@@ -1221,6 +1225,8 @@ internal static class ConversionValidationGuidance
                 ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"],
             "provisional-skeleton-remap" or "unsafe-skeleton-remap" =>
                 ["skeleton-compatibility.json", "conversion-quality.json", "preview-workbench.html", "in-game-validation.json"],
+            "compound-hardcase-certainty" =>
+                ["topology-correspondence.json", "skeleton-compatibility.json", "mod-stack-cross-validation.json", "plugin-patches.json", "preview-workbench.html", "in-game-validation.json"],
             "manual-cleanup-likely" =>
                 ["preview-workbench.html", "conversion-quality.json", "skeleton-compatibility.json", "in-game-validation.json", "CalienteTools/BodySlide/ShapeData/"],
             "physics-profile-unsupported" or "physics-config-mismatch" or "physics-bone-missing" or "physics-bone-coverage" or "physics-bone-remap" =>
@@ -19738,7 +19744,8 @@ internal sealed class LocalExportService(
             outputDirectory,
             outputFiles,
             bodySlideProject,
-            pluginAnalysis);
+            pluginAnalysis,
+            raceCompatibility);
 
         await File.WriteAllTextAsync(
             previewPath,
@@ -23843,7 +23850,8 @@ internal sealed class LocalExportService(
         string outputDirectory,
         IReadOnlyList<string> outputFiles,
         BodySlideProject bodySlideProject,
-        PluginAnalysisResult pluginAnalysis)
+        PluginAnalysisResult pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility)
     {
         var issues = new List<ConversionValidationIssue>();
         var physicsCompatibility = BuildPhysicsCompatibilityReport(
@@ -24098,6 +24106,29 @@ internal sealed class LocalExportService(
                 "provisional-skeleton-remap",
                 skeletonMapping.UnsupportedBones.Count > 0 ? "high" : "medium",
                 $"Automatic skeleton remap safety is provisional for '{skeletonMapping.SourceSkeleton}' → '{skeletonMapping.TargetSkeleton}' ({string.Join(", ", (skeletonMapping.AutomaticRemapSignals ?? []).Take(4))})."));
+        }
+
+        if (RequiresCompoundHardCaseCertaintySweep(
+                topologyMismatchRisk,
+                payloadReuse,
+                partitionSignals,
+                skeletonMapping,
+                pluginAnalysis,
+                raceCompatibility,
+                request.TargetBody))
+        {
+            var compoundSignals = BuildCompoundHardCaseCertaintySignals(
+                topologyMismatchRisk,
+                payloadReuse,
+                partitionSignals,
+                skeletonMapping,
+                pluginAnalysis,
+                raceCompatibility,
+                request.TargetBody);
+            issues.Add(new ConversionValidationIssue(
+                "compound-hardcase-certainty",
+                "high",
+                $"Topology drift, custom-rig uncertainty, and mixed plugin/load-order context overlap for '{request.TargetBody}', so automatic certainty is low until the full hardest-case stack is reviewed ({string.Join(", ", compoundSignals.Take(5))})."));
         }
 
         var physicsBoneRemaps = ExtractPhysicsBoneRemaps(steps);
@@ -32557,6 +32588,28 @@ internal sealed class LocalExportService(
                ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"]));
         }
 
+        if (RequiresCompoundHardCaseCertaintySweep(
+               topologyCorrespondence,
+               skeletonMapping,
+               pluginAnalysis,
+               raceCompatibility,
+               targetBody))
+        {
+            var compoundSignals = BuildCompoundHardCaseCertaintySignals(
+               topologyCorrespondence,
+               skeletonMapping,
+               pluginAnalysis,
+               raceCompatibility,
+               targetBody);
+            scenarios.Add(new InGameValidationScenario(
+               "Compound topology/custom-rig mod-stack sweep",
+               "High",
+               $"The hardest-case certainty signals overlap for {targetBody}: {string.Join(", ", compoundSignals.Take(5))}. Validate manual cleanup, remap safety, and load-order behavior together before release.",
+               ["full load-order launch", "equip", "combat", "cell transition", "save / reload"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
+               ["topology-correspondence.json", "skeleton-compatibility.json", "mod-stack-cross-validation.json", "plugin-patches.json", "preview-workbench.html"]));
+        }
+
         if (RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody))
         {
            var mixedRegions = sensitiveRegions.Count > 0
@@ -32707,6 +32760,19 @@ internal sealed class LocalExportService(
             ];
         }
 
+        var requiresCompoundCertaintySweep = RequiresCompoundHardCaseCertaintySweep(
+            inGameValidation.TopologyCorrespondence,
+            skeletonMapping,
+            pluginAnalysis,
+            raceCompatibility,
+            targetBody);
+        var compoundCertaintySignals = BuildCompoundHardCaseCertaintySignals(
+            inGameValidation.TopologyCorrespondence,
+            skeletonMapping,
+            pluginAnalysis,
+            raceCompatibility,
+            targetBody);
+
         return new ModStackCrossValidationReport(
             TargetBody: targetBody,
             TargetBodyFamily: BuildTargetBodyFamily(targetBody),
@@ -32715,6 +32781,7 @@ internal sealed class LocalExportService(
             SourceSkeletonRemapSafety: skeletonMapping.AutomaticRemapSafety,
             RequiresLoadOrderValidation: RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody),
             RequiresPluginPatchReview: pluginAnalysis is not null && ((pluginAnalysis.AmbiguousPlugins?.Count ?? 0) > 0 || pluginNames.Count > 0),
+            RequiresCompoundCertaintySweep: requiresCompoundCertaintySweep,
             ScannedPluginCount: pluginNames.Count,
             ArmorAddonCount: armorAddons.Count,
             ArmorRecordCount: armorRecords.Count,
@@ -32728,6 +32795,7 @@ internal sealed class LocalExportService(
                 .Select(candidate => $"{candidate.Label} ({candidate.Confidence:0.##})")
                 .ToArray() ?? [],
             ValidationSignals: inGameValidation.TopologyCorrespondence?.Signals ?? [],
+            CompoundCertaintySignals: compoundCertaintySignals,
             RaceWarningCount: raceCompatibility?.Warnings.Count ?? 0,
             RaceWarnings: raceCompatibility?.Warnings ?? [],
             IncompatibleRaceCount: raceCompatibility?.IncompatibleRaces.Count ?? 0,
@@ -32738,6 +32806,7 @@ internal sealed class LocalExportService(
                 "verify-related-artifacts",
                 "launch-full-load-order",
                 "verify-plugin-and-race-compatibility",
+                "dispatch-compound-hard-case-sweep",
                 "capture-load-order-observation",
                 "persist-release-gate-result"
             ],
@@ -32749,6 +32818,165 @@ internal sealed class LocalExportService(
                 "runtime-validation-plan.json",
                 "skeleton-compatibility.json"
             ]);
+    }
+
+    private static bool RequiresCompoundHardCaseCertaintySweep(
+        bool topologyMismatchRisk,
+        MorphPayloadReuseSummary? payloadReuse,
+        PartitionSignalReport? partitionSignals,
+        SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody) =>
+        HasHardTopologyCertaintyRisk(topologyMismatchRisk, payloadReuse, partitionSignals) &&
+        HasCustomRigCertaintyRisk(skeletonMapping) &&
+        RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody);
+
+    private static bool RequiresCompoundHardCaseCertaintySweep(
+        TopologyCorrespondenceReport? topologyCorrespondence,
+        SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody) =>
+        HasHardTopologyCertaintyRisk(topologyCorrespondence) &&
+        HasCustomRigCertaintyRisk(skeletonMapping) &&
+        RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody);
+
+    private static IReadOnlyList<string> BuildCompoundHardCaseCertaintySignals(
+        bool topologyMismatchRisk,
+        MorphPayloadReuseSummary? payloadReuse,
+        PartitionSignalReport? partitionSignals,
+        SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody)
+    {
+        var signals = new List<string>();
+        if (topologyMismatchRisk)
+        {
+            signals.Add("topology-mismatch");
+        }
+
+        if (payloadReuse?.ExtremelyAdaptedVariantCount > 0)
+        {
+            signals.Add($"extreme-topology-adaptation:{payloadReuse.ExtremelyAdaptedVariantCount}");
+        }
+
+        if ((partitionSignals?.TopologyWarnings?.Count ?? 0) > 0)
+        {
+            signals.Add("topology-partition-review");
+        }
+
+        AppendCustomRigCertaintySignals(signals, skeletonMapping);
+        AppendMixedModStackCertaintySignals(signals, pluginAnalysis, raceCompatibility, targetBody);
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildCompoundHardCaseCertaintySignals(
+        TopologyCorrespondenceReport? topologyCorrespondence,
+        SkeletonMappingResult skeletonMapping,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody)
+    {
+        var signals = new List<string>();
+        if (topologyCorrespondence is not null)
+        {
+            if (topologyCorrespondence.HeuristicHeavy)
+            {
+                signals.Add("heuristic-heavy-topology");
+            }
+
+            if (!topologyCorrespondence.StrictTransferReady)
+            {
+                signals.Add("strict-transfer-not-ready");
+            }
+
+            if (topologyCorrespondence.RequiresManualSemanticReview)
+            {
+                signals.Add("manual-semantic-review");
+            }
+
+            signals.AddRange(topologyCorrespondence.Signals
+                .Where(static signal =>
+                    signal.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+                    signal.Contains("semantic", StringComparison.OrdinalIgnoreCase) ||
+                    signal.Contains("boundary", StringComparison.OrdinalIgnoreCase))
+                .Take(4));
+        }
+
+        AppendCustomRigCertaintySignals(signals, skeletonMapping);
+        AppendMixedModStackCertaintySignals(signals, pluginAnalysis, raceCompatibility, targetBody);
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool HasHardTopologyCertaintyRisk(
+        bool topologyMismatchRisk,
+        MorphPayloadReuseSummary? payloadReuse,
+        PartitionSignalReport? partitionSignals) =>
+        topologyMismatchRisk ||
+        payloadReuse?.ExtremelyAdaptedVariantCount > 0 ||
+        (partitionSignals?.TopologyWarnings?.Count ?? 0) > 0;
+
+    private static bool HasHardTopologyCertaintyRisk(TopologyCorrespondenceReport? topologyCorrespondence) =>
+        topologyCorrespondence is not null &&
+        (topologyCorrespondence.HeuristicHeavy ||
+         !topologyCorrespondence.StrictTransferReady ||
+         topologyCorrespondence.RequiresManualSemanticReview);
+
+    private static bool HasCustomRigCertaintyRisk(SkeletonMappingResult skeletonMapping) =>
+        skeletonMapping.SourceSkeletonUsedSparseInference ||
+        skeletonMapping.UnsupportedBones.Count > 0 ||
+        !skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase);
+
+    private static void AppendCustomRigCertaintySignals(List<string> signals, SkeletonMappingResult skeletonMapping)
+    {
+        if (skeletonMapping.SourceSkeletonUsedSparseInference)
+        {
+            signals.Add("sparse-skeleton-inference");
+        }
+
+        if (skeletonMapping.UnsupportedBones.Count > 0)
+        {
+            signals.Add($"unsupported-bones:{skeletonMapping.UnsupportedBones.Count}");
+        }
+
+        if (!skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase))
+        {
+            signals.Add($"remap-safety:{skeletonMapping.AutomaticRemapSafety}");
+        }
+    }
+
+    private static void AppendMixedModStackCertaintySignals(
+        List<string> signals,
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        string targetBody)
+    {
+        if (!RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody))
+        {
+            return;
+        }
+
+        var pluginCount = pluginAnalysis?.ScannedPlugins?.Count ?? 0;
+        var ambiguousPluginCount = pluginAnalysis?.AmbiguousPlugins?.Count ?? 0;
+        var raceWarningCount = (raceCompatibility?.Warnings?.Count ?? 0) + (raceCompatibility?.IncompatibleRaces?.Count ?? 0);
+        signals.Add($"mixed-mod-stack:{pluginCount}");
+        if (ambiguousPluginCount > 0)
+        {
+            signals.Add($"ambiguous-plugins:{ambiguousPluginCount}");
+        }
+
+        if (raceWarningCount > 0)
+        {
+            signals.Add($"race-warnings:{raceWarningCount}");
+        }
     }
 
     private static IReadOnlyList<string> BuildPluginMeshFamilySummary(

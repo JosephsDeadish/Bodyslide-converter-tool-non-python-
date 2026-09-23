@@ -364,6 +364,32 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void BuildFollowUpActions_CoversCompoundHardcaseCertaintyArtifacts()
+    {
+        var summary = new ConversionValidationSummary(
+            "UNSAFE",
+            24,
+            2,
+            0,
+            0,
+            [
+                new ConversionValidationIssue("compound-hardcase-certainty", "high", "Topology drift, custom-rig uncertainty, and mixed plugin/load-order context overlap."),
+                new ConversionValidationIssue("unsafe-skeleton-remap", "high", "Automatic skeleton remap safety is unsafe.")
+            ]);
+
+        var actions = ConversionValidationGuidance.BuildFollowUpActions(summary, "Alien Hybrid", maxActions: 6);
+        var artifacts = ConversionValidationGuidance.GetIssueReviewArtifacts(
+            new ConversionValidationIssue("compound-hardcase-certainty", "high", "Topology drift, custom-rig uncertainty, and mixed plugin/load-order context overlap."));
+
+        Assert.Contains(actions, action => action.Contains("topology-correspondence.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("hardest-case", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildFollowUpActions_CoversPartialOutputAndMasterChainCases()
     {
         var summary = new ConversionValidationSummary(

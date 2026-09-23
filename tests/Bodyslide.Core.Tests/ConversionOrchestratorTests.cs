@@ -17867,6 +17867,7 @@ public sealed class RealisticModPackFixtureTests
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("\"Code\": \"unknown-target-body-support\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("\"Code\": \"compound-hardcase-certainty\"", qualityJson, StringComparison.Ordinal);
             using var qualityReport = JsonDocument.Parse(qualityJson);
             Assert.Equal("experimental-manual-cleanup", qualityReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.False(qualityReport.RootElement.GetProperty("ConversionReadiness").GetProperty("CanSafelyAnimate").GetBoolean());
@@ -17889,6 +17890,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Compound topology/custom-rig mod-stack sweep", StringComparison.Ordinal));
 
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
@@ -17978,19 +17982,27 @@ public sealed class RealisticModPackFixtureTests
 
             var modStackJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "mod-stack-cross-validation.json"));
             Assert.Contains("\"RequiresLoadOrderValidation\": true", modStackJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"RequiresCompoundCertaintySweep\": true", modStackJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Mixed mod-stack load-order sweep", modStackJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Compound topology/custom-rig mod-stack sweep", modStackJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("launch-full-load-order", modStackJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("dispatch-compound-hard-case-sweep", modStackJson, StringComparison.OrdinalIgnoreCase);
             using var modStackReport = JsonDocument.Parse(modStackJson);
             Assert.Equal("Alien Hybrid", modStackReport.RootElement.GetProperty("TargetBody").GetString());
             Assert.True(modStackReport.RootElement.GetProperty("RequiresLoadOrderValidation").GetBoolean());
+            Assert.True(modStackReport.RootElement.GetProperty("RequiresCompoundCertaintySweep").GetBoolean());
             Assert.True(modStackReport.RootElement.GetProperty("DistinctMeshFamilyCount").GetInt32() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("DistinctDeclaredMasterCount").GetInt32() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("DeclaredMasters").GetArrayLength() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("SourceSkeletonCandidates").GetArrayLength() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("ValidationSignals").GetArrayLength() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("CompoundCertaintySignals").GetArrayLength() > 0);
             Assert.Contains(
                 modStackReport.RootElement.GetProperty("RecommendedRuntimeScenarios").EnumerateArray().Select(static item => item.GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                modStackReport.RootElement.GetProperty("RecommendedRuntimeScenarios").EnumerateArray().Select(static item => item.GetString()),
+                static name => string.Equals(name, "Compound topology/custom-rig mod-stack sweep", StringComparison.OrdinalIgnoreCase));
 
             var matrixProofJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json"));
             Assert.Contains("\"StrictProofReady\": false", matrixProofJson, StringComparison.OrdinalIgnoreCase);
