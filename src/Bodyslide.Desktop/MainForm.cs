@@ -100,6 +100,8 @@ public sealed class MainForm : Form
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
     private UiTheme _currentTheme;
+    private string? _autoDetectedSourceBody;
+    private double? _autoDetectedSourceConfidence;
     private bool _suppressThemeSelectionChanged;
     private bool _allowUserMainSplitOverride;
     private bool _userAdjustedMainSplit;
@@ -1791,8 +1793,9 @@ public sealed class MainForm : Form
 
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
-        _progressBar.Style = ProgressBarStyle.Marquee;
-        _progressBar.MarqueeAnimationSpeed = 30;
+        _cancelButton.Text = "Cancel";
+        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.MarqueeAnimationSpeed = 0;
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
@@ -1848,8 +1851,6 @@ public sealed class MainForm : Form
                 var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
                     ? update.CurrentFile
                     : $"{update.CurrentFile} — {update.Stage}";
-                _progressBar.Style = ProgressBarStyle.Continuous;
-                _progressBar.MarqueeAnimationSpeed = 0;
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
@@ -1998,16 +1999,26 @@ public sealed class MainForm : Form
             string.IsNullOrWhiteSpace(detection.Body) ||
             detection.Body.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase))
         {
+            ClearAutoDetectedSourceHint(refreshDetails: true);
             return;
         }
 
         var index = _sourceComboBox.FindStringExact(detection.Body);
         if (index < 0)
         {
+            ClearAutoDetectedSourceHint(refreshDetails: true);
             return;
         }
 
-        _sourceComboBox.SelectedIndex = index;
+        _autoDetectedSourceBody = detection.Body;
+        _autoDetectedSourceConfidence = Math.Clamp(detection.Confidence, 0d, 1d);
+
+        if (_sourceComboBox.SelectedIndex != index)
+        {
+            _sourceComboBox.SelectedIndex = index;
+        }
+
+        UpdateSourceDetails();
         AppendLog($"Auto-selected source body from inspection: {detection.Body} ({detection.Confidence:P0}).");
     }
 
@@ -2023,6 +2034,7 @@ public sealed class MainForm : Form
         }
 
         _cancelButton.Enabled = false;
+        _cancelButton.Text = "Cancelling...";
         _activeConversion.Cancel();
         AppendLog("Cancellation requested...");
         _statusLabel.Text = "Cancelling...";
@@ -2031,7 +2043,7 @@ public sealed class MainForm : Form
     private void SetBusyState(bool isBusy)
     {
         _convertButton.Enabled = !isBusy;
-        _cancelButton.Enabled = isBusy;
+        _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
         _inspectInputButton.Enabled = !isBusy && InputPathExists();
         _loadResultButton.Enabled = !isBusy;
@@ -2048,6 +2060,7 @@ public sealed class MainForm : Form
         UseWaitCursor = isBusy;
         if (!isBusy)
         {
+            _cancelButton.Text = "Cancel";
             _progressBar.Style = ProgressBarStyle.Continuous;
         }
         _progressBar.MarqueeAnimationSpeed = _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
@@ -2550,6 +2563,8 @@ public sealed class MainForm : Form
         {
             _inspectListView.EndUpdate();
         }
+
+        ClearAutoDetectedSourceHint(refreshDetails: true);
     }
 
     private void OpenBatchReport()
@@ -2780,9 +2795,48 @@ public sealed class MainForm : Form
         }
 
         var resolvedSource = BodyTypeCatalog.ResolveName(rawSource);
+        if (TryGetAutoDetectedSourceConfidence(rawSource, resolvedSource, out var confidence))
+        {
+            _sourceDetailsLabel.Text =
+                $"Auto-detected from the last inspection: {resolvedSource} ({confidence:P0} confidence). Review this hint if the mod mixes body families, has sparse meshes, or uses unusual source assets. " +
+                BuildBodyDetailsText(resolvedSource, defaultText: string.Empty, isSourceContext: true);
+            return;
+        }
+
         _sourceDetailsLabel.Text =
             $"Source hint only: treat the original armor as built for {resolvedSource}. This does not change the destination body or output physics. " +
             BuildBodyDetailsText(resolvedSource, defaultText: string.Empty, isSourceContext: true);
+    }
+
+    private void ClearAutoDetectedSourceHint(bool refreshDetails)
+    {
+        var hadHint = !string.IsNullOrWhiteSpace(_autoDetectedSourceBody) || _autoDetectedSourceConfidence.HasValue;
+        _autoDetectedSourceBody = null;
+        _autoDetectedSourceConfidence = null;
+
+        if (refreshDetails && hadHint && _sourceDetailsLabel is not null && !_sourceDetailsLabel.IsDisposed)
+        {
+            UpdateSourceDetails();
+        }
+    }
+
+    private bool TryGetAutoDetectedSourceConfidence(string rawSource, string resolvedSource, out double confidence)
+    {
+        confidence = 0d;
+        if (_autoDetectedSourceConfidence is not double detectedConfidence ||
+            string.IsNullOrWhiteSpace(_autoDetectedSourceBody))
+        {
+            return false;
+        }
+
+        if (!string.Equals(_autoDetectedSourceBody, rawSource, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(_autoDetectedSourceBody, resolvedSource, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        confidence = detectedConfidence;
+        return true;
     }
 
     private void UpdatePhysicsDetails()
