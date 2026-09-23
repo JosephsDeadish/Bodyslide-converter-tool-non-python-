@@ -261,6 +261,14 @@ internal static class DesktopWorkflowAutomation
              !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
              !metric.Value.Equals("mainstream-automatic", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Target body support reliability", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("direct", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Has explicit support metadata", StringComparison.OrdinalIgnoreCase) &&
+             metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Target body support missing fields", StringComparison.OrdinalIgnoreCase) &&
+             !string.IsNullOrWhiteSpace(metric.Value)) ||
+            (metric.Property.Equals("Target body support quality warnings", StringComparison.OrdinalIgnoreCase) &&
+             !string.IsNullOrWhiteSpace(metric.Value)) ||
             (metric.Property.Equals("Sparse source inference", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Source skeleton reliability", StringComparison.OrdinalIgnoreCase) &&
@@ -354,6 +362,21 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
                     Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
                     Add(metrics, reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
+                    Add(metrics, reportName, "Target body support reliability", TryReadNestedString(root, "ConversionReadiness", "TargetBodySupportReliability"), filePath);
+                    if (TryGetProperty(root, "TargetBodySupport", out var targetBodySupport))
+                    {
+                        Add(metrics, reportName, "Has explicit support metadata", FormatBool(TryReadBoolValue(targetBodySupport, "HasExplicitSupportMetadata")), filePath);
+                        Add(metrics, reportName, "Target skeleton framework", TryReadString(targetBodySupport, "SkeletonFramework"), filePath);
+                        Add(metrics, reportName, "Target body support missing fields", TryReadArray(targetBodySupport, "MissingFields"), filePath);
+                        Add(metrics, reportName, "Target body support quality warnings", TryReadArray(targetBodySupport, "QualityWarnings"), filePath);
+                        Add(metrics, reportName, "Expected semantic regions", TryReadArray(targetBodySupport, "ExpectedSemanticRegions"), filePath);
+                        Add(metrics, reportName, "Expected collision regions", TryReadArray(targetBodySupport, "ExpectedCollisionRegions"), filePath);
+                        Add(metrics, reportName, "Expected bilateral regions", TryReadArray(targetBodySupport, "ExpectedBilateralRegions"), filePath);
+                        Add(metrics, reportName, "Target physics slots", TryReadIntValue(targetBodySupport, "PhysicsSlotCount"), filePath);
+                        Add(metrics, reportName, "Target chain depth", TryReadIntValue(targetBodySupport, "PhysicsChainDepth"), filePath);
+                        Add(metrics, reportName, "Target physics families", TryReadIntValue(targetBodySupport, "PhysicsFamilyCount"), filePath);
+                        Add(metrics, reportName, "Target runtime physics nodes", TryReadIntValue(targetBodySupport, "PhysicsNodeCount"), filePath);
+                    }
                     break;
                 case "skeleton-compatibility.json":
                     Add(metrics, reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);
@@ -911,6 +934,20 @@ internal static class DesktopWorkflowAutomation
                 "Check the graded support tier before treating the output as fully automatic; experimental tiers still require manual cleanup or runtime verification.",
                 $"{supportTierMetric.Property}: {supportTierMetric.Value}",
                 supportTierMetric.FilePath,
+                Blocking: true));
+        }
+
+        var targetBodySupportMetric = FindMetric(reportMetrics, "Target body support reliability", static value => !value.Equals("direct", StringComparison.OrdinalIgnoreCase))
+                                      ?? FindMetric(reportMetrics, "Has explicit support metadata", static value => value.Equals("No", StringComparison.OrdinalIgnoreCase))
+                                      ?? FindMetric(reportMetrics, "Target body support missing fields", static value => !string.IsNullOrWhiteSpace(value))
+                                      ?? FindMetric(reportMetrics, "Target body support quality warnings", static value => !string.IsNullOrWhiteSpace(value));
+        if (targetBodySupportMetric is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "Target-body support",
+                "Open conversion-quality.json or the generated target-body template and complete the target body's support metadata before treating the output as fully automatic.",
+                $"{targetBodySupportMetric.Property}: {targetBodySupportMetric.Value}",
+                targetBodySupportMetric.FilePath,
                 Blocking: true));
         }
 

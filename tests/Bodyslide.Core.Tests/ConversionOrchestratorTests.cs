@@ -16041,6 +16041,68 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesTargetBodySupportMetricsForReviewState()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        var previewPath = Path.Combine(outputDirectory, "preview-workbench.html");
+
+        try
+        {
+            File.WriteAllText(previewPath, "<html></html>");
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "conversion-quality.json"),
+                """
+                {
+                  "TargetBody": "Custom Hybrid",
+                  "SupportTier": "mainstream-automatic",
+                  "ValidationSummary": { "Status": "ready", "Score": 97, "HighSeverityCount": 0, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] },
+                  "ConversionReadiness": {
+                    "CanConvert": true,
+                    "CanPhysicsConvert": true,
+                    "CanSafelyAnimate": true,
+                    "SkeletonReliability": "direct",
+                    "SkeletonRemapSafety": "safe",
+                    "TargetBodySupportReliability": "review",
+                    "Summary": "Target body metadata still needs manual review."
+                  },
+                  "TargetBodySupport": {
+                    "HasExplicitSupportMetadata": false,
+                    "SkeletonFramework": "custom-hybrid",
+                    "ExpectedSemanticRegions": ["breasts", "belly", "tail"],
+                    "ExpectedCollisionRegions": ["breasts", "belly"],
+                    "ExpectedBilateralRegions": ["breasts"],
+                    "PhysicsSlotCount": 1,
+                    "PhysicsChainDepth": 1,
+                    "PhysicsFamilyCount": 1,
+                    "PhysicsNodeCount": 2,
+                    "MissingFields": ["expectedCollisionRegions", "minimumPhysicsSlotCount"],
+                    "QualityWarnings": ["physicsBones-slot-coverage", "runtime-config-expectations-quality"]
+                  }
+                }
+                """);
+
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
+
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Target body support reliability", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Has explicit support metadata", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Equals("No", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Target body support missing fields", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("expectedCollisionRegions", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Target body support quality warnings", StringComparison.OrdinalIgnoreCase) &&
+                                                             metric.Value.Contains("physicsBones-slot-coverage", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Target-body support", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.Blocking);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesStricterRuntimeReviewSignalsThanReadySummary()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");

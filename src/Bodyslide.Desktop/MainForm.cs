@@ -3216,6 +3216,7 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
                     AddReportMetric(reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
                     AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Target body support reliability", TryReadNestedString(root, "ConversionReadiness", "TargetBodySupportReliability"), filePath);
                     AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
@@ -3241,6 +3242,20 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
                     AddReportMetric(reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
                     AddReportMetric(reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
+                    if (TryGetProperty(root, "TargetBodySupport", out var targetBodySupport))
+                    {
+                        AddReportMetric(reportName, "Has explicit support metadata", FormatBool(TryReadBoolValue(targetBodySupport, "HasExplicitSupportMetadata")), filePath);
+                        AddReportMetric(reportName, "Target skeleton framework", TryReadString(targetBodySupport, "SkeletonFramework"), filePath);
+                        AddReportMetric(reportName, "Target body support missing fields", TryReadArray(targetBodySupport, "MissingFields"), filePath);
+                        AddReportMetric(reportName, "Target body support quality warnings", TryReadArray(targetBodySupport, "QualityWarnings"), filePath);
+                        AddReportMetric(reportName, "Expected semantic regions", TryReadArray(targetBodySupport, "ExpectedSemanticRegions"), filePath);
+                        AddReportMetric(reportName, "Expected collision regions", TryReadArray(targetBodySupport, "ExpectedCollisionRegions"), filePath);
+                        AddReportMetric(reportName, "Expected bilateral regions", TryReadArray(targetBodySupport, "ExpectedBilateralRegions"), filePath);
+                        AddReportMetric(reportName, "Target physics slots", TryReadInt(targetBodySupport, "PhysicsSlotCount"), filePath);
+                        AddReportMetric(reportName, "Target chain depth", TryReadInt(targetBodySupport, "PhysicsChainDepth"), filePath);
+                        AddReportMetric(reportName, "Target physics families", TryReadInt(targetBodySupport, "PhysicsFamilyCount"), filePath);
+                        AddReportMetric(reportName, "Target runtime physics nodes", TryReadInt(targetBodySupport, "PhysicsNodeCount"), filePath);
+                    }
                     break;
                 case "dependency-map.json":
                     AddReportMetric(reportName, "Entries", CountElements(root), filePath);
