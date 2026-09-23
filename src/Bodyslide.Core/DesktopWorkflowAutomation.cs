@@ -337,46 +337,12 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
                     break;
                 case "conversion-quality.json":
-                    Add(metrics, reportName, "Source body", TryReadString(root, "DetectedSourceBody"), filePath);
-                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
-                    Add(metrics, reportName, "Mesh type", TryReadString(root, "MeshType"), filePath);
-                    Add(metrics, reportName, "Strategy", TryReadString(root, "Strategy"), filePath);
-                    Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
-                    Add(metrics, reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
-                    Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
-                    Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    foreach (var metric in ConversionQualityReportMetrics.Read(root))
+                    {
+                        Add(metrics, reportName, metric.Property, metric.Value, filePath);
+                    }
                     Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
                     Add(metrics, reportName, "Support tier summary", TryReadNestedString(root, "ConversionReadiness", "Summary"), filePath);
-                    Add(metrics, reportName, "Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected")), filePath);
-                    Add(metrics, reportName, "Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk")), filePath);
-                    Add(metrics, reportName, "Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification"), filePath);
-                    Add(metrics, reportName, "Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence"), filePath);
-                    Add(metrics, reportName, "Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode"), filePath);
-                    Add(metrics, reportName, "True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence")), filePath);
-                    Add(metrics, reportName, "Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus"), filePath);
-                    Add(metrics, reportName, "Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview")), filePath);
-                    Add(metrics, reportName, "Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy")), filePath);
-                    Add(metrics, reportName, "Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions"), filePath);
-                    Add(metrics, reportName, "Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions"), filePath);
-                    Add(metrics, reportName, "Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals"), filePath);
-                    Add(metrics, reportName, "Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"), filePath);
-                    Add(metrics, reportName, "Validation status", TryReadNestedString(root, "ValidationSummary", "Status"), filePath);
-                    Add(metrics, reportName, "Validation score", TryReadNestedString(root, "ValidationSummary", "Score"), filePath);
-                    Add(metrics, reportName, "Target body support reliability", TryReadNestedString(root, "ConversionReadiness", "TargetBodySupportReliability"), filePath);
-                    if (TryGetProperty(root, "TargetBodySupport", out var targetBodySupport))
-                    {
-                        Add(metrics, reportName, "Has explicit support metadata", FormatBool(TryReadBoolValue(targetBodySupport, "HasExplicitSupportMetadata")), filePath);
-                        Add(metrics, reportName, "Target skeleton framework", TryReadString(targetBodySupport, "SkeletonFramework"), filePath);
-                        Add(metrics, reportName, "Target body support missing fields", TryReadArray(targetBodySupport, "MissingFields"), filePath);
-                        Add(metrics, reportName, "Target body support quality warnings", TryReadArray(targetBodySupport, "QualityWarnings"), filePath);
-                        Add(metrics, reportName, "Expected semantic regions", TryReadArray(targetBodySupport, "ExpectedSemanticRegions"), filePath);
-                        Add(metrics, reportName, "Expected collision regions", TryReadArray(targetBodySupport, "ExpectedCollisionRegions"), filePath);
-                        Add(metrics, reportName, "Expected bilateral regions", TryReadArray(targetBodySupport, "ExpectedBilateralRegions"), filePath);
-                        Add(metrics, reportName, "Target physics slots", TryReadIntValue(targetBodySupport, "PhysicsSlotCount"), filePath);
-                        Add(metrics, reportName, "Target chain depth", TryReadIntValue(targetBodySupport, "PhysicsChainDepth"), filePath);
-                        Add(metrics, reportName, "Target physics families", TryReadIntValue(targetBodySupport, "PhysicsFamilyCount"), filePath);
-                        Add(metrics, reportName, "Target runtime physics nodes", TryReadIntValue(targetBodySupport, "PhysicsNodeCount"), filePath);
-                    }
                     break;
                 case "skeleton-compatibility.json":
                     Add(metrics, reportName, "Source skeleton", TryReadString(root, "SourceSkeleton"), filePath);

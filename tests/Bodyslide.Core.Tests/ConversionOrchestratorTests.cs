@@ -16103,6 +16103,68 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public void ConversionQualityReportMetrics_Read_ParsesValidationAndTargetBodySupportFields()
+    {
+        using var document = JsonDocument.Parse(
+            """
+            {
+              "DetectedSourceBody": "CBBE",
+              "TargetBody": "Custom Hybrid",
+              "SupportTier": "advanced-review-required",
+              "ValidationSummary": { "Status": "needs-review", "Score": 83, "HighSeverityCount": 1, "MediumSeverityCount": 2, "LowSeverityCount": 0, "Issues": [] },
+              "ConversionReadiness": {
+                "CanConvert": true,
+                "CanPhysicsConvert": false,
+                "CanSafelyAnimate": false,
+                "TargetBodySupportReliability": "review"
+              },
+              "TopologyCorrespondence": {
+                "Classification": "mixed",
+                "Confidence": "medium",
+                "MatchingMode": "semantic+heuristic",
+                "UsesTrueSemanticCorrespondence": false,
+                "SemanticVertexMatchingStatus": "partial",
+                "SemanticAnchorProfile": "extended",
+                "SemanticAnchorCoverage": "partial",
+                "SemanticAnchorEvidence": ["anchors:3"],
+                "RequiresManualSemanticReview": true,
+                "HeuristicHeavy": true,
+                "FocusRegions": ["belly"],
+                "UnmatchedFocusRegions": ["tail"],
+                "Signals": ["custom-topology"],
+                "Recommendations": ["manual-review"]
+              },
+              "TargetBodySupport": {
+                "HasExplicitSupportMetadata": false,
+                "SkeletonFramework": "custom-hybrid",
+                "ExpectedSemanticRegions": ["breasts", "belly", "tail"],
+                "ExpectedCollisionRegions": ["breasts"],
+                "ExpectedBilateralRegions": ["breasts"],
+                "PhysicsSlotCount": 1,
+                "PhysicsChainDepth": 1,
+                "PhysicsFamilyCount": 1,
+                "PhysicsNodeCount": 2,
+                "MissingFields": ["expectedCollisionRegions"],
+                "QualityWarnings": ["physicsBones-slot-coverage"]
+              }
+            }
+            """);
+
+        var metrics = ConversionQualityReportMetrics.Read(document.RootElement);
+
+        Assert.Contains(metrics, metric => metric.Property.Equals("Validation score", StringComparison.OrdinalIgnoreCase) &&
+                                           metric.Value == "83");
+        Assert.Contains(metrics, metric => metric.Property.Equals("Target body support reliability", StringComparison.OrdinalIgnoreCase) &&
+                                           metric.Value == "review");
+        Assert.Contains(metrics, metric => metric.Property.Equals("Has explicit support metadata", StringComparison.OrdinalIgnoreCase) &&
+                                           metric.Value == "No");
+        Assert.Contains(metrics, metric => metric.Property.Equals("Target body support missing fields", StringComparison.OrdinalIgnoreCase) &&
+                                           metric.Value?.Contains("expectedCollisionRegions", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Contains(metrics, metric => metric.Property.Equals("Target runtime physics nodes", StringComparison.OrdinalIgnoreCase) &&
+                                           metric.Value == "2");
+    }
+
+    [Fact]
     public void DesktopWorkflowAutomation_BuildFromOutputDirectory_UsesStricterRuntimeReviewSignalsThanReadySummary()
     {
         var outputDirectory = Path.Combine(Path.GetTempPath(), $"slidesmith-workflow-{Guid.NewGuid():N}");
