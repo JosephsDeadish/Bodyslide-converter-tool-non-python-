@@ -6,40 +6,45 @@ internal readonly record struct ConversionQualityReportMetric(string Property, s
 
 internal static class ConversionQualityReportMetrics
 {
-    public static IReadOnlyList<ConversionQualityReportMetric> Read(JsonElement root) =>
-    [
-        new("Source body", TryReadString(root, "DetectedSourceBody")),
-        new("Target body", TryReadString(root, "TargetBody")),
-        new("Mesh type", TryReadString(root, "MeshType")),
-        new("Strategy", TryReadString(root, "Strategy")),
-        new("Support tier", TryReadString(root, "SupportTier")),
-        new("Target body support reliability", TryReadNestedString(root, "ConversionReadiness", "TargetBodySupportReliability")),
-        new("Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert"))),
-        new("Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert"))),
-        new("Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate"))),
-        new("Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected"))),
-        new("Correction applied", FormatBool(TryReadBoolValue(root, "CorrectionApplied"))),
-        new("Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk"))),
-        new("Validation status", TryReadNestedString(root, "ValidationSummary", "Status")),
-        new("Validation score", TryReadNestedString(root, "ValidationSummary", "Score")),
-        new("High-risk poses", TryReadInt(root, "HighRiskPoseCount")),
-        new("Missing normals", TryReadInt(root, "MissingNormalCount")),
-        new("Quality warnings", TryReadArray(root, "QualityWarnings")),
-        new("Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification")),
-        new("Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence")),
-        new("Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode")),
-        new("True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence"))),
-        new("Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus")),
-        new("Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile")),
-        new("Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage")),
-        new("Semantic anchor evidence", TryReadNestedArray(root, "TopologyCorrespondence", "SemanticAnchorEvidence")),
-        new("Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview"))),
-        new("Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy"))),
-        new("Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions")),
-        new("Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions")),
-        new("Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals")),
-        new("Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"))
-    ].Concat(ReadTargetBodySupport(root)).ToArray();
+    public static IReadOnlyList<ConversionQualityReportMetric> Read(JsonElement root)
+    {
+        var metrics = new List<ConversionQualityReportMetric>
+        {
+            new("Source body", TryReadString(root, "DetectedSourceBody")),
+            new("Target body", TryReadString(root, "TargetBody")),
+            new("Mesh type", TryReadString(root, "MeshType")),
+            new("Strategy", TryReadString(root, "Strategy")),
+            new("Support tier", TryReadString(root, "SupportTier")),
+            new("Target body support reliability", TryReadNestedString(root, "ConversionReadiness", "TargetBodySupportReliability")),
+            new("Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert"))),
+            new("Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert"))),
+            new("Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate"))),
+            new("Clipping detected", FormatBool(TryReadBoolValue(root, "ClippingDetected"))),
+            new("Correction applied", FormatBool(TryReadBoolValue(root, "CorrectionApplied"))),
+            new("Topology risk", FormatBool(TryReadBoolValue(root, "TopologyMismatchRisk"))),
+            new("Validation status", TryReadNestedString(root, "ValidationSummary", "Status")),
+            new("Validation score", TryReadNestedScalar(root, "ValidationSummary", "Score")),
+            new("High-risk poses", TryReadInt(root, "HighRiskPoseCount")),
+            new("Missing normals", TryReadInt(root, "MissingNormalCount")),
+            new("Quality warnings", TryReadArray(root, "QualityWarnings")),
+            new("Topology correspondence", TryReadNestedString(root, "TopologyCorrespondence", "Classification")),
+            new("Topology correspondence confidence", TryReadNestedString(root, "TopologyCorrespondence", "Confidence")),
+            new("Topology matching mode", TryReadNestedString(root, "TopologyCorrespondence", "MatchingMode")),
+            new("True semantic correspondence", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "UsesTrueSemanticCorrespondence"))),
+            new("Semantic vertex matching", TryReadNestedString(root, "TopologyCorrespondence", "SemanticVertexMatchingStatus")),
+            new("Semantic anchor profile", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorProfile")),
+            new("Semantic anchor coverage", TryReadNestedString(root, "TopologyCorrespondence", "SemanticAnchorCoverage")),
+            new("Semantic anchor evidence", TryReadNestedArray(root, "TopologyCorrespondence", "SemanticAnchorEvidence")),
+            new("Manual semantic review", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "RequiresManualSemanticReview"))),
+            new("Heuristic-heavy topology", FormatBool(TryReadNestedBoolValue(root, "TopologyCorrespondence", "HeuristicHeavy"))),
+            new("Topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "FocusRegions")),
+            new("Unmatched topology focus regions", TryReadNestedArray(root, "TopologyCorrespondence", "UnmatchedFocusRegions")),
+            new("Topology signals", TryReadNestedArray(root, "TopologyCorrespondence", "Signals")),
+            new("Topology recommendations", TryReadNestedArray(root, "TopologyCorrespondence", "Recommendations"))
+        };
+        metrics.AddRange(ReadTargetBodySupport(root));
+        return metrics;
+    }
 
     private static IEnumerable<ConversionQualityReportMetric> ReadTargetBodySupport(JsonElement root)
     {
@@ -94,6 +99,18 @@ internal static class ConversionQualityReportMetrics
     private static string? TryReadNestedArray(JsonElement element, string propertyName, string nestedPropertyName) =>
         TryGetProperty(element, propertyName, out var nested)
             ? TryReadArray(nested, nestedPropertyName)
+            : null;
+
+    private static string? TryReadNestedScalar(JsonElement element, string propertyName, string nestedPropertyName) =>
+        TryGetProperty(element, propertyName, out var nested) && TryGetProperty(nested, nestedPropertyName, out var value)
+            ? value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => null
+            }
             : null;
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
