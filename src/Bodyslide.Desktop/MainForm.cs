@@ -57,6 +57,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _outputZipCheckBox;
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _statusLabel;
+    private readonly Label _modeStatusLabel;
     private readonly Label _presetDetailsLabel;
     private readonly Label _targetDetailsLabel;
     private readonly Label _sourceDetailsLabel;
@@ -264,35 +265,83 @@ public sealed class MainForm : Form
         inputRow.Controls.Add(inputActions, 2, 0);
         layout.Controls.Add(inputRow, 0, 1);
 
-        var modeRow = new FlowLayoutPanel
+        var modeRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
+            ColumnCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        modeRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        modeRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        modeRow.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 6),
+            Text = "Step 1: choose a quick preset or switch to manual mode if you want to pick the TO body yourself."
+        }, 0, 0);
+        modeRow.SetColumnSpan(modeRow.Controls[modeRow.Controls.Count - 1], 2);
+        var modeSelectorPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
             AutoSize = true,
             WrapContents = true,
-            Margin = new Padding(0, 6, 0, 0),
+            Margin = new Padding(0),
         };
         _usePresetRadio = new RadioButton
         {
-            Text = "Preset mode (recommended quick setup)",
+            Text = "Quick preset mode (recommended)",
             AutoSize = true,
             Checked = true,
         };
         _useCustomTargetRadio = new RadioButton
         {
-            Text = "Manual mode (choose the destination body yourself)",
+            Text = "Manual mode (I will choose the TO body)",
             AutoSize = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
         _useCustomTargetRadio.CheckedChanged += (_, _) => RefreshModeState();
-        modeRow.Controls.Add(_usePresetRadio);
-        modeRow.Controls.Add(_useCustomTargetRadio);
-        modeRow.Controls.Add(new Label
+        modeSelectorPanel.Controls.Add(_usePresetRadio);
+        modeSelectorPanel.Controls.Add(_useCustomTargetRadio);
+        modeRow.Controls.Add(modeSelectorPanel, 0, 1);
+        var themePanel = new FlowLayoutPanel
         {
             AutoSize = true,
-            Margin = new Padding(12, 4, 0, 0),
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(12, 0, 0, 0),
+        };
+        var themeLabel = new Label
+        {
+            Text = "Theme",
+            AutoSize = true,
+            Margin = new Padding(0, 8, 4, 0),
+        };
+        _themeComboBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 120,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        _themeComboBox.Items.Add(UiTheme.Light.ToString());
+        _themeComboBox.Items.Add(UiTheme.Dark.ToString());
+        _themeComboBox.SelectedIndexChanged += (_, _) => OnThemeSelectionChanged();
+        themePanel.Controls.Add(themeLabel);
+        themePanel.Controls.Add(_themeComboBox);
+        modeRow.Controls.Add(themePanel, 1, 1);
+        _modeStatusLabel = new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 6, 0, 0),
             Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
-        });
+        };
+        modeRow.Controls.Add(_modeStatusLabel, 0, 2);
+        modeRow.SetColumnSpan(_modeStatusLabel, 2);
         layout.Controls.Add(modeRow, 0, 2);
 
         _conversionOptionsPanel = new TableLayoutPanel
@@ -616,7 +665,7 @@ public sealed class MainForm : Form
         customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
         layout.Controls.Add(CreateSection("Custom profiles", customProfilesPanel), 0, 6);
 
-        var actionRow = new FlowLayoutPanel
+        var primaryActionRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
             FlowDirection = FlowDirection.LeftToRight,
@@ -640,10 +689,11 @@ public sealed class MainForm : Form
         _convertButton = new Button
         {
             Name = "convertButton",
-            Text = "Convert",
-            Width = 110,
-            Height = 34,
-            Margin = new Padding(0, 0, 8, 0),
+            Text = "Start conversion",
+            Width = 180,
+            Height = 42,
+            Margin = new Padding(0, 0, 12, 0),
+            Font = new Font(Font, FontStyle.Bold),
         };
         _convertButton.Click += async (_, _) => await ConvertAsync();
         _cancelButton = new Button
@@ -768,40 +818,50 @@ public sealed class MainForm : Form
             Margin = new Padding(8, 0, 0, 0),
         };
         _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
-        var themeLabel = new Label
+        var secondaryActionRow = new FlowLayoutPanel
         {
-            Text = "Theme",
             AutoSize = true,
-            Margin = new Padding(16, 8, 4, 0),
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            Margin = new Padding(0, 8, 0, 0),
         };
-        _themeComboBox = new ComboBox
+        primaryActionRow.Controls.Add(_convertButton);
+        primaryActionRow.Controls.Add(_cancelButton);
+        primaryActionRow.Controls.Add(_outputZipCheckBox);
+        primaryActionRow.Controls.Add(_buildSlidersCheckBox);
+        secondaryActionRow.Controls.Add(_clearLogButton);
+        secondaryActionRow.Controls.Add(_openOutputButton);
+        secondaryActionRow.Controls.Add(_openPreviewButton);
+        secondaryActionRow.Controls.Add(_loadResultButton);
+        secondaryActionRow.Controls.Add(_openBatchReportButton);
+        secondaryActionRow.Controls.Add(_openReportButton);
+        secondaryActionRow.Controls.Add(_openGuidanceTargetButton);
+        secondaryActionRow.Controls.Add(_openArtifactButton);
+        secondaryActionRow.Controls.Add(_loadCustomProfileButton);
+        secondaryActionRow.Controls.Add(_saveProfileButton);
+        secondaryActionRow.Controls.Add(_inspectCacheButton);
+        secondaryActionRow.Controls.Add(_runSelfCheckButton);
+        var actionLayout = new TableLayoutPanel
         {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 110,
-            Margin = new Padding(0, 4, 0, 0),
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            Margin = new Padding(0),
         };
-        _themeComboBox.Items.Add(UiTheme.Light.ToString());
-        _themeComboBox.Items.Add(UiTheme.Dark.ToString());
-        _themeComboBox.SelectedIndexChanged += (_, _) => OnThemeSelectionChanged();
-        actionRow.Controls.Add(_outputZipCheckBox);
-        actionRow.Controls.Add(_buildSlidersCheckBox);
-        actionRow.Controls.Add(_convertButton);
-        actionRow.Controls.Add(_cancelButton);
-        actionRow.Controls.Add(_clearLogButton);
-        actionRow.Controls.Add(_openOutputButton);
-        actionRow.Controls.Add(_openPreviewButton);
-        actionRow.Controls.Add(_loadResultButton);
-        actionRow.Controls.Add(_openBatchReportButton);
-        actionRow.Controls.Add(_openReportButton);
-        actionRow.Controls.Add(_openGuidanceTargetButton);
-        actionRow.Controls.Add(_openArtifactButton);
-        actionRow.Controls.Add(_loadCustomProfileButton);
-        actionRow.Controls.Add(_saveProfileButton);
-        actionRow.Controls.Add(_inspectCacheButton);
-        actionRow.Controls.Add(_runSelfCheckButton);
-        actionRow.Controls.Add(themeLabel);
-        actionRow.Controls.Add(_themeComboBox);
-        layout.Controls.Add(CreateSection("Actions", actionRow), 0, 7);
+        actionLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        actionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        actionLayout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 6),
+            Text = "Step 4: review the setup above, then use Start conversion. The buttons below it are optional tools and reports."
+        }, 0, 0);
+        actionLayout.Controls.Add(primaryActionRow, 0, 1);
+        actionLayout.Controls.Add(secondaryActionRow, 0, 2);
+        layout.Controls.Add(CreateSection("Actions", actionLayout), 0, 7);
 
         var bottomPanel = new TableLayoutPanel
         {
@@ -1012,6 +1072,8 @@ public sealed class MainForm : Form
         _themeComboBox.SelectedItem = _currentTheme.ToString();
         _suppressThemeSelectionChanged = false;
         ApplyTheme(_currentTheme);
+        UpdateResponsiveLayout();
+        UpdateMainSplitLayout();
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
         SizeChanged += (_, _) =>
         {
@@ -1209,11 +1271,22 @@ public sealed class MainForm : Form
             case Button button:
                 button.UseVisualStyleBackColor = false;
                 button.FlatStyle = FlatStyle.Flat;
-                button.FlatAppearance.BorderColor = palette.Border;
-                button.FlatAppearance.MouseDownBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.35);
-                button.FlatAppearance.MouseOverBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.18);
-                button.BackColor = palette.SurfaceBackground;
-                button.ForeColor = palette.Foreground;
+                if (ReferenceEquals(button, _convertButton))
+                {
+                    button.FlatAppearance.BorderColor = palette.Accent;
+                    button.FlatAppearance.MouseDownBackColor = BlendColors(palette.Accent, palette.SurfaceBackground, 0.15);
+                    button.FlatAppearance.MouseOverBackColor = BlendColors(palette.Accent, palette.SurfaceBackground, 0.25);
+                    button.BackColor = palette.Accent;
+                    button.ForeColor = Color.White;
+                }
+                else
+                {
+                    button.FlatAppearance.BorderColor = palette.Border;
+                    button.FlatAppearance.MouseDownBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.35);
+                    button.FlatAppearance.MouseOverBackColor = BlendColors(palette.SurfaceBackground, palette.Accent, 0.18);
+                    button.BackColor = palette.SurfaceBackground;
+                    button.ForeColor = palette.Foreground;
+                }
                 break;
             case CheckBox checkBox:
                 checkBox.BackColor = Color.Transparent;
@@ -1615,6 +1688,9 @@ public sealed class MainForm : Form
         _presetBatchTextBox.Enabled = usingPreset;
         _targetComboBox.Enabled = !usingPreset;
         _targetBatchTextBox.Enabled = !usingPreset;
+        _modeStatusLabel.Text = usingPreset
+            ? "Preset mode is active. The selected preset chooses the TO body below for you. Switch to Manual mode above if you want to change the TO body yourself."
+            : "Manual mode is active. Use the TO body box below to choose the converted output body. FROM body stays in the Source hints section.";
         if (usingPreset && TryGetSelectedPreset(out var preset))
         {
             var targetIndex = _targetComboBox.FindStringExact(preset.TargetBody);
