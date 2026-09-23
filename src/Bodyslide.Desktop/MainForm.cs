@@ -103,6 +103,7 @@ public sealed class MainForm : Form
     private bool _suppressThemeSelectionChanged;
     private bool _allowUserMainSplitOverride;
     private bool _userAdjustedMainSplit;
+    private int? _userPreferredMainSplitDistance;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -185,6 +186,7 @@ public sealed class MainForm : Form
             if (_allowUserMainSplitOverride)
             {
                 _userAdjustedMainSplit = true;
+                _userPreferredMainSplitDistance = _mainSplitContainer.SplitterDistance;
             }
         };
         Controls.Add(_mainSplitContainer);
@@ -1205,7 +1207,7 @@ public sealed class MainForm : Form
         }
 
         var splitterDistance = _userAdjustedMainSplit
-            ? Math.Clamp(_mainSplitContainer.SplitterDistance, panel1Minimum, maxSplitterDistance)
+            ? Math.Clamp(_userPreferredMainSplitDistance ?? _mainSplitContainer.SplitterDistance, panel1Minimum, maxSplitterDistance)
             : Math.Clamp(preferredPanel1Height, panel1Minimum, maxSplitterDistance);
         if (_mainSplitContainer.SplitterDistance != splitterDistance)
         {
