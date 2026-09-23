@@ -86,6 +86,9 @@ public sealed class MainForm : Form
     private readonly BatchConversionRunner _batchRunner;
     private readonly ConversionInspector _inspector;
     private readonly ToolTip _optionToolTip;
+    private readonly TableLayoutPanel _conversionOptionsPanel;
+    private readonly GroupBox _destinationSetupGroupBox;
+    private readonly GroupBox _sourceHintsGroupBox;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
@@ -144,10 +147,11 @@ public sealed class MainForm : Form
             ?.InformationalVersion ?? "1.0";
         Text = $"SlideSmith v{appVersion}";
         Name = "mainForm";
-        Width = 960;
-        Height = 760;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Width = 1240;
+        Height = 920;
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(860, 680);
+        MinimumSize = new Size(980, 760);
 
         _batchRunner = new BatchConversionRunner(StandaloneConversionModules.CreateDefault());
         _inspector = StandaloneConversionModules.CreateInspector();
@@ -159,13 +163,28 @@ public sealed class MainForm : Form
             ShowAlways = true,
         };
 
-        var layout = new TableLayoutPanel
+        var mainSplitContainer = new SplitContainer
         {
             Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            SplitterWidth = 8,
+            Panel1MinSize = 360,
+            Panel2MinSize = 220,
+            SplitterDistance = 560,
+        };
+        mainSplitContainer.Panel1.AutoScroll = true;
+        Controls.Add(mainSplitContainer);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 8,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(12),
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -174,8 +193,7 @@ public sealed class MainForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        Controls.Add(layout);
+        mainSplitContainer.Panel1.Controls.Add(layout);
 
         var dropPanel = new Panel
         {
@@ -230,7 +248,7 @@ public sealed class MainForm : Form
         var inputActions = new FlowLayoutPanel
         {
             AutoSize = true,
-            WrapContents = false,
+            WrapContents = true,
             FlowDirection = FlowDirection.LeftToRight,
             Margin = new Padding(0),
             Padding = new Padding(0),
@@ -248,7 +266,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             FlowDirection = FlowDirection.LeftToRight,
             AutoSize = true,
-            WrapContents = false,
+            WrapContents = true,
             Margin = new Padding(0, 6, 0, 0),
         };
         _usePresetRadio = new RadioButton
@@ -274,15 +292,15 @@ public sealed class MainForm : Form
         });
         layout.Controls.Add(modeRow, 0, 2);
 
-        var conversionOptionsPanel = new TableLayoutPanel
+        _conversionOptionsPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             ColumnCount = 2,
             AutoSize = true,
             Margin = new Padding(0, 6, 0, 0),
         };
-        conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-        conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        _conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        _conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
 
         var leftOptions = new TableLayoutPanel
         {
@@ -398,7 +416,8 @@ public sealed class MainForm : Form
         {
             _presetComboBox.SelectedIndex = 0;
         }
-        conversionOptionsPanel.Controls.Add(CreateSection("Destination setup (what you want to build)", leftOptions), 0, 0);
+        _destinationSetupGroupBox = CreateSection("Destination setup (what you want to build)", leftOptions);
+        _conversionOptionsPanel.Controls.Add(_destinationSetupGroupBox, 0, 0);
 
         var rightOptions = new TableLayoutPanel
         {
@@ -514,8 +533,9 @@ public sealed class MainForm : Form
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
         rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
 
-        conversionOptionsPanel.Controls.Add(CreateSection("Source hints, output overrides, and support files", rightOptions), 1, 0);
-        layout.Controls.Add(CreateSection("Conversion setup", conversionOptionsPanel), 0, 3);
+        _sourceHintsGroupBox = CreateSection("Source hints, output overrides, and support files", rightOptions);
+        _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
+        layout.Controls.Add(CreateSection("Conversion setup", _conversionOptionsPanel), 0, 3);
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
@@ -958,9 +978,10 @@ public sealed class MainForm : Form
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
-        layout.Controls.Add(CreateSection("Results and diagnostics", bottomPanel), 0, 8);
+        mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
 
         RefreshModeState();
+        UpdateResponsiveLayout();
         UpdatePresetDetails();
         UpdateTargetDetails();
         UpdateSourceDetails();
@@ -981,6 +1002,7 @@ public sealed class MainForm : Form
         _suppressThemeSelectionChanged = false;
         ApplyTheme(_currentTheme);
         AppendLog("Ready. Choose armor/clothing input, confirm FROM body (what the armor was made for) and TO body (what you want to build), then click Convert.");
+        SizeChanged += (_, _) => UpdateResponsiveLayout();
     }
 
     internal DesktopSmokeTestSummary GetSmokeTestSummary()
@@ -1004,6 +1026,43 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 8, 0, 0),
             Controls = { content }
         };
+    }
+
+    private void UpdateResponsiveLayout()
+    {
+        var useSingleColumn = ClientSize.Width < 1380;
+
+        _conversionOptionsPanel.SuspendLayout();
+        try
+        {
+            _conversionOptionsPanel.ColumnStyles.Clear();
+            _conversionOptionsPanel.RowStyles.Clear();
+
+            if (useSingleColumn)
+            {
+                _conversionOptionsPanel.ColumnCount = 1;
+                _conversionOptionsPanel.RowCount = 2;
+                _conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                _conversionOptionsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                _conversionOptionsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                _conversionOptionsPanel.SetCellPosition(_destinationSetupGroupBox, new TableLayoutPanelCellPosition(0, 0));
+                _conversionOptionsPanel.SetCellPosition(_sourceHintsGroupBox, new TableLayoutPanelCellPosition(0, 1));
+            }
+            else
+            {
+                _conversionOptionsPanel.ColumnCount = 2;
+                _conversionOptionsPanel.RowCount = 1;
+                _conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+                _conversionOptionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+                _conversionOptionsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                _conversionOptionsPanel.SetCellPosition(_destinationSetupGroupBox, new TableLayoutPanelCellPosition(0, 0));
+                _conversionOptionsPanel.SetCellPosition(_sourceHintsGroupBox, new TableLayoutPanelCellPosition(1, 0));
+            }
+        }
+        finally
+        {
+            _conversionOptionsPanel.ResumeLayout(performLayout: true);
+        }
     }
 
     private void OnThemeSelectionChanged()
