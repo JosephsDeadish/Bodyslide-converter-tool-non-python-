@@ -968,6 +968,7 @@ public sealed class MainForm : Form
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
         PopulateGuidanceTab(Array.Empty<string>(), null);
+        LoadUiSettings();
         RefreshCustomProfilesList();
         UpdatePathActionStates();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
@@ -975,7 +976,6 @@ public sealed class MainForm : Form
         PopulateCacheTab([], null);
         ShowPreviewStatus("Run a conversion to render preview-workbench.html in-app.");
         ConfigureOptionTooltips();
-        _currentTheme = LoadThemePreference();
         _suppressThemeSelectionChanged = true;
         _themeComboBox.SelectedItem = _currentTheme.ToString();
         _suppressThemeSelectionChanged = false;
@@ -1026,7 +1026,7 @@ public sealed class MainForm : Form
 
         _currentTheme = theme;
         ApplyTheme(theme);
-        SaveThemePreference(theme);
+        SaveUiSettings();
         AppendLog($"Theme switched to {theme} mode.");
     }
 
@@ -1141,23 +1141,21 @@ public sealed class MainForm : Form
             (int)Math.Round(background.B + ((accent.B - background.B) * amount)));
     }
 
-    private UiTheme LoadThemePreference()
+    private void LoadUiSettings()
     {
-        var settingsPath = GetThemeSettingsPath();
+        _currentTheme = GetSystemPreferredTheme();
+        _customProfilePaths.Clear();
+
+        var settingsPath = GetUiSettingsPath();
         try
         {
-            if (!File.Exists(settingsPath))
-            {
-                return GetSystemPreferredTheme();
-            }
+            var settings = DesktopUiSettingsStore.Load(settingsPath);
+            _customProfilePaths.AddRange(settings.CustomProfilePaths ?? []);
 
-            var json = File.ReadAllText(settingsPath);
-            var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ReportJsonOptions);
-            if (settings is not null &&
-                settings.TryGetValue("theme", out var themeValue) &&
-                Enum.TryParse<UiTheme>(themeValue, ignoreCase: true, out var theme))
+            if (!string.IsNullOrWhiteSpace(settings.Theme) &&
+                Enum.TryParse<UiTheme>(settings.Theme, ignoreCase: true, out var theme))
             {
-                return theme;
+                _currentTheme = theme;
             }
         }
         catch (IOException ex)
@@ -1172,73 +1170,59 @@ public sealed class MainForm : Form
         {
             System.Diagnostics.Trace.TraceWarning($"Failed to parse theme preference from '{settingsPath}': {ex.Message}");
         }
-
-        return GetSystemPreferredTheme();
     }
 
-    private void SaveThemePreference(UiTheme theme)
+    private void SaveUiSettings()
     {
-        string? tempPath = null;
         try
         {
-            var settingsPath = GetThemeSettingsPath();
-            var settingsDirectory = Path.GetDirectoryName(settingsPath);
-            if (!string.IsNullOrWhiteSpace(settingsDirectory))
-            {
-                Directory.CreateDirectory(settingsDirectory);
-            }
-            using var settingsLock = AcquireExclusiveThemeSettingsLock(settingsPath);
-            var json = JsonSerializer.Serialize(
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["theme"] = theme.ToString()
-                },
-                new JsonSerializerOptions { WriteIndented = true });
-            tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, settingsPath, overwrite: true);
-            tempPath = null;
+            DesktopUiSettingsStore.Save(
+                GetUiSettingsPath(),
+                new DesktopUiSettings(
+                    _currentTheme.ToString(),
+                    _customProfilePaths.Count > 0
+                        ? [.. _customProfilePaths]
+                        : []));
         }
         catch (Exception ex)
         {
-            AppendLog($"Failed to save theme preference: {ex.Message}");
-            if (!string.IsNullOrWhiteSpace(tempPath))
-            {
-                try
-                {
-                    File.Delete(tempPath);
-                }
-                catch
-                {
-                }
-            }
+            AppendLog($"Failed to save UI settings: {ex.Message}");
         }
     }
 
-    private static FileStream AcquireExclusiveThemeSettingsLock(string settingsPath)
+    private bool PruneMissingCustomProfiles(string operation)
     {
-        var lockPath = $"{settingsPath}.lock";
-        const int maxAttempts = 20;
-        const int retryDelayMilliseconds = 50;
-
-        for (var attempt = 0; ; attempt++)
+        if (_customProfilePaths.Count == 0)
         {
-            try
-            {
-                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            }
-            catch (IOException) when (attempt < maxAttempts)
-            {
-                Thread.Sleep(retryDelayMilliseconds);
-            }
-            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
-            {
-                Thread.Sleep(retryDelayMilliseconds);
-            }
+            return false;
         }
+
+        var missingPaths = _customProfilePaths
+            .Where(static path => !File.Exists(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (missingPaths.Length == 0)
+        {
+            return false;
+        }
+
+        _customProfilePaths.RemoveAll(path => missingPaths.Contains(path, StringComparer.OrdinalIgnoreCase));
+        RefreshCustomProfilesList();
+        SaveUiSettings();
+        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+
+        var missingNames = string.Join(", ", missingPaths.Select(Path.GetFileName));
+        AppendLog($"Removed {missingPaths.Length} missing custom profile file(s) before {operation}: {missingNames}");
+        MessageBox.Show(
+            this,
+            $"Removed {missingPaths.Length} missing custom profile file(s) before {operation}:\n{missingNames}",
+            "Missing custom profiles",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+        return true;
     }
 
-    private static string GetThemeSettingsPath() =>
+    private static string GetUiSettingsPath() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SlideSmith",
@@ -1580,6 +1564,8 @@ public sealed class MainForm : Form
             return;
         }
 
+        PruneMissingCustomProfiles("conversion");
+
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
         _progressBar.Style = ProgressBarStyle.Marquee;
@@ -1738,6 +1724,8 @@ public sealed class MainForm : Form
             MessageBox.Show(this, "Input path was not found.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
+
+        PruneMissingCustomProfiles("inspection");
 
         try
         {
@@ -2898,6 +2886,7 @@ public sealed class MainForm : Form
 
         _customProfilePaths.RemoveAll(path => selectedPaths.Contains(path, StringComparer.OrdinalIgnoreCase));
         RefreshCustomProfilesList();
+        SaveUiSettings();
         AppendLog($"Removed {selectedPaths.Length} custom profile file(s).");
         ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
     }
@@ -2911,6 +2900,7 @@ public sealed class MainForm : Form
 
         _customProfilePaths.Clear();
         RefreshCustomProfilesList();
+        SaveUiSettings();
         AppendLog("Cleared all loaded custom profile files.");
         ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
     }
@@ -2940,6 +2930,7 @@ public sealed class MainForm : Form
         {
             AppendLog($"Loaded {added} custom profile file(s): {string.Join(", ", dialog.FileNames.Select(Path.GetFileName))}");
             RefreshCustomProfilesList(dialog.FileNames[0]);
+            SaveUiSettings();
             ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
     }
@@ -2994,6 +2985,7 @@ public sealed class MainForm : Form
             }
 
             RefreshCustomProfilesList(dialog.FileName);
+            SaveUiSettings();
             ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
