@@ -293,17 +293,13 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     if (!string.IsNullOrWhiteSpace(skeletonNif))
     {
         skeletonNif = skeletonNif.Trim().Trim('"');
-        if (!skeletonNif.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+        if (!SkeletonSupportPathResolver.TryResolveSkeletonNifPath(skeletonNif, out var resolvedSkeletonNif))
         {
-            error = $"Invalid --skeleton-nif value '{skeletonNif}'. Provide a path to a .nif file.";
+            error = $"Could not resolve a usable skeleton .nif from '{skeletonNif}'. Provide a skeleton .nif directly, an XP32/XPMSSE mod folder, or a related .pex file from the same mod.";
             return false;
         }
 
-        if (!File.Exists(skeletonNif))
-        {
-            error = $"Could not find skeleton file '{skeletonNif}'. Check the path and try again.";
-            return false;
-        }
+        skeletonNif = resolvedSkeletonNif;
     }
 
     request = new ConversionRequest(
@@ -495,7 +491,7 @@ static void WriteUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--skeleton-nif <path to skeleton.nif>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--skeleton-nif <path to skeleton.nif|XP32 folder|related .pex>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
@@ -598,7 +594,7 @@ static void WriteConversionGuide()
     Console.WriteLine("  1) Pick a destination with --target <body> or --preset <name>.");
     Console.WriteLine("  2) If the source body is known, set --source <body> to improve mapping confidence.");
     Console.WriteLine("  3) Keep --physics auto unless you intentionally need none/cbpc/smp/smp+cbpc.");
-    Console.WriteLine("  4) Use --skeleton-nif <path> with your real XPMSSE/target skeleton for best bone mapping.");
+    Console.WriteLine("  4) Use --skeleton-nif <path> with your real XPMSSE/target skeleton support for best bone mapping.");
     Console.WriteLine("  5) Use --list-bodies, --body-reference <body>, --list-presets, and --list-physics before converting.");
     Console.WriteLine();
     Console.WriteLine("Recommended command pattern:");

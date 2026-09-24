@@ -114,6 +114,8 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 # supply a skeleton NIF for accurate bone mapping (e.g. XPMSSE installed via mod manager)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --skeleton-nif "C:\Modlist\XPMSSE\meshes\actors\character\character assets\skeleton.nif"
+# You can also point --skeleton-nif at an XP32/XPMSSE mod folder or a related .pex file from the same mod;
+# SlideSmith will resolve the matching skeleton .nif automatically.
 
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets

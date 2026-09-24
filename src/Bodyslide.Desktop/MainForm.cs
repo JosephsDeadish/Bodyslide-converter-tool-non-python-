@@ -142,6 +142,7 @@ public sealed class MainForm : Form
     private const int MainSplitPanel2Minimum = 220;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
+    private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
 
     private enum UiTheme
     {
@@ -324,7 +325,10 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Text = "Drag and drop a .nif, plugin (.esp/.esm/.esl), archive (.zip/.7z/.tar/.tar.gz/.tgz), or armor folder here",
+            AllowDrop = true,
         };
+        dropLabel.DragEnter += OnDragEnter;
+        dropLabel.DragDrop += OnDragDrop;
         dropPanel.Controls.Add(dropLabel);
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Quick import", dropPanel), 0, 0);
 
@@ -763,27 +767,39 @@ public sealed class MainForm : Form
         _worldModeComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_worldModeComboBox, 1, 6);
 
-        rightOptions.Controls.Add(new Label { Text = "Skeleton NIF for bone mapping (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
+        rightOptions.Controls.Add(new Label { Text = "Skeleton support path (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
         var skeletonNifPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             AutoSize = true,
             Margin = new Padding(0),
             Padding = new Padding(0),
         };
         skeletonNifPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         skeletonNifPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        skeletonNifPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _skeletonNifTextBox = new TextBox
         {
             Dock = DockStyle.Fill,
-            PlaceholderText = "Optional: path to skeleton.nif (e.g. XPMSSE)",
+            PlaceholderText = "Optional: skeleton .nif, XP32/XPMSSE folder, or related .pex file",
         };
-        var browseSkeletonNifButton = new Button { Text = "Browse...", AutoSize = true };
-        browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonNif();
+        var browseSkeletonNifButton = new Button { Text = "File...", AutoSize = true };
+        browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonSupportFile();
+        var browseSkeletonFolderButton = new Button { Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
+        browseSkeletonFolderButton.Click += (_, _) => BrowseSkeletonSupportFolder();
         skeletonNifPanel.Controls.Add(_skeletonNifTextBox, 0, 0);
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
+        skeletonNifPanel.Controls.Add(browseSkeletonFolderButton, 2, 0);
         rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
+        var supportGuideLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+            Text = "XP32/XPMSSE mod folders and related .pex files are accepted here. Footwear / heel cases are auto-detected during Inspect and Convert, then surfaced in preview-workbench.html and world-physics.json guidance.",
+        };
+        rightOptions.Controls.Add(supportGuideLabel, 1, 8);
 
         _sourceHintsGroupBox = CreateAutoSizeSection("Original armor source hints, optional output overrides, and support files", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
@@ -895,8 +911,10 @@ public sealed class MainForm : Form
         {
             Text = "Package output as zip",
             AutoSize = true,
+            Checked = true,
             Margin = new Padding(0, 8, 12, 0),
         };
+        _outputZipCheckBox.CheckedChanged += (_, _) => UpdateOutputHint();
         _buildSlidersCheckBox = new CheckBox
         {
             Text = "Generate BodySlide project files",
@@ -1892,12 +1910,12 @@ public sealed class MainForm : Form
         }
     }
 
-    private void BrowseSkeletonNif()
+    private void BrowseSkeletonSupportFile()
     {
         using var fileDialog = new OpenFileDialog
         {
-            Title = "Select skeleton.nif",
-            Filter = "NIF Files (*.nif)|*.nif|All Files (*.*)|*.*",
+            Title = "Select a skeleton support file",
+            Filter = "Skeleton support files (*.nif;*.pex)|*.nif;*.pex|NIF Files (*.nif)|*.nif|Papyrus Scripts (*.pex)|*.pex|All Files (*.*)|*.*",
             CheckFileExists = true,
             Multiselect = false,
         };
@@ -1905,6 +1923,20 @@ public sealed class MainForm : Form
         if (fileDialog.ShowDialog(this) == DialogResult.OK)
         {
             _skeletonNifTextBox.Text = fileDialog.FileName;
+        }
+    }
+
+    private void BrowseSkeletonSupportFolder()
+    {
+        using var folderDialog = new FolderBrowserDialog
+        {
+            Description = "Select an XP32/XPMSSE or other skeleton-support mod folder",
+            UseDescriptionForTitle = true,
+        };
+
+        if (folderDialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _skeletonNifTextBox.Text = folderDialog.SelectedPath;
         }
     }
 
@@ -2103,7 +2135,10 @@ public sealed class MainForm : Form
         var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
             : _sourceComboBox.Text.Trim();
-        var skeletonNifPath = string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim();
+        if (!TryResolveSkeletonSupportPath(ReadOptionalPathValue(_skeletonNifTextBox.Text), out var skeletonNifPath))
+        {
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -2232,7 +2267,7 @@ public sealed class MainForm : Form
             _lastPreviewPath = GetFirstExistingOutputFile(results, PreviewFileCandidates);
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
-            _ = await LoadPreviewInAppAsync(_lastPreviewPath);
+            _ = await LoadPreviewInAppWithTimeoutAsync(_lastPreviewPath);
             await Task.Yield();
             var workflowSnapshot = await BuildWorkflowSnapshotAsync(results, _lastPreviewPath, cancellationToken);
             PopulateSummaryTab(workflowSnapshot.SummaryRows);
@@ -2316,6 +2351,11 @@ public sealed class MainForm : Form
         _activeConversion = new CancellationTokenSource();
         try
         {
+            if (!TryResolveSkeletonSupportPath(ReadOptionalPathValue(_skeletonNifTextBox.Text), out var skeletonNifPath))
+            {
+                return;
+            }
+
             SetBusyState(isBusy: true);
             ShowBusyProgress("Inspecting input...");
             ClearInspectionTab("Inspecting input...");
@@ -2325,7 +2365,7 @@ public sealed class MainForm : Form
                 ResolveInspectionTargetBody(),
                 _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
                 _activeConversion.Token,
-                skeletonNifPath: string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim());
+                skeletonNifPath: skeletonNifPath);
 
             PopulateInspectionTab(inspection);
             ApplyDetectedSourceBodySelection(inspection.Detection);
@@ -2521,7 +2561,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _ = await LoadPreviewInAppAsync(_lastPreviewPath);
+        _ = await LoadPreviewInAppWithTimeoutAsync(_lastPreviewPath);
         _resultsTabControl.SelectedTab = _previewTabPage;
     }
 
@@ -2572,7 +2612,7 @@ public sealed class MainForm : Form
                 : null;
 
             UpdatePathActionStates();
-            _ = await LoadPreviewInAppAsync(previewPath);
+            _ = await LoadPreviewInAppWithTimeoutAsync(previewPath);
             var snapshot = await BuildWorkflowSnapshotAsync(selectedFolder, previewPath);
             PopulateSummaryTab(snapshot.SummaryRows);
             PopulateReportsTab(snapshot.ReportMetrics);
@@ -2632,6 +2672,25 @@ public sealed class MainForm : Form
             OpenPreviewExternally(previewPath);
             return false;
         }
+    }
+
+    private async Task<bool> LoadPreviewInAppWithTimeoutAsync(string? previewPath)
+    {
+        var loadTask = LoadPreviewInAppAsync(previewPath);
+        if (loadTask.IsCompleted)
+        {
+            return await loadTask;
+        }
+
+        var completedTask = await Task.WhenAny(loadTask, Task.Delay(PreviewLoadTimeout));
+        if (completedTask == loadTask)
+        {
+            return await loadTask;
+        }
+
+        ShowPreviewStatus("Embedded preview is taking too long to initialize. Conversion output is ready; open preview-workbench.html manually if needed.");
+        AppendLog("Preview initialization timed out; continuing without blocking the rest of the desktop workflow.");
+        return false;
     }
 
     private async Task<bool> EnsurePreviewWebViewReadyAsync()
@@ -3105,7 +3164,7 @@ public sealed class MainForm : Form
         {
             _lastPreviewPath = targetPath;
             UpdatePathActionStates();
-            await LoadPreviewInAppAsync(targetPath);
+            await LoadPreviewInAppWithTimeoutAsync(targetPath);
             _resultsTabControl.SelectedTab = _previewTabPage;
             return;
         }
@@ -3296,9 +3355,12 @@ public sealed class MainForm : Form
         }
 
         var explicitOutput = _outputTextBox.Text.Trim();
+        var packageHint = _outputZipCheckBox.Checked
+            ? " Raw output will include README.txt plus fomod/ metadata, and a distributable zip will be created."
+            : " Raw output will include README.txt plus fomod/ metadata; enable Package output as zip to bundle them into a distributable archive.";
         _outputHintLabel.Text = string.IsNullOrWhiteSpace(explicitOutput)
-            ? $"If you leave Output blank, SlideSmith will save to: {ResolveEffectiveOutputDirectoryPreview()}"
-            : $"Converted files will be saved to: {explicitOutput}";
+            ? $"If you leave Output blank, SlideSmith will save to: {ResolveEffectiveOutputDirectoryPreview()}.{packageHint}"
+            : $"Converted files will be saved to: {explicitOutput}.{packageHint}";
     }
 
     private void UpdatePresetDetails()
@@ -3462,11 +3524,45 @@ public sealed class MainForm : Form
         _optionToolTip.SetToolTip(_worldModeComboBox,
             "Controls how dropped-item/world meshes are reported and packaged for the converted output.");
         _optionToolTip.SetToolTip(_skeletonNifTextBox,
-            "Optional skeleton file used to improve bone mapping. Leave blank if the input mod already includes the right skeleton support.");
+            "Optional skeleton support path used to improve bone mapping.\n" +
+            "You can select a skeleton .nif directly, an XP32/XPMSSE mod folder, or a related .pex file from the same mod.");
         _optionToolTip.SetToolTip(_outputZipCheckBox,
-            "Create a ready-to-share zip package of the converted output.");
+            "Create a ready-to-share zip package of the converted output.\n" +
+            "The raw output folder always includes README.txt plus fomod/ installer metadata.");
         _optionToolTip.SetToolTip(_buildSlidersCheckBox,
             "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+    }
+
+    private bool TryResolveSkeletonSupportPath(string? inputPath, out string? skeletonNifPath)
+    {
+        skeletonNifPath = null;
+        if (string.IsNullOrWhiteSpace(inputPath))
+        {
+            return true;
+        }
+
+        if (SkeletonSupportPathResolver.TryResolveSkeletonNifPath(inputPath, out skeletonNifPath))
+        {
+            if (skeletonNifPath is not null &&
+                !string.Equals(
+                    Path.GetFullPath(inputPath),
+                    Path.GetFullPath(skeletonNifPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLog($"Resolved skeleton support path to: {skeletonNifPath}");
+            }
+
+            return true;
+        }
+
+        MessageBox.Show(
+            this,
+            "Could not locate a usable skeleton .nif from that path.\n\n" +
+            "Select a skeleton .nif directly, an XP32/XPMSSE mod folder, or a related .pex file from the same mod.",
+            "Invalid skeleton support path",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+        return false;
     }
 
     private static string BuildBodyDetailsText(string bodyName, string defaultText, bool isSourceContext)
