@@ -7938,23 +7938,35 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 ct.ThrowIfCancellationRequested();
                 var baseStem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
                 var perArmorOutput = Path.Combine(rootOutput, baseStem);
-                var perArmorRequest = request with
-                {
-                    InputPath = meshFile,
-                    OutputDirectory = perArmorOutput,
-                    SharedPluginOutputDirectory = rootOutput
-                };
-                var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
-                ct.ThrowIfCancellationRequested();
-                resultBag.Add((meshFile, result));
-
-                var done = incrementCompleted();
                 var currentLabel = Path.GetFileName(meshFile);
                 if (!string.IsNullOrWhiteSpace(variantLabel))
                 {
                     currentLabel += $" [{variantLabel}]";
                 }
 
+                var stageProgress = progress is null
+                    ? null
+                    : new Progress<ConversionStageProgressUpdate>(update =>
+                        progress.Report(new BatchProgressUpdate(
+                            Completed: Math.Clamp(Volatile.Read(ref completed), 0, total),
+                            Total: total,
+                            CurrentFile: currentLabel,
+                            Success: false,
+                            Stage: update.Stage,
+                            StageIndex: update.StepIndex,
+                            StageCount: update.StepCount,
+                            IsItemCompleted: false)));
+                var perArmorRequest = request with
+                {
+                    InputPath = meshFile,
+                    OutputDirectory = perArmorOutput,
+                    SharedPluginOutputDirectory = rootOutput
+                };
+                var result = await orchestrator.ConvertAsync(perArmorRequest, ct, stageProgress);
+                ct.ThrowIfCancellationRequested();
+                resultBag.Add((meshFile, result));
+
+                var done = incrementCompleted();
                 progress?.Report(new BatchProgressUpdate(done, total, currentLabel, result.Success));
             });
 
@@ -12085,6 +12097,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
 
     public Task<ConvertedMesh> ConvertAsync(ImportedArmor armor, MeshAnalysis analysis, DeformationCage cage, string targetBody, string? deformationProfile, string? sourceBody, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var effectiveCage = LocalExportService.BuildExportDeformationCage(armor.MeshFiles, cage) ?? cage;
         var strategy = analysis.MeshType switch
         {
@@ -12115,6 +12128,8 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
                 effectiveCage));
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Compute a relative source→target delta when sourceBody is provided.
         // When source == target the delta is 1.0 per region (no-op). When source differs from target
         // only the directional difference is applied rather than the full target field.
@@ -12130,6 +12145,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             baseField = BodyTransformationFieldCatalog.Resolve(targetBody, armor);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var tunedField = ApplyBodySpecificTuning(baseField, targetBody, sourceBody);
         var profileField = DeformationProfileModifier.Apply(tunedField, deformationProfile);
         var extremeDifference = !string.IsNullOrWhiteSpace(sourceBody)
@@ -12143,6 +12159,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             _ => profileField
         };
 
+        cancellationToken.ThrowIfCancellationRequested();
         var solverRefinedMorphing = !string.IsNullOrWhiteSpace(sourceBody)
             ? regionalMorphing
             : ApplyRegionAwareSolver(regionalMorphing, analysis.MeshType);
@@ -12152,6 +12169,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
         var stabilizedMorphing = stabilizationAssessment.IsExtreme || physicsRigHints.StrengthenStabilization
             ? ApplyExtremeDifferenceStabilization(featureAdjustedMorphing, analysis, stabilizationAssessment, physicsRigHints.StrengthenStabilization)
             : featureAdjustedMorphing;
+        cancellationToken.ThrowIfCancellationRequested();
         var islandAwareMorphing = ApplyIslandAwareCageTuning(stabilizedMorphing, effectiveCage);
         var islandRegionalMorphing = BuildIslandRegionalMorphing(islandAwareMorphing, effectiveCage);
         if (islandRegionalMorphing.Count > 0)
@@ -12159,6 +12177,7 @@ internal sealed class StrategyMeshConversionService : IMeshConversionService
             effectiveCage = effectiveCage with { IslandRegionalMorphing = islandRegionalMorphing };
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(new ConvertedMesh(analysis.MeshType, strategy, analysis.MeshCount, islandAwareMorphing, effectiveCage));
     }
 

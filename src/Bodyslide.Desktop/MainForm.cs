@@ -196,13 +196,10 @@ public sealed class MainForm : Form
             {
                 if (!owner.IsDisposed && owner.IsHandleCreated)
                 {
-                    owner.BeginInvoke((MethodInvoker)Flush);
+                    owner.BeginInvoke((System.Windows.Forms.MethodInvoker)Flush);
                 }
             }
             catch (InvalidOperationException)
-            {
-            }
-            catch (ObjectDisposedException)
             {
             }
         }
@@ -2228,15 +2225,13 @@ public sealed class MainForm : Form
             UpdatePathActionStates();
             _ = await LoadPreviewInAppAsync(_lastPreviewPath);
             await Task.Yield();
-            PopulateSummaryTab(results);
-            PopulateReportsTab(results);
+            var workflowSnapshot = await BuildWorkflowSnapshotAsync(results, _lastPreviewPath, cancellationToken);
+            PopulateSummaryTab(workflowSnapshot.SummaryRows);
+            PopulateReportsTab(workflowSnapshot.ReportMetrics);
             await Task.Yield();
-            PopulateArtifactsTab(results);
+            PopulateArtifactsTab(workflowSnapshot.Artifacts);
             var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
-            ApplyValidationGatePresentation(
-                results.Select(static result => result.OutputDirectory).ToArray(),
-                _lastPreviewPath,
-                guidanceNeedsReview);
+            ApplyValidationGatePresentation(workflowSnapshot.ValidationState, guidanceNeedsReview);
 
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
@@ -2401,7 +2396,12 @@ public sealed class MainForm : Form
             return;
         }
 
-        _cancelButton.Enabled = false;
+        if (_activeConversion.IsCancellationRequested)
+        {
+            _statusLabel.Text = "Still cancelling — waiting for the current conversion step to stop.";
+            return;
+        }
+
         _cancelButton.Text = "Cancelling...";
         _activeConversion.Cancel();
         AppendLog("Cancellation requested...");
@@ -2558,12 +2558,12 @@ public sealed class MainForm : Form
 
             UpdatePathActionStates();
             _ = await LoadPreviewInAppAsync(previewPath);
-            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(selectedFolder, previewPath);
+            var snapshot = await BuildWorkflowSnapshotAsync(selectedFolder, previewPath);
             PopulateSummaryTab(snapshot.SummaryRows);
             PopulateReportsTab(snapshot.ReportMetrics);
             PopulateArtifactsTab(snapshot.Artifacts);
             var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
-            ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
+            ApplyValidationGatePresentation(snapshot.ValidationState, guidanceNeedsReview);
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
                 : previewPath is not null
@@ -3170,6 +3170,11 @@ public sealed class MainForm : Form
         bool requiresReview)
     {
         var state = DesktopWorkflowAutomation.BuildValidationState(outputDirectories, previewPath);
+        ApplyValidationGatePresentation(state, requiresReview);
+    }
+
+    private void ApplyValidationGatePresentation(DesktopWorkflowValidationState state, bool requiresReview)
+    {
         var effectiveStatus = requiresReview && ConversionValidationPresentation.GetGateRank(state.EffectiveStatus) < ConversionValidationPresentation.GetGateRank("needs-review")
             ? "needs-review"
             : state.EffectiveStatus;
@@ -3468,17 +3473,73 @@ public sealed class MainForm : Form
         _openPreviewButton.Enabled = File.Exists(_lastPreviewPath);
         _openBatchReportButton.Enabled = File.Exists(_lastBatchReportPath);
         _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
-        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
-            _guidanceListView.SelectedItems[0].Tag is string selectedGuidanceTarget &&
-            (File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget));
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
         _openCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count == 1;
         _removeCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count > 0;
         _clearCustomProfilesButton.Enabled = _customProfilePaths.Count > 0;
+        UpdateGuidanceActionButtonState();
     }
 
     private static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
         DesktopWorkflowSupport.ParseDelimitedValues(value);
+
+    private void UpdateGuidanceActionButtonState()
+    {
+        _openGuidanceTargetButton.Text = "Open next action";
+        if (_activeConversion is not null ||
+            _guidanceListView.SelectedItems.Count == 0 ||
+            _guidanceListView.SelectedItems[0].Tag is not string selectedGuidanceTarget ||
+            string.IsNullOrWhiteSpace(selectedGuidanceTarget))
+        {
+            _openGuidanceTargetButton.Enabled = false;
+            return;
+        }
+
+        var targetExists = File.Exists(selectedGuidanceTarget) || Directory.Exists(selectedGuidanceTarget);
+        _openGuidanceTargetButton.Enabled = targetExists;
+        if (!targetExists)
+        {
+            return;
+        }
+
+        _openGuidanceTargetButton.Text = BuildGuidanceActionButtonText(selectedGuidanceTarget);
+    }
+
+    private static string BuildGuidanceActionButtonText(string targetPath)
+    {
+        if (Directory.Exists(targetPath))
+        {
+            return "Open folder";
+        }
+
+        var fileName = Path.GetFileName(targetPath);
+        return fileName.ToLowerInvariant() switch
+        {
+            "preview-workbench.html" or "preview.html" => "Open preview",
+            "conversion-matrix-proof.json" or "conversion-matrix-pack-proof.json" => "Open matrix proof",
+            "windows-ui-e2e-automation.json" => "Open UI harness plan",
+            "desktop-workflow-automation.json" => "Open desktop flow",
+            "live-game-execution.json" => "Open live-game plan",
+            "runtime-validation-plan.json" or "runtime-validation-harness.json" => "Open runtime plan",
+            "topology-correspondence.json" => "Open topology report",
+            "mod-stack-cross-validation.json" => "Open mod-stack proof",
+            "plugin-patches.json" => "Open plugin patch report",
+            "skeleton-compatibility.json" => "Open skeleton report",
+            "conversion-quality.json" => "Open quality report",
+            _ => "Open file"
+        };
+    }
+
+    private static Task<DesktopWorkflowAutomationSnapshot> BuildWorkflowSnapshotAsync(
+        IReadOnlyList<ConversionResult> results,
+        string? previewPath,
+        CancellationToken cancellationToken) =>
+        Task.Run(() => DesktopWorkflowAutomation.BuildFromResults(results, previewPath), cancellationToken);
+
+    private static Task<DesktopWorkflowAutomationSnapshot> BuildWorkflowSnapshotAsync(
+        string outputDirectory,
+        string? previewPath) =>
+        Task.Run(() => DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath));
 
     private async Task InspectLearningCacheAsync()
     {
