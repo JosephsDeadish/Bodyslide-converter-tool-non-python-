@@ -2712,6 +2712,7 @@ public sealed class MainForm : Form
                 AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromModStackCrossValidation(outputDirectory, previewPath, Add, ref requiresReview);
+                AppendGuidanceFromConversionMatrixProof(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
             }
@@ -3989,6 +3990,43 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Live-game launch sequence", TryReadArray(root, "LaunchSequence"), filePath);
                     AddReportMetric(reportName, "Live-game probes", CountNestedArray(root, "Probes"), filePath);
                     break;
+                case "conversion-matrix-proof.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Target body family", TryReadString(root, "TargetBodyFamily"), filePath);
+                    AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
+                    AddReportMetric(reportName, "Matrix coordinate key", TryReadString(root, "MatrixCoordinateKey"), filePath);
+                    AddReportMetric(reportName, "Matrix coordinates", TryReadArray(root, "MatrixCoordinates"), filePath);
+                    AddReportMetric(reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    AddReportMetric(reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    AddReportMetric(reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
+                    AddReportMetric(reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
+                    AddReportMetric(reportName, "Matrix axes", CountNestedArray(root, "Axes"), filePath);
+                    AddReportMetric(reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
+                    AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
+                case "conversion-matrix-pack-proof.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Total conversions", TryReadInt(root, "TotalCount"), filePath);
+                    AddReportMetric(reportName, "Strict proof ready count", TryReadInt(root, "StrictProofReadyCount"), filePath);
+                    AddReportMetric(reportName, "Non-strict proof count", TryReadInt(root, "NonStrictProofCount"), filePath);
+                    AddReportMetric(reportName, "Unique matrix coordinates", TryReadInt(root, "UniqueMatrixCoordinateCount"), filePath);
+                    AddReportMetric(reportName, "Target bodies", TryReadArray(root, "DistinctTargetBodies"), filePath);
+                    AddReportMetric(reportName, "Unique target bodies", TryReadInt(root, "UniqueTargetBodyCount"), filePath);
+                    AddReportMetric(reportName, "Target body families", TryReadArray(root, "DistinctTargetBodyFamilies"), filePath);
+                    AddReportMetric(reportName, "Support tiers", TryReadArray(root, "DistinctSupportTiers"), filePath);
+                    AddReportMetric(reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    AddReportMetric(reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    AddReportMetric(reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
+                    AddReportMetric(reportName, "Missing matrix dimensions", TryReadArray(root, "MissingMatrixDimensions"), filePath);
+                    AddReportMetric(reportName, "Missing matrix combinations", TryReadArray(root, "MissingMatrixCombinations"), filePath);
+                    AddReportMetric(reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
+                    AddReportMetric(reportName, "Axis summaries", CountNestedArray(root, "Axes"), filePath);
+                    AddReportMetric(reportName, "Matrix dimensions", CountNestedArray(root, "MatrixDimensionCoverage"), filePath);
+                    AddReportMetric(reportName, "Matrix dimensions meeting minimum coverage", CountObjectsWithBool(root, "MatrixDimensionCoverage", "MeetsMinimumCoverage", expected: true), filePath);
+                    AddReportMetric(reportName, "Matrix combinations", CountNestedArray(root, "MatrixCombinationCoverage"), filePath);
+                    AddReportMetric(reportName, "Matrix combinations meeting minimum coverage", CountObjectsWithBool(root, "MatrixCombinationCoverage", "MeetsMinimumCoverage", expected: true), filePath);
+                    AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
                 case "topology-correspondence.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
@@ -4870,6 +4908,103 @@ public sealed class MainForm : Form
         }
     }
 
+    private static void AppendGuidanceFromConversionMatrixProof(
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        AppendGuidanceFromConversionMatrixProofReport(
+            Path.Combine(outputDirectory, "conversion-matrix-proof.json"),
+            "Matrix proof",
+            outputDirectory,
+            previewPath,
+            add,
+            ref requiresReview);
+
+        AppendGuidanceFromConversionMatrixProofReport(
+            Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json"),
+            "Pack matrix proof",
+            outputDirectory,
+            previewPath,
+            add,
+            ref requiresReview);
+    }
+
+    private static void AppendGuidanceFromConversionMatrixProofReport(
+        string reportPath,
+        string area,
+        string outputDirectory,
+        string? previewPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = OpenJsonDocument(reportPath);
+            var root = document.RootElement;
+            var proofCoverage = TryReadString(root, "ProofCoverage") ?? "unknown";
+            var strictProofReady = TryReadBoolValue(root, "StrictProofReady") == true;
+            var missingProofAxes = ReadArrayValues(root, "MissingProofAxes");
+            var blockingGaps = ReadArrayValues(root, "BlockingGaps");
+            var missingDimensions = ReadArrayValues(root, "MissingMatrixDimensions");
+            var missingCombinations = ReadArrayValues(root, "MissingMatrixCombinations");
+            var targetBody = TryReadString(root, "TargetBody") ?? "this output";
+            var guidanceTarget = ResolveMatrixProofGuidanceTargetPath(
+                outputDirectory,
+                previewPath,
+                reportPath,
+                missingProofAxes);
+
+            if (strictProofReady)
+            {
+                add(
+                    area,
+                    "Info",
+                    $"{targetBody} is marked strict-proof-ready. Open {Path.GetFileName(reportPath)} if you want the full axis-by-axis proof summary before sharing.",
+                    guidanceTarget);
+                return;
+            }
+
+            requiresReview = true;
+
+            var axisSummary = missingProofAxes.Count > 0
+                ? $" Missing proof axes: {BuildListPreview(missingProofAxes)}."
+                : string.Empty;
+            var dimensionSummary = missingDimensions.Count > 0
+                ? $" Missing matrix dimensions: {BuildListPreview(missingDimensions)}."
+                : string.Empty;
+            var combinationSummary = missingCombinations.Count > 0
+                ? $" Missing matrix combinations: {BuildListPreview(missingCombinations)}."
+                : string.Empty;
+
+            add(
+                area,
+                "Warning",
+                $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}).{axisSummary}{dimensionSummary}{combinationSummary}",
+                guidanceTarget);
+
+            if (blockingGaps.Count > 0)
+            {
+                add(
+                    $"{area} next step",
+                    "Action",
+                    $"Open {Path.GetFileName(reportPath)} and work through the top blocking gap first: {blockingGaps[0]}",
+                    guidanceTarget);
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add(area, "Warning", $"Could not read {Path.GetFileName(reportPath)}: {ex.Message}", reportPath);
+        }
+    }
+
     private static void AppendGuidanceFromModStackCrossValidation(
         string outputDirectory,
         string? previewPath,
@@ -5283,6 +5418,57 @@ public sealed class MainForm : Form
         }
 
         return fallbackPath;
+    }
+
+    private static string ResolveMatrixProofGuidanceTargetPath(
+        string outputDirectory,
+        string? previewPath,
+        string reportPath,
+        IReadOnlyList<string> missingProofAxes)
+    {
+        if (missingProofAxes.Any(axis => axis.Equals("desktop-e2e", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "desktop-workflow-automation.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "windows-ui-e2e-automation.json")
+                ?? reportPath;
+        }
+
+        if (missingProofAxes.Any(axis => axis.Equals("runtime-automation", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "runtime-validation-harness.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "runtime-validation-plan.json")
+                ?? reportPath;
+        }
+
+        if (missingProofAxes.Any(axis => axis.Equals("live-game", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "live-game-execution.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "runtime-validation-plan.json")
+                ?? reportPath;
+        }
+
+        if (missingProofAxes.Any(axis => axis.Equals("plugin-modstack", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "mod-stack-cross-validation.json")
+                ?? ResolveExistingGuidancePath(outputDirectory, "plugin-patches.json")
+                ?? reportPath;
+        }
+
+        if (missingProofAxes.Any(axis =>
+                axis.Equals("topology", StringComparison.OrdinalIgnoreCase) ||
+                axis.Equals("strict-layout", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "topology-correspondence.json")
+                ?? (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath) ? previewPath : null)
+                ?? reportPath;
+        }
+
+        if (missingProofAxes.Any(axis => axis.Equals("skeleton", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ResolveExistingGuidancePath(outputDirectory, "skeleton-compatibility.json") ?? reportPath;
+        }
+
+        return reportPath;
     }
 
     private static string? NormalizeGateStatus(string? status)
