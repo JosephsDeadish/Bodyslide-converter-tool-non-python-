@@ -107,7 +107,7 @@ public static class ExecutionEnvironment
         var fullInputPath = Path.GetFullPath(inputPath);
         var normalizedInputPath = fullInputPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var parentDirectory = Directory.Exists(normalizedInputPath)
-            ? Path.GetDirectoryName(normalizedInputPath)
+            ? normalizedInputPath
             : Path.GetDirectoryName(fullInputPath);
 
         return string.IsNullOrWhiteSpace(parentDirectory)

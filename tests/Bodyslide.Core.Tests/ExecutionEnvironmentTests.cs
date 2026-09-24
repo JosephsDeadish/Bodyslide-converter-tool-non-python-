@@ -60,7 +60,7 @@ public sealed class ExecutionEnvironmentTests
             var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
 
             Assert.Equal(
-                Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputDirectory))!, "SlideSmith-output"),
+                Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
                 outputRoot);
         }
         finally
