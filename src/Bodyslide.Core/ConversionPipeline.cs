@@ -20003,6 +20003,75 @@ internal sealed class LocalExportService(
         await ConversionLearningCache.SaveToGlobalAndLocalAsync(cache, cachePath, cancellationToken);
         outputFiles.Add(cachePath);
 
+        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
+        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
+        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse, BuildTargetBodySupportReliability(targetBodySupportAssessment));
+        var topologyCorrespondence = BuildTopologyCorrespondenceReport(
+            armor,
+            request.TargetBody,
+            topologyMismatchRisk,
+            qualityWarnings,
+            payloadReuse,
+            cageTopology,
+            mesh.RegionalMorphing,
+            clipping,
+            voxelResult,
+            poseSimulation);
+
+        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
+        var provisionalQualityReport = new ConversionQualityReport(
+            DetectedSourceBody:        detectedBody.Body,
+            BodyDetectionConfidence:   detectedBody.Confidence,
+            BodyDetectionEvidence:     detectedBody.Evidence,
+            TargetBody:                request.TargetBody,
+            MeshType:                  analysis.MeshType,
+            Strategy:                  mesh.Strategy,
+            RegionalMorphing:          mesh.RegionalMorphing,
+            ClippingDetected:          clipping.HasClipping,
+            ClippingRegions:           clipping.HasClipping ? clipping.Regions : [],
+            CorrectionApplied:         correction.Applied,
+            CorrectionMethod:          correction.Method,
+            VoxelPenetrationsFound:    voxelResult.HasPenetrations,
+            VoxelAffectedRegions:      voxelResult.AffectedRegions,
+            SourceSkeleton:            skeletonMapping.SourceSkeleton,
+            TargetSkeleton:            skeletonMapping.TargetSkeleton,
+            MappedBoneCount:           skeletonMapping.BoneMappings.Count,
+            UnsupportedBones:          skeletonMapping.UnsupportedBones,
+            GeneratedAt:               DateTimeOffset.UtcNow,
+            SourceSkeletonConfidence:  skeletonMapping.SourceSkeletonConfidence,
+            SourceSkeletonEvidence:    skeletonMapping.SourceSkeletonEvidence,
+            SourceSkeletonUsedSparseInference: skeletonMapping.SourceSkeletonUsedSparseInference,
+            SourceSkeletonCandidates:  skeletonMapping.SourceSkeletonCandidates,
+            SkeletonRemapCertainty:    skeletonMapping.RemapCertainty,
+            TopologyMismatchRisk:      topologyMismatchRisk,
+            ManualCleanupLikely:       manualCleanupLikely,
+            RuntimeVerificationRequired: runtimeVerificationRequired,
+            Caveats:                   conversionCaveats,
+            TopologyCorrespondence:    topologyCorrespondence,
+            VertexCountDeltaRatio:     vertexCountDeltaRatio,
+            UvCoverageDeltaRatio:      uvCoverageDeltaRatio,
+            UvAspectRatioDelta:        uvAspectRatioDelta,
+            QualityWarnings:           qualityWarnings,
+            SourceBodyMatchRatio:      morphs.SourceBodyMatchRatio,
+            BodySlideCompatible:       morphs.BodySlideCompatible,
+            HighRiskPoseCount:         poseSimulation.TotalPosesAtRisk,
+            HighRiskPoseRegions:       poseSimulation.HighRiskRegions,
+            MissingNormalCount:        textureSummary.MissingNormals.Count,
+            SourceMorphQuality:        morphs.SourceMorphQuality,
+            SourceAssetSupport:        morphs.SourceAssetSupport,
+            PayloadReuse:              payloadReuse,
+            NifSupport:                nifSupport,
+            PluginRewriteVerification: pluginRewriteVerification,
+            PartitionSignals:          partitionSignals,
+            CageTopology:              cageTopology,
+            SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts,
+            TargetBodySupport:         targetBodySupport);
+        await File.WriteAllTextAsync(
+            qualityPath,
+            JsonSerializer.Serialize(provisionalQualityReport, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(qualityPath);
+
         string? zipPath = null;
         if (request.OutputZip)
         {
@@ -20065,20 +20134,6 @@ internal sealed class LocalExportService(
                 validationSummary),
             cancellationToken);
 
-        var manualCleanupLikely = IsManualCleanupLikely(topologyMismatchRisk, qualityWarnings, skeletonMapping, payloadReuse, poseSimulation);
-        var runtimeVerificationRequired = IsRuntimeVerificationRequired(manualCleanupLikely, skeletonMapping, poseSimulation, voxelResult, clipping);
-        var conversionCaveats = BuildConversionCaveats(request.TargetBody, manualCleanupLikely, runtimeVerificationRequired, topologyMismatchRisk, skeletonMapping, payloadReuse, BuildTargetBodySupportReliability(targetBodySupportAssessment));
-        var topologyCorrespondence = BuildTopologyCorrespondenceReport(
-            armor,
-            request.TargetBody,
-            topologyMismatchRisk,
-            qualityWarnings,
-            payloadReuse,
-            cageTopology,
-            mesh.RegionalMorphing,
-            clipping,
-            voxelResult,
-            poseSimulation);
         var conversionReadiness = BuildConversionReadinessAssessment(
             request.TargetBody,
             validationSummary,
@@ -20287,15 +20342,10 @@ internal sealed class LocalExportService(
             CageTopology:              cageTopology,
             SuggestedBodyProfileArtifacts: suggestedBodyProfileArtifacts,
             TargetBodySupport:         targetBodySupport);
-        var qualityPath = Path.Combine(outputDirectory, "conversion-quality.json");
         await File.WriteAllTextAsync(
             qualityPath,
             JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
-        if (!outputFiles.Contains(qualityPath, StringComparer.OrdinalIgnoreCase))
-        {
-            outputFiles.Add(qualityPath);
-        }
 
         var desktopWorkflowAutomationPath = Path.Combine(outputDirectory, "desktop-workflow-automation.json");
         var preferredPreviewPath = File.Exists(previewWorkbenchPath)

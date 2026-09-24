@@ -1539,6 +1539,46 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task ConvertAsync_WithOutputZip_DoesNotSelfReportMissingQualityOrZipArtifacts()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "armor.nif");
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory, OutputZip: true));
+
+            Assert.True(result.Success);
+
+            using var qualityReport = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json")));
+            var issueCodes = qualityReport.RootElement
+                .GetProperty("ValidationSummary")
+                .GetProperty("Issues")
+                .EnumerateArray()
+                .Select(static issue => issue.GetProperty("Code").GetString())
+                .Where(static code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            Assert.DoesNotContain("missing-conversion-quality-report", issueCodes);
+            Assert.DoesNotContain("missing-output-zip", issueCodes);
+            Assert.DoesNotContain("zip-missing-conversion-quality-report", issueCodes);
+
+            var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
+            using var archive = ZipFile.OpenRead(zipPath);
+            Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ConvertAsync_WithDefaultModules_SkeletonStepReportsMapping()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
