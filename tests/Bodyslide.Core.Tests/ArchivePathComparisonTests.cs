@@ -52,5 +52,65 @@ namespace Bodyslide.Core.Tests
                 }
             }
         }
+
+        [Fact]
+        public void ExtractToTemporaryWorkspace_HonorsCancellation()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+
+            try
+            {
+                var zipPath = Path.Combine(workingDirectory, "cancel.zip");
+                using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    var entry = archive.CreateEntry("mesh.nif");
+                    using var entryStream = entry.Open();
+                    using var writer = new StreamWriter(entryStream);
+                    writer.Write("dummy");
+                }
+
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+
+                Assert.Throws<OperationCanceledException>(() =>
+                    ArchiveExtractionHelper.ExtractToTemporaryWorkspace(zipPath, "test-cancel", cancellation.Token));
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
+
+        [Fact]
+        public void EnumerateFiles_HonorsCancellation()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+
+            try
+            {
+                File.WriteAllText(Path.Combine(workingDirectory, "armor_0.nif"), "dummy");
+
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+
+                Assert.Throws<OperationCanceledException>(() =>
+                    BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(
+                        workingDirectory,
+                        [".nif"],
+                        cancellationToken: cancellation.Token));
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
     }
 }

@@ -7716,7 +7716,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
-            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract");
+            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract", cancellationToken);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -7786,7 +7786,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         cancellationToken.ThrowIfCancellationRequested();
         var excludedDirectories = BuildExcludedScanDirectories(request);
         var includeCharacterBodyAssets = variants.Count > 1;
-        var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories)
+        var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories, cancellationToken)
             .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -8010,8 +8010,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         public static IReadOnlyList<string> EnumerateFiles(
             string path,
             IReadOnlyCollection<string> extensions,
-            IReadOnlyList<string>? excludedDirectories = null)
+            IReadOnlyList<string>? excludedDirectories = null,
+            CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(path))
             {
                 return extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
@@ -8030,9 +8032,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
             while (pending.Count > 0)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var directory = pending.Pop();
                 foreach (var childDirectory in Directory.EnumerateDirectories(directory))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (ShouldSkipDirectory(childDirectory, excludedDirectories))
                     {
                         continue;
@@ -8043,6 +8047,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
                 foreach (var file in Directory.EnumerateFiles(directory))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
                     {
                         files.Add(Path.GetFullPath(file));
@@ -9906,7 +9911,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
         if (ArchiveExtractionHelper.IsSupportedArchive(fullInputPath))
         {
-            temporaryWorkspace = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(fullInputPath, "bodyslide-extract");
+            temporaryWorkspace = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(fullInputPath, "bodyslide-extract", cancellationToken);
             sourcePath = temporaryWorkspace;
             cancellationToken.ThrowIfCancellationRequested();
         }
@@ -9918,7 +9923,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             sourcePath = ResolveSupportScanRoot(fullInputPath);
         }
 
-        var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories);
+        var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
 
         // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
@@ -9938,16 +9943,16 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
-        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
+        var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        var xmlFiles = EnumerateFiles(supportScanRoot, [".xml"], excludedDirectories);
+        var xmlFiles = EnumerateFiles(supportScanRoot, [".xml"], excludedDirectories, cancellationToken);
         var physicsFiles = xmlFiles
             .Where(path => !BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(path))
-            .Concat(EnumerateFiles(supportScanRoot, [".hkx"], excludedDirectories))
+            .Concat(EnumerateFiles(supportScanRoot, [".hkx"], excludedDirectories, cancellationToken))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
-        var inferredReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".nif"], excludedDirectories)
+        var inferredReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".nif"], excludedDirectories, cancellationToken)
             .Where(path =>
             {
                 var fileName = Path.GetFileNameWithoutExtension(path);
@@ -9964,7 +9969,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
-            EnumerateFiles(supportScanRoot, [".json"], excludedDirectories)
+            EnumerateFiles(supportScanRoot, [".json"], excludedDirectories, cancellationToken)
                 .Where(CustomBodyProfileSupport.IsProfileFile)
                 .ToArray());
         cancellationToken.ThrowIfCancellationRequested();
@@ -10063,8 +10068,12 @@ internal sealed class LocalArmorImportService : IArmorImportService
         return File.Exists(siblingPath) ? Path.GetFullPath(siblingPath) : null;
     }
 
-    private static IReadOnlyList<string> EnumerateFiles(string path, IReadOnlyCollection<string> extensions, IReadOnlyList<string>? excludedDirectories) =>
-        BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories);
+    private static IReadOnlyList<string> EnumerateFiles(
+        string path,
+        IReadOnlyCollection<string> extensions,
+        IReadOnlyList<string>? excludedDirectories,
+        CancellationToken cancellationToken = default) =>
+        BatchConversionRunner.SourceScanEnumerator.EnumerateFiles(path, extensions, excludedDirectories, cancellationToken);
 
     private static string ResolveSupportScanRoot(string sourcePath)
     {
@@ -10127,25 +10136,30 @@ internal static class ArchiveExtractionHelper
             path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
     }
 
-    public static string ExtractToTemporaryWorkspace(string archivePath, string tempFolderPrefix)
+    public static string ExtractToTemporaryWorkspace(
+        string archivePath,
+        string tempFolderPrefix,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var tempDirectory = Path.Combine(Path.GetTempPath(), tempFolderPrefix, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
-        ExtractArchive(archivePath, tempDirectory);
+        ExtractArchive(archivePath, tempDirectory, cancellationToken);
         return tempDirectory;
     }
 
-    private static void ExtractArchive(string archivePath, string destinationDirectory)
+    private static void ExtractArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractZipArchive(archivePath, destinationDirectory);
+            ExtractZipArchive(archivePath, destinationDirectory, cancellationToken);
             return;
         }
 
         if (archivePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractSevenZipArchive(archivePath, destinationDirectory);
+            ExtractSevenZipArchive(archivePath, destinationDirectory, cancellationToken);
             return;
         }
 
@@ -10167,7 +10181,7 @@ internal static class ArchiveExtractionHelper
         throw new NotSupportedException($"Unsupported archive format: {archivePath}");
     }
 
-    private static void ExtractZipArchive(string archivePath, string destinationDirectory)
+    private static void ExtractZipArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -10178,6 +10192,7 @@ internal static class ArchiveExtractionHelper
         using var archive = ZipFile.OpenRead(archivePath);
         foreach (var entry in archive.Entries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(entry.FullName))
             {
                 continue;
@@ -10211,7 +10226,7 @@ internal static class ArchiveExtractionHelper
         }
     }
 
-    private static void ExtractSevenZipArchive(string archivePath, string destinationDirectory)
+    private static void ExtractSevenZipArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -10222,6 +10237,7 @@ internal static class ArchiveExtractionHelper
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
         foreach (var entry in archive.Entries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (entry.IsDirectory || string.IsNullOrWhiteSpace(entry.Key))
             {
                 continue;

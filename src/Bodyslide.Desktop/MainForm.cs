@@ -2029,12 +2029,7 @@ public sealed class MainForm : Form
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
         _cancelButton.Text = "Cancel";
-        _progressBar.Style = ProgressBarStyle.Marquee;
-        _progressBar.MarqueeAnimationSpeed = 30;
-        _progressBar.Minimum = 0;
-        _progressBar.Maximum = 100;
-        _progressBar.Value = 0;
-        _statusLabel.Text = $"Preparing conversion: {Path.GetFileName(input)}";
+        ShowBusyProgress($"Preparing conversion: {Path.GetFileName(input)}");
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
@@ -2209,16 +2204,18 @@ public sealed class MainForm : Form
             return;
         }
 
+        _activeConversion = new CancellationTokenSource();
         try
         {
             SetBusyState(isBusy: true);
-            _statusLabel.Text = "Inspecting input...";
+            ShowBusyProgress("Inspecting input...");
             ClearInspectionTab("Inspecting input...");
 
             var inspection = await _inspector.InspectAsync(
                 input,
                 ResolveInspectionTargetBody(),
                 _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
+                _activeConversion.Token,
                 skeletonNifPath: string.IsNullOrWhiteSpace(_skeletonNifTextBox.Text) ? null : _skeletonNifTextBox.Text.Trim());
 
             PopulateInspectionTab(inspection);
@@ -2226,6 +2223,12 @@ public sealed class MainForm : Form
             _resultsTabControl.SelectedTab = _inspectTabPage;
             _statusLabel.Text = "Inspection complete.";
             AppendLog($"Inspection complete: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}.");
+        }
+        catch (OperationCanceledException)
+        {
+            ClearInspectionTab("Inspection cancelled.");
+            _statusLabel.Text = "Inspection cancelled.";
+            AppendLog("Inspection cancelled.");
         }
         catch (Exception ex)
         {
@@ -2235,6 +2238,8 @@ public sealed class MainForm : Form
         }
         finally
         {
+            _activeConversion?.Dispose();
+            _activeConversion = null;
             SetBusyState(isBusy: false);
         }
     }
@@ -2296,6 +2301,16 @@ public sealed class MainForm : Form
         _activeConversion.Cancel();
         AppendLog("Cancellation requested...");
         _statusLabel.Text = "Cancelling...";
+    }
+
+    private void ShowBusyProgress(string statusText)
+    {
+        _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.MarqueeAnimationSpeed = 30;
+        _progressBar.Minimum = 0;
+        _progressBar.Maximum = 100;
+        _progressBar.Value = 0;
+        _statusLabel.Text = statusText;
     }
 
     private void SetBusyState(bool isBusy)
@@ -2419,35 +2434,53 @@ public sealed class MainForm : Form
 
     private async Task LoadResultDirectoryAsync(string selectedFolder, string sourceLabel)
     {
-        var previewPath = ResolvePreviewPath(selectedFolder);
-        _lastPreviewPath = previewPath;
-        _lastOutputDirectory = selectedFolder;
-
-        var batchReportCandidate = Path.Combine(selectedFolder, "batch-report.json");
-        _lastBatchReportPath = File.Exists(batchReportCandidate)
-            ? batchReportCandidate
-            : null;
-
-        UpdatePathActionStates();
-        _ = await LoadPreviewInAppAsync(previewPath);
-        var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(selectedFolder, previewPath);
-        PopulateSummaryTab(snapshot.SummaryRows);
-        PopulateReportsTab(snapshot.ReportMetrics);
-        PopulateArtifactsTab(snapshot.Artifacts);
-        var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
-        ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
-        _resultsTabControl.SelectedTab = guidanceNeedsReview
-            ? _guidanceTabPage
-            : previewPath is not null
-                ? _previewTabPage
-                : _summaryTabPage;
-        AppendLog($"Loaded previous result from {sourceLabel}: {selectedFolder}");
-        if (previewPath is null)
+        var resetProgressWhenDone = _activeConversion is null;
+        if (resetProgressWhenDone)
         {
-            AppendLog("Loaded reports/artifacts without an embedded preview; review Summary, Reports, Files, and Next actions for packaging/runtime details.");
+            ShowBusyProgress("Loading previous result...");
         }
+        try
+        {
+            var previewPath = ResolvePreviewPath(selectedFolder);
+            _lastPreviewPath = previewPath;
+            _lastOutputDirectory = selectedFolder;
 
-        AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
+            var batchReportCandidate = Path.Combine(selectedFolder, "batch-report.json");
+            _lastBatchReportPath = File.Exists(batchReportCandidate)
+                ? batchReportCandidate
+                : null;
+
+            UpdatePathActionStates();
+            _ = await LoadPreviewInAppAsync(previewPath);
+            var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(selectedFolder, previewPath);
+            PopulateSummaryTab(snapshot.SummaryRows);
+            PopulateReportsTab(snapshot.ReportMetrics);
+            PopulateArtifactsTab(snapshot.Artifacts);
+            var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
+            ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
+            _resultsTabControl.SelectedTab = guidanceNeedsReview
+                ? _guidanceTabPage
+                : previewPath is not null
+                    ? _previewTabPage
+                    : _summaryTabPage;
+            AppendLog($"Loaded previous result from {sourceLabel}: {selectedFolder}");
+            if (previewPath is null)
+            {
+                AppendLog("Loaded reports/artifacts without an embedded preview; review Summary, Reports, Files, and Next actions for packaging/runtime details.");
+            }
+
+            AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
+            _statusLabel.Text = $"Loaded previous result ({sourceLabel}).";
+        }
+        finally
+        {
+            if (resetProgressWhenDone)
+            {
+                _progressBar.Style = ProgressBarStyle.Continuous;
+                _progressBar.MarqueeAnimationSpeed = 0;
+                _progressBar.Value = 0;
+            }
+        }
     }
 
     private async Task<bool> LoadPreviewInAppAsync(string? previewPath)
