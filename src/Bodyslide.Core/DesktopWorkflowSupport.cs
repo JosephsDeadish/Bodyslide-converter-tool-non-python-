@@ -1,7 +1,34 @@
 namespace Bodyslide.Core;
 
+internal sealed record DesktopLaunchOptions(string? StartupOutputDirectory, bool FromModOrganizerLauncher)
+{
+    internal static DesktopLaunchOptions Empty { get; } = new(null, false);
+}
+
 internal static class DesktopWorkflowSupport
 {
+    private static readonly string[] DesktopResultArgumentNames =
+    [
+        "load-result",
+        "result",
+        "output",
+        "mo2-output",
+        "mo2-result",
+        "mo2-mod"
+    ];
+
+    private static readonly string[] DesktopResultMarkerFiles =
+    [
+        "preview-workbench.html",
+        "preview.html",
+        "batch-report.json",
+        "conversion-quality.json",
+        "armor-pack-validation.json",
+        "desktop-workflow-automation.json",
+        "runtime-validation-plan.json",
+        "live-game-execution.json"
+    ];
+
     public static string? ReadOptionalSelection(string? selected) =>
         string.IsNullOrWhiteSpace(selected) || selected.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase)
             ? null
@@ -128,5 +155,156 @@ internal static class DesktopWorkflowSupport
         }
 
         return null;
+    }
+
+    public static DesktopLaunchOptions ParseLaunchOptions(IReadOnlyList<string>? args)
+    {
+        if (args is null || args.Count == 0)
+        {
+            return DesktopLaunchOptions.Empty;
+        }
+
+        string? candidatePath = null;
+        var fromMo2 = args.Any(static arg =>
+            !string.IsNullOrWhiteSpace(arg) &&
+            (arg.Contains("mo2", StringComparison.OrdinalIgnoreCase) ||
+             arg.Contains("modorganizer", StringComparison.OrdinalIgnoreCase)));
+
+        for (var index = 0; index < args.Count; index++)
+        {
+            var arg = args[index];
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                continue;
+            }
+
+            if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value) &&
+                !string.IsNullOrWhiteSpace(value))
+            {
+                candidatePath = value;
+                index = consumedIndex;
+                continue;
+            }
+
+            if (arg.StartsWith('-'))
+            {
+                continue;
+            }
+
+            if (candidatePath is null)
+            {
+                candidatePath = arg;
+            }
+        }
+
+        return new DesktopLaunchOptions(
+            TryResolveResultOutputDirectory(candidatePath),
+            fromMo2);
+    }
+
+    public static string? TryResolveResultOutputDirectory(string? candidatePath)
+    {
+        var normalizedCandidate = NormalizeCandidatePath(candidatePath);
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return null;
+        }
+
+        if (!File.Exists(normalizedCandidate) && !Directory.Exists(normalizedCandidate))
+        {
+            return null;
+        }
+
+        var currentDirectory = Directory.Exists(normalizedCandidate)
+            ? Path.GetFullPath(normalizedCandidate)
+            : Path.GetDirectoryName(Path.GetFullPath(normalizedCandidate));
+        while (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            if (LooksLikeSlideSmithOutputDirectory(currentDirectory))
+            {
+                return currentDirectory;
+            }
+
+            currentDirectory = Path.GetDirectoryName(currentDirectory);
+        }
+
+        return Directory.Exists(normalizedCandidate)
+            ? Path.GetFullPath(normalizedCandidate)
+            : Path.GetDirectoryName(Path.GetFullPath(normalizedCandidate));
+    }
+
+    public static bool LooksLikeSlideSmithOutputDirectory(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        if (DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName))))
+        {
+            return true;
+        }
+
+        var fomodDirectory = Path.Combine(directory, "fomod");
+        if (Directory.Exists(fomodDirectory))
+        {
+            return File.Exists(Path.Combine(fomodDirectory, "ModuleConfig.xml")) ||
+                   File.Exists(Path.Combine(fomodDirectory, "info.xml"));
+        }
+
+        return false;
+    }
+
+    private static bool TryReadNamedArgumentValue(
+        IReadOnlyList<string> args,
+        int index,
+        out int consumedIndex,
+        out string? value)
+    {
+        consumedIndex = index;
+        value = null;
+
+        var arg = args[index];
+        if (!arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var separatorIndex = arg.IndexOf('=');
+        var key = separatorIndex >= 0 ? arg[2..separatorIndex] : arg[2..];
+        if (!DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (separatorIndex >= 0)
+        {
+            value = arg[(separatorIndex + 1)..];
+            return true;
+        }
+
+        if (index + 1 < args.Count)
+        {
+            var next = args[index + 1];
+            if (!string.IsNullOrWhiteSpace(next) && !next.StartsWith('-'))
+            {
+                value = next;
+                consumedIndex = index + 1;
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    private static string? NormalizeCandidatePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var trimmed = path.Trim().Trim('"');
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 }

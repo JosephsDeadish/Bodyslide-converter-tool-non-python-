@@ -99,12 +99,14 @@ public sealed class MainForm : Form
     private string? _lastBatchReportPath;
     private WebView2? _previewWebView;
     private readonly List<string> _customProfilePaths = [];
+    private readonly DesktopLaunchOptions _launchOptions;
     private UiTheme _currentTheme;
     private string? _autoDetectedSourceBody;
     private double? _autoDetectedSourceConfidence;
     private bool _suppressThemeSelectionChanged;
     private bool _suppressTargetSelectionChanged;
     private bool _allowUserMainSplitOverride;
+    private bool _startupResultLoadHandled;
     private bool _userAdjustedMainSplit;
     private int? _userPreferredMainSplitDistance;
     private static readonly string[] ReportFileNames =
@@ -152,8 +154,9 @@ public sealed class MainForm : Form
 
     private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
 
-    public MainForm()
+    public MainForm(DesktopLaunchOptions? launchOptions = null)
     {
+        _launchOptions = launchOptions ?? DesktopLaunchOptions.Empty;
         var appVersion = Assembly
             .GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -1114,7 +1117,20 @@ public sealed class MainForm : Form
             UpdateResponsiveLayout();
             UpdateMainSplitLayout();
         };
-        Shown += (_, _) => _allowUserMainSplitOverride = true;
+        Shown += async (_, _) =>
+        {
+            _allowUserMainSplitOverride = true;
+            if (_startupResultLoadHandled ||
+                string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
+            {
+                return;
+            }
+
+            _startupResultLoadHandled = true;
+            await LoadResultDirectoryAsync(
+                _launchOptions.StartupOutputDirectory,
+                _launchOptions.FromModOrganizerLauncher ? "MO2 launcher argument" : "launcher argument");
+        };
     }
 
     internal DesktopSmokeTestSummary GetSmokeTestSummary()
@@ -2175,7 +2191,7 @@ public sealed class MainForm : Form
     {
         using var folderDialog = new FolderBrowserDialog
         {
-            Description = "Select a previous SlideSmith output folder containing preview-workbench.html or preview.html",
+            Description = "Select a previous SlideSmith output folder or any nested report/FOMOD folder within it",
             UseDescriptionForTitle = true,
         };
 
@@ -2184,20 +2200,24 @@ public sealed class MainForm : Form
             return;
         }
 
-        var selectedFolder = folderDialog.SelectedPath;
-        var previewPath = ResolvePreviewPath(selectedFolder);
-
-        if (previewPath is null)
+        if (DesktopWorkflowSupport.TryResolveResultOutputDirectory(folderDialog.SelectedPath) is not { } selectedFolder ||
+            !DesktopWorkflowSupport.LooksLikeSlideSmithOutputDirectory(selectedFolder))
         {
             MessageBox.Show(
                 this,
-                $"No preview-workbench.html or preview.html was found in the selected folder.{Environment.NewLine}{selectedFolder}",
+                $"No recognizable SlideSmith result folder was found in the selected location.{Environment.NewLine}{folderDialog.SelectedPath}",
                 "Load result",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;
         }
 
+        await LoadResultDirectoryAsync(selectedFolder, "manual selection");
+    }
+
+    private async Task LoadResultDirectoryAsync(string selectedFolder, string sourceLabel)
+    {
+        var previewPath = ResolvePreviewPath(selectedFolder);
         _lastPreviewPath = previewPath;
         _lastOutputDirectory = selectedFolder;
 
@@ -2214,8 +2234,17 @@ public sealed class MainForm : Form
         PopulateArtifactsTab(snapshot.Artifacts);
         var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
         ApplyValidationGatePresentation([selectedFolder], previewPath, guidanceNeedsReview);
-        _resultsTabControl.SelectedTab = guidanceNeedsReview ? _guidanceTabPage : _previewTabPage;
-        AppendLog($"Loaded previous result from: {selectedFolder}");
+        _resultsTabControl.SelectedTab = guidanceNeedsReview
+            ? _guidanceTabPage
+            : previewPath is not null
+                ? _previewTabPage
+                : _summaryTabPage;
+        AppendLog($"Loaded previous result from {sourceLabel}: {selectedFolder}");
+        if (previewPath is null)
+        {
+            AppendLog("Loaded reports/artifacts without an embedded preview; review Summary, Reports, Files, and Next actions for packaging/runtime details.");
+        }
+
         AppendLog(BuildValidationOutcomeLogMessage([selectedFolder], previewPath, guidanceNeedsReview));
     }
 
@@ -2424,6 +2453,7 @@ public sealed class MainForm : Form
                 AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
                 AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
                 AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+                AppendGuidanceFromFomodArtifacts(outputDirectory, Add);
                 AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
                 AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
@@ -4403,6 +4433,31 @@ public sealed class MainForm : Form
         {
             requiresReview = true;
             add("Packaging", "Warning", $"Could not read armor-pack-validation.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromFomodArtifacts(
+        string outputDirectory,
+        Action<string, string, string, string?> add)
+    {
+        var moduleConfigPath = ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"));
+        if (moduleConfigPath is not null)
+        {
+            add(
+                "Packaging assets",
+                "Info",
+                "Open fomod/ModuleConfig.xml from Files to verify the MO2/Vortex install mapping for meshes, plugins, CalienteTools, and staged support files.",
+                moduleConfigPath);
+        }
+
+        var infoPath = ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "info.xml"));
+        if (infoPath is not null)
+        {
+            add(
+                "Packaging assets",
+                "Info",
+                "Open fomod/info.xml from Files to verify the generated package metadata and install notes before sharing the conversion output.",
+                infoPath);
         }
     }
 

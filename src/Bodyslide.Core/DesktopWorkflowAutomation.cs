@@ -247,6 +247,8 @@ internal static class DesktopWorkflowAutomation
                 Path.GetFileName(file),
                 !string.IsNullOrWhiteSpace(baseDirectory) ? Path.GetRelativePath(baseDirectory, file) : file,
                 file))
+            .OrderBy(static artifact => GetArtifactPriority(artifact.DisplayPath))
+            .ThenBy(static artifact => artifact.DisplayPath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
     private static DesktopWorkflowValidationState BuildValidationState(
@@ -1040,6 +1042,20 @@ internal static class DesktopWorkflowAutomation
                 Blocking: false));
         }
 
+        var fomodModuleConfigPath = FindArtifactPath(artifacts, static artifact =>
+            NormalizeArtifactPath(artifact.DisplayPath).Equals("fomod/moduleconfig.xml", StringComparison.OrdinalIgnoreCase));
+        var fomodInfoPath = FindArtifactPath(artifacts, static artifact =>
+            NormalizeArtifactPath(artifact.DisplayPath).Equals("fomod/info.xml", StringComparison.OrdinalIgnoreCase));
+        if (fomodModuleConfigPath is not null || fomodInfoPath is not null)
+        {
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "FOMOD packaging",
+                "Open the generated fomod/ModuleConfig.xml and fomod/info.xml from the Files tab and verify the MO2/Vortex install mapping and package metadata before sharing.",
+                "FOMOD installer artifacts detected",
+                fomodModuleConfigPath ?? fomodInfoPath,
+                Blocking: false));
+        }
+
         if (HasArtifact(artifacts, artifact =>
                 artifact.Name.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
                 artifact.Name.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
@@ -1115,6 +1131,32 @@ internal static class DesktopWorkflowAutomation
         IReadOnlyList<DesktopWorkflowArtifact> artifacts,
         Func<DesktopWorkflowArtifact, bool> predicate) =>
         artifacts.FirstOrDefault(predicate)?.FullPath;
+
+    private static int GetArtifactPriority(string displayPath)
+    {
+        var normalized = NormalizeArtifactPath(displayPath);
+        if (normalized.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("preview.html", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (normalized.Equals("fomod/moduleconfig.xml", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("fomod/info.xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        if (normalized.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return 2;
+        }
+
+        return 3;
+    }
+
+    private static string NormalizeArtifactPath(string path) =>
+        path.Replace('\\', '/');
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
     {

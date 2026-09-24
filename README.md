@@ -35,6 +35,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 
 - `/src/Bodyslide.Core` - conversion pipeline + modules
 - `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or manual destination mode, explicit source-body override, output-zip toggle, convert/cancel)
+  - supports startup result loading via `--load-result`, `--result`, `--output`, or an existing output-path argument (useful for MO2 launcher entries)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
 
@@ -46,6 +47,9 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
+
+# load an existing output folder directly in the Desktop app
+dotnet run --project src/Bodyslide.Desktop -- --load-result "<output folder|preview html|fomod\\ModuleConfig.xml>"
 
 # GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder),
 # separate **"File..."** and **"Folder..."** browse buttons for the input field (no more double-dialog),

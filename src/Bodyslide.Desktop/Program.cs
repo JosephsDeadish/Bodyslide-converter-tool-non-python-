@@ -21,7 +21,7 @@ internal static class Program
         try
         {
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(DesktopWorkflowSupport.ParseLaunchOptions(args)));
             return 0;
         }
         catch (Exception ex)

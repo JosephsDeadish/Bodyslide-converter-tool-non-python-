@@ -16425,8 +16425,11 @@ public sealed class RealisticModPackFixtureTests
         try
         {
             File.WriteAllText(previewPath, "<html></html>");
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
             Directory.CreateDirectory(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets"));
             Directory.CreateDirectory(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "DemoArmor"));
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"), "<config />");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod />");
             File.WriteAllText(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets", "demo.osp"), "<SliderSetInfo />");
             File.WriteAllText(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "DemoArmor", "demo.tri"), "tri");
             File.WriteAllText(Path.Combine(outputDirectory, "plugin-patches.json"), "{ }");
@@ -16449,9 +16452,14 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Files tab", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Packaging", StringComparison.OrdinalIgnoreCase) &&
                                                                step.Blocking);
+            Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("FOMOD packaging", StringComparison.OrdinalIgnoreCase) &&
+                                                               step.ExpectedSignal.Contains("FOMOD installer artifacts detected", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("BodySlide", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Plugin patch", StringComparison.OrdinalIgnoreCase) &&
                                                                step.Blocking);
+            Assert.True(snapshot.Artifacts.Count >= 2);
+            Assert.Equal("fomod/ModuleConfig.xml", snapshot.Artifacts[0].DisplayPath.Replace('\\', '/'));
+            Assert.Equal("fomod/info.xml", snapshot.Artifacts[1].DisplayPath.Replace('\\', '/'));
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
                                                               metric.Value.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
