@@ -58,8 +58,52 @@ jobs:
       - name: Rename CLI exe
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Stage Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleRoot = "artifacts/win-bundle"
+          $desktopBundle = Join-Path $bundleRoot "desktop"
+          $cliBundle = Join-Path $bundleRoot "cli"
+          $metaBundle = Join-Path $bundleRoot "meta"
+          Remove-Item $bundleRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item README.md (Join-Path $bundleRoot "README.md") -Force
+          $bundleMetadata = [ordered]@{
+            desktop = "desktop/SlideSmith.exe"
+            cli = "cli/SlideSmith-CLI.exe"
+            readme = "README.md"
+            sourceDesktopPublish = "artifacts/win-x64"
+            sourceCliPublish = "artifacts/win-x64-cli"
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
+
       - name: Create Windows bundle zip (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+        run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
+            throw "Missing desktop/SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
+            throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "README.md"))) {
+            throw "Missing README.md in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
+            throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
 
       - name: Create GitHub Release and upload executables
         uses: softprops/action-gh-release@v2

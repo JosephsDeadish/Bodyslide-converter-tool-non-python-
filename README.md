@@ -158,7 +158,7 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing both GUI + CLI side-by-side |
+| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, and `meta/slidesmith-bundle.json` |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.

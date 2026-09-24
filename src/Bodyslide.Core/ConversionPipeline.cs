@@ -7063,7 +7063,7 @@ public sealed class ConversionOrchestrator(
             }
 
             var defaultOutput = Path.Combine(
-                ExecutionEnvironment.GetDefaultOutputRoot(),
+                ExecutionEnvironment.GetDefaultOutputRootForInput(normalized.Request.InputPath),
                 normalized.Request.TargetBody,
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
             var outputDirectory = Path.GetFullPath(normalized.Request.OutputDirectory ?? defaultOutput);
@@ -19259,7 +19259,10 @@ internal sealed class LocalExportService(
         VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken)
     {
-        var defaultOutput = Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
+        var defaultOutput = Path.Combine(
+            ExecutionEnvironment.GetDefaultOutputRootForInput(request.InputPath),
+            request.TargetBody,
+            Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
         var outputDirectory = Path.GetFullPath(request.OutputDirectory ?? defaultOutput);
         Directory.CreateDirectory(outputDirectory);
         mesh = mesh with { DeformationCage = BuildExportDeformationCage(armor.MeshFiles, mesh.DeformationCage) };

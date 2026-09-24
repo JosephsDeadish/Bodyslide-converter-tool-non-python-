@@ -33,6 +33,18 @@ public static class ExecutionEnvironment
             "output");
     }
 
+    public static string GetDefaultOutputRootForInput(
+        string? inputPath,
+        string? processPath = null,
+        string? appContextBaseDirectory = null,
+        string? currentDirectory = null)
+    {
+        var inputRoot = TryGetInputAdjacentOutputRoot(inputPath);
+        return !string.IsNullOrWhiteSpace(inputRoot)
+            ? inputRoot
+            : GetDefaultOutputRoot(processPath, appContextBaseDirectory, currentDirectory);
+    }
+
     public static bool TryNormalizeCurrentDirectoryToExecutionRoot(
         string? processPath = null,
         string? appContextBaseDirectory = null)
@@ -83,5 +95,23 @@ public static class ExecutionEnvironment
 
         return Path.GetFullPath(path)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static string? TryGetInputAdjacentOutputRoot(string? inputPath)
+    {
+        if (string.IsNullOrWhiteSpace(inputPath))
+        {
+            return null;
+        }
+
+        var fullInputPath = Path.GetFullPath(inputPath);
+        var normalizedInputPath = fullInputPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parentDirectory = Directory.Exists(normalizedInputPath)
+            ? Path.GetDirectoryName(normalizedInputPath)
+            : Path.GetDirectoryName(fullInputPath);
+
+        return string.IsNullOrWhiteSpace(parentDirectory)
+            ? null
+            : Path.Combine(parentDirectory, "SlideSmith-output");
     }
 }

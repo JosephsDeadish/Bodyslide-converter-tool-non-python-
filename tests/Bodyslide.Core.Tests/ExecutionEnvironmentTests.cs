@@ -36,4 +36,36 @@ public sealed class ExecutionEnvironmentTests
             Path.Combine(Path.GetDirectoryName(Path.GetFullPath(processPath))!, "output"),
             outputRoot);
     }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_UsesInputParentForFiles()
+    {
+        var inputPath = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputPath);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputPath))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_UsesDirectoryParentForFolders()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", "pack");
+        Directory.CreateDirectory(inputDirectory);
+
+        try
+        {
+            var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+            Assert.Equal(
+                Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputDirectory))!, "SlideSmith-output"),
+                outputRoot);
+        }
+        finally
+        {
+            Directory.Delete(inputDirectory, recursive: true);
+        }
+    }
 }

@@ -3344,7 +3344,10 @@ public sealed class MainForm : Form
             fileNameStem = "output";
         }
 
-        return Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), ResolveProfileTargetName(), fileNameStem);
+        return Path.Combine(
+            ExecutionEnvironment.GetDefaultOutputRootForInput(input),
+            ResolveProfileTargetName(),
+            fileNameStem);
     }
 
     private void UpdateOutputHint()
