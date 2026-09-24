@@ -140,6 +140,8 @@ public sealed class MainForm : Form
     private const int MainSplitPreferredDistance = 560;
     private const int MainSplitPanel1Minimum = 360;
     private const int MainSplitPanel2Minimum = 220;
+    private const int MaxLogCharacters = 120000;
+    private const int TrimmedLogCharacters = 90000;
 
     private enum UiTheme
     {
@@ -159,6 +161,88 @@ public sealed class MainForm : Form
         Color WarningForeground);
 
     private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
+
+    private sealed class CoalescingBatchProgress(Control owner, Action<BatchProgressUpdate> onUiThread) : IProgress<BatchProgressUpdate>, IDisposable
+    {
+        private readonly object _gate = new();
+        private BatchProgressUpdate? _latest;
+        private bool _scheduled;
+        private bool _disposed;
+
+        public void Report(BatchProgressUpdate value)
+        {
+            var shouldSchedule = false;
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _latest = value;
+                if (!_scheduled)
+                {
+                    _scheduled = true;
+                    shouldSchedule = true;
+                }
+            }
+
+            if (!shouldSchedule)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!owner.IsDisposed && owner.IsHandleCreated)
+                {
+                    owner.BeginInvoke((MethodInvoker)Flush);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        private void Flush()
+        {
+            while (true)
+            {
+                BatchProgressUpdate? latest;
+                lock (_gate)
+                {
+                    if (_disposed)
+                    {
+                        _scheduled = false;
+                        return;
+                    }
+
+                    latest = _latest;
+                    _latest = null;
+                    if (latest is null)
+                    {
+                        _scheduled = false;
+                        return;
+                    }
+                }
+
+                onUiThread(latest);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                _disposed = true;
+                _latest = null;
+                _scheduled = false;
+            }
+        }
+    }
 
     public MainForm()
         : this(null)
@@ -2082,10 +2166,9 @@ public sealed class MainForm : Form
 
             // Wire a per-item progress callback so the progress bar advances
             // during batch runs instead of showing a marquee spinner throughout.
-            string? lastProgressLogMessage = null;
             string? lastProgressStatus = null;
             var lastProgressUiUpdateUtc = DateTime.MinValue;
-            var progress = new Progress<BatchProgressUpdate>(update =>
+            var progress = new CoalescingBatchProgress(this, update =>
             {
                 var total = Math.Max(1, update.Total);
                 var completed = Math.Clamp(update.Completed, 0, total);
@@ -2123,27 +2206,31 @@ public sealed class MainForm : Form
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
 
-                if (!string.IsNullOrWhiteSpace(update.Stage))
+                if (update.IsItemCompleted)
                 {
-                    var logMessage = $"Processing {activeItem}/{total}: {update.CurrentFile} — {update.Stage}";
-                    if (!string.Equals(logMessage, lastProgressLogMessage, StringComparison.Ordinal))
-                    {
-                        AppendLog(logMessage);
-                        lastProgressLogMessage = logMessage;
-                    }
+                    AppendLog($"Completed {completed}/{total}: {update.CurrentFile} ({(update.Success ? "ok" : "review needed")}).");
                 }
             });
 
-            var results = await Task.Run(
-                () => _batchRunner.ConvertAsync(request, cancellationToken, progress),
-                cancellationToken);
+            IReadOnlyList<ConversionResult> results;
+            using (progress)
+            {
+                results = await Task.Run(
+                    () => _batchRunner.ConvertAsync(request, cancellationToken, progress),
+                    cancellationToken);
+            }
+
+            _statusLabel.Text = "Conversion finished. Loading reports, preview, and guidance...";
+            await Task.Yield();
             _lastOutputDirectory = GetBestOutputDirectory(results);
             _lastPreviewPath = GetFirstExistingOutputFile(results, PreviewFileCandidates);
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             _ = await LoadPreviewInAppAsync(_lastPreviewPath);
+            await Task.Yield();
             PopulateSummaryTab(results);
             PopulateReportsTab(results);
+            await Task.Yield();
             PopulateArtifactsTab(results);
             var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
             ApplyValidationGatePresentation(
@@ -2318,7 +2405,7 @@ public sealed class MainForm : Form
         _cancelButton.Text = "Cancelling...";
         _activeConversion.Cancel();
         AppendLog("Cancellation requested...");
-        _statusLabel.Text = "Cancelling...";
+        _statusLabel.Text = "Cancelling — waiting for the current conversion step to stop.";
     }
 
     private void ShowBusyProgress(string statusText)
@@ -2334,6 +2421,7 @@ public sealed class MainForm : Form
     private void SetBusyState(bool isBusy)
     {
         _convertButton.Enabled = !isBusy;
+        _convertButton.Text = isBusy ? "Converting..." : "Start conversion";
         _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
         _inspectInputButton.Enabled = !isBusy && InputPathExists();
@@ -3050,6 +3138,30 @@ public sealed class MainForm : Form
         }
 
         _logTextBox.AppendText(Environment.NewLine + timestamped);
+        TrimLogIfNeeded();
+    }
+
+    private void TrimLogIfNeeded()
+    {
+        if (_logTextBox.TextLength <= MaxLogCharacters)
+        {
+            return;
+        }
+
+        var logText = _logTextBox.Text;
+        if (logText.Length <= TrimmedLogCharacters)
+        {
+            return;
+        }
+
+        var trimStart = logText.Length - TrimmedLogCharacters;
+        var nextLineBreak = logText.IndexOf(Environment.NewLine, trimStart, StringComparison.Ordinal);
+        var sliceStart = nextLineBreak >= 0
+            ? nextLineBreak + Environment.NewLine.Length
+            : trimStart;
+        _logTextBox.Text = logText[sliceStart..];
+        _logTextBox.SelectionStart = _logTextBox.TextLength;
+        _logTextBox.ScrollToCaret();
     }
 
     private void ApplyValidationGatePresentation(
@@ -4997,6 +5109,15 @@ public sealed class MainForm : Form
                     $"Open {Path.GetFileName(reportPath)} and work through the top blocking gap first: {blockingGaps[0]}",
                     guidanceTarget);
             }
+
+            foreach (var axis in missingProofAxes.Take(4))
+            {
+                add(
+                    $"{area} gap",
+                    "Action",
+                    BuildMatrixProofAxisActionText(axis),
+                    ResolveMatrixProofGuidanceTargetPath(outputDirectory, previewPath, reportPath, [axis]));
+            }
         }
         catch (Exception ex)
         {
@@ -5470,6 +5591,27 @@ public sealed class MainForm : Form
 
         return reportPath;
     }
+
+    private static string BuildMatrixProofAxisActionText(string? axis) =>
+        axis?.Trim().ToLowerInvariant() switch
+        {
+            "topology-transfer" or "strict-layout" =>
+                "Hard topology correspondence is not fully proven yet. Open topology-correspondence.json and preview-workbench.html, then review the highest-risk regions before treating the conversion as universal.",
+            "desktop-e2e" =>
+                "Windows desktop end-to-end coverage still depends on an external harness. Open desktop-workflow-automation.json or windows-ui-e2e-automation.json and complete that click-path proof on a Windows host.",
+            "live-game-execution" =>
+                "Live-game validation is still external. Open live-game-execution.json and complete the scenario/save-driven proof on the target Windows mod stack before release.",
+            "runtime-automation" =>
+                "Runtime automation is still exported as a harness contract. Open runtime-validation-plan.json and runtime-validation-harness.json to finish the missing automation proof outside the desktop app.",
+            "plugin-modstack" =>
+                "Mixed body × skeleton × plugin-family coverage still needs stricter matrix proof. Open mod-stack-cross-validation.json and plugin-patches.json, then validate the real load-order combination before release.",
+            "custom-skeleton" =>
+                "Custom skeleton proof still needs stronger direct evidence. Open skeleton-compatibility.json and review any sparse-inference or unsupported-bone warnings before release.",
+            "body-support" =>
+                "Target-body support is not yet proven as universal. Open conversion-matrix-proof.json and conversion-quality.json, then review the remaining support-tier gaps for this body family.",
+            _ =>
+                $"Open conversion-matrix-proof.json and resolve the remaining '{axis ?? "unknown"}' proof gap before treating this output as universally covered."
+        };
 
     private static string? NormalizeGateStatus(string? status)
     {

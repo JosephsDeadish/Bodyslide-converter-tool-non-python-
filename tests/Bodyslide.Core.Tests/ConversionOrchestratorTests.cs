@@ -18517,6 +18517,15 @@ public sealed class RealisticModPackFixtureTests
                           string.Equals(metric.Property, "Matrix combinations", StringComparison.OrdinalIgnoreCase) &&
                           int.TryParse(metric.Value, out var combinationCount) &&
                           combinationCount >= 3);
+            Assert.Contains(
+                desktopSnapshot.SummaryRows,
+                row => string.Equals(row.Property, "Missing proof axes", StringComparison.OrdinalIgnoreCase) &&
+                       row.Value.Contains("runtime-automation", StringComparison.OrdinalIgnoreCase) &&
+                       row.Value.Contains("desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                desktopSnapshot.SummaryRows,
+                row => string.Equals(row.Property, "Blocking proof gaps", StringComparison.OrdinalIgnoreCase) &&
+                       row.Value.Contains("body × skeleton × plugin × runtime physics", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

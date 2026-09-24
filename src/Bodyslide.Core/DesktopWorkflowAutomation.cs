@@ -133,6 +133,8 @@ internal static class DesktopWorkflowAutomation
         {
             rows.Add(new("Validation gate", ConversionValidationPresentation.GetGateLabel(validationState.EffectiveStatus)));
         }
+        AppendMetricRow(rows, reportMetrics, "Missing proof axes");
+        AppendMetricRow(rows, reportMetrics, "Blocking proof gaps");
         AppendMetricRow(rows, reportMetrics, "Pack status");
         AppendMetricRow(rows, reportMetrics, "Needs review");
         AppendMetricRow(rows, reportMetrics, "High risk");
