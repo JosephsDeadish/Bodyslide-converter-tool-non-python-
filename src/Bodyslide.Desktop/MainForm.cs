@@ -161,6 +161,7 @@ public sealed class MainForm : Form
         Color WarningForeground);
 
     private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
+    private sealed record GuidanceBuildResult(IReadOnlyList<GuidanceEntry> Entries, bool RequiresReview, string GateStatus);
 
     private sealed class CoalescingBatchProgress(Control owner, Action<BatchProgressUpdate> onUiThread) : IProgress<BatchProgressUpdate>, IDisposable
     {
@@ -2444,6 +2445,12 @@ public sealed class MainForm : Form
         }
         _progressBar.MarqueeAnimationSpeed = _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
         _progressBar.Value = 0;
+        if (!isBusy)
+        {
+            UpdateReportActionButtonState();
+            UpdateArtifactActionButtonState();
+            UpdateGuidanceActionButtonState();
+        }
     }
 
     private void OpenInputPath()
@@ -3477,6 +3484,8 @@ public sealed class MainForm : Form
         _openCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count == 1;
         _removeCustomProfileButton.Enabled = _customProfilesListView.SelectedItems.Count > 0;
         _clearCustomProfilesButton.Enabled = _customProfilePaths.Count > 0;
+        UpdateReportActionButtonState();
+        UpdateArtifactActionButtonState();
         UpdateGuidanceActionButtonState();
     }
 
@@ -3502,10 +3511,42 @@ public sealed class MainForm : Form
             return;
         }
 
-        _openGuidanceTargetButton.Text = BuildGuidanceActionButtonText(selectedGuidanceTarget);
+        _openGuidanceTargetButton.Text = BuildOpenPathButtonText(selectedGuidanceTarget, "Open next action");
     }
 
-    private static string BuildGuidanceActionButtonText(string targetPath)
+    private void UpdateReportActionButtonState()
+    {
+        _openReportButton.Text = "Open report";
+        if (_activeConversion is not null ||
+            _reportsListView.SelectedItems.Count == 0 ||
+            _reportsListView.SelectedItems[0].Tag is not string selectedReportPath ||
+            !File.Exists(selectedReportPath))
+        {
+            _openReportButton.Enabled = false;
+            return;
+        }
+
+        _openReportButton.Enabled = true;
+        _openReportButton.Text = BuildOpenPathButtonText(selectedReportPath, "Open report");
+    }
+
+    private void UpdateArtifactActionButtonState()
+    {
+        _openArtifactButton.Text = "Open file";
+        if (_activeConversion is not null ||
+            _artifactsListView.SelectedItems.Count == 0 ||
+            _artifactsListView.SelectedItems[0].Tag is not string selectedArtifactPath ||
+            (!File.Exists(selectedArtifactPath) && !Directory.Exists(selectedArtifactPath)))
+        {
+            _openArtifactButton.Enabled = false;
+            return;
+        }
+
+        _openArtifactButton.Enabled = true;
+        _openArtifactButton.Text = BuildOpenPathButtonText(selectedArtifactPath, "Open file");
+    }
+
+    private static string BuildOpenPathButtonText(string targetPath, string fallback)
     {
         if (Directory.Exists(targetPath))
         {
@@ -3526,7 +3567,7 @@ public sealed class MainForm : Form
             "plugin-patches.json" => "Open plugin patch report",
             "skeleton-compatibility.json" => "Open skeleton report",
             "conversion-quality.json" => "Open quality report",
-            _ => "Open file"
+            _ => fallback
         };
     }
 
