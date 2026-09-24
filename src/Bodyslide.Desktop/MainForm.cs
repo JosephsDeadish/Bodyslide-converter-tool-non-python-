@@ -1231,7 +1231,7 @@ public sealed class MainForm : Form
         var panel2Minimum = Math.Min(MainSplitPanel2Minimum, Math.Max(0, availableHeight - panel1Minimum));
         var maxSplitterDistance = Math.Max(panel1Minimum, availableHeight - panel2Minimum);
         var preferredPanel1Height = MainSplitPreferredDistance;
-        if (!_topLayoutPanel.IsDisposed)
+        if (_topLayoutPanel is not null && !_topLayoutPanel.IsDisposed)
         {
             var widthBudget = Math.Max(0, _mainSplitContainer.Panel1.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
             preferredPanel1Height = Math.Max(
