@@ -113,6 +113,7 @@ public sealed class MainForm : Form
     private bool _allowUserMainSplitOverride;
     private bool _startupResultLoadHandled;
     private bool _userAdjustedMainSplit;
+    private bool? _usesSingleColumnConversionLayout;
     private int? _userPreferredMainSplitDistance;
     private static readonly string[] ReportFileNames =
     [
@@ -768,6 +769,8 @@ public sealed class MainForm : Form
             Height = 92,
             View = View.Details,
             FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
             HideSelection = false,
             MultiSelect = true,
         };
@@ -1090,9 +1093,7 @@ public sealed class MainForm : Form
         _guidanceListView.Columns.Add("Area", 150);
         _guidanceListView.Columns.Add("Priority", 90);
         _guidanceListView.Columns.Add("Guidance", -2);
-        _guidanceListView.SelectedIndexChanged += (_, _) => _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
-            _guidanceListView.SelectedItems[0].Tag is string targetPath &&
-            (File.Exists(targetPath) || Directory.Exists(targetPath));
+        _guidanceListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
         _resultsTabControl.TabPages.Add(_guidanceTabPage);
@@ -1109,7 +1110,7 @@ public sealed class MainForm : Form
         _reportsListView.Columns.Add("Report", 260);
         _reportsListView.Columns.Add("Property", 180);
         _reportsListView.Columns.Add("Value", -2);
-        _reportsListView.SelectedIndexChanged += (_, _) => _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
+        _reportsListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _reportsListView.DoubleClick += (_, _) => OpenSelectedReport();
         _reportsTabPage.Controls.Add(_reportsListView);
         _resultsTabControl.TabPages.Add(_reportsTabPage);
@@ -1151,10 +1152,11 @@ public sealed class MainForm : Form
             View = View.Details,
             FullRowSelect = true,
             GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
         };
         _artifactsListView.Columns.Add("File", 260);
         _artifactsListView.Columns.Add("Path", -2);
-        _artifactsListView.SelectedIndexChanged += (_, _) => _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
+        _artifactsListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _artifactsTabPage.Controls.Add(_artifactsListView);
         _resultsTabControl.TabPages.Add(_artifactsTabPage);
@@ -1267,12 +1269,22 @@ public sealed class MainForm : Form
 
     private void UpdateResponsiveLayout()
     {
+        if (_conversionOptionsPanel.IsDisposed)
+        {
+            return;
+        }
+
         var useSingleColumn = ClientSize.Width < 1500 ||
                               _conversionOptionsPanel.DisplayRectangle.Width < 1100;
+        if (_usesSingleColumnConversionLayout == useSingleColumn)
+        {
+            return;
+        }
 
         _conversionOptionsPanel.SuspendLayout();
         try
         {
+            _usesSingleColumnConversionLayout = useSingleColumn;
             _conversionOptionsPanel.ColumnStyles.Clear();
             _conversionOptionsPanel.RowStyles.Clear();
 
