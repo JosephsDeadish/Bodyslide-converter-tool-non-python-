@@ -2231,7 +2231,7 @@ public sealed class MainForm : Form
             PopulateReportsTab(workflowSnapshot.ReportMetrics);
             await Task.Yield();
             PopulateArtifactsTab(workflowSnapshot.Artifacts);
-            var guidanceNeedsReview = PopulateGuidanceTab(results, _lastPreviewPath);
+            var guidanceNeedsReview = await PopulateGuidanceTabAsync(results, _lastPreviewPath, cancellationToken);
             ApplyValidationGatePresentation(workflowSnapshot.ValidationState, guidanceNeedsReview);
 
             _resultsTabControl.SelectedTab = guidanceNeedsReview
@@ -2569,7 +2569,7 @@ public sealed class MainForm : Form
             PopulateSummaryTab(snapshot.SummaryRows);
             PopulateReportsTab(snapshot.ReportMetrics);
             PopulateArtifactsTab(snapshot.Artifacts);
-            var guidanceNeedsReview = PopulateGuidanceTab(selectedFolder, previewPath);
+            var guidanceNeedsReview = await PopulateGuidanceTabAsync(selectedFolder, previewPath);
             ApplyValidationGatePresentation(snapshot.ValidationState, guidanceNeedsReview);
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
@@ -2729,6 +2729,19 @@ public sealed class MainForm : Form
         return PopulateGuidanceTab(outputDirectories, previewPath);
     }
 
+    private async Task<bool> PopulateGuidanceTabAsync(
+        IReadOnlyList<ConversionResult> results,
+        string? previewPath,
+        CancellationToken cancellationToken)
+    {
+        var outputDirectories = results
+            .Select(result => result.OutputDirectory)
+            .Where(static directory => !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return await PopulateGuidanceTabAsync(outputDirectories, previewPath, cancellationToken);
+    }
+
     private bool PopulateGuidanceTab(string? outputDirectory, string? previewPath)
     {
         if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
@@ -2739,109 +2752,36 @@ public sealed class MainForm : Form
         return PopulateGuidanceTab([outputDirectory], previewPath);
     }
 
-    private bool PopulateGuidanceTab(IReadOnlyList<string> outputDirectories, string? previewPath)
+    private async Task<bool> PopulateGuidanceTabAsync(string? outputDirectory, string? previewPath)
     {
-        var requiresReview = false;
-        var gateStatus = "ready";
-        var gateRank = ConversionValidationPresentation.GetGateRank(gateStatus);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var entries = new List<GuidanceEntry>();
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            return await PopulateGuidanceTabAsync(Array.Empty<string>(), previewPath, CancellationToken.None);
+        }
 
-        _openGuidanceTargetButton.Enabled = false;
+        return await PopulateGuidanceTabAsync([outputDirectory], previewPath, CancellationToken.None);
+    }
+
+    private bool PopulateGuidanceTab(IReadOnlyList<string> outputDirectories, string? previewPath)
+        => PopulateGuidanceTab(BuildGuidanceBuildResult(outputDirectories, previewPath));
+
+    private async Task<bool> PopulateGuidanceTabAsync(
+        IReadOnlyList<string> outputDirectories,
+        string? previewPath,
+        CancellationToken cancellationToken)
+    {
+        var buildResult = await Task.Run(() => BuildGuidanceBuildResult(outputDirectories, previewPath), cancellationToken);
+        return PopulateGuidanceTab(buildResult);
+    }
+
+    private bool PopulateGuidanceTab(GuidanceBuildResult buildResult)
+    {
+        var gateRank = ConversionValidationPresentation.GetGateRank(buildResult.GateStatus);
         _guidanceListView.BeginUpdate();
         try
         {
             _guidanceListView.Items.Clear();
-
-            void Add(string area, string priority, string guidance, string? targetPath = null)
-            {
-                if (string.IsNullOrWhiteSpace(guidance) ||
-                    !seen.Add($"{area}|{priority}|{guidance}"))
-                {
-                    return;
-                }
-
-                entries.Add(new GuidanceEntry(area, priority, guidance, targetPath));
-            }
-
-            void PromoteGate(string? candidateStatus)
-            {
-                var candidateRank = ConversionValidationPresentation.GetGateRank(candidateStatus);
-                if (candidateRank > gateRank)
-                {
-                    gateRank = candidateRank;
-                    gateStatus = candidateStatus ?? gateStatus;
-                }
-            }
-
-            if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
-            {
-                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
-            }
-            else if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
-            {
-                Add(
-                    "Preview",
-                    "Info",
-                    "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.",
-                    previewPath);
-            }
-            else
-            {
-                requiresReview = true;
-                Add(
-                    "Preview",
-                    "Warning",
-                    "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.",
-                    outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory)));
-            }
-
-            foreach (var outputDirectory in outputDirectories)
-            {
-                AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
-                AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
-                AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
-                AppendGuidanceFromFomodArtifacts(outputDirectory, Add);
-                AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromModStackCrossValidation(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromConversionMatrixProof(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
-                AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
-            }
-
-            if (requiresReview &&
-                !string.IsNullOrWhiteSpace(previewPath) &&
-                File.Exists(previewPath))
-            {
-                Add(
-                    "Review flow",
-                    "Action",
-                    "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
-                    previewPath);
-            }
-
-            var actionableEntries = entries.ToArray();
-            if (actionableEntries.Length > 0)
-            {
-                var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
-                    ? previewPath
-                    : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
-                Add(
-                    "Overall status",
-                    gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
-                    BuildGuidanceOverview(actionableEntries, requiresReview, gateStatus),
-                    guidanceTarget);
-            }
-
-            if (entries.Count == 0)
-            {
-                Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
-            }
-
-            foreach (var entry in entries
+            foreach (var entry in buildResult.Entries
                          .OrderByDescending(entry => GetGuidancePriorityRank(entry.Priority))
                          .ThenBy(entry => entry.Area, StringComparer.OrdinalIgnoreCase)
                          .ThenBy(entry => entry.Guidance, StringComparer.OrdinalIgnoreCase))
@@ -2863,12 +2803,109 @@ public sealed class MainForm : Form
             _guidanceListView.EndUpdate();
         }
 
-        _openGuidanceTargetButton.Enabled = _guidanceListView.SelectedItems.Count > 0 &&
-            _guidanceListView.SelectedItems[0].Tag is string selectedTargetPath &&
-            (File.Exists(selectedTargetPath) || Directory.Exists(selectedTargetPath));
+        UpdateGuidanceActionButtonState();
 
-        return requiresReview ||
+        return buildResult.RequiresReview ||
             gateRank >= ConversionValidationPresentation.GetGateRank("needs-review");
+    }
+
+    private static GuidanceBuildResult BuildGuidanceBuildResult(IReadOnlyList<string> outputDirectories, string? previewPath)
+    {
+        var requiresReview = false;
+        var gateStatus = "ready";
+        var gateRank = ConversionValidationPresentation.GetGateRank(gateStatus);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<GuidanceEntry>();
+
+        void Add(string area, string priority, string guidance, string? targetPath = null)
+        {
+            if (string.IsNullOrWhiteSpace(guidance) ||
+                !seen.Add($"{area}|{priority}|{guidance}"))
+            {
+                return;
+            }
+
+            entries.Add(new GuidanceEntry(area, priority, guidance, targetPath));
+        }
+
+        void PromoteGate(string? candidateStatus)
+        {
+            var candidateRank = ConversionValidationPresentation.GetGateRank(candidateStatus);
+            if (candidateRank > gateRank)
+            {
+                gateRank = candidateRank;
+                gateStatus = candidateStatus ?? gateStatus;
+            }
+        }
+
+        if (outputDirectories.Count == 0 && string.IsNullOrWhiteSpace(previewPath))
+        {
+            Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+        }
+        else if (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath))
+        {
+            Add(
+                "Preview",
+                "Info",
+                "Open the Preview tab to visually inspect the converted mesh, then compare Summary and Reports before installing or sharing the output.",
+                previewPath);
+        }
+        else
+        {
+            requiresReview = true;
+            Add(
+                "Preview",
+                "Warning",
+                "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.",
+                outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory)));
+        }
+
+        foreach (var outputDirectory in outputDirectories)
+        {
+            AppendGuidanceFromBatchReport(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+            AppendGuidanceFromConversionQuality(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+            AppendGuidanceFromPackValidation(outputDirectory, previewPath, Add, ref requiresReview, PromoteGate);
+            AppendGuidanceFromFomodArtifacts(outputDirectory, Add);
+            AppendGuidanceFromSkeletonCompatibility(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromTextureSummary(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromDependencyMap(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromPluginPatches(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromModStackCrossValidation(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromConversionMatrixProof(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromWorldPhysics(outputDirectory, previewPath, Add, ref requiresReview);
+            AppendGuidanceFromInGameValidation(outputDirectory, previewPath, Add, ref requiresReview);
+        }
+
+        if (requiresReview &&
+            !string.IsNullOrWhiteSpace(previewPath) &&
+            File.Exists(previewPath))
+        {
+            Add(
+                "Review flow",
+                "Action",
+                "Start with the Preview tab for visual review, then work through the targeted report actions below before installing or sharing the output.",
+                previewPath);
+        }
+
+        var actionableEntries = entries.ToArray();
+        if (actionableEntries.Length > 0)
+        {
+            var guidanceTarget = !string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)
+                ? previewPath
+                : outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
+            Add(
+                "Overall status",
+                gateRank >= ConversionValidationPresentation.GetGateRank("needs-review") || requiresReview ? "Warning" : "Info",
+                BuildGuidanceOverview(actionableEntries, requiresReview, gateStatus),
+                guidanceTarget);
+        }
+
+        if (entries.Count == 0)
+        {
+            Add("Status", "Info", "Run or load a conversion to see preview guidance, warnings, and recommended next actions here.");
+        }
+
+        return new GuidanceBuildResult(entries, requiresReview, gateStatus);
     }
 
     private void PopulateInspectionTab(ConversionInspectionResult inspection)
