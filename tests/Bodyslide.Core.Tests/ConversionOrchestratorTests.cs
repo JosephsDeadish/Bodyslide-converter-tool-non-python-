@@ -14736,6 +14736,31 @@ public sealed class RuntimeReadinessReporterTests
     }
 
     [Fact]
+    public void CreateDesktopReport_IncludesUniversalProofGapChecks()
+    {
+        var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath);
+
+        var universalCoverage = Assert.Single(checks, check => check.Area == "Universal coverage");
+        Assert.Equal("Warning", universalCoverage.Status);
+        Assert.Contains("any armor to any body", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("topology-correspondence", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+
+        var desktopAutomation = Assert.Single(checks, check => check.Area == "Desktop automation proof");
+        Assert.Equal("Info", desktopAutomation.Status);
+        Assert.Contains("external UI automation harness", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WebView2", desktopAutomation.Details, StringComparison.OrdinalIgnoreCase);
+
+        var liveGameAutomation = Assert.Single(checks, check => check.Area == "Live-game automation proof");
+        Assert.Equal("Info", liveGameAutomation.Status);
+        Assert.Contains("external harness contract", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Windows mod stack", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
+
+        var matrixProof = Assert.Single(checks, check => check.Area == "Strict matrix proof");
+        Assert.Equal("Warning", matrixProof.Status);
+        Assert.Contains("body × skeleton × plugin-family × runtime combinations", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ValidateCatalogConsistency_BuiltInBodiesAndRaceRulesHaveFrameworkCoverage()
     {
         var issues = RuntimeReadinessReporter.ValidateCatalogConsistency();

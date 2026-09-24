@@ -60,6 +60,10 @@ public static class RuntimeReadinessReporter
         checks.Add(CreateCacheCheck());
         checks.Add(CreateScratchWriteCheck());
         checks.Add(CreateStartupCrashLogWriteCheck());
+        checks.Add(CreateUniversalCoverageCheck());
+        checks.Add(CreateDesktopAutomationCoverageCheck());
+        checks.Add(CreateLiveGameAutomationCoverageCheck());
+        checks.Add(CreateStrictMatrixCoverageCheck());
 
         if (includeDesktopProbe)
         {
@@ -402,6 +406,30 @@ public static class RuntimeReadinessReporter
             }
         }
     }
+
+    private static RuntimeReadinessCheck CreateUniversalCoverageCheck() =>
+        new(
+            "Universal coverage",
+            "Warning",
+            "SlideSmith can convert many real-world armors, but a true 'any armor to any body' claim still needs deeper proof for the hardest topology-correspondence cases.");
+
+    private static RuntimeReadinessCheck CreateDesktopAutomationCoverageCheck() =>
+        new(
+            "Desktop automation proof",
+            "Info",
+            "Real Windows click-path validation is still external and should be completed on a Windows host with WebView2 plus an external UI automation harness.");
+
+    private static RuntimeReadinessCheck CreateLiveGameAutomationCoverageCheck() =>
+        new(
+            "Live-game automation proof",
+            "Info",
+            "In-game/runtime verification is still exported as an external harness contract and must be finished against the target Windows mod stack outside this desktop app.");
+
+    private static RuntimeReadinessCheck CreateStrictMatrixCoverageCheck() =>
+        new(
+            "Strict matrix proof",
+            "Warning",
+            "Universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations, even when a single conversion looks healthy.");
 
     private static RuntimeReadinessCheck CreateDesktopProbeCheck(string? currentExePath)
     {

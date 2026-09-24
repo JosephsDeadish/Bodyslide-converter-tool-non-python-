@@ -1835,7 +1835,14 @@ public sealed class MainForm : Form
         _resultsTabControl.SelectedTab = _readinessTabPage;
         var summary = string.Join(", ", checks.Select(static check => $"{check.Status}:{check.Area}"));
         AppendLog($"Self-check completed — {summary}");
-        _statusLabel.Text = "Readiness self-check completed.";
+        var errorCount = checks.Count(static check => check.Status.Equals("Error", StringComparison.OrdinalIgnoreCase));
+        var warningCount = checks.Count(static check => check.Status.Equals("Warning", StringComparison.OrdinalIgnoreCase));
+        var infoCount = checks.Count(static check => check.Status.Equals("Info", StringComparison.OrdinalIgnoreCase));
+        _statusLabel.Text = errorCount > 0
+            ? $"Readiness self-check completed — {errorCount} error(s), {warningCount} warning(s), {infoCount} info note(s)."
+            : warningCount > 0 || infoCount > 0
+                ? $"Readiness self-check completed — {warningCount} warning(s), {infoCount} info note(s)."
+                : "Readiness self-check completed — no warnings.";
     }
 
     private static TableLayoutPanel CreateThreeColumnRow(string labelText, out TextBox textBox)
