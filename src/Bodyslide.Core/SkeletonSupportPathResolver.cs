@@ -184,7 +184,9 @@ public static class SkeletonSupportPathResolver
             score -= 10;
         }
 
-        if (normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
+        if (normalized.Contains("/character assets female/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/character assets male/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase))
         {
             score += 5;

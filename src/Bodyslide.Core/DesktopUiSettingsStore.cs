@@ -54,13 +54,17 @@ public static class DesktopUiSettingsStore
         }
 
         string? tempPath = null;
-        using var settingsLock = AcquireExclusiveSettingsLock(settingsPath);
+        var settingsLock = AcquireExclusiveSettingsLock(settingsPath);
+        var lockPath = settingsLock.Name;
         try
         {
-            tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(normalized, WriteOptions));
-            File.Move(tempPath, settingsPath, overwrite: true);
-            tempPath = null;
+            using (settingsLock)
+            {
+                tempPath = $"{settingsPath}.{Guid.NewGuid():N}.tmp";
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(normalized, WriteOptions));
+                File.Move(tempPath, settingsPath, overwrite: true);
+                tempPath = null;
+            }
         }
         finally
         {
@@ -73,6 +77,17 @@ public static class DesktopUiSettingsStore
                 catch
                 {
                 }
+            }
+
+            try
+            {
+                if (File.Exists(lockPath))
+                {
+                    File.Delete(lockPath);
+                }
+            }
+            catch
+            {
             }
         }
     }

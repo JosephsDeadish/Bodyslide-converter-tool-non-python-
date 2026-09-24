@@ -65,6 +65,26 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
         Assert.Null(result);
     }
 
+    [Fact]
+    public void TryResolveSkeletonNifPath_PrefersBaseCharacterAssetsSkeletonOverGenderedVariants()
+    {
+        var modRoot = Path.Combine(_root, "XPMSSE");
+        var baseDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets");
+        var femaleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets female");
+        Directory.CreateDirectory(baseDirectory);
+        Directory.CreateDirectory(femaleDirectory);
+
+        var baseSkeletonPath = Path.Combine(baseDirectory, "skeleton.nif");
+        var femaleSkeletonPath = Path.Combine(femaleDirectory, "skeleton.nif");
+        File.WriteAllText(baseSkeletonPath, "base");
+        File.WriteAllText(femaleSkeletonPath, "female");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(baseSkeletonPath), result);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
