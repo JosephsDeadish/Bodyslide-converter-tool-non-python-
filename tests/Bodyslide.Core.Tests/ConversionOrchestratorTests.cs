@@ -18124,6 +18124,9 @@ public sealed class RealisticModPackFixtureTests
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Per-island ownership/layout sweep", StringComparison.Ordinal));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Compound topology/custom-rig mod-stack sweep", StringComparison.Ordinal));
 
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
@@ -18189,6 +18192,14 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().Select(static probe => probe.GetProperty("RequiresFullLoadOrderLaunch").GetBoolean()),
                 static value => value);
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().SelectMany(static probe =>
+                    probe.GetProperty("ProofAxes").EnumerateArray().Select(static item => item.GetString())),
+                static axis => string.Equals(axis, "strict-layout", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray().SelectMany(static probe =>
+                    probe.GetProperty("MatrixCoordinatesTargeted").EnumerateArray().Select(static item => item.GetString())),
+                static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
 
             var liveGameExecutionJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json"));
             Assert.Contains("\"IntegrationCoverage\": \"external-live-game-harness\"", liveGameExecutionJson, StringComparison.Ordinal);
@@ -18241,6 +18252,14 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
                 static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
+                    item.GetProperty("ProofAxes").EnumerateArray().Select(static axis => axis.GetString())),
+                static axis => string.Equals(axis, "live-game-execution", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
+                    item.GetProperty("MatrixCoordinatesTargeted").EnumerateArray().Select(static coordinate => coordinate.GetString())),
+                static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
             Assert.True(liveGameExecution.RootElement.GetProperty("Probes").GetArrayLength() > 0);
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("HostEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
@@ -18293,6 +18312,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
                 static coordinate => coordinate is not null && coordinate.StartsWith("topology-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
+                static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 matrixProof.RootElement.GetProperty("MatrixCoordinates").EnumerateArray().Select(static item => item.GetString()),
                 static coordinate => coordinate is not null && coordinate.StartsWith("runtime-physics:", StringComparison.OrdinalIgnoreCase));
@@ -18389,6 +18411,9 @@ public sealed class RealisticModPackFixtureTests
                 windowsUiAutomation.RootElement.GetProperty("MatrixCombinationsTargeted").EnumerateArray().Select(static item => item.GetString()),
                 static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("MatrixCombinationsTargeted").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "body-hardcase-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("BootstrapContract").GetProperty("LaunchActions").EnumerateArray().Select(static item => item.GetString()),
                 static action => string.Equals(action, "attach-winforms-uia-driver", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -18401,6 +18426,17 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "fixture-smoke-conversion", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "hardcase-proof-artifact-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().SelectMany(static profile =>
+                    profile.GetProperty("ProofAxes").EnumerateArray().Select(static axis => axis.GetString())),
+                static axis => string.Equals(axis, "desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().SelectMany(static profile =>
+                    profile.GetProperty("MatrixCoordinatesTargeted").EnumerateArray().Select(static coordinate => coordinate.GetString())),
+                static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
                 static selector => string.Equals(selector, "inputPathTextBox", StringComparison.Ordinal));

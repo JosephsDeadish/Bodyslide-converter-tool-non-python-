@@ -596,14 +596,18 @@ public sealed record RuntimeAutomationHarnessProbe(
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease,
     bool RequiresManualAssertion,
-    bool RequiresFullLoadOrderLaunch);
+    bool RequiresFullLoadOrderLaunch,
+    IReadOnlyList<string>? ProofAxes = null,
+    IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
 public sealed record LiveGameExecutionScenarioProfile(
     string Name,
     string ValidationSaveProfile,
     IReadOnlyList<string> DispatchActions,
     IReadOnlyList<string> SuccessSignals,
     IReadOnlyList<string> RelatedArtifacts,
-    bool BlocksRelease);
+    bool BlocksRelease,
+    IReadOnlyList<string>? ProofAxes = null,
+    IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
 public sealed record ExternalHarnessBootstrapContract(
     string HarnessKind,
     string ContractVersion,
@@ -727,6 +731,14 @@ public sealed record ConversionReadinessAssessment(
     string SkeletonRemapSafety,
     string TargetBodySupportReliability,
     string RecommendedReleaseGate);
+public sealed record MatrixProofContext(
+    string TargetBody,
+    ConversionReadinessAssessment ConversionReadiness,
+    TopologyCorrespondenceReport TopologyCorrespondence,
+    SkeletonMappingResult SkeletonMapping,
+    ModStackCrossValidationReport? ModStackCrossValidation,
+    PhysicsCompatibilityReport PhysicsCompatibility,
+    PartitionSignalReport? PartitionSignals);
 public sealed record RuntimeValidationExecutionPlan(
     string TargetBody,
     string ValidationGate,
@@ -759,7 +771,9 @@ public sealed record WindowsUiE2EFlowProfile(
     string EntryPointSelector,
     IReadOnlyList<string> RequiredSelectors,
     IReadOnlyList<string> RelatedArtifacts,
-    bool BlocksRelease);
+    bool BlocksRelease,
+    IReadOnlyList<string>? ProofAxes = null,
+    IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
 public sealed record WindowsUiE2EAutomationPlan(
     string Coverage,
     IReadOnlyList<string> BlockingProofAxes,
@@ -20100,6 +20114,7 @@ internal sealed class LocalExportService(
             poseSimulation,
             worldPhysics,
             topologyCorrespondence,
+            partitionSignals,
             conversionReadiness);
         await File.WriteAllTextAsync(
             inGameValidationPath,
@@ -20146,8 +20161,17 @@ internal sealed class LocalExportService(
             outputFiles.Add(modStackCrossValidationPath);
         }
 
+        var matrixProofContext = new MatrixProofContext(
+            request.TargetBody,
+            conversionReadiness,
+            topologyCorrespondence,
+            skeletonMapping,
+            modStackCrossValidation,
+            physicsCompatibility,
+            partitionSignals);
+
         var runtimeValidationPlanPath = Path.Combine(outputDirectory, "runtime-validation-plan.json");
-        var runtimeValidationPlan = BuildRuntimeValidationExecutionPlan(inGameValidation);
+        var runtimeValidationPlan = BuildRuntimeValidationExecutionPlan(inGameValidation, matrixProofContext);
         await File.WriteAllTextAsync(
             runtimeValidationPlanPath,
             JsonSerializer.Serialize(runtimeValidationPlan, new JsonSerializerOptions { WriteIndented = true }),
@@ -20165,7 +20189,7 @@ internal sealed class LocalExportService(
         }
 
         var liveGameExecutionPath = Path.Combine(outputDirectory, "live-game-execution.json");
-        var liveGameExecution = BuildLiveGameExecutionPlan(runtimeValidationPlan, modStackCrossValidation);
+        var liveGameExecution = BuildLiveGameExecutionPlan(runtimeValidationPlan, matrixProofContext);
         await File.WriteAllTextAsync(
             liveGameExecutionPath,
             JsonSerializer.Serialize(liveGameExecution, new JsonSerializerOptions { WriteIndented = true }),
@@ -20178,16 +20202,10 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(runtimeObservationBundleTemplatePath);
 
-        var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan();
+        var windowsUiAutomation = BuildWindowsUiE2EAutomationPlan(matrixProofContext, runtimeValidationPlan);
         var conversionMatrixProofPath = Path.Combine(outputDirectory, "conversion-matrix-proof.json");
         var conversionMatrixProof = BuildConversionMatrixProofReport(
-            request.TargetBody,
-            conversionReadiness,
-            topologyCorrespondence,
-            skeletonMapping,
-            partitionSignals,
-            modStackCrossValidation,
-            physicsCompatibility,
+            matrixProofContext,
             runtimeValidationPlan,
             liveGameExecution,
             windowsUiAutomation);
@@ -30392,6 +30410,7 @@ internal sealed class LocalExportService(
         PoseSimulationResult poseSimulation,
         WorldObjectPhysicsReport worldPhysics,
         TopologyCorrespondenceReport topologyCorrespondence,
+        PartitionSignalReport? partitionSignals,
         ConversionReadinessAssessment conversionReadiness)
     {
         var coreRegions = BuildInGameCoreRegions(targetBody, mesh.RegionalMorphing);
@@ -30483,6 +30502,7 @@ internal sealed class LocalExportService(
            beastRegions,
            wingRegions,
            topologyCorrespondence,
+           partitionSignals,
            manualCleanupLikely,
            skeletonMapping,
            pluginAnalysis,
@@ -30508,7 +30528,9 @@ internal sealed class LocalExportService(
            checklist);
     }
 
-    private static RuntimeValidationExecutionPlan BuildRuntimeValidationExecutionPlan(InGameValidationReport report)
+    private static RuntimeValidationExecutionPlan BuildRuntimeValidationExecutionPlan(
+        InGameValidationReport report,
+        MatrixProofContext matrixProofContext)
     {
         var steps = new List<RuntimeValidationExecutionStep>
         {
@@ -30569,7 +30591,7 @@ internal sealed class LocalExportService(
             "A real live-game pass still requires an external harness or scripted test environment in the final modded game install.",
             "Blocking runtime probes still require host-side observation or assertion capture on the final skeleton, body, and load-order combination."
         };
-        var automationHarness = BuildRuntimeAutomationHarness(report, steps, limitationNotes);
+        var automationHarness = BuildRuntimeAutomationHarness(report, steps, limitationNotes, matrixProofContext);
 
         return new RuntimeValidationExecutionPlan(
             report.TargetBody,
@@ -30591,8 +30613,9 @@ internal sealed class LocalExportService(
 
     private static LiveGameExecutionPlan BuildLiveGameExecutionPlan(
         RuntimeValidationExecutionPlan runtimePlan,
-        ModStackCrossValidationReport? modStackCrossValidation)
+        MatrixProofContext matrixProofContext)
     {
+        var modStackCrossValidation = matrixProofContext.ModStackCrossValidation;
         var deploymentArtifacts = new[]
         {
             "conversion-matrix-proof.json",
@@ -30658,7 +30681,7 @@ internal sealed class LocalExportService(
                 ? "full-load-order-integration-save"
                 : "standard-load-order-validation-save"
         };
-        var scenarioProfiles = BuildLiveGameScenarioProfiles(runtimePlan, validationSaveProfiles);
+        var scenarioProfiles = BuildLiveGameScenarioProfiles(runtimePlan, validationSaveProfiles, matrixProofContext);
         var observationBundleContract = BuildRuntimeObservationBundleContract(
             validationSaveProfiles,
             scenarioProfiles,
@@ -30849,6 +30872,11 @@ internal sealed class LocalExportService(
             signals.Add("mesh-collision-probes-captured");
         }
 
+        if ((profile.ProofAxes ?? []).Contains("strict-layout", StringComparer.OrdinalIgnoreCase))
+        {
+            signals.Add("ownership-layout-preserved");
+        }
+
         if (profile.RelatedArtifacts.Contains("plugin-patches.json", StringComparer.OrdinalIgnoreCase) ||
             profile.RelatedArtifacts.Contains("mod-stack-cross-validation.json", StringComparer.OrdinalIgnoreCase))
         {
@@ -30882,6 +30910,11 @@ internal sealed class LocalExportService(
             failureSignals.Add("non-manifold-boundary-regression");
         }
 
+        if ((profile.ProofAxes ?? []).Contains("strict-layout", StringComparer.OrdinalIgnoreCase))
+        {
+            failureSignals.Add("ownership-layout-regression");
+        }
+
         if (profile.RelatedArtifacts.Contains("skeleton-compatibility.json", StringComparer.OrdinalIgnoreCase))
         {
             failureSignals.Add("bone-transform-instability");
@@ -30896,7 +30929,9 @@ internal sealed class LocalExportService(
         return failureSignals.OrderBy(static signal => signal, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static WindowsUiE2EAutomationPlan BuildWindowsUiE2EAutomationPlan()
+    private static WindowsUiE2EAutomationPlan BuildWindowsUiE2EAutomationPlan(
+        MatrixProofContext matrixProofContext,
+        RuntimeValidationExecutionPlan runtimePlan)
     {
         var selectors = new[]
         {
@@ -30994,7 +31029,7 @@ internal sealed class LocalExportService(
                 "ui-selector-resolution-log",
                 "ui-run-summary"
             ]);
-        var flowProfiles = BuildWindowsUiFlowProfiles();
+        var flowProfiles = BuildWindowsUiFlowProfiles(matrixProofContext);
 
         return new WindowsUiE2EAutomationPlan(
             Coverage: "external-windows-ui-harness-ready",
@@ -31004,10 +31039,7 @@ internal sealed class LocalExportService(
                 "topology-transfer",
                 "strict-layout"
             ],
-            MatrixCombinationsTargeted:
-            [
-                "body-skeleton-plugin-runtime"
-            ],
+            MatrixCombinationsTargeted: BuildWindowsUiMatrixCombinations(matrixProofContext, runtimePlan),
             RequiresWindowsHost: true,
             RequiresExternalUiHarness: true,
             RequiresEmbeddedPreviewRuntimeForInAppPreview: true,
@@ -31019,6 +31051,7 @@ internal sealed class LocalExportService(
                 "custom-profile-management",
                 "multi-target-batch-conversion",
                 "load-existing-result",
+                "hardcase-proof-artifact-review",
                 "preview-guidance-report-artifact-review",
                 "catalog-and-cache-navigation"
             ],
@@ -31027,7 +31060,8 @@ internal sealed class LocalExportService(
                 "stable-winforms-control-names",
                 "artifact-backed-report-metrics",
                 "html-data-testid-preview-selectors",
-                "result-reload-state-validation"
+                "result-reload-state-validation",
+                "matrix-coordinate-targeting"
             ],
             LimitationNotes:
             [
@@ -31042,7 +31076,8 @@ internal sealed class LocalExportService(
 
     private static IReadOnlyList<LiveGameExecutionScenarioProfile> BuildLiveGameScenarioProfiles(
         RuntimeValidationExecutionPlan runtimePlan,
-        IReadOnlyList<string> validationSaveProfiles)
+        IReadOnlyList<string> validationSaveProfiles,
+        MatrixProofContext matrixProofContext)
     {
         var defaultSmokeSave = validationSaveProfiles.FirstOrDefault(static value =>
             value.Equals("neutral-smoke-test-save", StringComparison.OrdinalIgnoreCase)) ?? validationSaveProfiles.First();
@@ -31054,13 +31089,26 @@ internal sealed class LocalExportService(
             value.Contains("load-order", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
 
         return runtimePlan.AutomationHarness?.Probes
-            .Select(probe => new LiveGameExecutionScenarioProfile(
-                Name: probe.Objective,
-                ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
-                DispatchActions: probe.DispatchActions,
-                SuccessSignals: probe.ExpectedAssertions,
-                RelatedArtifacts: probe.RelatedArtifacts,
-                BlocksRelease: probe.BlocksRelease))
+            .Select(probe =>
+            {
+                var proofAxes = BuildProofAxesForRelatedArtifacts(probe.Objective, probe.RelatedArtifacts, "live-game-execution")
+                    .Concat(probe.ProofAxes ?? [])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                return new LiveGameExecutionScenarioProfile(
+                    Name: probe.Objective,
+                    ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
+                    DispatchActions: probe.DispatchActions,
+                    SuccessSignals: probe.ExpectedAssertions,
+                    RelatedArtifacts: probe.RelatedArtifacts,
+                    BlocksRelease: probe.BlocksRelease,
+                    ProofAxes: proofAxes,
+                    MatrixCoordinatesTargeted: BuildTargetedMatrixCoordinates(
+                        matrixProofContext,
+                        proofAxes,
+                        runtimeCoverage: runtimePlan.ExecutionCoverage,
+                        liveGameCoverage: "external-live-game-harness"));
+            })
             .ToArray() ?? [];
     }
 
@@ -31097,46 +31145,271 @@ internal sealed class LocalExportService(
         return defaultSmokeSave;
     }
 
-    private static IReadOnlyList<WindowsUiE2EFlowProfile> BuildWindowsUiFlowProfiles() =>
+    private static IReadOnlyList<WindowsUiE2EFlowProfile> BuildWindowsUiFlowProfiles(MatrixProofContext matrixProofContext) =>
     [
-        new(
-            Name: "fixture-smoke-conversion",
-            EntryPointSelector: "main-form",
-            RequiredSelectors: ["main-form", "input-path", "output-path", "target-body", "convert-button", "summary-list", "reports-list"],
-            RelatedArtifacts: ["conversion-quality.json", "in-game-validation.json", "preview-workbench.html"],
-            BlocksRelease: true),
-        new(
-            Name: "result-reload-review",
-            EntryPointSelector: "load-result-button",
-            RequiredSelectors: ["load-result-button", "summary-list", "guidance-list", "reports-list", "artifacts-list"],
-            RelatedArtifacts: ["desktop-workflow-automation.json", "conversion-matrix-proof.json", "live-game-execution.json"],
-            BlocksRelease: true),
-        new(
-            Name: "custom-profile-roundtrip",
-            EntryPointSelector: "load-custom-profile-button",
-            RequiredSelectors: ["load-custom-profile-button", "save-profile-button", "custom-profiles-list", "target-body"],
-            RelatedArtifacts: ["desktop-workflow-automation.json", "conversion-quality.json"],
-            BlocksRelease: false),
-        new(
-            Name: "batch-all-bodies-review",
-            EntryPointSelector: "all-bodies",
-            RequiredSelectors: ["all-bodies", "target-batch", "convert-button", "reports-list", "artifacts-list"],
-            RelatedArtifacts: ["conversion-quality.json", "runtime-validation-plan.json", "windows-ui-e2e-automation.json"],
-            BlocksRelease: false)
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "fixture-smoke-conversion",
+            "main-form",
+            ["main-form", "input-path", "output-path", "target-body", "convert-button", "summary-list", "reports-list"],
+            ["conversion-quality.json", "in-game-validation.json", "preview-workbench.html"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "result-reload-review",
+            "load-result-button",
+            ["load-result-button", "summary-list", "guidance-list", "reports-list", "artifacts-list"],
+            ["desktop-workflow-automation.json", "conversion-matrix-proof.json", "live-game-execution.json"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "hardcase-proof-artifact-review",
+            "guidance-list",
+            ["guidance-list", "reports-list", "artifacts-list", "open-report-button", "open-guidance-target-button", "open-artifact-button", "preview-root"],
+            ["topology-correspondence.json", "mod-stack-cross-validation.json", "runtime-validation-plan.json", "live-game-execution.json", "conversion-matrix-proof.json", "windows-ui-e2e-automation.json"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "custom-profile-roundtrip",
+            "load-custom-profile-button",
+            ["load-custom-profile-button", "save-profile-button", "custom-profiles-list", "target-body"],
+            ["desktop-workflow-automation.json", "conversion-quality.json"],
+            blocksRelease: false),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "batch-all-bodies-review",
+            "all-bodies",
+            ["all-bodies", "target-batch", "convert-button", "reports-list", "artifacts-list"],
+            ["conversion-quality.json", "runtime-validation-plan.json", "windows-ui-e2e-automation.json"],
+            blocksRelease: false)
     ];
 
+    private static WindowsUiE2EFlowProfile BuildWindowsUiFlowProfile(
+        MatrixProofContext matrixProofContext,
+        string name,
+        string entryPointSelector,
+        IReadOnlyList<string> requiredSelectors,
+        IReadOnlyList<string> relatedArtifacts,
+        bool blocksRelease)
+    {
+        var proofAxes = BuildProofAxesForRelatedArtifacts(name, relatedArtifacts, "desktop-e2e");
+        return new WindowsUiE2EFlowProfile(
+            Name: name,
+            EntryPointSelector: entryPointSelector,
+            RequiredSelectors: requiredSelectors,
+            RelatedArtifacts: relatedArtifacts,
+            BlocksRelease: blocksRelease,
+            ProofAxes: proofAxes,
+            MatrixCoordinatesTargeted: BuildTargetedMatrixCoordinates(
+                matrixProofContext,
+                proofAxes,
+                desktopCoverage: "external-windows-ui-harness-ready"));
+    }
+
+    private static IReadOnlyList<string> BuildWindowsUiMatrixCombinations(
+        MatrixProofContext matrixProofContext,
+        RuntimeValidationExecutionPlan runtimePlan)
+    {
+        var combinations = new List<string>
+        {
+            "body-skeleton-plugin-runtime"
+        };
+
+        if (HasHardTopologyCertaintyRisk(matrixProofContext.TopologyCorrespondence) || matrixProofContext.PartitionSignals?.TopologyIslandCount > 1)
+        {
+            combinations.Add("body-hardcase-runtime");
+        }
+
+        if (matrixProofContext.ModStackCrossValidation?.RequiresLoadOrderValidation == true ||
+            runtimePlan.AutomationHarness?.Probes.Any(static probe => probe.RequiresFullLoadOrderLaunch) == true)
+        {
+            combinations.Add("hardcase-skeleton-master");
+        }
+
+        return combinations
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildProofAxesForRelatedArtifacts(
+        string? name,
+        IEnumerable<string>? relatedArtifacts,
+        string primaryAxis)
+    {
+        var axes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            primaryAxis
+        };
+
+        var normalizedName = name ?? string.Empty;
+        var artifacts = relatedArtifacts?
+            .Where(static artifact => !string.IsNullOrWhiteSpace(artifact))
+            .ToArray() ?? [];
+
+        if (artifacts.Any(static artifact => artifact.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("preview-workbench.html", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("morphs.json", StringComparison.OrdinalIgnoreCase)) ||
+            normalizedName.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            normalizedName.Contains("openwork", StringComparison.OrdinalIgnoreCase) ||
+            normalizedName.Contains("ownership", StringComparison.OrdinalIgnoreCase))
+        {
+            axes.Add("topology-transfer");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase)) &&
+            (normalizedName.Contains("layout", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.Contains("ownership", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.Contains("island", StringComparison.OrdinalIgnoreCase) ||
+             normalizedName.Contains("openwork", StringComparison.OrdinalIgnoreCase)))
+        {
+            axes.Add("strict-layout");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("skeleton-compatibility.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            axes.Add("custom-skeleton");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("plugin-patches.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("race-compatibility.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            axes.Add("plugin-modstack");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("runtime-validation-harness.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("world-physics.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            axes.Add("runtime-automation");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("runtime-observation-bundle.template.json", StringComparison.OrdinalIgnoreCase)) ||
+            normalizedName.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            normalizedName.Contains("save / reload", StringComparison.OrdinalIgnoreCase) ||
+            normalizedName.Contains("ground", StringComparison.OrdinalIgnoreCase))
+        {
+            axes.Add("live-game-execution");
+        }
+
+        if (artifacts.Any(static artifact => artifact.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
+                                             artifact.Equals("windows-ui-e2e-automation.json", StringComparison.OrdinalIgnoreCase)))
+        {
+            axes.Add("desktop-e2e");
+        }
+
+        return axes
+            .OrderBy(GetProofAxisPriority)
+            .ThenBy(static axis => axis, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static int GetProofAxisPriority(string axis) =>
+        axis switch
+        {
+            "body-support" => 0,
+            "topology-transfer" => 1,
+            "strict-layout" => 2,
+            "custom-skeleton" => 3,
+            "plugin-modstack" => 4,
+            "runtime-automation" => 5,
+            "live-game-execution" => 6,
+            "desktop-e2e" => 7,
+            _ => 100
+        };
+
+    private static IReadOnlyList<string> BuildTargetedMatrixCoordinates(
+        MatrixProofContext matrixProofContext,
+        IEnumerable<string> proofAxes,
+        string? runtimeCoverage = null,
+        string? liveGameCoverage = null,
+        string? desktopCoverage = null)
+    {
+        var axes = proofAxes
+            .Where(static axis => !string.IsNullOrWhiteSpace(axis))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var baseCoordinates = BuildBaseMatrixCoordinates(matrixProofContext);
+        var selected = new List<string>();
+
+        AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "target-body:");
+        AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "target-body-family:");
+        AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "support-tier:");
+
+        if (axes.Contains("topology-transfer") || axes.Contains("strict-layout"))
+        {
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-family:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "hard-case-family:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-classification:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "topology-layout-family:");
+        }
+
+        if (axes.Contains("custom-skeleton"))
+        {
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "skeleton-mode:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "source-skeleton-family:");
+        }
+
+        if (axes.Contains("plugin-modstack"))
+        {
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "plugin-stack:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "plugin-family:");
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "master-chain:");
+        }
+
+        if (axes.Contains("runtime-automation") || axes.Contains("live-game-execution"))
+        {
+            AppendMatrixCoordinateByPrefix(selected, baseCoordinates, "runtime-physics:");
+        }
+
+        if (axes.Contains("runtime-automation") && !string.IsNullOrWhiteSpace(runtimeCoverage))
+        {
+            selected.Add($"runtime-automation:{runtimeCoverage}");
+        }
+
+        if (axes.Contains("live-game-execution") && !string.IsNullOrWhiteSpace(liveGameCoverage))
+        {
+            selected.Add($"live-game:{liveGameCoverage}");
+        }
+
+        if (axes.Contains("desktop-e2e") && !string.IsNullOrWhiteSpace(desktopCoverage))
+        {
+            selected.Add($"desktop-ui:{desktopCoverage}");
+        }
+
+        return selected
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static void AppendMatrixCoordinateByPrefix(
+        ICollection<string> selected,
+        IReadOnlyList<string> sourceCoordinates,
+        string prefix)
+    {
+        var coordinate = sourceCoordinates.FirstOrDefault(entry => entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(coordinate))
+        {
+            selected.Add(coordinate);
+        }
+    }
+
     private static ConversionMatrixProofReport BuildConversionMatrixProofReport(
-        string targetBody,
-        ConversionReadinessAssessment conversionReadiness,
-        TopologyCorrespondenceReport topologyCorrespondence,
-        SkeletonMappingResult skeletonMapping,
-        PartitionSignalReport? partitionSignals,
-        ModStackCrossValidationReport? modStackCrossValidation,
-        PhysicsCompatibilityReport physicsCompatibility,
+        MatrixProofContext matrixProofContext,
         RuntimeValidationExecutionPlan runtimePlan,
         LiveGameExecutionPlan liveGameExecution,
         WindowsUiE2EAutomationPlan windowsUiAutomation)
     {
+        var targetBody = matrixProofContext.TargetBody;
+        var conversionReadiness = matrixProofContext.ConversionReadiness;
+        var topologyCorrespondence = matrixProofContext.TopologyCorrespondence;
+        var skeletonMapping = matrixProofContext.SkeletonMapping;
+        var partitionSignals = matrixProofContext.PartitionSignals;
+        var modStackCrossValidation = matrixProofContext.ModStackCrossValidation;
+        var physicsCompatibility = matrixProofContext.PhysicsCompatibility;
         var bodySupportAxis = new ConversionMatrixProofAxis(
             Axis: "body-support",
             Coverage: conversionReadiness.TargetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase)
@@ -31337,7 +31610,7 @@ internal sealed class LocalExportService(
 
         var blockingGaps = axes
             .Where(static axis => !axis.StrictlyProven)
-            .Select(axis => BuildMatrixProofBlockingGap(axis, topologyCorrespondence, skeletonMapping, modStackCrossValidation, runtimePlan, liveGameExecution, windowsUiAutomation))
+            .Select(axis => BuildMatrixProofBlockingGap(axis, matrixProofContext, runtimePlan, liveGameExecution, windowsUiAutomation))
             .Where(static gap => !string.IsNullOrWhiteSpace(gap))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -31348,12 +31621,7 @@ internal sealed class LocalExportService(
                 ? "artifact-backed-with-targeted-gaps"
                 : "artifact-backed-with-major-gaps";
         var matrixCoordinates = BuildConversionMatrixCoordinates(
-            targetBody,
-            conversionReadiness,
-            topologyCorrespondence,
-            skeletonMapping,
-            modStackCrossValidation,
-            physicsCompatibility,
+            matrixProofContext,
             runtimePlan,
             liveGameExecution,
             windowsUiAutomation);
@@ -31383,12 +31651,17 @@ internal sealed class LocalExportService(
 
     private static string BuildMatrixProofBlockingGap(
         ConversionMatrixProofAxis axis,
-        TopologyCorrespondenceReport topologyCorrespondence,
-        SkeletonMappingResult skeletonMapping,
-        ModStackCrossValidationReport? modStackCrossValidation,
+        MatrixProofContext matrixProofContext,
         RuntimeValidationExecutionPlan runtimePlan,
         LiveGameExecutionPlan liveGameExecution,
-        WindowsUiE2EAutomationPlan windowsUiAutomation) =>
+        WindowsUiE2EAutomationPlan windowsUiAutomation)
+    {
+        var topologyCorrespondence = matrixProofContext.TopologyCorrespondence;
+        var skeletonMapping = matrixProofContext.SkeletonMapping;
+        var modStackCrossValidation = matrixProofContext.ModStackCrossValidation;
+        var partitionSignals = matrixProofContext.PartitionSignals;
+
+        return
         axis.Axis switch
         {
             "body-support" => "Target-body support metadata is not yet direct enough to treat this output as universally proven.",
@@ -31398,6 +31671,10 @@ internal sealed class LocalExportService(
                 "Topology transfer still shows radical-divergence or boundary-stability risk across hard-case focus regions.",
             "topology-transfer" =>
                 "Topology transfer still relies on heuristic or partial semantic correspondence for hard-case mesh regions.",
+            "strict-layout" when !(partitionSignals?.StrictOwnershipLayoutReady ?? true) =>
+                "Per-island ownership or boundary layout still needs direct review before strict layout proof is satisfied.",
+            "strict-layout" =>
+                "Topology ownership/layout evidence is not yet strong enough to count as strict proof across island-heavy meshes.",
             "custom-skeleton" when skeletonMapping.SourceSkeletonUsedSparseInference || skeletonMapping.UnsupportedBones.Count > 0 =>
                 "Custom skeleton coverage still depends on sparse inference or leaves unsupported bones unresolved.",
             "custom-skeleton" when !string.Equals(skeletonMapping.RemapCertainty?.Classification, "direct", StringComparison.OrdinalIgnoreCase) =>
@@ -31418,62 +31695,23 @@ internal sealed class LocalExportService(
                 "Desktop E2E remains an external Windows UI harness plan rather than an executed in-repo proof.",
             _ => $"Axis '{axis.Axis}' is not yet strictly proven."
         };
+    }
 
 
     private static IReadOnlyList<string> BuildConversionMatrixCoordinates(
-        string targetBody,
-        ConversionReadinessAssessment conversionReadiness,
-        TopologyCorrespondenceReport topologyCorrespondence,
-        SkeletonMappingResult skeletonMapping,
-        ModStackCrossValidationReport? modStackCrossValidation,
-        PhysicsCompatibilityReport physicsCompatibility,
+        MatrixProofContext matrixProofContext,
         RuntimeValidationExecutionPlan runtimePlan,
         LiveGameExecutionPlan liveGameExecution,
         WindowsUiE2EAutomationPlan windowsUiAutomation)
     {
-        var pluginMode = modStackCrossValidation is null
-            ? "plugin-free"
-            : modStackCrossValidation.RequiresLoadOrderValidation
-                ? "full-load-order-required"
-                : modStackCrossValidation.RequiresPluginPatchReview || modStackCrossValidation.AmbiguousPluginCount > 0
-                    ? "plugin-review-required"
-                    : "plugin-aware";
-        var skeletonMode = skeletonMapping.SourceSkeletonUsedSparseInference
-            ? "sparse-inference"
-                : string.Equals(skeletonMapping.RemapCertainty?.Classification, "review-backed", StringComparison.OrdinalIgnoreCase)
-                    ? "fallback-remap-review"
-                : skeletonMapping.UnsupportedBones.Count > 0
-                    ? "partial-remap"
-                : conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase)
-                    ? "safe-remap"
-                    : conversionReadiness.SkeletonRemapSafety;
-        var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
-        var hardCaseFamily = BuildTopologyHardCaseFamily(topologyCorrespondence, targetBody);
-        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping);
-        var pluginFamily = BuildPluginFamilyMatrixMode(modStackCrossValidation);
-        var masterChainMode = BuildMasterChainMatrixMode(modStackCrossValidation);
-        var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
-            ? "physics-disabled"
-            : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
-
-        return
-        [
-            $"target-body:{targetBody}",
-            $"target-body-family:{BuildTargetBodyFamily(targetBody)}",
-            $"support-tier:{conversionReadiness.SupportTier}",
-            $"topology-family:{topologyFamily}",
-            $"hard-case-family:{hardCaseFamily}",
-            $"topology-classification:{topologyCorrespondence.Classification}",
-            $"skeleton-mode:{skeletonMode}",
-            $"source-skeleton-family:{sourceSkeletonFamily}",
-            $"plugin-stack:{pluginMode}",
-            $"plugin-family:{pluginFamily}",
-            $"master-chain:{masterChainMode}",
-            $"runtime-physics:{runtimePhysicsMode}",
-            $"runtime-automation:{runtimePlan.ExecutionCoverage}",
-            $"live-game:{liveGameExecution.IntegrationCoverage}",
-            $"desktop-ui:{windowsUiAutomation.Coverage}"
-        ];
+        return BuildBaseMatrixCoordinates(matrixProofContext)
+            .Concat(
+            [
+                $"runtime-automation:{runtimePlan.ExecutionCoverage}",
+                $"live-game:{liveGameExecution.IntegrationCoverage}",
+                $"desktop-ui:{windowsUiAutomation.Coverage}"
+            ])
+            .ToArray();
     }
 
     private static string BuildTopologyMatrixFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody)
@@ -31525,6 +31763,53 @@ internal sealed class LocalExportService(
 
         return "core-humanoid";
     }
+
+    private static string BuildTopologyLayoutMatrixFamily(
+        TopologyCorrespondenceReport topologyCorrespondence,
+        PartitionSignalReport? partitionSignals)
+    {
+        if (!(partitionSignals?.StrictOwnershipLayoutReady ?? true))
+        {
+            return "ownership-layout-review";
+        }
+
+        if ((partitionSignals?.TopologyNonManifoldEdgeCount ?? 0) > 0)
+        {
+            return "non-manifold-boundary-review";
+        }
+
+        if (topologyCorrespondence.HardCaseFamily.Equals("layered-openwork", StringComparison.OrdinalIgnoreCase))
+        {
+            return "openwork-layered";
+        }
+
+        if (topologyCorrespondence.HardCaseFamily.Equals("multipart-straps-windows", StringComparison.OrdinalIgnoreCase))
+        {
+            return "multipart-windowed";
+        }
+
+        if ((partitionSignals?.TopologyIslandCount ?? 0) >= 3)
+        {
+            return "multi-island";
+        }
+
+        if ((partitionSignals?.TopologyIslandCount ?? 0) == 2)
+        {
+            return "split-island";
+        }
+
+        return "standard";
+    }
+
+    private static bool RequiresTopologyOwnershipLayoutSweep(
+        TopologyCorrespondenceReport topologyCorrespondence,
+        PartitionSignalReport? partitionSignals) =>
+        !(partitionSignals?.StrictOwnershipLayoutReady ?? true) ||
+        (partitionSignals?.TopologyIslandCount ?? 0) > 1 ||
+        (partitionSignals?.TopologyNonManifoldEdgeCount ?? 0) > 0 ||
+        topologyCorrespondence.HeuristicHeavy ||
+        topologyCorrespondence.HardCaseFamily.Equals("layered-openwork", StringComparison.OrdinalIgnoreCase) ||
+        topologyCorrespondence.HardCaseFamily.Equals("multipart-straps-windows", StringComparison.OrdinalIgnoreCase);
 
     private static string BuildTopologyHardCaseFamily(TopologyCorrespondenceReport topologyCorrespondence, string targetBody) =>
         BuildTopologyHardCaseFamily(BuildTopologyClassificationSignals(topologyCorrespondence, targetBody));
@@ -31670,6 +31955,58 @@ internal sealed class LocalExportService(
         return normalized.Replace(' ', '-');
     }
 
+    private static IReadOnlyList<string> BuildBaseMatrixCoordinates(MatrixProofContext matrixProofContext)
+    {
+        var targetBody = matrixProofContext.TargetBody;
+        var conversionReadiness = matrixProofContext.ConversionReadiness;
+        var topologyCorrespondence = matrixProofContext.TopologyCorrespondence;
+        var skeletonMapping = matrixProofContext.SkeletonMapping;
+        var modStackCrossValidation = matrixProofContext.ModStackCrossValidation;
+        var physicsCompatibility = matrixProofContext.PhysicsCompatibility;
+        var topologyFamily = BuildTopologyMatrixFamily(topologyCorrespondence, targetBody);
+        var topologyLayoutFamily = BuildTopologyLayoutMatrixFamily(topologyCorrespondence, matrixProofContext.PartitionSignals);
+        var hardCaseFamily = BuildTopologyHardCaseFamily(topologyCorrespondence, targetBody);
+        var sourceSkeletonFamily = BuildSourceSkeletonMatrixFamily(skeletonMapping);
+        var pluginMode = modStackCrossValidation is null
+            ? "plugin-free"
+            : modStackCrossValidation.RequiresLoadOrderValidation
+                ? "full-load-order-required"
+                : modStackCrossValidation.RequiresPluginPatchReview || modStackCrossValidation.AmbiguousPluginCount > 0
+                    ? "plugin-review-required"
+                    : "plugin-aware";
+        var skeletonMode = skeletonMapping.SourceSkeletonUsedSparseInference
+            ? "sparse-inference"
+            : string.Equals(skeletonMapping.RemapCertainty?.Classification, "review-backed", StringComparison.OrdinalIgnoreCase)
+                ? "fallback-remap-review"
+            : skeletonMapping.UnsupportedBones.Count > 0
+                ? "partial-remap"
+            : conversionReadiness.SkeletonRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase)
+                ? "safe-remap"
+                : conversionReadiness.SkeletonRemapSafety;
+        var pluginFamily = BuildPluginFamilyMatrixMode(modStackCrossValidation);
+        var masterChainMode = BuildMasterChainMatrixMode(modStackCrossValidation);
+        var runtimePhysicsMode = string.Equals(physicsCompatibility.RequestedProfile, "none", StringComparison.OrdinalIgnoreCase)
+            ? "physics-disabled"
+            : $"{physicsCompatibility.RequestedProfile}-{physicsCompatibility.CollisionComplexity}";
+
+        return
+        [
+            $"target-body:{targetBody}",
+            $"target-body-family:{BuildTargetBodyFamily(targetBody)}",
+            $"support-tier:{conversionReadiness.SupportTier}",
+            $"topology-family:{topologyFamily}",
+            $"topology-layout-family:{topologyLayoutFamily}",
+            $"hard-case-family:{hardCaseFamily}",
+            $"topology-classification:{topologyCorrespondence.Classification}",
+            $"skeleton-mode:{skeletonMode}",
+            $"source-skeleton-family:{sourceSkeletonFamily}",
+            $"plugin-stack:{pluginMode}",
+            $"plugin-family:{pluginFamily}",
+            $"master-chain:{masterChainMode}",
+            $"runtime-physics:{runtimePhysicsMode}"
+        ];
+    }
+
     private static string BuildPluginFamilyMatrixMode(ModStackCrossValidationReport? modStackCrossValidation)
     {
         if (modStackCrossValidation is null)
@@ -31713,24 +32050,34 @@ internal sealed class LocalExportService(
     private static RuntimeAutomationHarness BuildRuntimeAutomationHarness(
         InGameValidationReport report,
         IReadOnlyList<RuntimeValidationExecutionStep> steps,
-        IReadOnlyList<string> limitationNotes)
+        IReadOnlyList<string> limitationNotes,
+        MatrixProofContext matrixProofContext)
     {
         var probes = steps
-            .Select(step => new RuntimeAutomationHarnessProbe(
-            ProbeId: BuildRuntimeAutomationProbeId(step),
-            step.Phase,
-            step.Priority,
-            step.Objective,
-            DispatchActions: BuildRuntimeDispatchActions(step),
-            ExpectedAssertions: BuildRuntimeExpectedAssertions(step),
-            FailureSignals: BuildRuntimeFailureSignals(step),
-            step.FocusRegions,
-            step.RelatedArtifacts,
-            step.BlocksRelease,
-            RequiresManualAssertion: step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
-                                     step.BlocksRelease,
-            RequiresFullLoadOrderLaunch: step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
-                                         step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase)))
+            .Select(step =>
+            {
+                var proofAxes = BuildProofAxesForRelatedArtifacts(step.Name, step.RelatedArtifacts, "runtime-automation");
+                return new RuntimeAutomationHarnessProbe(
+                    ProbeId: BuildRuntimeAutomationProbeId(step),
+                    step.Phase,
+                    step.Priority,
+                    step.Objective,
+                    DispatchActions: BuildRuntimeDispatchActions(step),
+                    ExpectedAssertions: BuildRuntimeExpectedAssertions(step),
+                    FailureSignals: BuildRuntimeFailureSignals(step),
+                    step.FocusRegions,
+                    step.RelatedArtifacts,
+                    step.BlocksRelease,
+                    RequiresManualAssertion: step.Phase.Contains("live-runtime", StringComparison.OrdinalIgnoreCase) ||
+                                             step.BlocksRelease,
+                    RequiresFullLoadOrderLaunch: step.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+                                                 step.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase),
+                    ProofAxes: proofAxes,
+                    MatrixCoordinatesTargeted: BuildTargetedMatrixCoordinates(
+                        matrixProofContext,
+                        proofAxes,
+                        runtimeCoverage: "external-harness-ready"));
+            })
             .ToArray();
 
         var bootstrapContract = new ExternalHarnessBootstrapContract(
@@ -33147,6 +33494,7 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> beastRegions,
         IReadOnlyList<string> wingRegions,
         TopologyCorrespondenceReport topologyCorrespondence,
+        PartitionSignalReport? partitionSignals,
         bool manualCleanupLikely,
         SkeletonMappingResult skeletonMapping,
         PluginAnalysisResult? pluginAnalysis,
@@ -33209,6 +33557,28 @@ internal sealed class LocalExportService(
                ["idle", "turn", "crouch", "jump / landing"],
                topologyCorrespondence.FocusRegions.Count > 0 ? topologyCorrespondence.FocusRegions : coreRegions,
                ["topology-correspondence.json", "preview-workbench.html", "conversion-quality.json"]));
+        }
+
+        if (RequiresTopologyOwnershipLayoutSweep(topologyCorrespondence, partitionSignals))
+        {
+            var topologyLayoutFamily = BuildTopologyLayoutMatrixFamily(topologyCorrespondence, partitionSignals);
+            var islandCount = partitionSignals?.TopologyIslandCount ?? 0;
+            var layoutViolationCount = partitionSignals?.OwnershipLayoutViolations?.Count ?? 0;
+            var layoutPriority = (!partitionSignals?.StrictOwnershipLayoutReady ?? false) ||
+                                (partitionSignals?.TopologyNonManifoldEdgeCount ?? 0) > 0
+               ? "High"
+               : "Action";
+            scenarios.Add(new InGameValidationScenario(
+               "Per-island ownership/layout sweep",
+               layoutPriority,
+               $"Topology layout family '{topologyLayoutFamily}' requires deeper ownership review for {targetBody}; inspect {islandCount} island(s) and {layoutViolationCount} ownership/layout warning(s) before treating the hardest-case transfer as strict-proof-ready.",
+               ["preview compare", "equip", "crouch", "jump / landing"],
+               topologyCorrespondence.UnmatchedFocusRegions.Count > 0
+                  ? topologyCorrespondence.UnmatchedFocusRegions
+                  : topologyCorrespondence.FocusRegions.Count > 0
+                      ? topologyCorrespondence.FocusRegions
+                      : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
+               ["topology-correspondence.json", "conversion-quality.json", "preview-workbench.html"]));
         }
 
         if (topologyCorrespondence.HardCaseFamily.Equals("footwear-world-mesh", StringComparison.OrdinalIgnoreCase))
