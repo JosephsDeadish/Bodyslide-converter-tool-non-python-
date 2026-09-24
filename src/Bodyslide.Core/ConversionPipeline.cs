@@ -604,6 +604,7 @@ public sealed record LiveGameExecutionScenarioProfile(
     string ValidationSaveProfile,
     IReadOnlyList<string> DispatchActions,
     IReadOnlyList<string> SuccessSignals,
+    IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease,
     IReadOnlyList<string>? ProofAxes = null,
@@ -641,6 +642,7 @@ public sealed record LiveGameExecutionProbe(
 public sealed record RuntimeObservationScenarioContract(
     string Scenario,
     string ValidationSaveProfile,
+    IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RequiredSuccessSignals,
     IReadOnlyList<string> BlockingFailureSignals,
     IReadOnlyList<string> EvidenceArtifacts,
@@ -771,6 +773,7 @@ public sealed record WindowsUiE2EFlowProfile(
     string EntryPointSelector,
     IReadOnlyList<string> RequiredSelectors,
     IReadOnlyList<string> RelatedArtifacts,
+    IReadOnlyList<string> FocusRegions,
     bool BlocksRelease,
     IReadOnlyList<string>? ProofAxes = null,
     IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
@@ -30789,6 +30792,7 @@ internal sealed class LocalExportService(
                 return new RuntimeObservationScenarioContract(
                     Scenario: profile.Name,
                     ValidationSaveProfile: profile.ValidationSaveProfile,
+                    FocusRegions: profile.FocusRegions,
                     RequiredSuccessSignals: BuildRuntimeObservationSuccessSignals(profile, matchingProbe),
                     BlockingFailureSignals: BuildRuntimeObservationFailureSignals(profile, matchingProbe),
                     EvidenceArtifacts: profile.RelatedArtifacts,
@@ -31100,6 +31104,7 @@ internal sealed class LocalExportService(
                     ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
                     DispatchActions: probe.DispatchActions,
                     SuccessSignals: probe.ExpectedAssertions,
+                    FocusRegions: probe.FocusRegions,
                     RelatedArtifacts: probe.RelatedArtifacts,
                     BlocksRelease: probe.BlocksRelease,
                     ProofAxes: proofAxes,
@@ -31193,17 +31198,42 @@ internal sealed class LocalExportService(
         bool blocksRelease)
     {
         var proofAxes = BuildProofAxesForRelatedArtifacts(name, relatedArtifacts, "desktop-e2e");
+        var focusRegions = BuildWindowsUiFlowFocusRegions(matrixProofContext, proofAxes);
         return new WindowsUiE2EFlowProfile(
             Name: name,
             EntryPointSelector: entryPointSelector,
             RequiredSelectors: requiredSelectors,
             RelatedArtifacts: relatedArtifacts,
+            FocusRegions: focusRegions,
             BlocksRelease: blocksRelease,
             ProofAxes: proofAxes,
             MatrixCoordinatesTargeted: BuildTargetedMatrixCoordinates(
                 matrixProofContext,
                 proofAxes,
                 desktopCoverage: "external-windows-ui-harness-ready"));
+    }
+
+    private static IReadOnlyList<string> BuildWindowsUiFlowFocusRegions(
+        MatrixProofContext matrixProofContext,
+        IReadOnlyCollection<string> proofAxes)
+    {
+        if (!proofAxes.Contains("topology-transfer", StringComparer.OrdinalIgnoreCase) &&
+            !proofAxes.Contains("strict-layout", StringComparer.OrdinalIgnoreCase) &&
+            !proofAxes.Contains("custom-skeleton", StringComparer.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        var topologyCorrespondence = matrixProofContext.TopologyCorrespondence;
+        var preferredRegions = topologyCorrespondence.UnmatchedFocusRegions.Count > 0
+            ? topologyCorrespondence.UnmatchedFocusRegions
+            : topologyCorrespondence.FocusRegions;
+
+        return preferredRegions
+            .Where(static region => !string.IsNullOrWhiteSpace(region))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(6)
+            .ToArray();
     }
 
     private static IReadOnlyList<string> BuildWindowsUiMatrixCombinations(

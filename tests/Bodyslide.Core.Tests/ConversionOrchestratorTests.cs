@@ -18092,6 +18092,8 @@ public sealed class RealisticModPackFixtureTests
             var orchestrator = StandaloneConversionModules.CreateDefault();
             var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
             Assert.True(result.Success);
+            Assert.True(SkeletonFoundationAliasCatalog.TryResolve("Digitigrade beast hybrid skeleton", out var canonicalFoundation));
+            Assert.Equal("digitigrade-beast", canonicalFoundation);
 
             var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
             Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
@@ -18112,8 +18114,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(inGameReport.RootElement.GetProperty("ManualCleanupLikely").GetBoolean());
             Assert.Equal("experimental-manual-cleanup", inGameReport.RootElement.GetProperty("SupportTier").GetString());
             Assert.Equal("unsafe", inGameReport.RootElement.GetProperty("ConversionReadiness").GetProperty("SkeletonRemapSafety").GetString());
-            Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString()));
+            Assert.Equal("Alien Hybrid", inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("ObservedTokenCount").GetInt32() > 0);
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("CorrespondenceScope").GetString()));
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString()));
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("HardCaseFamily").GetString()));
@@ -18134,6 +18137,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("\"UnmatchedFocusRegions\"", topologyJson, StringComparison.Ordinal);
             using var topologyReport = JsonDocument.Parse(topologyJson);
             Assert.Equal("Alien Hybrid", topologyReport.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Equal("Alien Hybrid", topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticAnchorProfile").GetString());
+            Assert.True(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UsesTrueSemanticCorrespondence").GetBoolean());
             Assert.False(string.IsNullOrWhiteSpace(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString()));
             Assert.False(string.IsNullOrWhiteSpace(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("HardCaseFamily").GetString()));
             Assert.False(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("StrictTransferReady").GetBoolean());
@@ -18253,6 +18258,9 @@ public sealed class RealisticModPackFixtureTests
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
                 static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("FocusRegions").GetArrayLength()),
+                static count => count > 0);
+            Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
                     item.GetProperty("ProofAxes").EnumerateArray().Select(static axis => axis.GetString())),
                 static axis => string.Equals(axis, "live-game-execution", StringComparison.OrdinalIgnoreCase));
@@ -18267,6 +18275,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("HostEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static artifact => string.Equals(artifact, "partition-slot-snapshots/", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Scenarios").EnumerateArray().Select(static scenario => scenario.GetProperty("FocusRegions").GetArrayLength()),
+                static count => count > 0);
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Scenarios").EnumerateArray().SelectMany(static scenario =>
                     scenario.GetProperty("RequiredSuccessSignals").EnumerateArray().Select(static item => item.GetString())),
@@ -18429,6 +18440,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "hardcase-proof-artifact-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray()
+                    .Where(static profile => string.Equals(profile.GetProperty("Name").GetString(), "hardcase-proof-artifact-review", StringComparison.OrdinalIgnoreCase))
+                    .Select(static profile => profile.GetProperty("FocusRegions").GetArrayLength()),
+                static count => count > 0);
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().SelectMany(static profile =>
                     profile.GetProperty("ProofAxes").EnumerateArray().Select(static axis => axis.GetString())),

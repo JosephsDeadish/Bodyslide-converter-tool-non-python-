@@ -161,6 +161,43 @@
     }
   },
   {
+    "name": "Alien Hybrid",
+    "aliases": ["Sparse Alien Hybrid", "Mawbind Alien"],
+    "anchors": {
+      "belly": ["NPC Belly", "Belly"],
+      "thighs": ["Thighs", "PawWidth"],
+      "tail": ["NPC Tail", "Tail1", "Tail2", "TailSheath", "TailBase"],
+      "feet": ["PawFront.L", "PawFront.R", "PawRear.L", "PawRear.R", "PawPad"],
+      "mouth": ["JawLower", "TongueMid", "TongueTip", "Maw"],
+      "genitals": ["BeastForeskin", "BeastGlans", "BeastKnot", "BeastVagina", "BeastAnus", "SheathLength"]
+    },
+    "landmarks": {
+      "belly": [
+        { "label": "navel", "x": 0.50, "y": 0.54, "z": 0.57 }
+      ],
+      "thighs": [
+        { "label": "left-haunch", "x": 0.37, "y": 0.55, "z": 0.30 },
+        { "label": "right-haunch", "x": 0.63, "y": 0.55, "z": 0.30 }
+      ],
+      "tail": [
+        { "label": "tail-root", "x": 0.50, "y": 0.79, "z": 0.21 },
+        { "label": "tail-mid", "x": 0.50, "y": 0.89, "z": 0.17 }
+      ],
+      "feet": [
+        { "label": "left-forepaw", "x": 0.36, "y": 0.59, "z": 0.08 },
+        { "label": "right-forepaw", "x": 0.64, "y": 0.59, "z": 0.08 }
+      ],
+      "mouth": [
+        { "label": "maw-center", "x": 0.50, "y": 0.59, "z": 0.87 },
+        { "label": "tongue-base", "x": 0.50, "y": 0.57, "z": 0.83 }
+      ],
+      "genitals": [
+        { "label": "sheath-root", "x": 0.50, "y": 0.60, "z": 0.20 },
+        { "label": "rear-groin", "x": 0.50, "y": 0.53, "z": 0.18 }
+      ]
+    }
+  },
+  {
     "name": "Equine Humanoid",
     "aliases": ["Mareform", "Centaur Humanoid"],
     "anchors": {
