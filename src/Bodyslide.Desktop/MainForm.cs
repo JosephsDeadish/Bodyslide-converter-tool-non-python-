@@ -103,6 +103,7 @@ public sealed class MainForm : Form
     private string? _autoDetectedSourceBody;
     private double? _autoDetectedSourceConfidence;
     private bool _suppressThemeSelectionChanged;
+    private bool _suppressTargetSelectionChanged;
     private bool _allowUserMainSplitOverride;
     private bool _userAdjustedMainSplit;
     private int? _userPreferredMainSplitDistance;
@@ -317,8 +318,20 @@ public sealed class MainForm : Form
             Text = "Manual mode (I will choose the TO body)",
             AutoSize = true,
         };
-        _usePresetRadio.CheckedChanged += (_, _) => RefreshModeState();
-        _useCustomTargetRadio.CheckedChanged += (_, _) => RefreshModeState();
+        _usePresetRadio.CheckedChanged += (_, _) =>
+        {
+            if (_usePresetRadio.Checked)
+            {
+                RefreshModeState();
+            }
+        };
+        _useCustomTargetRadio.CheckedChanged += (_, _) =>
+        {
+            if (_useCustomTargetRadio.Checked)
+            {
+                RefreshModeState();
+            }
+        };
         modeSelectorPanel.Controls.Add(_usePresetRadio);
         modeSelectorPanel.Controls.Add(_useCustomTargetRadio);
         modeRow.Controls.Add(modeSelectorPanel, 0, 1);
@@ -431,11 +444,21 @@ public sealed class MainForm : Form
         }
         _targetComboBox.SelectedIndexChanged += (_, _) =>
         {
+            if (_suppressTargetSelectionChanged)
+            {
+                return;
+            }
+
             UpdateTargetDetails();
             UpdatePhysicsDetails();
         };
         _targetComboBox.TextChanged += (_, _) =>
         {
+            if (_suppressTargetSelectionChanged)
+            {
+                return;
+            }
+
             UpdateTargetDetails();
             UpdatePhysicsDetails();
         };
@@ -1067,10 +1090,7 @@ public sealed class MainForm : Form
         RefreshModeState();
         UpdateResponsiveLayout();
         UpdateMainSplitLayout();
-        UpdatePresetDetails();
-        UpdateTargetDetails();
         UpdateSourceDetails();
-        UpdatePhysicsDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
         PopulateGuidanceTab(Array.Empty<string>(), null);
@@ -1741,7 +1761,18 @@ public sealed class MainForm : Form
             var targetIndex = _targetComboBox.FindStringExact(preset.TargetBody);
             if (targetIndex >= 0)
             {
-                _targetComboBox.SelectedIndex = targetIndex;
+                try
+                {
+                    _suppressTargetSelectionChanged = true;
+                    if (_targetComboBox.SelectedIndex != targetIndex)
+                    {
+                        _targetComboBox.SelectedIndex = targetIndex;
+                    }
+                }
+                finally
+                {
+                    _suppressTargetSelectionChanged = false;
+                }
             }
         }
 
