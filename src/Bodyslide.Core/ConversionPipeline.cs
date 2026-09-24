@@ -615,6 +615,8 @@ public sealed record RuntimeAutomationHarness(
     string TargetBody,
     string ValidationGate,
     string AutomationCoverage,
+    IReadOnlyList<string> BlockingProofAxes,
+    IReadOnlyList<string> MatrixCombinationsTargeted,
     bool RequiresExternalGameHarness,
     bool RequiresModdedTestEnvironment,
     bool SupportsArtifactPreflightAutomation,
@@ -652,6 +654,8 @@ public sealed record LiveGameExecutionPlan(
     string TargetBody,
     string ValidationGate,
     string IntegrationCoverage,
+    IReadOnlyList<string> BlockingProofAxes,
+    IReadOnlyList<string> MatrixCombinationsTargeted,
     bool RequiresWindowsHost,
     bool RequiresExternalHarness,
     bool RequiresSkseOrEquivalentLauncher,
@@ -758,6 +762,8 @@ public sealed record WindowsUiE2EFlowProfile(
     bool BlocksRelease);
 public sealed record WindowsUiE2EAutomationPlan(
     string Coverage,
+    IReadOnlyList<string> BlockingProofAxes,
+    IReadOnlyList<string> MatrixCombinationsTargeted,
     bool RequiresWindowsHost,
     bool RequiresExternalUiHarness,
     bool RequiresEmbeddedPreviewRuntimeForInAppPreview,
@@ -30716,6 +30722,19 @@ internal sealed class LocalExportService(
             runtimePlan.TargetBody,
             runtimePlan.ValidationGate,
             "external-live-game-harness",
+            BlockingProofAxes:
+            [
+                "live-game-execution",
+                "plugin-modstack",
+                "body-support",
+                "strict-layout"
+            ],
+            MatrixCombinationsTargeted:
+            [
+                "body-skeleton-plugin-runtime",
+                "body-hardcase-runtime",
+                "hardcase-skeleton-master"
+            ],
             RequiresWindowsHost: true,
             RequiresExternalHarness: runtimePlan.RequiresExternalGameHarness,
             RequiresSkseOrEquivalentLauncher: true,
@@ -30979,6 +30998,16 @@ internal sealed class LocalExportService(
 
         return new WindowsUiE2EAutomationPlan(
             Coverage: "external-windows-ui-harness-ready",
+            BlockingProofAxes:
+            [
+                "desktop-e2e",
+                "topology-transfer",
+                "strict-layout"
+            ],
+            MatrixCombinationsTargeted:
+            [
+                "body-skeleton-plugin-runtime"
+            ],
             RequiresWindowsHost: true,
             RequiresExternalUiHarness: true,
             RequiresEmbeddedPreviewRuntimeForInAppPreview: true,
@@ -31743,6 +31772,19 @@ internal sealed class LocalExportService(
             report.TargetBody,
             report.ValidationGate,
             "external-harness-ready",
+            BlockingProofAxes:
+            [
+                "runtime-automation",
+                "topology-transfer",
+                "custom-skeleton",
+                "plugin-modstack"
+            ],
+            MatrixCombinationsTargeted:
+            [
+                "body-skeleton-plugin-runtime",
+                "body-hardcase-runtime",
+                "hardcase-skeleton-master"
+            ],
             RequiresExternalGameHarness: true,
             RequiresModdedTestEnvironment: true,
             SupportsArtifactPreflightAutomation: true,

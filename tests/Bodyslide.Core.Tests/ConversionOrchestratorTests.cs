@@ -16030,6 +16030,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Windows host required", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness automation coverage", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Harness probes", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Blocking proof axes", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Contains("desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Matrix combinations targeted", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Contains("body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Live-game integration coverage", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Host capabilities", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Supported UI flows", StringComparison.OrdinalIgnoreCase));
@@ -18162,6 +18166,15 @@ public sealed class RealisticModPackFixtureTests
             using var runtimeHarness = JsonDocument.Parse(runtimeHarnessJson);
             Assert.Equal("runtime-validation-runner", runtimeHarness.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
             Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "custom-skeleton", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                runtimeHarness.RootElement.GetProperty("MatrixCombinationsTargeted").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 runtimeHarness.RootElement.GetProperty("BootstrapContract").GetProperty("LaunchActions").EnumerateArray().Select(static item => item.GetString()),
                 static action => string.Equals(action, "dispatch-probes-by-phase", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -18183,6 +18196,15 @@ public sealed class RealisticModPackFixtureTests
             using var liveGameExecution = JsonDocument.Parse(liveGameExecutionJson);
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.True(liveGameExecution.RootElement.GetProperty("RequiresSkseOrEquivalentLauncher").GetBoolean());
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "live-game-execution", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "strict-layout", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("MatrixCombinationsTargeted").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "hardcase-skeleton-master", StringComparison.OrdinalIgnoreCase));
             Assert.Equal("skyrim-live-game-external-runner", liveGameExecution.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
             Assert.Equal("pending-external-harness", liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("Status").GetString());
             Assert.Contains(
@@ -18357,6 +18379,15 @@ public sealed class RealisticModPackFixtureTests
             using var windowsUiAutomation = JsonDocument.Parse(windowsUiAutomationJson);
             Assert.True(windowsUiAutomation.RootElement.GetProperty("RequiresWindowsHost").GetBoolean());
             Assert.Equal("windows-ui-e2e-runner", windowsUiAutomation.RootElement.GetProperty("BootstrapContract").GetProperty("HarnessKind").GetString());
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "desktop-e2e", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("BlockingProofAxes").EnumerateArray().Select(static item => item.GetString()),
+                static axis => string.Equals(axis, "topology-transfer", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("MatrixCombinationsTargeted").EnumerateArray().Select(static item => item.GetString()),
+                static combination => string.Equals(combination, "body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("BootstrapContract").GetProperty("LaunchActions").EnumerateArray().Select(static item => item.GetString()),
                 static action => string.Equals(action, "attach-winforms-uia-driver", StringComparison.OrdinalIgnoreCase));

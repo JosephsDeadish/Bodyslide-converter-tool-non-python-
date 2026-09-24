@@ -440,6 +440,8 @@ internal static class DesktopWorkflowAutomation
                 case "runtime-validation-harness.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Harness automation coverage", TryReadString(root, "AutomationCoverage"), filePath);
+                    Add(metrics, reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    Add(metrics, reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     Add(metrics, reportName, "Artifact preflight automation", FormatBool(TryReadBoolValue(root, "SupportsArtifactPreflightAutomation")), filePath);
                     Add(metrics, reportName, "Scenario dispatch automation", FormatBool(TryReadBoolValue(root, "SupportsScenarioDispatchAutomation")), filePath);
                     Add(metrics, reportName, "Manual assertion required", FormatBool(TryReadBoolValue(root, "RequiresManualAssertion")), filePath);
@@ -451,6 +453,8 @@ internal static class DesktopWorkflowAutomation
                 case "live-game-execution.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    Add(metrics, reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    Add(metrics, reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
                     Add(metrics, reportName, "External live-game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalHarness")), filePath);
                     Add(metrics, reportName, "SKSE launcher required", FormatBool(TryReadBoolValue(root, "RequiresSkseOrEquivalentLauncher")), filePath);
@@ -551,6 +555,8 @@ internal static class DesktopWorkflowAutomation
                     break;
                 case "windows-ui-e2e-automation.json":
                     Add(metrics, reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    Add(metrics, reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    Add(metrics, reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
                     Add(metrics, reportName, "External UI harness", FormatBool(TryReadBoolValue(root, "RequiresExternalUiHarness")), filePath);
                     Add(metrics, reportName, "Embedded preview runtime required", FormatBool(TryReadBoolValue(root, "RequiresEmbeddedPreviewRuntimeForInAppPreview")), filePath);

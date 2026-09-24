@@ -4227,6 +4227,8 @@ public sealed class MainForm : Form
                 case "runtime-validation-harness.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Harness automation coverage", TryReadString(root, "AutomationCoverage"), filePath);
+                    AddReportMetric(reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    AddReportMetric(reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     AddReportMetric(reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
                     AddReportMetric(reportName, "Modded test environment", FormatBool(TryReadBoolValue(root, "RequiresModdedTestEnvironment")), filePath);
                     AddReportMetric(reportName, "Artifact preflight automation", FormatBool(TryReadBoolValue(root, "SupportsArtifactPreflightAutomation")), filePath);
@@ -4238,6 +4240,8 @@ public sealed class MainForm : Form
                 case "live-game-execution.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     AddReportMetric(reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    AddReportMetric(reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    AddReportMetric(reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
                     AddReportMetric(reportName, "External live-game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalHarness")), filePath);
                     AddReportMetric(reportName, "SKSE launcher required", FormatBool(TryReadBoolValue(root, "RequiresSkseOrEquivalentLauncher")), filePath);
@@ -4318,6 +4322,8 @@ public sealed class MainForm : Form
                     break;
                 case "windows-ui-e2e-automation.json":
                     AddReportMetric(reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    AddReportMetric(reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
+                    AddReportMetric(reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
                     AddReportMetric(reportName, "External UI harness", FormatBool(TryReadBoolValue(root, "RequiresExternalUiHarness")), filePath);
                     AddReportMetric(reportName, "Embedded preview runtime required", FormatBool(TryReadBoolValue(root, "RequiresEmbeddedPreviewRuntimeForInAppPreview")), filePath);
