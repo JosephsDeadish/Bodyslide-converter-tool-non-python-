@@ -8,6 +8,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+            Environment.ProcessPath,
+            AppContext.BaseDirectory);
         RegisterGlobalExceptionHandlers();
 
         if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))

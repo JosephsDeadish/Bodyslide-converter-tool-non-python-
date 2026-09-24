@@ -7034,8 +7034,7 @@ public sealed class ConversionOrchestrator(
             }
 
             var defaultOutput = Path.Combine(
-                Environment.CurrentDirectory,
-                "output",
+                ExecutionEnvironment.GetDefaultOutputRoot(),
                 normalized.Request.TargetBody,
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
             var outputDirectory = Path.GetFullPath(normalized.Request.OutputDirectory ?? defaultOutput);
@@ -7616,7 +7615,7 @@ public sealed class ConversionOrchestrator(
             exclusions.Add(Path.GetFullPath(request.SharedPluginOutputDirectory));
         }
 
-        exclusions.Add(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output")));
+        exclusions.Add(Path.GetFullPath(ExecutionEnvironment.GetDefaultOutputRoot()));
 
         return exclusions.ToList();
     }
@@ -7806,7 +7805,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         {
             var variant = variants[0];
             var rootOutput = request.OutputDirectory ??
-                Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, "batch");
+                Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, "batch");
             var resultsWithPaths = await ConvertMeshSetAsync(processableMeshFiles, variant.Request, rootOutput, processableMeshFiles.Count, progress, cancellationToken);
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, rootOutput, cancellationToken);
             return resultsWithPaths.Select(x => x.Result).ToList();
@@ -7962,8 +7961,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         }
 
         return batchMode
-            ? Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment, "batch")
-            : Path.Combine(Environment.CurrentDirectory, "output", variant.OutputSegment);
+            ? Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), variant.OutputSegment, "batch")
+            : Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), variant.OutputSegment);
     }
 
     private static IReadOnlyList<string> BuildExcludedScanDirectories(ConversionRequest request)
@@ -7975,7 +7974,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             exclusions.Add(Path.GetFullPath(request.OutputDirectory));
         }
 
-        var defaultOutputRoot = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "output"));
+        var defaultOutputRoot = Path.GetFullPath(ExecutionEnvironment.GetDefaultOutputRoot());
         exclusions.Add(defaultOutputRoot);
 
         return exclusions.ToList();
@@ -19175,7 +19174,7 @@ internal sealed class LocalExportService(
         VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken)
     {
-        var defaultOutput = Path.Combine(Environment.CurrentDirectory, "output", request.TargetBody, Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
+        var defaultOutput = Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), request.TargetBody, Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
         var outputDirectory = Path.GetFullPath(request.OutputDirectory ?? defaultOutput);
         Directory.CreateDirectory(outputDirectory);
         mesh = mesh with { DeformationCage = BuildExportDeformationCage(armor.MeshFiles, mesh.DeformationCage) };

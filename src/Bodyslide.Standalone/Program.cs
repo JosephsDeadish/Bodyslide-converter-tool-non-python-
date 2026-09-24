@@ -3,6 +3,10 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 
+ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+    Environment.ProcessPath,
+    AppContext.BaseDirectory);
+
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
 if (TryLaunchDesktopGuiOnWindows(args))
