@@ -58,6 +58,9 @@ public sealed class MainForm : Form
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _statusLabel;
     private readonly Label _modeStatusLabel;
+    private readonly Label _targetSelectionLabel;
+    private readonly Label _targetModeHintLabel;
+    private readonly Label _targetBatchLabel;
     private readonly Label _presetDetailsLabel;
     private readonly Label _targetDetailsLabel;
     private readonly Label _sourceDetailsLabel;
@@ -92,6 +95,7 @@ public sealed class MainForm : Form
     private readonly TableLayoutPanel _conversionOptionsPanel;
     private readonly GroupBox _destinationSetupGroupBox;
     private readonly GroupBox _sourceHintsGroupBox;
+    private readonly TextBox _presetTargetTextBox;
 
     private CancellationTokenSource? _activeConversion;
     private string? _lastOutputDirectory;
@@ -399,7 +403,7 @@ public sealed class MainForm : Form
         leftOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var conversionGuideLabel = new Label
         {
-            Text = "Use a preset when you want one named output setup. Presets choose the destination body, slider shape, and default output physics for you.",
+            Text = "Use a preset when you want one named output setup. Preset mode locks the TO body automatically. Switch to Manual mode only when you want to choose one or more TO bodies yourself.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
@@ -434,7 +438,27 @@ public sealed class MainForm : Form
             PlaceholderText = "Example: 3BA Curvy, HIMBO Lean",
         };
         leftOptions.Controls.Add(_presetBatchTextBox, 1, 2);
-        leftOptions.Controls.Add(new Label { Text = "To body / destination body", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 3);
+        _targetSelectionLabel = new Label
+        {
+            Text = "TO body from preset",
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+        };
+        leftOptions.Controls.Add(_targetSelectionLabel, 0, 3);
+        var targetSelectorPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        _presetTargetTextBox = new TextBox
+        {
+            Name = "presetTargetBodyTextBox",
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            TabStop = false,
+        };
         _targetComboBox = new ComboBox
         {
             Name = "targetBodyComboBox",
@@ -470,16 +494,42 @@ public sealed class MainForm : Form
             UpdateTargetDetails();
             UpdatePhysicsDetails();
         };
-        leftOptions.Controls.Add(_targetComboBox, 1, 3);
-        leftOptions.Controls.Add(new Label { Text = "Destination body batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 4);
+        targetSelectorPanel.Controls.Add(_presetTargetTextBox);
+        targetSelectorPanel.Controls.Add(_targetComboBox);
+        leftOptions.Controls.Add(targetSelectorPanel, 1, 3);
+        _targetModeHintLabel = new Label
+        {
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+            MaximumSize = new Size(420, 0),
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        leftOptions.Controls.Add(_targetModeHintLabel, 0, 4);
+        leftOptions.SetColumnSpan(_targetModeHintLabel, 2);
+        _targetBatchLabel = new Label
+        {
+            Text = "Destination body batch list (optional)",
+            Anchor = AnchorStyles.Left,
+            AutoSize = true,
+        };
+        leftOptions.Controls.Add(_targetBatchLabel, 0, 5);
         _targetBatchTextBox = new TextBox
         {
             Name = "targetBatchTextBox",
             Dock = DockStyle.Fill,
-            PlaceholderText = "Example: CBBE, 3BA, HIMBO",
+            PlaceholderText = "Example: 3BA, HIMBO (mixed female + male pack)",
         };
-        leftOptions.Controls.Add(_targetBatchTextBox, 1, 4);
-        leftOptions.Controls.Add(new Label(), 0, 5);
+        leftOptions.Controls.Add(_targetBatchTextBox, 1, 5);
+        leftOptions.Controls.Add(new Label(), 0, 6);
+        var mixedTargetsButton = new Button
+        {
+            Name = "mixedTargetsButton",
+            Text = "Mixed female + male pack",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 2, 8, 4),
+        };
+        mixedTargetsButton.Click += (_, _) => ApplySuggestedMixedGenderTargets();
         var allBodiesButton = new Button
         {
             Name = "allBodiesButton",
@@ -494,23 +544,34 @@ public sealed class MainForm : Form
             _targetBatchTextBox.Text = "all";
             AppendLog("Destination set to all supported body types.");
         };
-        leftOptions.Controls.Add(allBodiesButton, 1, 5);
-        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 6);
+        var targetBatchActions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            WrapContents = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            Dock = DockStyle.Fill,
+        };
+        targetBatchActions.Controls.Add(mixedTargetsButton);
+        targetBatchActions.Controls.Add(allBodiesButton);
+        leftOptions.Controls.Add(targetBatchActions, 1, 6);
+        leftOptions.Controls.Add(new Label { Text = "Preset details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
         _presetDetailsLabel = new Label
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
         };
-        leftOptions.Controls.Add(_presetDetailsLabel, 1, 6);
-        leftOptions.Controls.Add(new Label { Text = "Destination body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 7);
+        leftOptions.Controls.Add(_presetDetailsLabel, 1, 7);
+        leftOptions.Controls.Add(new Label { Text = "Destination body details", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 8);
         _targetDetailsLabel = new Label
         {
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
         };
-        leftOptions.Controls.Add(_targetDetailsLabel, 1, 7);
+        leftOptions.Controls.Add(_targetDetailsLabel, 1, 8);
         if (_presetComboBox.Items.Count > 0)
         {
             _presetComboBox.SelectedIndex = 0;
@@ -528,7 +589,7 @@ public sealed class MainForm : Form
         rightOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         var overrideGuideLabel = new Label
         {
-            Text = "These fields are optional hints or overrides. They help the converter understand the source armor or change the output behavior when auto-detection is not enough.",
+            Text = "These fields describe the original armor or adjust optional output behavior. Most users only need the FROM body here when auto-detection is wrong.",
             Anchor = AnchorStyles.Left,
             AutoSize = true,
             MaximumSize = new Size(420, 0),
@@ -550,7 +611,7 @@ public sealed class MainForm : Form
         _profileComboBox.SelectedIndex = 0;
         rightOptions.Controls.Add(_profileComboBox, 1, 1);
 
-        rightOptions.Controls.Add(new Label { Text = "From body / source armor body (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
+        rightOptions.Controls.Add(new Label { Text = "FROM body / original armor body (usually leave Auto)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
         _sourceComboBox = new ComboBox
         {
             Dock = DockStyle.Fill,
@@ -636,7 +697,7 @@ public sealed class MainForm : Form
         skeletonNifPanel.Controls.Add(browseSkeletonNifButton, 1, 0);
         rightOptions.Controls.Add(skeletonNifPanel, 1, 7);
 
-        _sourceHintsGroupBox = CreateAutoSizeSection("Source hints, output overrides, and support files", rightOptions);
+        _sourceHintsGroupBox = CreateAutoSizeSection("Original armor source hints, optional output overrides, and support files", rightOptions);
         _conversionOptionsPanel.Controls.Add(_sourceHintsGroupBox, 1, 0);
         _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Conversion setup", _conversionOptionsPanel), 0, 3);
 
@@ -1767,18 +1828,97 @@ public sealed class MainForm : Form
         AppendLog($"Input selected: {dropped[0]}");
     }
 
+    private void ApplySuggestedMixedGenderTargets()
+    {
+        var suggestedTargets = GetSuggestedMixedGenderTargets();
+        if (suggestedTargets.Count == 0)
+        {
+            MessageBox.Show(
+                this,
+                "No built-in mixed female/male target suggestion is available right now. Switch to Manual mode and enter the TO bodies you want in the batch list.",
+                "Mixed target shortcut",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        _useCustomTargetRadio.Checked = true;
+        _targetBatchTextBox.Text = string.Join(", ", suggestedTargets);
+
+        var primaryTarget = suggestedTargets[0];
+        var targetIndex = _targetComboBox.FindStringExact(primaryTarget);
+        if (targetIndex >= 0)
+        {
+            _targetComboBox.SelectedIndex = targetIndex;
+        }
+        else
+        {
+            _targetComboBox.Text = primaryTarget;
+        }
+
+        AppendLog($"Manual mixed female/male targets selected: {string.Join(", ", suggestedTargets)}.");
+    }
+
+    private IReadOnlyList<string> GetSuggestedMixedGenderTargets()
+    {
+        var currentTarget = BodyTypeCatalog.ResolveName(ResolveProfileTargetName());
+        var femaleTarget = ResolveSuggestedTargetForGender(currentTarget, "female", "3BA", "CBBE", "UUNP", "BHUNP", "UNP");
+        var maleTarget = ResolveSuggestedTargetForGender(currentTarget, "male", "HIMBO", "SAM Light", "SAM", "SOS", "TNG");
+
+        return [.. new[] { femaleTarget, maleTarget }
+            .Where(static target => !string.IsNullOrWhiteSpace(target))
+            .Select(static target => target!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static string? ResolveSuggestedTargetForGender(string? currentTarget, string gender, params string[] preferredFallbacks)
+    {
+        if (!string.IsNullOrWhiteSpace(currentTarget) &&
+            BodyTypeCatalog.TryGetGender(currentTarget, out var currentGender) &&
+            string.Equals(currentGender, gender, StringComparison.OrdinalIgnoreCase))
+        {
+            return currentTarget;
+        }
+
+        foreach (var fallback in preferredFallbacks)
+        {
+            if (BodyTypeCatalog.All.Any(body =>
+                    string.Equals(body.Name, fallback, StringComparison.OrdinalIgnoreCase)) &&
+                BodyTypeCatalog.TryGetGender(fallback, out var fallbackGender) &&
+                string.Equals(fallbackGender, gender, StringComparison.OrdinalIgnoreCase))
+            {
+                return fallback;
+            }
+        }
+
+        return BodyTypeCatalog.All
+            .Select(static body => body.Name)
+            .FirstOrDefault(body =>
+                BodyTypeCatalog.TryGetGender(body, out var candidateGender) &&
+                string.Equals(candidateGender, gender, StringComparison.OrdinalIgnoreCase));
+    }
+
     private void RefreshModeState()
     {
         var usingPreset = _usePresetRadio.Checked;
         _presetComboBox.Enabled = usingPreset;
         _presetBatchTextBox.Enabled = usingPreset;
         _targetComboBox.Enabled = !usingPreset;
+        _targetComboBox.Visible = !usingPreset;
+        _presetTargetTextBox.Visible = usingPreset;
         _targetBatchTextBox.Enabled = !usingPreset;
+        _targetSelectionLabel.Text = usingPreset
+            ? "TO body from preset"
+            : "TO body / destination body";
+        _targetBatchLabel.Text = usingPreset
+            ? "Manual multi-target list (switches to manual mode)"
+            : "Destination body batch list (optional)";
         _modeStatusLabel.Text = usingPreset
             ? "Preset mode is active. The selected preset chooses the TO body below for you. Switch to Manual mode above if you want to change the TO body yourself."
             : "Manual mode is active. Use the TO body box below to choose the converted output body. FROM body stays in the Source hints section.";
         if (usingPreset && TryGetSelectedPreset(out var preset))
         {
+            _presetTargetTextBox.Text = preset.TargetBody;
             var targetIndex = _targetComboBox.FindStringExact(preset.TargetBody);
             if (targetIndex >= 0)
             {
@@ -1796,6 +1936,14 @@ public sealed class MainForm : Form
                 }
             }
         }
+        else if (!usingPreset)
+        {
+            _presetTargetTextBox.Text = string.Empty;
+        }
+
+        _targetModeHintLabel.Text = usingPreset
+            ? "Preset mode locks the TO body to the preset above. The editable FROM body is in the Source hints section on the right. Need a mixed female/male or cross-body pack? Use the shortcut below or switch to Manual mode and enter multiple TO bodies like 3BA, HIMBO."
+            : "Manual mode lets you choose the TO body directly. Use the batch list for multiple outputs or mixed female/male packs such as 3BA, HIMBO.";
 
         UpdatePresetDetails();
         UpdateTargetDetails();
@@ -1852,15 +2000,16 @@ public sealed class MainForm : Form
         _activeConversion = new CancellationTokenSource();
         SetBusyState(isBusy: true);
         _cancelButton.Text = "Cancel";
-        _progressBar.Style = ProgressBarStyle.Continuous;
-        _progressBar.MarqueeAnimationSpeed = 0;
+        _progressBar.Style = ProgressBarStyle.Marquee;
+        _progressBar.MarqueeAnimationSpeed = 30;
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
-        _statusLabel.Text = $"Converting: {Path.GetFileName(input)}";
+        _statusLabel.Text = $"Preparing conversion: {Path.GetFileName(input)}";
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
+        await Task.Yield();
 
         try
         {
@@ -1891,6 +2040,8 @@ public sealed class MainForm : Form
             // Wire a per-item progress callback so the progress bar advances
             // during batch runs instead of showing a marquee spinner throughout.
             string? lastProgressLogMessage = null;
+            string? lastProgressStatus = null;
+            var lastProgressUiUpdateUtc = DateTime.MinValue;
             var progress = new Progress<BatchProgressUpdate>(update =>
             {
                 var total = Math.Max(1, update.Total);
@@ -1909,6 +2060,22 @@ public sealed class MainForm : Form
                 var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
                     ? update.CurrentFile
                     : $"{update.CurrentFile} — {update.Stage}";
+                var now = DateTime.UtcNow;
+                var shouldRefreshUi = update.IsItemCompleted ||
+                    !string.Equals(statusSuffix, lastProgressStatus, StringComparison.Ordinal) ||
+                    now - lastProgressUiUpdateUtc >= TimeSpan.FromMilliseconds(250);
+                if (!shouldRefreshUi)
+                {
+                    return;
+                }
+
+                lastProgressStatus = statusSuffix;
+                lastProgressUiUpdateUtc = now;
+                if (_progressBar.Style != ProgressBarStyle.Continuous)
+                {
+                    _progressBar.Style = ProgressBarStyle.Continuous;
+                    _progressBar.MarqueeAnimationSpeed = 0;
+                }
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
@@ -2833,8 +3000,17 @@ public sealed class MainForm : Form
     {
         if (!TryGetSelectedPreset(out var preset))
         {
+            if (_presetTargetTextBox is not null && !_presetTargetTextBox.IsDisposed)
+            {
+                _presetTargetTextBox.Text = string.Empty;
+            }
             _presetDetailsLabel.Text = "—";
             return;
+        }
+
+        if (_presetTargetTextBox is not null && !_presetTargetTextBox.IsDisposed)
+        {
+            _presetTargetTextBox.Text = preset.TargetBody;
         }
 
         _presetDetailsLabel.Text =
@@ -2943,20 +3119,20 @@ public sealed class MainForm : Form
         _optionToolTip.SetToolTip(_usePresetRadio,
             "Recommended for most users. A preset picks the destination body, shape profile, and default output physics together.");
         _optionToolTip.SetToolTip(_useCustomTargetRadio,
-            "Use this when you want to type or choose the destination body directly instead of starting from a preset.");
+            "Use this when you want to type or choose one or more TO bodies directly instead of letting a preset lock the destination body.");
         _optionToolTip.SetToolTip(_presetComboBox,
             "Quick setup for the output you want. Presets do not describe the original source armor body.");
         _optionToolTip.SetToolTip(_presetBatchTextBox,
             "Optional comma-separated preset list for batch conversion. Example: 3BA Curvy, HIMBO Lean");
         _optionToolTip.SetToolTip(_targetComboBox,
-            "The body you want the converted armor to fit. This is the destination/output body.");
+            "The body you want the converted armor to fit. This is the TO/output body and is only editable in Manual mode.");
         _optionToolTip.SetToolTip(_targetBatchTextBox,
             "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.\n" +
             "For mixed male/female packs you can enter targets like 3BA, HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
         _optionToolTip.SetToolTip(_profileComboBox,
             "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
         _optionToolTip.SetToolTip(_sourceComboBox,
-            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This does not choose the output body.");
+            "What body the original armor was built for. Leave Auto unless detection gets it wrong. This FROM body hint does not choose the output body.");
         _optionToolTip.SetToolTip(_physicsComboBox,
             "Controls the converted output physics, not the source armor.\n" +
             "Auto = use the preset/body default.\n" +
