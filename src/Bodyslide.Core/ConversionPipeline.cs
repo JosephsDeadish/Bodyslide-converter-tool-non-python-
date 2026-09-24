@@ -7844,6 +7844,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 progress,
                 cancellationToken,
                 () => Interlocked.Increment(ref completed),
+                () => Volatile.Read(ref completed),
                 variant.DisplayName);
 
             await WriteBatchReportAsync(resultsWithPaths, variant.Request.TargetBody, variant.DisplayName, variantRootOutput, cancellationToken);
@@ -7920,9 +7921,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken,
         Func<int>? incrementCompleted = null,
+        Func<int>? getCompleted = null,
         string? variantLabel = null)
     {
-        incrementCompleted ??= () => 1;
+        var localCompleted = 0;
+        incrementCompleted ??= () => Interlocked.Increment(ref localCompleted);
+        getCompleted ??= () => Volatile.Read(ref localCompleted);
 
         var resultBag = new System.Collections.Concurrent.ConcurrentBag<(string MeshFile, ConversionResult Result)>();
         var maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 2);
@@ -7948,7 +7952,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     ? null
                     : new Progress<ConversionStageProgressUpdate>(update =>
                         progress.Report(new BatchProgressUpdate(
-                            Completed: Math.Clamp(Volatile.Read(ref completed), 0, total),
+                            Completed: Math.Clamp(getCompleted(), 0, total),
                             Total: total,
                             CurrentFile: currentLabel,
                             Success: false,
