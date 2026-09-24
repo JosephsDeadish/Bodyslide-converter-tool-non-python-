@@ -18264,6 +18264,12 @@ public sealed class RealisticModPackFixtureTests
                 liveGameExecution.RootElement.GetProperty("ValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
                 static profile => string.Equals(profile, "world-grounding-validation-save", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
+                static profile => string.Equals(profile, "topology-workbench-validation-save", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
+                static profile => string.Equals(profile, "custom-skeleton-remap-validation-save", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("DeploymentArtifacts").EnumerateArray().Select(static item => item.GetString()),
                 static artifact => string.Equals(artifact, "mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
@@ -18273,6 +18279,19 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
                 static profile => string.Equals(profile, "full-load-order-integration-save", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray()
+                    .Where(static item => item.GetProperty("Name").GetString() is not null &&
+                                          item.GetProperty("Name").GetString()!.Contains("topology", StringComparison.OrdinalIgnoreCase))
+                    .Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
+                static profile => string.Equals(profile, "topology-workbench-validation-save", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray()
+                    .Where(static item => item.GetProperty("Name").GetString() is not null &&
+                                          (item.GetProperty("Name").GetString()!.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+                                           item.GetProperty("Name").GetString()!.Contains("rig", StringComparison.OrdinalIgnoreCase)))
+                    .Select(static item => item.GetProperty("ValidationSaveProfile").GetString()),
+                static profile => string.Equals(profile, "custom-skeleton-remap-validation-save", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().Select(static item => item.GetProperty("Name").GetString()),
                 static name => name is not null && name.Contains("rig-family crossover", StringComparison.OrdinalIgnoreCase));
@@ -18459,6 +18478,9 @@ public sealed class RealisticModPackFixtureTests
                 windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray().Select(static item => item.GetString()),
                 static flow => string.Equals(flow, "external-proof-handoff", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray().Select(static item => item.GetString()),
+                static flow => string.Equals(flow, "hardcase-proof-artifact-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("AutomationSignals").EnumerateArray().Select(static item => item.GetString()),
                 static signal => string.Equals(signal, "stable-winforms-control-names", StringComparison.OrdinalIgnoreCase));
             Assert.True(windowsUiAutomation.RootElement.GetProperty("FlowProfiles").GetArrayLength() >= 3);
@@ -18472,10 +18494,26 @@ public sealed class RealisticModPackFixtureTests
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "external-proof-handoff", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "topology-workbench-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().Select(static profile => profile.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "custom-skeleton-remap-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray()
                     .Where(static profile => string.Equals(profile.GetProperty("Name").GetString(), "hardcase-proof-artifact-review", StringComparison.OrdinalIgnoreCase))
                     .Select(static profile => profile.GetProperty("FocusRegions").GetArrayLength()),
                 static count => count > 0);
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray()
+                    .Where(static profile => string.Equals(profile.GetProperty("Name").GetString(), "topology-workbench-review", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(static profile => profile.GetProperty("RelatedArtifacts").EnumerateArray().Select(static artifact => artifact.GetString())),
+                static artifact => string.Equals(artifact, "preview-workbench.html", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray()
+                    .Where(static profile => string.Equals(profile.GetProperty("Name").GetString(), "custom-skeleton-remap-review", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(static profile => profile.GetProperty("ProofAxes").EnumerateArray().Select(static axis => axis.GetString())),
+                static axis => string.Equals(axis, "custom-skeleton", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray()
                     .Where(static profile => string.Equals(profile.GetProperty("Name").GetString(), "external-proof-handoff", StringComparison.OrdinalIgnoreCase))
@@ -31048,6 +31086,9 @@ public sealed class CustomBodyProfileSupportTests
     [InlineData("Ultimate Body Enhancer", true, "ube-extended-physics")]
     [InlineData("Vanilla Beast", false, "beast-humanoid")]
     [InlineData("Horse Follower", false, "equine-humanoid")]
+    [InlineData("Lamia Humanoid", false, "serpentine-humanoid")]
+    [InlineData("Spriggan Branch Body", false, "spriggan-branch")]
+    [InlineData("Dragonkin Humanoid", false, "draconic-humanoid")]
     public async Task BasicSkeletonMappingService_TargetSkeletonLabel_ResolvesSkeletonFoundationAliases(
         string skeletonFoundation,
         bool withPhysicsBones,

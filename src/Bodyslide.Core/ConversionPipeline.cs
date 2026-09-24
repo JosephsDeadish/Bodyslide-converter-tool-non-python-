@@ -30688,6 +30688,8 @@ internal sealed class LocalExportService(
         var validationSaveProfiles = new[]
         {
             "neutral-smoke-test-save",
+            "topology-workbench-validation-save",
+            "custom-skeleton-remap-validation-save",
             "combat-stress-save",
             "world-grounding-validation-save",
             modStackCrossValidation?.RequiresLoadOrderValidation == true
@@ -31070,6 +31072,8 @@ internal sealed class LocalExportService(
                 "custom-profile-management",
                 "multi-target-batch-conversion",
                 "load-existing-result",
+                "topology-workbench-review",
+                "custom-skeleton-remap-review",
                 "hardcase-proof-artifact-review",
                 "external-proof-handoff",
                 "preview-guidance-report-artifact-review",
@@ -31101,6 +31105,10 @@ internal sealed class LocalExportService(
     {
         var defaultSmokeSave = validationSaveProfiles.FirstOrDefault(static value =>
             value.Equals("neutral-smoke-test-save", StringComparison.OrdinalIgnoreCase)) ?? validationSaveProfiles.First();
+        var topologyWorkbenchSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Equals("topology-workbench-validation-save", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
+        var customSkeletonSave = validationSaveProfiles.FirstOrDefault(static value =>
+            value.Equals("custom-skeleton-remap-validation-save", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
         var combatSave = validationSaveProfiles.FirstOrDefault(static value =>
             value.Equals("combat-stress-save", StringComparison.OrdinalIgnoreCase)) ?? defaultSmokeSave;
         var groundingSave = validationSaveProfiles.FirstOrDefault(static value =>
@@ -31117,7 +31125,7 @@ internal sealed class LocalExportService(
                     .ToArray();
                 return new LiveGameExecutionScenarioProfile(
                     Name: probe.Objective,
-                    ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
+                    ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, topologyWorkbenchSave, customSkeletonSave, combatSave, groundingSave, loadOrderSave),
                     DispatchActions: probe.DispatchActions,
                     SuccessSignals: probe.ExpectedAssertions,
                     RelatedArtifacts: probe.RelatedArtifacts,
@@ -31138,6 +31146,8 @@ internal sealed class LocalExportService(
     private static string DetermineValidationSaveProfile(
         RuntimeAutomationHarnessProbe probe,
         string defaultSmokeSave,
+        string topologyWorkbenchSave,
+        string customSkeletonSave,
         string combatSave,
         string groundingSave,
         string loadOrderSave)
@@ -31145,6 +31155,24 @@ internal sealed class LocalExportService(
         if (probe.RequiresFullLoadOrderLaunch)
         {
             return loadOrderSave;
+        }
+
+        if ((probe.ProofAxes ?? []).Any(static axis => axis.Equals("topology-transfer", StringComparison.OrdinalIgnoreCase)) &&
+            (probe.Phase.Contains("preflight", StringComparison.OrdinalIgnoreCase) ||
+             probe.Phase.Contains("workbench", StringComparison.OrdinalIgnoreCase) ||
+             probe.Objective.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+             probe.Objective.Contains("cleanup", StringComparison.OrdinalIgnoreCase)))
+        {
+            return topologyWorkbenchSave;
+        }
+
+        if ((probe.ProofAxes ?? []).Any(static axis => axis.Equals("custom-skeleton", StringComparison.OrdinalIgnoreCase)) &&
+            (probe.Objective.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+             probe.Objective.Contains("rig", StringComparison.OrdinalIgnoreCase) ||
+             probe.Objective.Contains("remap", StringComparison.OrdinalIgnoreCase) ||
+             probe.Phase.Contains("preflight", StringComparison.OrdinalIgnoreCase)))
+        {
+            return customSkeletonSave;
         }
 
         if (probe.Objective.Contains("ground", StringComparison.OrdinalIgnoreCase) ||
@@ -31183,6 +31211,20 @@ internal sealed class LocalExportService(
             "load-result-button",
             ["load-result-button", "summary-list", "guidance-list", "reports-list", "artifacts-list"],
             ["desktop-workflow-automation.json", "conversion-matrix-proof.json", "live-game-execution.json"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "topology-workbench-review",
+            "preview-root",
+            ["preview-root", "guidance-list", "reports-list", "artifacts-list", "open-report-button", "open-artifact-button"],
+            ["topology-correspondence.json", "preview-workbench.html", "conversion-quality.json", "desktop-workflow-automation.json"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "custom-skeleton-remap-review",
+            "reports-list",
+            ["reports-list", "guidance-list", "artifacts-list", "open-report-button", "open-artifact-button"],
+            ["skeleton-compatibility.json", "conversion-quality.json", "runtime-validation-plan.json", "live-game-execution.json"],
             blocksRelease: true),
         BuildWindowsUiFlowProfile(
             matrixProofContext,
@@ -32205,6 +32247,16 @@ internal sealed class LocalExportService(
             scenario.Name.Contains("workbench", StringComparison.OrdinalIgnoreCase))
         {
             return "workbench-review";
+        }
+
+        if (scenario.Name.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Name.Contains("mod-stack", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Trigger.Contains("full load-order", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Trigger.Contains("save / reload", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Trigger.Contains("cell transition", StringComparison.OrdinalIgnoreCase) ||
+            scenario.Trigger.Contains("equip", StringComparison.OrdinalIgnoreCase))
+        {
+            return "live-runtime";
         }
 
         if (scenario.Name.Contains("physics", StringComparison.OrdinalIgnoreCase) ||

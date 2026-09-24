@@ -98,6 +98,36 @@
     ]
   },
   {
+    "canonical": "serpentine-humanoid",
+    "aliases": [
+      "Serpentine Humanoid",
+      "Lamia Humanoid",
+      "Naga Humanoid",
+      "Serpentine Coil Skeleton",
+      "Lamia Coil Rig"
+    ]
+  },
+  {
+    "canonical": "spriggan-branch",
+    "aliases": [
+      "Spriggan Branch",
+      "Spriggan Branch Body",
+      "Verdant Spirit",
+      "Branch Warden",
+      "Briar Skeleton"
+    ]
+  },
+  {
+    "canonical": "draconic-humanoid",
+    "aliases": [
+      "Draconic Humanoid",
+      "Dragonkin Humanoid",
+      "Wyvern Humanoid",
+      "Drake Humanoid",
+      "Dragonkin Wing Skeleton"
+    ]
+  },
+  {
     "canonical": "insectoid-humanoid",
     "aliases": [
       "Insectoid Humanoid",
