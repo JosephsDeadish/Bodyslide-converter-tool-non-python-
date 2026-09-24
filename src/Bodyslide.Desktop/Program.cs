@@ -137,9 +137,17 @@ internal static class Program
             try
             {
                 Clipboard.SetText(crashDetails);
+                MessageBox.Show(dialog, "Crash details copied to the clipboard.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch
+            catch (Exception clipboardEx)
             {
+                System.Diagnostics.Trace.TraceWarning($"Failed to copy crash details to the clipboard: {clipboardEx.Message}");
+                MessageBox.Show(
+                    dialog,
+                    "Clipboard access is unavailable on this machine right now. You can still use the crash log path shown above.",
+                    "Clipboard unavailable",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
             }
         };
         actions.Controls.Add(closeButton);

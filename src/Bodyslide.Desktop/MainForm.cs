@@ -1295,6 +1295,7 @@ public sealed class MainForm : Form
             UpdateResponsiveLayout();
             UpdateMainSplitLayout();
         };
+        FormClosing += (_, _) => SaveUiSettings();
         Shown += async (_, _) =>
         {
             _allowUserMainSplitOverride = true;
@@ -2652,10 +2653,12 @@ public sealed class MainForm : Form
             await _previewWebView.EnsureCoreWebView2Async();
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"Failed to initialize in-app preview WebView2: {ex.Message}");
             _previewWebView?.Dispose();
             _previewWebView = null;
+            ShowPreviewStatus($"In-app preview is unavailable on this machine: {ex.Message}");
             return false;
         }
     }
@@ -3328,6 +3331,13 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (!HasKnownBodyMetadata(targetBody))
+        {
+            _targetDetailsLabel.Text =
+                $"Custom target '{targetBody}': conversion can still run, but support certainty drops until you load or save a custom profile with the right sliders, transform field, and physics metadata for this body.";
+            return;
+        }
+
         _targetDetailsLabel.Text = BuildBodyDetailsText(
             targetBody,
             defaultText: $"This is the destination body the converted armor will be reshaped for.",
@@ -3348,6 +3358,13 @@ public sealed class MainForm : Form
         }
 
         var resolvedSource = BodyTypeCatalog.ResolveName(rawSource);
+        if (!HasKnownBodyMetadata(resolvedSource))
+        {
+            _sourceDetailsLabel.Text =
+                $"Custom source hint '{resolvedSource}': use this only when auto-detection is wrong. Unrecognized source bodies keep conversion possible, but they increase the chance that manual Outfit Studio cleanup or a custom profile will still be needed.";
+            return;
+        }
+
         if (TryGetAutoDetectedSourceConfidence(rawSource, resolvedSource, out var confidence))
         {
             _sourceDetailsLabel.Text =
@@ -3469,6 +3486,10 @@ public sealed class MainForm : Form
             : "Use this if you want the converted armor to fit this body family.";
         return $"{roleText} {metadata.Gender} body. Skeleton: {profile.SkeletonFoundation}. Default output physics: {physics}.{aliases} {metadata.Notes}".Trim();
     }
+
+    private static bool HasKnownBodyMetadata(string bodyName) =>
+        BuiltInBodyMetadataCatalog.TryGet(bodyName, out _) &&
+        BodyTechnicalProfileCatalog.TryGet(bodyName, out _);
 
     private static string BuildPhysicsHelpSuffix(string physicsProfile, string targetBody)
     {
@@ -3874,23 +3895,22 @@ public sealed class MainForm : Form
             return;
         }
 
+        var template = DesktopCustomBodyProfileTemplateCatalog.Resolve(effectiveTarget);
         var effectivePhysics = ResolveEffectivePhysicsProfile(effectiveTarget);
         var effectiveProfile = ResolveEffectiveDeformationProfile();
-        var baseField = CreateBaseTransformationField(effectiveTarget);
+        var baseField = template.TransformationField;
         var transformedField = ApplyDeformationProfile(baseField, effectiveProfile);
-        BodyTypeCatalog.TryResolve(effectiveTarget, out var bodyInfo);
-        var gender = IsMaleBody(effectiveTarget) ? "male" : "female";
         var payload = new
         {
-            Name = effectiveTarget,
-            DetectionTokens = bodyInfo?.DetectionTokens ?? [effectiveTarget],
-            VertexCountMin = bodyInfo?.VertexCountMin ?? 0,
-            VertexCountMax = bodyInfo?.VertexCountMax ?? 0,
+            Name = template.Name,
+            DetectionTokens = template.DetectionTokens,
+            VertexCountMin = template.VertexCountMin,
+            VertexCountMax = template.VertexCountMax,
             TransformationField = transformedField,
-            SliderNames = ResolveSliderNames(effectiveTarget),
+            SliderNames = template.SliderNames,
             PhysicsProfile = effectivePhysics,
-            BodyOutputPath = ResolveBodyOutputPath(effectiveTarget),
-            Gender = gender,
+            BodyOutputPath = template.BodyOutputPath,
+            Gender = template.Gender,
         };
 
         try
@@ -3958,44 +3978,6 @@ public sealed class MainForm : Form
         return PhysicsProfileCatalog.GetDefaultForTargetBody(targetBody);
     }
 
-    private static Dictionary<string, double> CreateBaseTransformationField(string targetBody)
-    {
-        var field = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["chest"] = 1.02,
-            ["waist"] = 0.99,
-            ["pelvis"] = 1.02,
-            ["legs"] = 1.01,
-            ["shoulders"] = 1.00,
-            ["breasts"] = 1.02,
-            ["butt"] = 1.01,
-            ["belly"] = 1.01,
-            ["arms"] = 1.00,
-            ["thighs"] = 1.01,
-            ["calves"] = 1.01,
-        };
-
-        foreach (var (region, value) in targetBody.Trim().ToUpperInvariant() switch
-        {
-            "CBBE" => new (string, double)[] { ("chest", 1.08), ("waist", 0.96), ("pelvis", 1.05), ("legs", 1.03), ("shoulders", 1.01), ("breasts", 1.09), ("butt", 1.06), ("belly", 1.02), ("arms", 1.01), ("thighs", 1.04), ("calves", 1.02) },
-            "3BA" => new (string, double)[] { ("chest", 1.12), ("waist", 0.95), ("pelvis", 1.06), ("legs", 1.04), ("shoulders", 1.01), ("breasts", 1.13), ("butt", 1.08), ("belly", 1.03), ("arms", 1.02), ("thighs", 1.05), ("calves", 1.03) },
-            "BHUNP" => new (string, double)[] { ("chest", 1.10), ("waist", 0.94), ("pelvis", 1.07), ("legs", 1.04), ("shoulders", 1.01), ("breasts", 1.11), ("butt", 1.07), ("belly", 1.03), ("arms", 1.01), ("thighs", 1.05), ("calves", 1.03) },
-            "UNP" => new (string, double)[] { ("chest", 1.04), ("waist", 0.97), ("pelvis", 1.02), ("legs", 1.01), ("shoulders", 1.00), ("breasts", 1.04), ("butt", 1.02), ("belly", 1.01), ("arms", 1.00), ("thighs", 1.02), ("calves", 1.01) },
-            "TBD" => new (string, double)[] { ("chest", 1.06), ("waist", 0.96), ("pelvis", 1.04), ("legs", 1.02), ("shoulders", 1.00), ("breasts", 1.07), ("butt", 1.04), ("belly", 1.02), ("arms", 1.00), ("thighs", 1.03), ("calves", 1.02) },
-            "UBE" => new (string, double)[] { ("chest", 1.06), ("waist", 0.97), ("pelvis", 1.03), ("legs", 1.02), ("shoulders", 1.01), ("breasts", 1.06), ("butt", 1.03), ("belly", 1.02), ("arms", 1.01), ("thighs", 1.03), ("calves", 1.02) },
-            "HIMBO" => new (string, double)[] { ("chest", 1.10), ("waist", 1.02), ("pelvis", 1.04), ("legs", 1.06), ("shoulders", 1.12), ("breasts", 1.08), ("butt", 1.05), ("belly", 1.03), ("arms", 1.10), ("thighs", 1.07), ("calves", 1.05) },
-            "SAM" => new (string, double)[] { ("chest", 1.08), ("waist", 1.01), ("pelvis", 1.03), ("legs", 1.05), ("shoulders", 1.10), ("breasts", 1.05), ("butt", 1.04), ("belly", 1.02), ("arms", 1.08), ("thighs", 1.06), ("calves", 1.04) },
-            "SOS" => new (string, double)[] { ("chest", 1.05), ("waist", 1.00), ("pelvis", 1.02), ("legs", 1.04), ("shoulders", 1.06), ("breasts", 1.03), ("butt", 1.03), ("belly", 1.01), ("arms", 1.05), ("thighs", 1.04), ("calves", 1.03) },
-            "VANILLA" => new (string, double)[] { ("chest", 1.00), ("waist", 1.00), ("pelvis", 1.00), ("legs", 1.00), ("shoulders", 1.00), ("breasts", 1.00), ("butt", 1.00), ("belly", 1.00), ("arms", 1.00), ("thighs", 1.00), ("calves", 1.00) },
-            _ => []
-        })
-        {
-            field[region] = value;
-        }
-
-        return field;
-    }
-
     private static IReadOnlyDictionary<string, double> ApplyDeformationProfile(
         IReadOnlyDictionary<string, double> field,
         string? profile)
@@ -4008,29 +3990,6 @@ public sealed class MainForm : Form
         return DeformationProfileModifier.Apply(field, profile)
             .ToDictionary(static pair => pair.Key, static pair => Math.Round(pair.Value, 4), StringComparer.OrdinalIgnoreCase);
     }
-
-    private static string[] ResolveSliderNames(string targetBody) => targetBody.Trim().ToUpperInvariant() switch
-    {
-        "CBBE" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist"],
-        "3BA" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics", "BellyPhysics"],
-        "BHUNP" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders", "NarrowWaist", "BreastsPhysics", "ButtPhysics"],
-        "UNP" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves", "Arms", "Shoulders"],
-        "HIMBO" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt", "Pecs"],
-        "SAM" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-        "SOS" => ["Body", "Chest", "Waist", "Arms", "Legs", "Shoulders", "Butt"],
-        "TBD" => ["Belly", "Butt", "BreastsShape", "BreastsSmall", "BreastsLarge", "WaistWidth", "HipWidth", "Thighs", "Calves"],
-        "UBE" => ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth", "Thighs"],
-        "VANILLA" => ["Belly", "Butt", "WaistWidth", "HipWidth", "Thighs"],
-        _ => ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"]
-    };
-
-    private static string ResolveBodyOutputPath(string targetBody) =>
-        IsMaleBody(targetBody)
-            ? @"meshes\actors\character\character assets male\"
-            : @"meshes\actors\character\character assets\";
-
-    private static bool IsMaleBody(string targetBody) =>
-        BodyTypeCatalog.IsMaleBody(targetBody);
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
         => DesktopWorkflowSupport.CombineSelections(selectedValue, enteredValues);
