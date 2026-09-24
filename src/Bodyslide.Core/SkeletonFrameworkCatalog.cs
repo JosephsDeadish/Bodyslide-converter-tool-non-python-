@@ -253,8 +253,11 @@ internal static class SkeletonFrameworkCatalog
         {
             evidence.Add($"token-matches:{tokenMatches}");
         }
-        var cueMatches = ecosystemCues.Count(cue =>
-            condensedBoneNames.Any(bone => bone.Contains(cue, StringComparison.OrdinalIgnoreCase)));
+        var matchedEcosystemCues = ecosystemCues
+            .Where(cue => condensedBoneNames.Any(bone => bone.Contains(cue, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var cueMatches = matchedEcosystemCues.Length;
         if (cueMatches > 0)
         {
             evidence.Add($"ecosystem-cues:{cueMatches}");
@@ -309,8 +312,9 @@ internal static class SkeletonFrameworkCatalog
             var physicsScore = physicsMatches >= framework.MinimumSignatureMatches
                 ? physicsMatches * 1d
                 : 0d;
+            var directCueSpecificityScore = matchedEcosystemCues.Sum(static cue => cue.Length) / 20d;
             var cueScore = cueMatches + contextCueMatches >= framework.MinimumSignatureMatches
-                ? (cueMatches + contextCueMatches) * 1.10d
+                ? (cueMatches * 1.35d) + (contextCueMatches * 1.10d) + directCueSpecificityScore
                 : 0d;
             var chainScore = chainDepthMatches >= framework.MinimumSignatureMatches &&
                              (semanticMatches > 0 || physicsMatches > 0 || cueMatches + contextCueMatches > 0)
@@ -345,7 +349,8 @@ internal static class SkeletonFrameworkCatalog
             evidence.Add($"chain-depth:{chainDepthOverlap}");
         }
 
-        return prefixMatches + (tokenMatches * 0.75d) + ((cueMatches + contextCueMatches) * 0.90d) + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d) + (chainDepthOverlap * 0.60d);
+        var directCueSpecificityBonus = matchedEcosystemCues.Sum(static cue => cue.Length) / 30d;
+        return prefixMatches + (tokenMatches * 0.75d) + (cueMatches * 1.05d) + (contextCueMatches * 0.90d) + directCueSpecificityBonus + (semanticOverlap * 0.65d) + (physicsOverlap * 0.70d) + (chainDepthOverlap * 0.60d);
     }
 
     private static bool ContainsNormalized(IReadOnlyList<string> condensedBoneNames, string value)

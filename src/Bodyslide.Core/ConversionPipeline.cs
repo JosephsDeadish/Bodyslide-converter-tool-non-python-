@@ -30667,6 +30667,8 @@ internal sealed class LocalExportService(
             "host-observation-capture",
             "skeleton-probe-capture",
             "mesh-collision-probe-capture",
+            "ownership-layout-snapshot-capture",
+            "skeleton-remap-trace-capture",
             "release-gate-persistence"
         };
         var observationChannels = new[]
@@ -30678,6 +30680,8 @@ internal sealed class LocalExportService(
             "bone-transform-tracking",
             "mesh-collision-probe",
             "partition-slot-snapshot",
+            "ownership-layout-snapshot",
+            "skeleton-remap-trace",
             "animation-dispatch-trace",
             "manual-observation-notes"
         };
@@ -30837,8 +30841,10 @@ internal sealed class LocalExportService(
                 "runtime-logs/",
                 "load-order-snapshot.txt",
                 "bone-transform-traces/",
+                "skeleton-remap-traces/",
                 "collision-probes/",
                 "partition-slot-snapshots/",
+                "topology-island-snapshots/",
                 "animation-dispatch-trace.json"
             ],
             Scenarios: scenarioContracts,
@@ -31002,6 +31008,7 @@ internal sealed class LocalExportService(
             new WindowsUiAutomationStep("Reports", "Open report metrics and verify runtime/load-order artifacts are listed", "reports-list", "Report list includes runtime, live-game, and mod-stack artifacts", true),
             new WindowsUiAutomationStep("Artifacts", "Open output artifacts tab and verify generated files are reachable", "artifacts-list", "Artifacts list includes preview and automation JSON outputs", true),
             new WindowsUiAutomationStep("Open actions", "Use open-report, open-next-action, open-file, and open-output actions to confirm the Desktop click paths reach the exported artifacts", "open-report-button", "Desktop open actions launch the selected report, guidance target, artifact, or output folder", true),
+            new WindowsUiAutomationStep("External proof handoff", "Open the runtime/live-game/Desktop automation artifacts that must be handed off to external harnesses", "guidance-list", "Desktop review flow reaches the exported runtime, live-game, and Windows UI harness contracts", true),
             new WindowsUiAutomationStep("Catalog and cache", "Open catalog and cache-oriented views to confirm non-conversion navigation still works", "catalog-list", "Catalog and cache views remain reachable after conversion and after loading a previous result", false)
         };
 
@@ -31064,6 +31071,7 @@ internal sealed class LocalExportService(
                 "multi-target-batch-conversion",
                 "load-existing-result",
                 "hardcase-proof-artifact-review",
+                "external-proof-handoff",
                 "preview-guidance-report-artifact-review",
                 "catalog-and-cache-navigation"
             ],
@@ -31182,6 +31190,13 @@ internal sealed class LocalExportService(
             "guidance-list",
             ["guidance-list", "reports-list", "artifacts-list", "open-report-button", "open-guidance-target-button", "open-artifact-button", "preview-root"],
             ["topology-correspondence.json", "mod-stack-cross-validation.json", "runtime-validation-plan.json", "live-game-execution.json", "conversion-matrix-proof.json", "windows-ui-e2e-automation.json"],
+            blocksRelease: true),
+        BuildWindowsUiFlowProfile(
+            matrixProofContext,
+            "external-proof-handoff",
+            "guidance-list",
+            ["guidance-list", "reports-list", "artifacts-list", "open-report-button", "open-guidance-target-button", "open-artifact-button"],
+            ["desktop-workflow-automation.json", "runtime-validation-plan.json", "runtime-validation-harness.json", "live-game-execution.json", "windows-ui-e2e-automation.json"],
             blocksRelease: true),
         BuildWindowsUiFlowProfile(
             matrixProofContext,
@@ -33290,6 +33305,47 @@ internal sealed class LocalExportService(
             : $"; alternate candidate(s): {string.Join(", ", alternatives)}";
     }
 
+    private static bool RequiresSkeletonFamilyCrossoverSweep(SkeletonMappingResult skeletonMapping)
+    {
+        if (skeletonMapping.SourceSkeletonCandidates is not { Count: > 1 } candidates)
+        {
+            return false;
+        }
+
+        if (!skeletonMapping.SourceSkeletonUsedSparseInference &&
+            skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var chosenConfidence = candidates.FirstOrDefault(candidate =>
+            candidate.Label.Equals(skeletonMapping.SourceSkeleton, StringComparison.OrdinalIgnoreCase))?.Confidence ?? 1d;
+        var alternateConfidence = candidates
+            .Where(candidate => !candidate.Label.Equals(skeletonMapping.SourceSkeleton, StringComparison.OrdinalIgnoreCase))
+            .Select(static candidate => candidate.Confidence)
+            .DefaultIfEmpty(0d)
+            .Max();
+
+        return alternateConfidence >= 0.45d || Math.Abs(chosenConfidence - alternateConfidence) <= 0.25d;
+    }
+
+    private static string BuildSkeletonFamilyCrossoverSummary(SkeletonMappingResult skeletonMapping)
+    {
+        var alternatives = skeletonMapping.SourceSkeletonCandidates?
+            .Where(candidate => !candidate.Label.Equals(skeletonMapping.SourceSkeleton, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(static candidate => candidate.Confidence)
+            .Take(3)
+            .Select(candidate => $"{candidate.Label} ({candidate.Confidence:0.##})")
+            .ToArray() ?? [];
+        var alternativesSummary = alternatives.Length == 0
+            ? "multiple nearby rig families were still implied by the sparse evidence."
+            : $"alternate rig-family candidates remain close: {string.Join(", ", alternatives)}.";
+        var safetySummary = skeletonMapping.AutomaticRemapSafety.Equals("safe", StringComparison.OrdinalIgnoreCase)
+            ? "Review the chosen remap against the live rig before release."
+            : $"Automatic remap safety remains {skeletonMapping.AutomaticRemapSafety}.";
+        return $"Source skeleton '{skeletonMapping.SourceSkeleton}' sits near a rig-family crossover; {alternativesSummary} {safetySummary}";
+    }
+
     private static bool IsManualCleanupLikely(
         bool topologyMismatchRisk,
         IReadOnlyList<string> qualityWarnings,
@@ -33737,6 +33793,17 @@ internal sealed class LocalExportService(
                ["idle", "walk", "combat", "jump"],
                sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
                ["skeleton-compatibility.json", "conversion-quality.json", "in-game-validation.json"]));
+        }
+
+        if (RequiresSkeletonFamilyCrossoverSweep(skeletonMapping))
+        {
+            scenarios.Add(new InGameValidationScenario(
+               "Skeleton family crossover sweep",
+               skeletonMapping.AutomaticRemapSafety.Equals("unsafe", StringComparison.OrdinalIgnoreCase) ? "High" : "Action",
+               BuildSkeletonFamilyCrossoverSummary(skeletonMapping),
+               ["idle", "walk", "combat", "save / reload"],
+               sensitiveRegions.Count > 0 ? sensitiveRegions : (hotspotRegions.Count > 0 ? hotspotRegions : coreRegions),
+               ["skeleton-compatibility.json", "mod-stack-cross-validation.json", "runtime-validation-plan.json", "live-game-execution.json"]));
         }
 
         if (RequiresCompoundHardCaseCertaintySweep(
