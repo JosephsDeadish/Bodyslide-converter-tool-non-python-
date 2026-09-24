@@ -554,6 +554,8 @@ public sealed class MainForm : Form
             Name = "targetBodyComboBox",
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDown,
+            AutoCompleteMode = AutoCompleteMode.SuggestAppend,
+            AutoCompleteSource = AutoCompleteSource.ListItems,
             MinimumSize = new Size(260, 0),
         };
         foreach (var body in BodyTypeCatalog.All.OrderBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
@@ -708,6 +710,8 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDown,
+            AutoCompleteMode = AutoCompleteMode.SuggestAppend,
+            AutoCompleteSource = AutoCompleteSource.ListItems,
             MinimumSize = new Size(260, 0),
         };
         _sourceComboBox.Items.Add("(auto)");
@@ -1334,8 +1338,8 @@ public sealed class MainForm : Form
     {
         return DesktopSmokeTestContract.Create(
             Text,
-            _presetComboBox.Items.Count,
-            _targetComboBox.Items.Count,
+            CountSelectableOptionItems(_presetComboBox),
+            CountSelectableOptionItems(_targetComboBox),
             CountSelectableOptionItems(_profileComboBox),
             CountSelectableOptionItems(_physicsComboBox),
             _resultsTabControl.TabPages.Count);
@@ -2425,18 +2429,12 @@ public sealed class MainForm : Form
         _autoDetectedSourceBody = detection.Body;
         _autoDetectedSourceConfidence = Math.Clamp(detection.Confidence, 0d, 1d);
 
-        if (_sourceComboBox.SelectedIndex != index)
-        {
-            _sourceComboBox.SelectedIndex = index;
-        }
-
         UpdateSourceDetails();
-        AppendLog($"Auto-selected source body from inspection: {detection.Body} ({detection.Confidence:P0}).");
+        AppendLog($"Auto-detected source body from inspection: {detection.Body} ({detection.Confidence:P0}).");
     }
 
     private bool IsSourceAutoSelection() =>
-        string.IsNullOrWhiteSpace(_sourceComboBox.Text) ||
-        string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase);
+        DesktopWorkflowSupport.IsAutoSelectionText(_sourceComboBox.Text);
 
     private void CancelConversion()
     {
@@ -3411,9 +3409,7 @@ public sealed class MainForm : Form
 
     private void UpdateSourceDetails()
     {
-        var rawSource = string.IsNullOrWhiteSpace(_sourceComboBox.Text)
-            ? _sourceComboBox.SelectedItem?.ToString()
-            : _sourceComboBox.Text.Trim();
+        var rawSource = ResolveDisplayedSourceBody();
         if (string.IsNullOrWhiteSpace(rawSource) ||
             string.Equals(rawSource, "(auto)", StringComparison.OrdinalIgnoreCase))
         {
@@ -3454,6 +3450,12 @@ public sealed class MainForm : Form
             UpdateSourceDetails();
         }
     }
+
+    private string? ResolveDisplayedSourceBody()
+        => DesktopWorkflowSupport.ResolveDisplayedSourceBody(
+            _sourceComboBox.Text,
+            _sourceComboBox.SelectedItem?.ToString(),
+            _autoDetectedSourceBody);
 
     private bool TryGetAutoDetectedSourceConfidence(string rawSource, string resolvedSource, out double confidence)
     {

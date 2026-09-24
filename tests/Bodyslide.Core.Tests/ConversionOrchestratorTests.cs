@@ -14493,6 +14493,42 @@ public sealed class BodyTypeCatalogTests
     }
 
     [Fact]
+    public void BuiltInBodyMetadataCatalog_AliasesAndCanonicalNames_AreUniqueAcrossBodies()
+    {
+        var ownersByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var metadata in BuiltInBodyMetadataCatalog.All)
+        {
+            Register(metadata.Name, metadata.Name);
+            foreach (var alias in metadata.Aliases)
+            {
+                Register(alias, metadata.Name);
+            }
+        }
+
+        void Register(string value, string owner)
+        {
+            foreach (var key in new[] { value, SlugifyAliasKey(value) })
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                if (ownersByKey.TryGetValue(key, out var existingOwner))
+                {
+                    Assert.True(
+                        string.Equals(existingOwner, owner, StringComparison.OrdinalIgnoreCase),
+                        $"Alias or canonical name '{value}' collides between '{existingOwner}' and '{owner}'.");
+                    continue;
+                }
+
+                ownersByKey[key] = owner;
+            }
+        }
+    }
+
+    [Fact]
     public void BodyTechnicalProfileCatalog_HasPhysicsMetadata_ForKnownBodies()
     {
         foreach (var body in new[] { "CBBE", "3BA", "BHUNP", "UNP", "UNPB", "UUNP", "COCO CBBE", "COCO UUNP", "TBD", "HIMBO", "SAM", "SAM Light", "SOS", "TNG", "UBE", "Vanilla", "Vanilla Beast", "Serpentine Humanoid", "Feline Humanoid", "Canine Humanoid", "Draconic Humanoid", "Goat Humanoid", "Hagraven", "Spriggan", "Equine Humanoid", "Avian Humanoid" })
@@ -14620,6 +14656,7 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Hooffolk", "Equine Humanoid")]
     [InlineData("Talonfolk", "Avian Humanoid")]
     [InlineData("Saxhleel", "Vanilla Beast")]
+    [InlineData("Dagi-Raht", "Feline Humanoid")]
     [InlineData("Cathay Reborn", "Feline Humanoid")]
     [InlineData("Senche Humanoid", "Feline Humanoid")]
     [InlineData("Lykaios", "Canine Humanoid")]
@@ -14682,6 +14719,15 @@ public sealed class BodyTypeCatalogTests
     {
         Assert.Equal(requested, BodyTypeCatalog.ResolveName(requested));
         Assert.False(BodyTechnicalProfileCatalog.TryGet(requested, out _));
+    }
+
+    [Fact]
+    public void BodyTypeCatalog_SpecializedBeastAliases_ResolveToSpecializedBodies()
+    {
+        Assert.Equal("Canine Humanoid", BodyTypeCatalog.ResolveName("Foxfolk"));
+        Assert.Equal("Canine Humanoid", BodyTypeCatalog.ResolveName("Lykaios"));
+        Assert.Equal("Feline Humanoid", BodyTypeCatalog.ResolveName("Dagi-Raht"));
+        Assert.Equal("Vanilla Beast", BodyTypeCatalog.ResolveName("Digitigrade Beast"));
     }
 
     [Theory]
@@ -14750,6 +14796,32 @@ public sealed class BodyTypeCatalogTests
             Assert.True(PhysicsProfileCatalog.Descriptions.ContainsKey(profile),
                 $"Missing description for physics profile '{profile}'");
         }
+    }
+
+    private static string SlugifyAliasKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(value.Length);
+        var lastWasSeparator = false;
+        foreach (var character in value.Trim())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+                lastWasSeparator = false;
+            }
+            else if (!lastWasSeparator)
+            {
+                builder.Append('-');
+                lastWasSeparator = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
     }
 }
 
@@ -14863,6 +14935,31 @@ public sealed class DesktopWorkflowSupportTests
         Assert.Null(DesktopWorkflowSupport.ReadOptionalSelection("(auto)"));
         Assert.Null(DesktopWorkflowSupport.ReadOptionalSelection(" "));
         Assert.Equal("HIMBO", DesktopWorkflowSupport.ReadOptionalSelection(" HIMBO "));
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_IsAutoSelectionText_RecognizesAutoAndBlankValues()
+    {
+        Assert.True(DesktopWorkflowSupport.IsAutoSelectionText(null));
+        Assert.True(DesktopWorkflowSupport.IsAutoSelectionText(" "));
+        Assert.True(DesktopWorkflowSupport.IsAutoSelectionText("(auto)"));
+        Assert.False(DesktopWorkflowSupport.IsAutoSelectionText("CBBE"));
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_ResolveDisplayedSourceBody_PrefersAutoDetectedHintWhileAutoStaysSelected()
+    {
+        var resolved = DesktopWorkflowSupport.ResolveDisplayedSourceBody("(auto)", "(auto)", "BHUNP");
+
+        Assert.Equal("BHUNP", resolved);
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_ResolveDisplayedSourceBody_PreservesManualSourceOverride()
+    {
+        var resolved = DesktopWorkflowSupport.ResolveDisplayedSourceBody("HIMBO", "(auto)", "BHUNP");
+
+        Assert.Equal("HIMBO", resolved);
     }
 
     [Fact]

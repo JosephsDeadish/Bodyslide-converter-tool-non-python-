@@ -34,6 +34,27 @@ internal static class DesktopWorkflowSupport
             ? null
             : selected.Trim();
 
+    public static bool IsAutoSelectionText(string? selected) =>
+        string.IsNullOrWhiteSpace(selected) ||
+        selected.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase);
+
+    public static string? ResolveDisplayedSourceBody(
+        string? comboText,
+        string? selectedItem,
+        string? autoDetectedSourceBody)
+    {
+        if (IsAutoSelectionText(comboText))
+        {
+            return !string.IsNullOrWhiteSpace(autoDetectedSourceBody)
+                ? autoDetectedSourceBody.Trim()
+                : selectedItem?.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(comboText)
+            ? selectedItem?.Trim()
+            : comboText.Trim();
+    }
+
     public static string? ReadOptionalPath(string? path) =>
         string.IsNullOrWhiteSpace(path) ? null : path.Trim();
 
