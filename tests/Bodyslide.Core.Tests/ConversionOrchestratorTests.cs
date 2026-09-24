@@ -334,6 +334,56 @@ public sealed class ConversionOrchestratorTests
     }
 
     [Fact]
+    public async Task BatchRunner_ThrowsWhenCancellationAlreadyRequested()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(inputFile, "mesh");
+
+        try
+        {
+            var runner = new BatchConversionRunner(BuildTestOrchestrator(new TestExporter()));
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                runner.ConvertAsync(new ConversionRequest(inputFile, "CBBE", outputDirectory), cts.Token));
+        }
+        finally
+        {
+            File.Delete(inputFile);
+            if (Directory.Exists(outputDirectory))
+            {
+                Directory.Delete(outputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task LocalArmorImportService_ThrowsWhenCancellationAlreadyRequested()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(inputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "armor_0.nif"), "mesh");
+
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new LocalArmorImportService().ImportAsync(inputDirectory, cts.Token));
+        }
+        finally
+        {
+            if (Directory.Exists(inputDirectory))
+            {
+                Directory.Delete(inputDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BatchRunner_ConvertsSingleNifToMultipleTargetBodies()
     {
         var inputFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.nif");

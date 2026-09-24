@@ -56,6 +56,7 @@ public sealed class MainForm : Form
     private readonly RadioButton _useCustomTargetRadio;
     private readonly CheckBox _outputZipCheckBox;
     private readonly CheckBox _buildSlidersCheckBox;
+    private readonly Label _outputHintLabel;
     private readonly Label _statusLabel;
     private readonly Label _modeStatusLabel;
     private readonly Label _targetSelectionLabel;
@@ -253,6 +254,7 @@ public sealed class MainForm : Form
         {
             UpdatePathActionStates();
             ClearInspectionTab("Input changed. Click Inspect Input to refresh detection and compatibility details.");
+            UpdateOutputHint();
         };
         var browseInputFileButton = new Button { Name = "browseInputFileButton", Text = "File...", AutoSize = true };
         browseInputFileButton.Click += (_, _) => BrowseInputFile();
@@ -428,6 +430,7 @@ public sealed class MainForm : Form
             UpdatePresetDetails();
             UpdateTargetDetails();
             UpdatePhysicsDetails();
+            UpdateOutputHint();
         };
         leftOptions.Controls.Add(_presetComboBox, 1, 1);
         leftOptions.Controls.Add(new Label { Text = "Preset batch list (optional)", Anchor = AnchorStyles.Left, AutoSize = true }, 0, 2);
@@ -483,6 +486,7 @@ public sealed class MainForm : Form
 
             UpdateTargetDetails();
             UpdatePhysicsDetails();
+            UpdateOutputHint();
         };
         _targetComboBox.TextChanged += (_, _) =>
         {
@@ -493,6 +497,7 @@ public sealed class MainForm : Form
 
             UpdateTargetDetails();
             UpdatePhysicsDetails();
+            UpdateOutputHint();
         };
         targetSelectorPanel.Controls.Add(_presetTargetTextBox);
         targetSelectorPanel.Controls.Add(_targetComboBox);
@@ -703,11 +708,33 @@ public sealed class MainForm : Form
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
-        _outputTextBox.TextChanged += (_, _) => UpdatePathActionStates();
+        _outputTextBox.TextChanged += (_, _) =>
+        {
+            UpdatePathActionStates();
+            UpdateOutputHint();
+        };
         var browseOutputButton = new Button { Text = "Browse...", AutoSize = true };
         browseOutputButton.Click += (_, _) => BrowseOutput();
         outputRow.Controls.Add(browseOutputButton, 2, 0);
-        _topLayoutPanel.Controls.Add(outputRow, 0, 4);
+        var outputSection = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            Margin = new Padding(0),
+        };
+        outputSection.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        outputSection.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        outputSection.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        outputSection.Controls.Add(outputRow, 0, 0);
+        _outputHintLabel = new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0, 4, 0, 0),
+            MaximumSize = new Size(920, 0),
+        };
+        outputSection.Controls.Add(_outputHintLabel, 0, 1);
+        _topLayoutPanel.Controls.Add(outputSection, 0, 4);
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
         _cachePathTextBox.PlaceholderText = "Custom path for .conversion-learning-cache.json";
@@ -1166,6 +1193,7 @@ public sealed class MainForm : Form
         LoadUiSettings();
         RefreshCustomProfilesList();
         UpdatePathActionStates();
+        UpdateOutputHint();
         ClearInspectionTab("Select an input and click Inspect Input to preview body detection, mesh analysis, and skeleton compatibility.");
         PopulateReportsTab(Array.Empty<DesktopWorkflowReportMetric>());
         PopulateCacheTab([], null);
@@ -1948,6 +1976,7 @@ public sealed class MainForm : Form
         UpdatePresetDetails();
         UpdateTargetDetails();
         UpdatePhysicsDetails();
+        UpdateOutputHint();
     }
 
     private async Task ConvertAsync()
@@ -2009,6 +2038,7 @@ public sealed class MainForm : Form
         AppendLog(usingPreset
             ? $"Starting conversion (presets: {string.Join(", ", selectedPresets)})..."
             : $"Starting conversion (destination bodies: {string.Join(", ", selectedTargets)})...");
+        AppendLog($"Output folder: {ResolveEffectiveOutputDirectoryPreview()}");
         await Task.Yield();
 
         try
@@ -2994,6 +3024,47 @@ public sealed class MainForm : Form
             mediumSeverityCount: validationSummary.MediumSeverityCount,
             lowSeverityCount: validationSummary.LowSeverityCount,
             previewAvailable: state.PreviewAvailable);
+    }
+
+    private string? ResolveEffectiveOutputDirectoryPreview()
+    {
+        var explicitOutput = _outputTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(explicitOutput))
+        {
+            return explicitOutput;
+        }
+
+        var input = _inputTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), ResolveProfileTargetName(), "...");
+        }
+
+        var fileNameStem = Path.GetFileNameWithoutExtension(input);
+        if (string.IsNullOrWhiteSpace(fileNameStem) && Directory.Exists(input))
+        {
+            fileNameStem = "batch";
+        }
+
+        if (string.IsNullOrWhiteSpace(fileNameStem))
+        {
+            fileNameStem = "output";
+        }
+
+        return Path.Combine(ExecutionEnvironment.GetDefaultOutputRoot(), ResolveProfileTargetName(), fileNameStem);
+    }
+
+    private void UpdateOutputHint()
+    {
+        if (_outputHintLabel is null || _outputHintLabel.IsDisposed)
+        {
+            return;
+        }
+
+        var explicitOutput = _outputTextBox.Text.Trim();
+        _outputHintLabel.Text = string.IsNullOrWhiteSpace(explicitOutput)
+            ? $"If you leave Output blank, SlideSmith will save to: {ResolveEffectiveOutputDirectoryPreview()}"
+            : $"Converted files will be saved to: {explicitOutput}";
     }
 
     private void UpdatePresetDetails()

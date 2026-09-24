@@ -7710,13 +7710,16 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         CancellationToken cancellationToken = default,
         IProgress<BatchProgressUpdate>? progress = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var variants = RequestNormalizer.Expand(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
             var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract");
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 return await ConvertDirectoryMeshesAsync(request, variants, extractedArchive, progress, cancellationToken);
             }
             finally
@@ -7742,6 +7745,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (variants.Count <= 1)
         {
             var currentFile = Path.GetFileName(originalRequest.InputPath);
@@ -7757,6 +7761,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         for (var index = 0; index < variants.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var variant = variants[index];
             var variantRootOutput = BuildVariantRootOutput(originalRequest, variant, batchMode: false);
             var variantOutput = Path.Combine(variantRootOutput, armorName);
@@ -7778,12 +7783,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         IProgress<BatchProgressUpdate>? progress,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var excludedDirectories = BuildExcludedScanDirectories(request);
         var includeCharacterBodyAssets = variants.Count > 1;
         var meshFiles = SourceScanEnumerator.EnumerateFiles(sourceDirectory, [".nif"], excludedDirectories)
             .Where(path => IsConvertibleBatchMesh(path, includeCharacterBodyAssets))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (meshFiles.Count == 0)
         {
@@ -7826,6 +7833,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         foreach (var entry in variantMeshSets)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var variant = entry.Variant;
             var variantRootOutput = BuildVariantRootOutput(request, variant, batchMode: true);
             var resultsWithPaths = await ConvertMeshSetAsync(
@@ -7927,6 +7935,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             },
             async (meshFile, ct) =>
             {
+                ct.ThrowIfCancellationRequested();
                 var baseStem = StripWeightSuffix(Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty);
                 var perArmorOutput = Path.Combine(rootOutput, baseStem);
                 var perArmorRequest = request with
@@ -7936,6 +7945,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     SharedPluginOutputDirectory = rootOutput
                 };
                 var result = await orchestrator.ConvertAsync(perArmorRequest, ct);
+                ct.ThrowIfCancellationRequested();
                 resultBag.Add((meshFile, result));
 
                 var done = incrementCompleted();
@@ -9889,6 +9899,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
     public Task<ImportedArmor> ImportAsync(string inputPath, CancellationToken cancellationToken, IReadOnlyList<string>? excludedDirectories = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var fullInputPath = Path.GetFullPath(inputPath);
         var sourcePath = fullInputPath;
         string? temporaryWorkspace = null;
@@ -9897,6 +9908,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
         {
             temporaryWorkspace = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(fullInputPath, "bodyslide-extract");
             sourcePath = temporaryWorkspace;
+            cancellationToken.ThrowIfCancellationRequested();
         }
         else if (File.Exists(fullInputPath) && IsPluginFile(fullInputPath))
         {
@@ -9907,6 +9919,7 @@ internal sealed class LocalArmorImportService : IArmorImportService
         }
 
         var meshFiles = EnumerateFiles(sourcePath, [".nif"], excludedDirectories);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // When a single weight-variant NIF (_0 or _1) is provided directly, also import the
         // sibling half so the full pair is processed together and weight interpolation works.
@@ -9926,12 +9939,14 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
         var supportScanRoot = ResolveSupportScanRoot(sourcePath);
         var textureFiles = EnumerateFiles(supportScanRoot, [".dds", ".png", ".tga"], excludedDirectories);
+        cancellationToken.ThrowIfCancellationRequested();
         var xmlFiles = EnumerateFiles(supportScanRoot, [".xml"], excludedDirectories);
         var physicsFiles = xmlFiles
             .Where(path => !BodySlideSourceProjectSupport.IsLikelyBodySlideSupportXml(path))
             .Concat(EnumerateFiles(supportScanRoot, [".hkx"], excludedDirectories))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
         var inferredReferenceFiles = EnumerateFiles(supportScanRoot, [".tri", ".nif"], excludedDirectories)
             .Where(path =>
             {
@@ -9947,10 +9962,12 @@ internal sealed class LocalArmorImportService : IArmorImportService
             .Concat(bodySlideSupportFiles)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
         var customBodyProfiles = CustomBodyProfileSupport.LoadProfiles(
             EnumerateFiles(supportScanRoot, [".json"], excludedDirectories)
                 .Where(CustomBodyProfileSupport.IsProfileFile)
                 .ToArray());
+        cancellationToken.ThrowIfCancellationRequested();
 
         return Task.FromResult(new ImportedArmor(
             sourcePath,
