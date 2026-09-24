@@ -1231,7 +1231,13 @@ public sealed class MainForm : Form
 
     internal DesktopSmokeTestSummary GetSmokeTestSummary()
     {
-        return DesktopSmokeTestContract.Create(Text, _resultsTabControl.TabPages.Count);
+        return DesktopSmokeTestContract.Create(
+            Text,
+            _presetComboBox.Items.Count,
+            _targetComboBox.Items.Count,
+            CountSelectableOptionItems(_profileComboBox),
+            CountSelectableOptionItems(_physicsComboBox),
+            _resultsTabControl.TabPages.Count);
     }
 
     internal string GetSmokeTestSummaryJson()
@@ -3002,6 +3008,17 @@ public sealed class MainForm : Form
         }
 
         return DesktopWorkflowSupport.ReadOptionalSelection(comboBox.SelectedItem?.ToString());
+    }
+
+    private static int CountSelectableOptionItems(ComboBox comboBox)
+    {
+        ArgumentNullException.ThrowIfNull(comboBox);
+
+        return comboBox.Items
+            .Cast<object?>()
+            .Select(static item => item?.ToString())
+            .Count(static value => !string.IsNullOrWhiteSpace(value) &&
+                                   !value.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? ReadOptionalPathValue(string? path) =>

@@ -18,31 +18,55 @@ public static class DesktopSmokeTestContract
     public const string ReadyStatus = "ok";
     public const string LayoutMismatchStatus = "layout-mismatch";
     public const int ExpectedDesktopTabCount = 10;
+    public static int ExpectedPresetCount => PresetCatalog.All.Count;
+    public static int ExpectedTargetCount => BodyTypeCatalog.All.Count;
+    public static int ExpectedProfileCount => DeformationProfileModifier.All.Count;
+    public static int ExpectedPhysicsCount => PhysicsProfileCatalog.All.Count;
 
     public static DesktopSmokeTestSummary Create(string title, int tabs)
     {
-        return new DesktopSmokeTestSummary(
-            tabs == ExpectedDesktopTabCount ? ReadyStatus : LayoutMismatchStatus,
+        return Create(
             title,
-            PresetCatalog.All.Count,
-            BodyTypeCatalog.All.Count,
-            DeformationProfileModifier.All.Count,
-            PhysicsProfileCatalog.All.Count,
+            ExpectedPresetCount,
+            ExpectedTargetCount,
+            ExpectedProfileCount,
+            ExpectedPhysicsCount,
+            tabs);
+    }
+
+    public static DesktopSmokeTestSummary Create(
+        string title,
+        int presets,
+        int targets,
+        int profiles,
+        int physics,
+        int tabs)
+    {
+        var countsMatch = presets == ExpectedPresetCount &&
+            targets == ExpectedTargetCount &&
+            profiles == ExpectedProfileCount &&
+            physics == ExpectedPhysicsCount;
+
+        return new DesktopSmokeTestSummary(
+            tabs == ExpectedDesktopTabCount && countsMatch ? ReadyStatus : LayoutMismatchStatus,
+            title,
+            presets,
+            targets,
+            profiles,
+            physics,
             tabs,
             ExpectedDesktopTabCount);
     }
 
     public static DesktopSmokeTestSummary CreateReady(string title, int tabs)
     {
-        return new DesktopSmokeTestSummary(
-            ReadyStatus,
+        return Create(
             title,
-            PresetCatalog.All.Count,
-            BodyTypeCatalog.All.Count,
-            DeformationProfileModifier.All.Count,
-            PhysicsProfileCatalog.All.Count,
-            tabs,
-            ExpectedDesktopTabCount);
+            ExpectedPresetCount,
+            ExpectedTargetCount,
+            ExpectedProfileCount,
+            ExpectedPhysicsCount,
+            tabs);
     }
 
     public static string Serialize(DesktopSmokeTestSummary payload)
@@ -63,20 +87,6 @@ public static class DesktopSmokeTestContract
         int physics,
         int tabs)
     {
-        var status = tabs == ExpectedDesktopTabCount
-            ? ReadyStatus
-            : LayoutMismatchStatus;
-
-        return JsonSerializer.Serialize(new
-        {
-            status,
-            title,
-            presets,
-            targets,
-            profiles,
-            physics,
-            tabs,
-            expectedTabs = ExpectedDesktopTabCount
-        });
+        return Serialize(Create(title, presets, targets, profiles, physics, tabs));
     }
 }
