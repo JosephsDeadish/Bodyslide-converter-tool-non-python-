@@ -154,7 +154,12 @@ public sealed class MainForm : Form
 
     private sealed record GuidanceEntry(string Area, string Priority, string Guidance, string? TargetPath);
 
-    public MainForm(DesktopLaunchOptions? launchOptions = null)
+    public MainForm()
+        : this(null)
+    {
+    }
+
+    internal MainForm(DesktopLaunchOptions? launchOptions)
     {
         _launchOptions = launchOptions ?? DesktopLaunchOptions.Empty;
         var appVersion = Assembly

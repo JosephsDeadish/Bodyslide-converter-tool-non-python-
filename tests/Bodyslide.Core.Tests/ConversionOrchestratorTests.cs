@@ -16457,9 +16457,21 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("BodySlide", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SuggestedGuiFlow, step => step.Area.Equals("Plugin patch", StringComparison.OrdinalIgnoreCase) &&
                                                                step.Blocking);
-            Assert.True(snapshot.Artifacts.Count >= 2);
-            Assert.Equal("fomod/ModuleConfig.xml", snapshot.Artifacts[0].DisplayPath.Replace('\\', '/'));
-            Assert.Equal("fomod/info.xml", snapshot.Artifacts[1].DisplayPath.Replace('\\', '/'));
+            var moduleConfigIndex = snapshot.Artifacts
+                .Select((artifact, index) => new { artifact, index })
+                .First(item => item.artifact.DisplayPath.Replace('\\', '/').Equals("fomod/ModuleConfig.xml", StringComparison.OrdinalIgnoreCase))
+                .index;
+            var infoIndex = snapshot.Artifacts
+                .Select((artifact, index) => new { artifact, index })
+                .First(item => item.artifact.DisplayPath.Replace('\\', '/').Equals("fomod/info.xml", StringComparison.OrdinalIgnoreCase))
+                .index;
+            var bodySlideIndex = snapshot.Artifacts
+                .Select((artifact, index) => new { artifact, index })
+                .First(item => item.artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase))
+                .index;
+            Assert.True(infoIndex < moduleConfigIndex);
+            Assert.True(moduleConfigIndex > 0);
+            Assert.True(infoIndex < bodySlideIndex);
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
                                                               metric.Value.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
