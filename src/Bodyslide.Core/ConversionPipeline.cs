@@ -604,11 +604,13 @@ public sealed record LiveGameExecutionScenarioProfile(
     string ValidationSaveProfile,
     IReadOnlyList<string> DispatchActions,
     IReadOnlyList<string> SuccessSignals,
-    IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RelatedArtifacts,
     bool BlocksRelease,
     IReadOnlyList<string>? ProofAxes = null,
-    IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
+    IReadOnlyList<string>? MatrixCoordinatesTargeted = null)
+{
+    public IReadOnlyList<string> FocusRegions { get; init; } = [];
+}
 public sealed record ExternalHarnessBootstrapContract(
     string HarnessKind,
     string ContractVersion,
@@ -642,11 +644,13 @@ public sealed record LiveGameExecutionProbe(
 public sealed record RuntimeObservationScenarioContract(
     string Scenario,
     string ValidationSaveProfile,
-    IReadOnlyList<string> FocusRegions,
     IReadOnlyList<string> RequiredSuccessSignals,
     IReadOnlyList<string> BlockingFailureSignals,
     IReadOnlyList<string> EvidenceArtifacts,
-    bool BlocksRelease);
+    bool BlocksRelease)
+{
+    public IReadOnlyList<string> FocusRegions { get; init; } = [];
+}
 public sealed record RuntimeObservationBundleContract(
     string Status,
     string HarnessKind,
@@ -773,10 +777,12 @@ public sealed record WindowsUiE2EFlowProfile(
     string EntryPointSelector,
     IReadOnlyList<string> RequiredSelectors,
     IReadOnlyList<string> RelatedArtifacts,
-    IReadOnlyList<string> FocusRegions,
     bool BlocksRelease,
     IReadOnlyList<string>? ProofAxes = null,
-    IReadOnlyList<string>? MatrixCoordinatesTargeted = null);
+    IReadOnlyList<string>? MatrixCoordinatesTargeted = null)
+{
+    public IReadOnlyList<string> FocusRegions { get; init; } = [];
+}
 public sealed record WindowsUiE2EAutomationPlan(
     string Coverage,
     IReadOnlyList<string> BlockingProofAxes,
@@ -30792,11 +30798,13 @@ internal sealed class LocalExportService(
                 return new RuntimeObservationScenarioContract(
                     Scenario: profile.Name,
                     ValidationSaveProfile: profile.ValidationSaveProfile,
-                    FocusRegions: profile.FocusRegions,
                     RequiredSuccessSignals: BuildRuntimeObservationSuccessSignals(profile, matchingProbe),
                     BlockingFailureSignals: BuildRuntimeObservationFailureSignals(profile, matchingProbe),
                     EvidenceArtifacts: profile.RelatedArtifacts,
-                    BlocksRelease: profile.BlocksRelease);
+                    BlocksRelease: profile.BlocksRelease)
+                {
+                    FocusRegions = profile.FocusRegions
+                };
             })
             .ToArray();
 
@@ -31104,7 +31112,6 @@ internal sealed class LocalExportService(
                     ValidationSaveProfile: DetermineValidationSaveProfile(probe, defaultSmokeSave, combatSave, groundingSave, loadOrderSave),
                     DispatchActions: probe.DispatchActions,
                     SuccessSignals: probe.ExpectedAssertions,
-                    FocusRegions: probe.FocusRegions,
                     RelatedArtifacts: probe.RelatedArtifacts,
                     BlocksRelease: probe.BlocksRelease,
                     ProofAxes: proofAxes,
@@ -31112,7 +31119,10 @@ internal sealed class LocalExportService(
                         matrixProofContext,
                         proofAxes,
                         runtimeCoverage: runtimePlan.ExecutionCoverage,
-                        liveGameCoverage: "external-live-game-harness"));
+                        liveGameCoverage: "external-live-game-harness"))
+                {
+                    FocusRegions = probe.FocusRegions
+                };
             })
             .ToArray() ?? [];
     }
@@ -31204,13 +31214,15 @@ internal sealed class LocalExportService(
             EntryPointSelector: entryPointSelector,
             RequiredSelectors: requiredSelectors,
             RelatedArtifacts: relatedArtifacts,
-            FocusRegions: focusRegions,
             BlocksRelease: blocksRelease,
             ProofAxes: proofAxes,
             MatrixCoordinatesTargeted: BuildTargetedMatrixCoordinates(
                 matrixProofContext,
                 proofAxes,
-                desktopCoverage: "external-windows-ui-harness-ready"));
+                desktopCoverage: "external-windows-ui-harness-ready"))
+        {
+            FocusRegions = focusRegions
+        };
     }
 
     private static IReadOnlyList<string> BuildWindowsUiFlowFocusRegions(
