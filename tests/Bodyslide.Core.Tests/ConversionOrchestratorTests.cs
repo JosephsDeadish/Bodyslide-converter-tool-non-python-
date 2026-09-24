@@ -62,6 +62,24 @@ public sealed class ConversionOrchestratorTests
                   "ValidationSummary": { "Status": "needs-review", "Score": 61, "HighSeverityCount": 1, "MediumSeverityCount": 0, "LowSeverityCount": 0, "Issues": [] }
                 }
                 """);
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "armor-pack-validation.json"),
+                """
+                {
+                  "TargetBody": "Feline Humanoid",
+                  "ConversionLabel": "demo",
+                  "PackReadinessStatus": "needs-review",
+                  "TotalCount": 1,
+                  "QualityReportCount": 1,
+                  "AverageValidationScore": 61,
+                  "ReadyCount": 0,
+                  "NeedsReviewCount": 1,
+                  "HighRiskCount": 0,
+                  "TopIssueCodes": [
+                    { "Code": "fomod-missing-root-plugin-entry", "Count": 1 }
+                  ]
+                }
+                """);
 
             var snapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath);
 
@@ -72,6 +90,10 @@ public sealed class ConversionOrchestratorTests
                                                       row.Value.Contains("REVIEW", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Support tier", StringComparison.OrdinalIgnoreCase) &&
                                                       row.Value.Equals("experimental-manual-cleanup", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.SummaryRows, row => row.Property.Equals("MO2/FOMOD verification", StringComparison.OrdinalIgnoreCase) &&
+                                                      row.Value.Contains("root plugin entry", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -16493,7 +16515,14 @@ public sealed class RealisticModPackFixtureTests
                   "PackReadinessStatus": "needs-review",
                   "TotalCount": 1,
                   "QualityReportCount": 1,
-                  "AverageValidationScore": 58
+                  "AverageValidationScore": 58,
+                  "ReadyCount": 0,
+                  "NeedsReviewCount": 1,
+                  "HighRiskCount": 0,
+                  "TopIssueCodes": [
+                    { "Code": "fomod-missing-root-plugin-entry", "Count": 1 },
+                    { "Code": "zip-missing-plugin-patch-report", "Count": 1 }
+                  ]
                 }
                 """);
 
@@ -16525,6 +16554,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(snapshot.Artifacts, artifact => artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
                                                               metric.Value.Equals("needs-review", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Needs review", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Equals("1", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("Top packaging issues", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Contains("root plugin entry", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(snapshot.ReportMetrics, metric => metric.Property.Equals("MO2/FOMOD verification", StringComparison.OrdinalIgnoreCase) &&
+                                                              metric.Value.Contains("Needs review", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("needs-review", snapshot.ValidationState.EffectiveStatus);
         }
         finally
         {

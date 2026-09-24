@@ -133,6 +133,11 @@ internal static class DesktopWorkflowAutomation
         {
             rows.Add(new("Validation gate", ConversionValidationPresentation.GetGateLabel(validationState.EffectiveStatus)));
         }
+        AppendMetricRow(rows, reportMetrics, "Pack status");
+        AppendMetricRow(rows, reportMetrics, "Needs review");
+        AppendMetricRow(rows, reportMetrics, "High risk");
+        AppendMetricRow(rows, reportMetrics, "Top packaging issues");
+        AppendMetricRow(rows, reportMetrics, "MO2/FOMOD verification");
         AppendMetricRow(rows, reportMetrics, "Target body");
         AppendMetricRow(rows, reportMetrics, "Detected source body");
         AppendMetricRow(rows, reportMetrics, "Conversion strategy");
@@ -285,6 +290,11 @@ internal static class DesktopWorkflowAutomation
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Runtime verification required", StringComparison.OrdinalIgnoreCase) &&
              metric.Value.Equals("Yes", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("Pack status", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("READY", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.Equals("PASS", StringComparison.OrdinalIgnoreCase)) ||
+            (metric.Property.Equals("MO2/FOMOD verification", StringComparison.OrdinalIgnoreCase) &&
+             !metric.Value.StartsWith("Ready", StringComparison.OrdinalIgnoreCase)) ||
             (metric.Property.Equals("Unsupported bones", StringComparison.OrdinalIgnoreCase) &&
              !string.IsNullOrWhiteSpace(metric.Value)));
         var derivedStatus = requiresReview ? "needs-review" : previewAvailable ? "ready" : null;
@@ -329,6 +339,12 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Failed", TryReadIntValue(root, "FailedCount"), filePath);
                     Add(metrics, reportName, "Pack status", TryReadString(root, "PackReadinessStatus"), filePath);
                     Add(metrics, reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    Add(metrics, reportName, "Ready", TryReadIntValue(root, "ReadyCount"), filePath);
+                    Add(metrics, reportName, "Needs review", TryReadIntValue(root, "NeedsReviewCount"), filePath);
+                    Add(metrics, reportName, "High risk", TryReadIntValue(root, "HighRiskCount"), filePath);
+                    Add(metrics, reportName, "Missing quality", TryReadIntValue(root, "MissingQualityReportCount"), filePath);
+                    Add(metrics, reportName, "Top packaging issues", TryReadTopIssueSummary(root), filePath);
+                    Add(metrics, reportName, "MO2/FOMOD verification", TryReadFomodVerificationSummary(root), filePath);
                     break;
                 case "armor-pack-validation.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -337,6 +353,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Items", TryReadIntValue(root, "TotalCount"), filePath);
                     Add(metrics, reportName, "Quality reports", TryReadIntValue(root, "QualityReportCount"), filePath);
                     Add(metrics, reportName, "Avg validation score", TryReadString(root, "AverageValidationScore"), filePath);
+                    Add(metrics, reportName, "Ready", TryReadIntValue(root, "ReadyCount"), filePath);
+                    Add(metrics, reportName, "Needs review", TryReadIntValue(root, "NeedsReviewCount"), filePath);
+                    Add(metrics, reportName, "High risk", TryReadIntValue(root, "HighRiskCount"), filePath);
+                    Add(metrics, reportName, "Top packaging issues", TryReadTopIssueSummary(root), filePath);
+                    Add(metrics, reportName, "MO2/FOMOD verification", TryReadFomodVerificationSummary(root), filePath);
                     break;
                 case "conversion-quality.json":
                     foreach (var metric in ConversionQualityReportMetrics.Read(root))
@@ -616,6 +637,114 @@ internal static class DesktopWorkflowAutomation
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? string.Join(", ", value.EnumerateArray().Select(static item => item.ToString()))
             : null;
+
+    private static string? TryReadTopIssueSummary(JsonElement element)
+    {
+        var issues = ReadTopIssueCodes(element);
+        if (issues.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join("; ", issues
+            .Take(3)
+            .Select(static issue => issue.Count > 1
+                ? $"{DescribePackIssueCode(issue.Code)} ({issue.Count})"
+                : DescribePackIssueCode(issue.Code)));
+    }
+
+    private static string? TryReadFomodVerificationSummary(JsonElement element)
+    {
+        var issues = ReadTopIssueCodes(element)
+            .Where(static issue => IsFomodIssueCode(issue.Code))
+            .ToArray();
+        if (issues.Length == 0)
+        {
+            return "Ready";
+        }
+
+        return $"Needs review: {string.Join("; ", issues
+            .Take(3)
+            .Select(static issue => issue.Count > 1
+                ? $"{DescribePackIssueCode(issue.Code)} ({issue.Count})"
+                : DescribePackIssueCode(issue.Code)))}";
+    }
+
+    private static IReadOnlyList<(string Code, int Count)> ReadTopIssueCodes(JsonElement element)
+    {
+        if (!TryGetProperty(element, "TopIssueCodes", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var issues = new List<(string Code, int Count)>();
+        foreach (var issue in value.EnumerateArray())
+        {
+            var code = TryReadString(issue, "Code");
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                continue;
+            }
+
+            issues.Add((code.Trim(), TryReadIntValue(issue, "Count") ?? 0));
+        }
+
+        return issues;
+    }
+
+    private static bool IsFomodIssueCode(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return false;
+        }
+
+        var normalized = code.Trim();
+        return normalized.Contains("fomod", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("root-plugin-entry", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("root-support-entry", StringComparison.OrdinalIgnoreCase)
+               || normalized.Contains("root-plugin", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DescribePackIssueCode(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return "packaging issue";
+        }
+
+        var normalized = code.Trim();
+        if (normalized.StartsWith("zip-missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"ZIP missing {DescribePackIssueFragment(normalized["zip-missing-".Length..])}";
+        }
+
+        if (normalized.StartsWith("missing-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Missing {DescribePackIssueFragment(normalized["missing-".Length..])}";
+        }
+
+        if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"FOMOD {DescribePackIssueFragment(normalized["fomod-".Length..])}";
+        }
+
+        return DescribePackIssueFragment(normalized);
+    }
+
+    private static string DescribePackIssueFragment(string fragment) =>
+        fragment.ToLowerInvariant() switch
+        {
+            "fomod-module-config" => "ModuleConfig.xml",
+            "fomod-info" => "info.xml",
+            "root-plugin-entry" => "root plugin entry",
+            "root-support-entry" => "root support entry",
+            "root-plugin" => "root plugin",
+            "plugin-patch-report" => "plugin-patches.json",
+            "output-zip" => "output zip",
+            "staged-mesh-output" => "staged meshes",
+            _ => fragment.Replace('-', ' ')
+        };
 
     private static int? TryReadIntValue(JsonElement element, string propertyName) =>
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
