@@ -14769,6 +14769,36 @@ public sealed class RuntimeReadinessReporterTests
     }
 }
 
+public sealed class ConversionMatrixProofGuidanceTests
+{
+    [Theory]
+    [InlineData("topology-transfer", "topology-correspondence.json")]
+    [InlineData("topology", "topology-correspondence.json")]
+    [InlineData("live-game-execution", "live-game-execution.json")]
+    [InlineData("live-game", "live-game-execution.json")]
+    [InlineData("custom-skeleton", "skeleton-compatibility.json")]
+    [InlineData("skeleton", "skeleton-compatibility.json")]
+    public void BuildAxisActionText_UsesExpectedArtifactHints(string axis, string expectedArtifact)
+    {
+        var text = ConversionMatrixProofGuidance.BuildAxisActionText(axis);
+
+        Assert.Contains(expectedArtifact, text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetPreferredArtifactsForAxes_PrioritizesSpecificKnownGapFamilies()
+    {
+        var topologyArtifacts = ConversionMatrixProofGuidance.GetPreferredArtifactsForAxes(["body-support", "topology-transfer"]);
+        Assert.Equal("topology-correspondence.json", topologyArtifacts[0]);
+
+        var liveGameArtifacts = ConversionMatrixProofGuidance.GetPreferredArtifactsForAxes(["body-support", "live-game-execution"]);
+        Assert.Equal("live-game-execution.json", liveGameArtifacts[0]);
+
+        var skeletonArtifacts = ConversionMatrixProofGuidance.GetPreferredArtifactsForAxes(["body-support", "custom-skeleton"]);
+        Assert.Equal("skeleton-compatibility.json", skeletonArtifacts[0]);
+    }
+}
+
 public sealed class DesktopWorkflowSupportTests
 {
     [Fact]
