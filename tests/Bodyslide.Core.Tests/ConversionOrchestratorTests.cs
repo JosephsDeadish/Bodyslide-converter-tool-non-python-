@@ -1843,6 +1843,7 @@ public sealed class ConversionOrchestratorTests
             var metaIni = await File.ReadAllTextAsync(metaIniPath);
             var sliderGroupsXml = await File.ReadAllTextAsync(sliderGroupsPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("installerVersion=\"5\"", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);

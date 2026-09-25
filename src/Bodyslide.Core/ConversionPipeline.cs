@@ -30633,7 +30633,7 @@ internal sealed class LocalExportService(
 
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
-            <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+            <config installerVersion="5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
               <moduleName>{{safePackage}} - SlideSmith Conversion</moduleName>
               <installSteps order="Explicit">
                 <installStep name="Target Body">
