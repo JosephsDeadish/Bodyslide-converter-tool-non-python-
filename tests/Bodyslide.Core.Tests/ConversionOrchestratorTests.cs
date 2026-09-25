@@ -18313,6 +18313,8 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(string.IsNullOrWhiteSpace(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("HardCaseFamily").GetString()));
             Assert.False(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("StrictTransferReady").GetBoolean());
             Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("UnmatchedFocusRegions").GetArrayLength() >= 0);
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("StrictTransferBlockers").GetArrayLength() > 0);
+            Assert.True(inGameReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("OwnershipLayoutSignals").GetArrayLength() > 0);
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Mixed mod-stack load-order sweep", StringComparison.Ordinal));
@@ -18336,6 +18338,12 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(string.IsNullOrWhiteSpace(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("SemanticVertexMatchingStatus").GetString()));
             Assert.False(string.IsNullOrWhiteSpace(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("HardCaseFamily").GetString()));
             Assert.False(topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("StrictTransferReady").GetBoolean());
+            Assert.Contains(
+                topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("StrictTransferBlockers").EnumerateArray().Select(static item => item.GetString()),
+                static blocker => blocker is not null && blocker.StartsWith("hard-case-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                topologyReport.RootElement.GetProperty("TopologyCorrespondence").GetProperty("OwnershipLayoutSignals").EnumerateArray().Select(static item => item.GetString()),
+                static signal => signal is not null && signal.StartsWith("island-count:", StringComparison.OrdinalIgnoreCase));
             Assert.True(topologyReport.RootElement.GetProperty("ReviewArtifacts").GetArrayLength() > 0);
 
             var runtimePlanJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json"));
@@ -18497,6 +18505,14 @@ public sealed class RealisticModPackFixtureTests
                 liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
                     item.GetProperty("MatrixCoordinatesTargeted").EnumerateArray().Select(static coordinate => coordinate.GetString())),
                 static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
+                    item.GetProperty("ObservationChannels").EnumerateArray().Select(static channel => channel.GetString())),
+                static channel => string.Equals(channel, "ownership-layout-snapshot", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray().SelectMany(static item =>
+                    item.GetProperty("ProofDeliverables").EnumerateArray().Select(static deliverable => deliverable.GetString())),
+                static deliverable => string.Equals(deliverable, "runtime-observation-bundle.json", StringComparison.OrdinalIgnoreCase));
             Assert.True(liveGameExecution.RootElement.GetProperty("Probes").GetArrayLength() > 0);
             Assert.Contains(
                 liveGameExecution.RootElement.GetProperty("ObservationBundleContract").GetProperty("HostEvidenceArtifacts").EnumerateArray().Select(static item => item.GetString()),
@@ -18537,6 +18553,13 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(modStackReport.RootElement.GetProperty("DistinctDeclaredMasterCount").GetInt32() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("DeclaredMasters").GetArrayLength() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("SourceSkeletonCandidates").GetArrayLength() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("RequiresSkeletonDependencyValidation").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(modStackReport.RootElement.GetProperty("MasterChainComplexity").GetString()));
+            Assert.True(modStackReport.RootElement.GetProperty("SkeletonDependencySignals").GetArrayLength() > 0);
+            Assert.True(modStackReport.RootElement.GetProperty("LoadOrderValidationSignals").GetArrayLength() > 0);
+            Assert.Contains(
+                modStackReport.RootElement.GetProperty("SuggestedValidationSaveProfiles").EnumerateArray().Select(static item => item.GetString()),
+                static profile => string.Equals(profile, "custom-skeleton-remap-validation-save", StringComparison.OrdinalIgnoreCase));
             Assert.True(modStackReport.RootElement.GetProperty("ValidationSignals").GetArrayLength() > 0);
             Assert.True(modStackReport.RootElement.GetProperty("CompoundCertaintySignals").GetArrayLength() > 0);
             Assert.Contains(
@@ -18719,6 +18742,14 @@ public sealed class RealisticModPackFixtureTests
                     profile.GetProperty("MatrixCoordinatesTargeted").EnumerateArray().Select(static coordinate => coordinate.GetString())),
                 static coordinate => coordinate is not null && coordinate.StartsWith("topology-layout-family:", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().SelectMany(static profile =>
+                    profile.GetProperty("AutomationCheckpoints").EnumerateArray().Select(static checkpoint => checkpoint.GetString())),
+                static checkpoint => string.Equals(checkpoint, "external-proof-handoff-opened", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                windowsUiAutomation.RootElement.GetProperty("FlowProfiles").EnumerateArray().SelectMany(static profile =>
+                    profile.GetProperty("ProofDeliverables").EnumerateArray().Select(static deliverable => deliverable.GetString())),
+                static deliverable => string.Equals(deliverable, "ui-run-summary", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
                 windowsUiAutomation.RootElement.GetProperty("Selectors").EnumerateArray().Select(static selector => selector.GetProperty("SelectorValue").GetString()),
                 static selector => string.Equals(selector, "inputPathTextBox", StringComparison.Ordinal));
             Assert.Contains(
@@ -18769,6 +18800,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.True(armorPackValidation.RootElement.GetProperty("RuntimeVerificationRequiredCount").GetInt32() > 0);
             Assert.True(armorPackValidation.RootElement.GetProperty("ExternalGameHarnessCount").GetInt32() > 0);
             Assert.True(armorPackValidation.RootElement.GetProperty("ExternalUiHarnessCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("FomodReadyCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("MetaIniReadyCount").GetInt32() > 0);
+            Assert.True(armorPackValidation.RootElement.GetProperty("PackagedInstallerReadyCount").GetInt32() > 0);
             Assert.Contains(
                 armorPackValidation.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("ValidationStatus").GetString()),
                 static status => string.Equals(status, "high-risk", StringComparison.OrdinalIgnoreCase));
@@ -18782,6 +18816,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.False(packItem.GetProperty("CanSafelyAnimate").GetBoolean());
             Assert.True(packItem.GetProperty("RequiresExternalGameHarness").GetBoolean());
             Assert.True(packItem.GetProperty("RequiresExternalUiHarness").GetBoolean());
+            Assert.True(packItem.GetProperty("HasFomodModuleConfig").GetBoolean());
+            Assert.True(packItem.GetProperty("HasFomodInfo").GetBoolean());
+            Assert.True(packItem.GetProperty("HasMetaIni").GetBoolean());
+            Assert.True(packItem.GetProperty("PackagedInstallerReady").GetBoolean());
 
             var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
             Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");

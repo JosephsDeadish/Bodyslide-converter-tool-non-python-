@@ -610,6 +610,8 @@ public sealed record LiveGameExecutionScenarioProfile(
     IReadOnlyList<string>? MatrixCoordinatesTargeted = null)
 {
     public IReadOnlyList<string> FocusRegions { get; init; } = [];
+    public IReadOnlyList<string> ObservationChannels { get; init; } = [];
+    public IReadOnlyList<string> ProofDeliverables { get; init; } = [];
 }
 public sealed record ExternalHarnessBootstrapContract(
     string HarnessKind,
@@ -718,6 +720,11 @@ public sealed record ModStackCrossValidationReport(
     IReadOnlyList<string> DeclaredMasters,
     int LinkedArmorFamilyCount,
     IReadOnlyList<string> SourceSkeletonCandidates,
+    string MasterChainComplexity,
+    bool RequiresSkeletonDependencyValidation,
+    IReadOnlyList<string> SkeletonDependencySignals,
+    IReadOnlyList<string> LoadOrderValidationSignals,
+    IReadOnlyList<string> SuggestedValidationSaveProfiles,
     IReadOnlyList<string> ValidationSignals,
     IReadOnlyList<string> CompoundCertaintySignals,
     int RaceWarningCount,
@@ -782,6 +789,8 @@ public sealed record WindowsUiE2EFlowProfile(
     IReadOnlyList<string>? MatrixCoordinatesTargeted = null)
 {
     public IReadOnlyList<string> FocusRegions { get; init; } = [];
+    public IReadOnlyList<string> AutomationCheckpoints { get; init; } = [];
+    public IReadOnlyList<string> ProofDeliverables { get; init; } = [];
 }
 public sealed record WindowsUiE2EAutomationPlan(
     string Coverage,
@@ -1598,7 +1607,9 @@ public sealed record TopologyCorrespondenceReport(
     string BoundaryRisk = "low",
     int HighVarianceRegionCount = 0,
     IReadOnlyList<string>? HighVarianceRegions = null,
-    IReadOnlyList<string>? StabilitySignals = null);
+    IReadOnlyList<string>? StabilitySignals = null,
+    IReadOnlyList<string>? StrictTransferBlockers = null,
+    IReadOnlyList<string>? OwnershipLayoutSignals = null);
 
 public sealed record CageTopologyReport(
     int IslandCount,
@@ -1700,7 +1711,12 @@ public sealed record ArmorPackValidationItem(
     bool RuntimeVerificationRequired = false,
     bool? CanSafelyAnimate = null,
     bool RequiresExternalGameHarness = false,
-    bool RequiresExternalUiHarness = false);
+    bool RequiresExternalUiHarness = false,
+    bool HasFomodModuleConfig = false,
+    bool HasFomodInfo = false,
+    bool HasMetaIni = false,
+    bool HasOutputZip = false,
+    bool PackagedInstallerReady = false);
 public sealed record ArmorPackValidationReport(
     string ConversionLabel,
     string TargetBody,
@@ -1717,6 +1733,10 @@ public sealed record ArmorPackValidationReport(
     int RuntimeVerificationRequiredCount,
     int ExternalGameHarnessCount,
     int ExternalUiHarnessCount,
+    int FomodReadyCount,
+    int MetaIniReadyCount,
+    int OutputZipReadyCount,
+    int PackagedInstallerReadyCount,
     int MissingQualityReportCount,
     double? AverageValidationScore,
     IReadOnlyList<ArmorPackValidationIssueCount> TopIssueCodes,
@@ -8356,6 +8376,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     RuntimeVerificationRequired = validationItem?.RuntimeVerificationRequired,
                     RequiresExternalGameHarness = validationItem?.RequiresExternalGameHarness,
                     RequiresExternalUiHarness = validationItem?.RequiresExternalUiHarness,
+                    HasFomodModuleConfig = validationItem?.HasFomodModuleConfig,
+                    HasFomodInfo = validationItem?.HasFomodInfo,
+                    HasMetaIni = validationItem?.HasMetaIni,
+                    HasOutputZip = validationItem?.HasOutputZip,
+                    PackagedInstallerReady = validationItem?.PackagedInstallerReady,
                 };
             }).ToList(),
         };
@@ -8405,6 +8430,11 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             var requiresExternalUiHarness = TryReadWindowsUiAutomationRequirement(
                 result.OutputDirectory,
                 static plan => plan.RequiresExternalUiHarness);
+            var hasFomodModuleConfig = File.Exists(Path.Combine(result.OutputDirectory, "fomod", "ModuleConfig.xml"));
+            var hasFomodInfo = File.Exists(Path.Combine(result.OutputDirectory, "fomod", "info.xml"));
+            var hasMetaIni = File.Exists(Path.Combine(result.OutputDirectory, "meta.ini"));
+            var hasOutputZip = File.Exists(result.OutputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip");
+            var packagedInstallerReady = hasFomodModuleConfig && hasFomodInfo && hasMetaIni;
             validationStatus = DeriveArmorPackValidationStatus(
                 validationStatus,
                 supportTier,
@@ -8428,7 +8458,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 RuntimeVerificationRequired: runtimeVerificationRequired,
                 CanSafelyAnimate: canSafelyAnimate,
                 RequiresExternalGameHarness: requiresExternalGameHarness,
-                RequiresExternalUiHarness: requiresExternalUiHarness));
+                RequiresExternalUiHarness: requiresExternalUiHarness,
+                HasFomodModuleConfig: hasFomodModuleConfig,
+                HasFomodInfo: hasFomodInfo,
+                HasMetaIni: hasMetaIni,
+                HasOutputZip: hasOutputZip,
+                PackagedInstallerReady: packagedInstallerReady));
         }
 
         var qualityReportCount = items.Count(item => item.ValidationScore.HasValue);
@@ -8441,6 +8476,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var runtimeVerificationRequiredCount = items.Count(item => item.RuntimeVerificationRequired);
         var externalGameHarnessCount = items.Count(item => item.RequiresExternalGameHarness);
         var externalUiHarnessCount = items.Count(item => item.RequiresExternalUiHarness);
+        var fomodReadyCount = items.Count(item => item.HasFomodModuleConfig && item.HasFomodInfo);
+        var metaIniReadyCount = items.Count(item => item.HasMetaIni);
+        var outputZipReadyCount = items.Count(item => item.HasOutputZip);
+        var packagedInstallerReadyCount = items.Count(item => item.PackagedInstallerReady);
         var missingQualityReportCount = items.Count(item => item.ValidationStatus.Equals("missing-quality-report", StringComparison.OrdinalIgnoreCase));
         double? averageValidationScore = qualityReportCount > 0
             ? Math.Round(items.Where(item => item.ValidationScore.HasValue).Average(item => item.ValidationScore!.Value), 1)
@@ -8471,6 +8510,10 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             RuntimeVerificationRequiredCount: runtimeVerificationRequiredCount,
             ExternalGameHarnessCount: externalGameHarnessCount,
             ExternalUiHarnessCount: externalUiHarnessCount,
+            FomodReadyCount: fomodReadyCount,
+            MetaIniReadyCount: metaIniReadyCount,
+            OutputZipReadyCount: outputZipReadyCount,
+            PackagedInstallerReadyCount: packagedInstallerReadyCount,
             MissingQualityReportCount: missingQualityReportCount,
             AverageValidationScore: averageValidationScore,
             TopIssueCodes: topIssueCodes,
@@ -31499,7 +31542,9 @@ internal sealed class LocalExportService(
                         runtimeCoverage: runtimePlan.ExecutionCoverage,
                         liveGameCoverage: "external-live-game-harness"))
                 {
-                    FocusRegions = probe.FocusRegions
+                    FocusRegions = probe.FocusRegions,
+                    ObservationChannels = BuildLiveGameScenarioObservationChannels(probe),
+                    ProofDeliverables = BuildLiveGameScenarioProofDeliverables(probe)
                 };
             })
             .ToArray() ?? [];
@@ -31556,6 +31601,74 @@ internal sealed class LocalExportService(
         }
 
         return defaultSmokeSave;
+    }
+
+    private static IReadOnlyList<string> BuildLiveGameScenarioObservationChannels(RuntimeAutomationHarnessProbe probe)
+    {
+        var channels = new List<string> { "runtime-log-capture", "screenshot-capture" };
+        if (probe.RequiresFullLoadOrderLaunch ||
+            probe.Objective.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("mod-stack", StringComparison.OrdinalIgnoreCase))
+        {
+            channels.Add("load-order-state-snapshot");
+            channels.Add("animation-dispatch-trace");
+        }
+
+        if (probe.RelatedArtifacts.Contains("skeleton-compatibility.json", StringComparer.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            channels.Add("bone-transform-tracking");
+            channels.Add("skeleton-remap-trace");
+        }
+
+        if (probe.RelatedArtifacts.Contains("topology-correspondence.json", StringComparer.OrdinalIgnoreCase) ||
+            probe.RelatedArtifacts.Contains("preview-workbench.html", StringComparer.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("layout", StringComparison.OrdinalIgnoreCase))
+        {
+            channels.Add("render-preview-capture");
+            channels.Add("ownership-layout-snapshot");
+            channels.Add("mesh-collision-probe");
+        }
+
+        return channels
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildLiveGameScenarioProofDeliverables(RuntimeAutomationHarnessProbe probe)
+    {
+        var deliverables = new List<string>(probe.RelatedArtifacts.Where(static artifact => !string.IsNullOrWhiteSpace(artifact)))
+        {
+            "runtime-observation-bundle.json"
+        };
+        if (probe.RelatedArtifacts.Contains("skeleton-compatibility.json", StringComparer.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            deliverables.Add("skeleton-remap-traces/");
+            deliverables.Add("bone-transform-traces/");
+        }
+
+        if (probe.RelatedArtifacts.Contains("topology-correspondence.json", StringComparer.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("topology", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("layout", StringComparison.OrdinalIgnoreCase))
+        {
+            deliverables.Add("topology-island-snapshots/");
+            deliverables.Add("preview-workbench.html");
+        }
+
+        if (probe.RequiresFullLoadOrderLaunch ||
+            probe.Objective.Contains("load-order", StringComparison.OrdinalIgnoreCase) ||
+            probe.Objective.Contains("mod-stack", StringComparison.OrdinalIgnoreCase))
+        {
+            deliverables.Add("load-order-state.json");
+        }
+
+        return deliverables
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IReadOnlyList<WindowsUiE2EFlowProfile> BuildWindowsUiFlowProfiles(MatrixProofContext matrixProofContext) =>
@@ -31640,7 +31753,9 @@ internal sealed class LocalExportService(
                 proofAxes,
                 desktopCoverage: "external-windows-ui-harness-ready"))
         {
-            FocusRegions = focusRegions
+            FocusRegions = focusRegions,
+            AutomationCheckpoints = BuildWindowsUiAutomationCheckpoints(name, proofAxes, relatedArtifacts),
+            ProofDeliverables = BuildWindowsUiProofDeliverables(name, relatedArtifacts)
         };
     }
 
@@ -31664,6 +31779,64 @@ internal sealed class LocalExportService(
             .Where(static region => !string.IsNullOrWhiteSpace(region))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(6)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildWindowsUiAutomationCheckpoints(
+        string name,
+        IReadOnlyCollection<string> proofAxes,
+        IReadOnlyList<string> relatedArtifacts)
+    {
+        var checkpoints = new List<string> { "selectors-resolved", "ui-state-captured" };
+        if (proofAxes.Contains("desktop-e2e", StringComparer.OrdinalIgnoreCase))
+        {
+            checkpoints.Add("flow-step-executed");
+        }
+
+        if (relatedArtifacts.Contains("preview-workbench.html", StringComparer.OrdinalIgnoreCase))
+        {
+            checkpoints.Add("preview-selectors-resolved");
+        }
+
+        if (relatedArtifacts.Contains("runtime-validation-plan.json", StringComparer.OrdinalIgnoreCase) ||
+            relatedArtifacts.Contains("live-game-execution.json", StringComparer.OrdinalIgnoreCase) ||
+            name.Contains("handoff", StringComparison.OrdinalIgnoreCase))
+        {
+            checkpoints.Add("external-proof-handoff-opened");
+        }
+
+        if (name.Contains("batch", StringComparison.OrdinalIgnoreCase))
+        {
+            checkpoints.Add("batch-targets-applied");
+        }
+
+        return checkpoints
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildWindowsUiProofDeliverables(
+        string name,
+        IReadOnlyList<string> relatedArtifacts)
+    {
+        var deliverables = new List<string>(relatedArtifacts.Where(static artifact => !string.IsNullOrWhiteSpace(artifact)))
+        {
+            "ui-run-summary",
+            "ui-selector-resolution-log"
+        };
+        if (relatedArtifacts.Contains("preview-workbench.html", StringComparer.OrdinalIgnoreCase))
+        {
+            deliverables.Add("ui-screenshot-bundle");
+        }
+
+        if (name.Contains("handoff", StringComparison.OrdinalIgnoreCase))
+        {
+            deliverables.Add("windows-ui-e2e-automation.json");
+            deliverables.Add("live-game-execution.json");
+        }
+
+        return deliverables
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 
@@ -32936,6 +33109,13 @@ internal sealed class LocalExportService(
             unmatchedFocusRegions);
         var limitationNotes = BuildTopologyCorrespondenceLimitationNotes(classification, topologyMismatchRisk, payloadReuse, semanticAnchors);
         var recommendations = BuildTopologyCorrespondenceRecommendations(classification, focusRegions, requiresManualSemanticReview);
+        var strictTransferBlockers = BuildTopologyStrictTransferBlockers(
+            hardCaseFamily,
+            classification,
+            semanticAnchors,
+            unmatchedFocusRegions,
+            stability);
+        var ownershipLayoutSignals = BuildTopologyOwnershipLayoutSignals(cageTopology, stability);
 
         return new TopologyCorrespondenceReport(
             classification,
@@ -32965,7 +33145,9 @@ internal sealed class LocalExportService(
             BoundaryRisk: stability.BoundaryRisk,
             HighVarianceRegionCount: stability.HighVarianceRegions.Count,
             HighVarianceRegions: stability.HighVarianceRegions,
-            StabilitySignals: stability.Signals);
+            StabilitySignals: stability.Signals,
+            StrictTransferBlockers: strictTransferBlockers,
+            OwnershipLayoutSignals: ownershipLayoutSignals);
     }
 
     private static IReadOnlyList<string> BuildTopologyCorrespondenceFocusRegions(
@@ -33700,6 +33882,95 @@ internal sealed class LocalExportService(
         return recommendations;
     }
 
+    private static IReadOnlyList<string> BuildTopologyStrictTransferBlockers(
+        string hardCaseFamily,
+        string classification,
+        SemanticAnchorAssessment semanticAnchors,
+        IReadOnlyList<string> unmatchedFocusRegions,
+        TopologyStabilityAssessment stability)
+    {
+        var blockers = new List<string>();
+        if (!classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add($"classification:{classification}");
+        }
+
+        if (!semanticAnchors.UsesTrueSemanticCorrespondence)
+        {
+            blockers.Add($"semantic-anchor-scope:{semanticAnchors.CorrespondenceScope}");
+        }
+
+        if (unmatchedFocusRegions.Count > 0)
+        {
+            blockers.Add($"unmatched-focus-regions:{string.Join("+", unmatchedFocusRegions.Take(4).Select(NormalizeInGameRegion))}");
+        }
+
+        if (!hardCaseFamily.Equals("core-humanoid", StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add($"hard-case-family:{hardCaseFamily}");
+        }
+
+        if (stability.RadicalTopologyRisk)
+        {
+            blockers.Add("radical-topology-risk");
+        }
+
+        if (!string.IsNullOrWhiteSpace(stability.BoundaryRisk) &&
+            !stability.BoundaryRisk.Equals("low", StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add($"boundary-risk:{stability.BoundaryRisk}");
+        }
+
+        if (stability.HighVarianceRegions.Count > 0)
+        {
+            blockers.Add($"high-variance-regions:{string.Join("+", stability.HighVarianceRegions.Take(4).Select(NormalizeInGameRegion))}");
+        }
+
+        return blockers
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildTopologyOwnershipLayoutSignals(
+        CageTopologyReport? cageTopology,
+        TopologyStabilityAssessment stability)
+    {
+        var signals = new List<string>();
+        if (cageTopology is null)
+        {
+            return signals;
+        }
+
+        if (cageTopology.IslandCount > 1)
+        {
+            signals.Add($"island-count:{cageTopology.IslandCount}");
+        }
+
+        if (cageTopology.BoundaryLoopCount > 0)
+        {
+            signals.Add($"boundary-loops:{cageTopology.BoundaryLoopCount}");
+        }
+
+        if (cageTopology.UsesEstimatedMemberships)
+        {
+            signals.Add("estimated-island-membership");
+        }
+
+        if (!string.IsNullOrWhiteSpace(stability.BoundaryRisk))
+        {
+            signals.Add($"boundary-risk:{stability.BoundaryRisk}");
+        }
+
+        if (stability.HighVarianceRegions.Count > 0)
+        {
+            signals.Add($"ownership-layout-focus:{string.Join("+", stability.HighVarianceRegions.Take(4).Select(NormalizeInGameRegion))}");
+        }
+
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static string BuildSourceSkeletonCandidateSummary(
         IReadOnlyList<SkeletonInferenceCandidate>? candidates,
         string chosenLabel)
@@ -33759,6 +34030,120 @@ internal sealed class LocalExportService(
             : $"Automatic remap safety remains {skeletonMapping.AutomaticRemapSafety}.";
         return $"Source skeleton '{skeletonMapping.SourceSkeleton}' sits near a rig-family crossover; {alternativesSummary} {safetySummary}";
     }
+
+    private static string BuildMasterChainComplexity(
+        IReadOnlyList<string> declaredMasters,
+        bool requiresLoadOrderValidation) =>
+        declaredMasters.Count switch
+        {
+            0 => requiresLoadOrderValidation ? "implicit-load-order" : "standalone",
+            1 => requiresLoadOrderValidation ? "single-master-load-order" : "single-master",
+            _ => requiresLoadOrderValidation ? "mixed-master-chain" : "multi-master"
+        };
+
+    private static IReadOnlyList<string> BuildSkeletonDependencySignals(
+        SkeletonMappingResult skeletonMapping,
+        IReadOnlyList<string> declaredMasters)
+    {
+        var signals = new List<string>();
+        if (skeletonMapping.AutomaticRemapSignals is { Count: > 0 })
+        {
+            signals.AddRange(skeletonMapping.AutomaticRemapSignals.Take(6));
+        }
+
+        if (skeletonMapping.SourceSkeletonCandidates is { Count: > 1 } candidates)
+        {
+            signals.Add($"candidate-count:{candidates.Count}");
+            var gap = GetSkeletonCandidateGap(candidates);
+            if (gap is not null)
+            {
+                signals.Add($"candidate-gap:{gap.Value:0.##}");
+            }
+        }
+
+        if (declaredMasters.Count > 0)
+        {
+            signals.Add($"declared-masters:{declaredMasters.Count}");
+        }
+
+        signals.Add($"source-skeleton:{NormalizeDependencySignalToken(skeletonMapping.SourceSkeleton)}");
+        return signals
+            .Where(static signal => !string.IsNullOrWhiteSpace(signal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildLoadOrderValidationSignals(
+        PluginAnalysisResult? pluginAnalysis,
+        RaceCompatibilityReport? raceCompatibility,
+        IReadOnlyList<string> declaredMasters,
+        int linkedArmorFamilies,
+        string targetBody)
+    {
+        var signals = new List<string>();
+        var pluginCount = pluginAnalysis?.ScannedPlugins?.Count ?? 0;
+        if (pluginCount > 0)
+        {
+            signals.Add($"plugin-count:{pluginCount}");
+        }
+
+        if (declaredMasters.Count > 0)
+        {
+            signals.Add($"declared-masters:{declaredMasters.Count}");
+        }
+
+        var ambiguousPluginCount = pluginAnalysis?.AmbiguousPlugins?.Count ?? 0;
+        if (ambiguousPluginCount > 0)
+        {
+            signals.Add($"ambiguous-plugins:{ambiguousPluginCount}");
+        }
+
+        if (linkedArmorFamilies > 0)
+        {
+            signals.Add($"linked-armor-families:{linkedArmorFamilies}");
+        }
+
+        var raceWarningCount = (raceCompatibility?.Warnings?.Count ?? 0) + (raceCompatibility?.IncompatibleRaces?.Count ?? 0);
+        if (raceWarningCount > 0)
+        {
+            signals.Add($"race-warnings:{raceWarningCount}");
+        }
+
+        signals.Add($"target-body-family:{NormalizeDependencySignalToken(BuildTargetBodyFamily(targetBody))}");
+        return signals
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildSuggestedValidationSaveProfiles(
+        bool requiresLoadOrderValidation,
+        bool requiresSkeletonDependencyValidation,
+        bool requiresCompoundCertaintySweep)
+    {
+        var profiles = new List<string> { "neutral-smoke-test-save" };
+        if (requiresSkeletonDependencyValidation)
+        {
+            profiles.Add("custom-skeleton-remap-validation-save");
+        }
+
+        profiles.Add(requiresLoadOrderValidation
+            ? "full-load-order-integration-save"
+            : "standard-load-order-validation-save");
+
+        if (requiresCompoundCertaintySweep)
+        {
+            profiles.Add("topology-workbench-validation-save");
+        }
+
+        return profiles
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string NormalizeDependencySignalToken(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? "unknown"
+            : value.Trim().ToLowerInvariant().Replace(' ', '-');
 
     private static bool IsManualCleanupLikely(
         bool topologyMismatchRisk,
@@ -34398,12 +34783,26 @@ internal sealed class LocalExportService(
             pluginAnalysis,
             raceCompatibility,
             targetBody);
+        var requiresLoadOrderValidation = RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody);
+        var requiresSkeletonDependencyValidation = HasCustomRigCertaintyRisk(skeletonMapping);
         var compoundCertaintySignals = BuildCompoundHardCaseCertaintySignals(
             inGameValidation.TopologyCorrespondence,
             skeletonMapping,
             pluginAnalysis,
             raceCompatibility,
             targetBody);
+        var masterChainComplexity = BuildMasterChainComplexity(declaredMasters, requiresLoadOrderValidation);
+        var skeletonDependencySignals = BuildSkeletonDependencySignals(skeletonMapping, declaredMasters);
+        var loadOrderValidationSignals = BuildLoadOrderValidationSignals(
+            pluginAnalysis,
+            raceCompatibility,
+            declaredMasters,
+            linkedArmorFamilies,
+            targetBody);
+        var suggestedValidationSaveProfiles = BuildSuggestedValidationSaveProfiles(
+            requiresLoadOrderValidation,
+            requiresSkeletonDependencyValidation,
+            requiresCompoundCertaintySweep);
 
         return new ModStackCrossValidationReport(
             TargetBody: targetBody,
@@ -34411,7 +34810,7 @@ internal sealed class LocalExportService(
             SupportTier: conversionReadiness.SupportTier,
             SourceSkeletonReliability: BuildSourceSkeletonInferenceReliability(skeletonMapping),
             SourceSkeletonRemapSafety: skeletonMapping.AutomaticRemapSafety,
-            RequiresLoadOrderValidation: RequiresMixedModStackValidation(pluginAnalysis, raceCompatibility, targetBody),
+            RequiresLoadOrderValidation: requiresLoadOrderValidation,
             RequiresPluginPatchReview: pluginAnalysis is not null && ((pluginAnalysis.AmbiguousPlugins?.Count ?? 0) > 0 || pluginNames.Count > 0),
             RequiresCompoundCertaintySweep: requiresCompoundCertaintySweep,
             ScannedPluginCount: pluginNames.Count,
@@ -34426,6 +34825,11 @@ internal sealed class LocalExportService(
             SourceSkeletonCandidates: skeletonMapping.SourceSkeletonCandidates?
                 .Select(candidate => $"{candidate.Label} ({candidate.Confidence:0.##})")
                 .ToArray() ?? [],
+            MasterChainComplexity: masterChainComplexity,
+            RequiresSkeletonDependencyValidation: requiresSkeletonDependencyValidation,
+            SkeletonDependencySignals: skeletonDependencySignals,
+            LoadOrderValidationSignals: loadOrderValidationSignals,
+            SuggestedValidationSaveProfiles: suggestedValidationSaveProfiles,
             ValidationSignals: inGameValidation.TopologyCorrespondence?.Signals ?? [],
             CompoundCertaintySignals: compoundCertaintySignals,
             RaceWarningCount: raceCompatibility?.Warnings.Count ?? 0,
