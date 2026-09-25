@@ -115,6 +115,9 @@ public sealed class MainForm : Form
     private bool _userAdjustedMainSplit;
     private bool? _usesSingleColumnConversionLayout;
     private int? _userPreferredMainSplitDistance;
+    private readonly object _uiSettingsSaveSync = new();
+    private DesktopUiSettings? _pendingUiSettingsSave;
+    private Task? _uiSettingsSaveTask;
     private static readonly string[] ReportFileNames =
     [
         "armor-pack-validation.json",
@@ -1320,7 +1323,7 @@ public sealed class MainForm : Form
             UpdateMainSplitLayout();
             UpdateListViewColumnLayouts();
         };
-        FormClosing += (_, _) => SaveUiSettings();
+        FormClosing += (_, _) => SaveUiSettings(flush: true);
         Shown += async (_, _) =>
         {
             _allowUserMainSplitOverride = true;
@@ -1724,30 +1727,97 @@ public sealed class MainForm : Form
         }
     }
 
-    private void SaveUiSettings()
+    private DesktopUiSettings CaptureUiSettingsSnapshot() =>
+        new(
+            _currentTheme.ToString(),
+            _customProfilePaths.Count > 0
+                ? [.. _customProfilePaths]
+                : []);
+
+    private void SaveUiSettings(bool flush = false)
+    {
+        var snapshot = CaptureUiSettingsSnapshot();
+        if (flush)
+        {
+            FlushPendingUiSettingsSave(snapshot);
+            return;
+        }
+
+        lock (_uiSettingsSaveSync)
+        {
+            _pendingUiSettingsSave = snapshot;
+            if (_uiSettingsSaveTask is null || _uiSettingsSaveTask.IsCompleted)
+            {
+                _uiSettingsSaveTask = Task.Run(ProcessPendingUiSettingsSaves);
+            }
+        }
+    }
+
+    private void FlushPendingUiSettingsSave(DesktopUiSettings snapshot)
+    {
+        Task? pendingSaveTask;
+        lock (_uiSettingsSaveSync)
+        {
+            _pendingUiSettingsSave = snapshot;
+            pendingSaveTask = _uiSettingsSaveTask;
+        }
+
+        if (pendingSaveTask is not null && !pendingSaveTask.IsCompleted)
+        {
+            pendingSaveTask.GetAwaiter().GetResult();
+            return;
+        }
+
+        TrySaveUiSettingsSnapshot(snapshot);
+    }
+
+    private void ProcessPendingUiSettingsSaves()
+    {
+        while (true)
+        {
+            DesktopUiSettings? snapshot;
+            lock (_uiSettingsSaveSync)
+            {
+                snapshot = _pendingUiSettingsSave;
+                _pendingUiSettingsSave = null;
+                if (snapshot is null)
+                {
+                    _uiSettingsSaveTask = null;
+                    return;
+                }
+            }
+
+            TrySaveUiSettingsSnapshot(snapshot);
+        }
+    }
+
+    private void TrySaveUiSettingsSnapshot(DesktopUiSettings snapshot)
     {
         try
         {
-            DesktopUiSettingsStore.Save(
-                GetUiSettingsPath(),
-                new DesktopUiSettings(
-                    _currentTheme.ToString(),
-                    _customProfilePaths.Count > 0
-                        ? [.. _customProfilePaths]
-                        : []));
+            DesktopUiSettingsStore.Save(GetUiSettingsPath(), snapshot);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            AppendLog($"Failed to save UI settings: {ex.Message}");
+            ReportUiSettingsSaveFailure(ex.Message);
         }
-        catch (UnauthorizedAccessException ex)
+    }
+
+    private void ReportUiSettingsSaveFailure(string message)
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated)
         {
-            AppendLog($"Failed to save UI settings: {ex.Message}");
+            System.Diagnostics.Trace.TraceWarning($"Failed to save UI settings: {message}");
+            return;
         }
-        catch (JsonException ex)
+
+        if (InvokeRequired)
         {
-            AppendLog($"Failed to save UI settings: {ex.Message}");
+            BeginInvoke(() => AppendLog($"Failed to save UI settings: {message}"));
+            return;
         }
+
+        AppendLog($"Failed to save UI settings: {message}");
     }
 
     private bool PruneMissingCustomProfiles(string operation)
@@ -5498,6 +5568,21 @@ public sealed class MainForm : Form
                 "Warning",
                 $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}; proof execution: {proofExecutionStatus}).{axisSummary}{dimensionSummary}{combinationSummary}",
                 guidanceTarget);
+
+            if (!string.Equals(proofExecutionStatus, "executed-pass", StringComparison.OrdinalIgnoreCase))
+            {
+                var externalProofTarget = File.Exists(Path.Combine(outputDirectory, "proof-result-bundle.json"))
+                    ? Path.Combine(outputDirectory, "proof-result-bundle.json")
+                    : Path.Combine(outputDirectory, "proof-harness-bundle.json");
+                var proofAction = string.Equals(proofExecutionStatus, "planned-only", StringComparison.OrdinalIgnoreCase)
+                    ? "Open proof-harness-bundle.json, run the required external Windows/Desktop/runtime/live-game proof steps, then import proof-result-bundle.json so this output stops being plan-only."
+                    : $"Open {Path.GetFileName(externalProofTarget)} and resolve the incomplete imported proof evidence before treating this output as release-ready.";
+                add(
+                    $"{area} proof handoff",
+                    "Action",
+                    proofAction,
+                    externalProofTarget);
+            }
 
             if (blockingGaps.Count > 0)
             {

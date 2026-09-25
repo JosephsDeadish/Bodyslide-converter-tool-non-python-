@@ -102,6 +102,24 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolveSkeletonNifPath_PrefersExactSkeletonNameOverHeuristicRigNamesInSameDirectory()
+    {
+        var modRoot = Path.Combine(_root, "MixedRigPack");
+        var meshesDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets");
+        Directory.CreateDirectory(meshesDirectory);
+
+        var rigPath = Path.Combine(meshesDirectory, "xpmsse_rig.nif");
+        var skeletonPath = Path.Combine(meshesDirectory, "skeleton.nif");
+        File.WriteAllText(rigPath, "rig");
+        File.WriteAllText(skeletonPath, "skeleton");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(skeletonPath), result);
+    }
+
+    [Fact]
     public void TryResolveSkeletonNifPath_DoesNotMistakeBodyMeshesForSkeletons()
     {
         var modRoot = Path.Combine(_root, "BodyOnlyPack");

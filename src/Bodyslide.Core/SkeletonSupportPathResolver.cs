@@ -108,10 +108,7 @@ public static class SkeletonSupportPathResolver
                 continue;
             }
 
-            var candidate = EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly)
-                .OrderBy(path => GetCandidateScore(path))
-                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
+            var candidate = SelectBestCandidate(EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly));
             if (candidate is not null)
             {
                 skeletonNifPath = Path.GetFullPath(candidate);
@@ -126,11 +123,9 @@ public static class SkeletonSupportPathResolver
     {
         skeletonNifPath = null;
 
-        var bestFallback = EnumerateFilesDepthFirst(rootDirectory, maxDepth: 5, "*.nif")
-            .Where(IsHeuristicSkeletonCandidate)
-            .OrderBy(path => GetCandidateScore(path))
-            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
+        var bestFallback = SelectBestCandidate(
+            EnumerateFilesDepthFirst(rootDirectory, maxDepth: 5, "*.nif")
+                .Where(IsHeuristicSkeletonCandidate));
         if (bestFallback is null)
         {
             return false;
@@ -213,56 +208,68 @@ public static class SkeletonSupportPathResolver
         }
     }
 
-    private static int GetCandidateScore(string path)
+    private static string? SelectBestCandidate(IEnumerable<string> candidates)
     {
-        var score = 0;
+        return candidates
+            .Select(static path => (Path: path, Rank: GetCandidateRank(path)))
+            .OrderBy(static candidate => candidate.Rank.ExactSkeletonPenalty)
+            .ThenBy(static candidate => candidate.Rank.HeuristicNamePenalty)
+            .ThenBy(static candidate => candidate.Rank.NegativeTokenPenalty)
+            .ThenBy(static candidate => candidate.Rank.PreferredDirectoryPenalty)
+            .ThenBy(static candidate => candidate.Rank.GenderedVariantPenalty)
+            .ThenBy(static candidate => candidate.Rank.PathDepth)
+            .ThenBy(static candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(static candidate => candidate.Path)
+            .FirstOrDefault();
+    }
+
+    private static SkeletonCandidateRank GetCandidateRank(string path)
+    {
         var fileName = Path.GetFileName(path);
         var fileStem = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
-        if (fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 40;
-        }
-        else if (fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 25;
-        }
-
-        if (fileStem.Contains("xpms", StringComparison.OrdinalIgnoreCase) ||
-            fileStem.Contains("xpmse", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 10;
-        }
-
-        if (fileStem.Contains("rig", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 8;
-        }
-
-        if (fileStem.Contains("bone", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 5;
-        }
-
-        if (NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase)))
-        {
-            score += 20;
-        }
-
         var normalized = path.Replace('\\', '/');
-        if (normalized.Contains("/meshes/actors/character/character assets/", StringComparison.OrdinalIgnoreCase))
-        {
-            score -= 10;
-        }
 
-        if (normalized.Contains("/character assets female/", StringComparison.OrdinalIgnoreCase) ||
+        var exactSkeletonPenalty = fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase)
+            ? 0
+            : fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase)
+                ? 1
+                : 2;
+
+        var heuristicNamePenalty =
+            (fileStem.Contains("xpms", StringComparison.OrdinalIgnoreCase) ||
+             fileStem.Contains("xpmse", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : 1) +
+            (fileStem.Contains("rig", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : 1) +
+            (fileStem.Contains("bone", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : 1);
+
+        var negativeTokenPenalty = NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase))
+            ? 1
+            : 0;
+
+        var preferredDirectoryPenalty = normalized.Contains("/meshes/actors/character/character assets/", StringComparison.OrdinalIgnoreCase)
+            ? 0
+            : 1;
+
+        var genderedVariantPenalty =
+            normalized.Contains("/character assets female/", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("/character assets male/", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase))
-        {
-            score += 5;
-        }
+            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase)
+                ? 1
+                : 0;
 
-        return score + normalized.Count(static c => c == '/');
+        return new SkeletonCandidateRank(
+            exactSkeletonPenalty,
+            heuristicNamePenalty,
+            negativeTokenPenalty,
+            preferredDirectoryPenalty,
+            genderedVariantPenalty,
+            normalized.Count(static c => c == '/'));
     }
 
     private static bool IsHeuristicSkeletonCandidate(string path)
@@ -280,4 +287,12 @@ public static class SkeletonSupportPathResolver
 
         return PositiveSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
+
+    private readonly record struct SkeletonCandidateRank(
+        int ExactSkeletonPenalty,
+        int HeuristicNamePenalty,
+        int NegativeTokenPenalty,
+        int PreferredDirectoryPenalty,
+        int GenderedVariantPenalty,
+        int PathDepth);
 }

@@ -24,11 +24,40 @@ public sealed record ProofHarnessComponentReference(
     IReadOnlyList<string> RequiredHostCapabilities,
     IReadOnlyList<string> ExpectedResultArtifacts);
 
+public sealed record ProofHarnessArtifactEntrypoints(
+    string MatrixProofReport,
+    string RuntimeValidationPlan,
+    string RuntimeValidationHarness,
+    string LiveGameExecutionPlan,
+    string RuntimeObservationTemplate,
+    string DesktopWorkflowAutomation,
+    string WindowsUiE2EAutomation,
+    string ResultBundle);
+
+public sealed record ProofHarnessScenarioReference(
+    string Scenario,
+    string Component,
+    string ValidationSaveProfile,
+    string EvidenceDirectory,
+    IReadOnlyList<string> ProofAxes,
+    IReadOnlyList<string> MatrixCoordinatesTargeted,
+    IReadOnlyList<string> ObservationChannels,
+    IReadOnlyList<string> RelatedArtifacts,
+    IReadOnlyList<string> ProofDeliverables,
+    bool BlocksRelease);
+
 public sealed record ProofEvidenceLocation(
     string Name,
     string RelativePath,
     string Purpose,
     bool Required);
+
+public sealed record ProofHarnessReplayableEvidenceContract(
+    string EvidenceRoot,
+    IReadOnlyList<ProofEvidenceLocation> Locations,
+    IReadOnlyList<string> RequiredObservationChannels,
+    IReadOnlyList<string> RequiredEvidenceCategories,
+    IReadOnlyList<string> Notes);
 
 public sealed record ProofScenarioExpectation(
     string Scenario,
@@ -48,14 +77,24 @@ public sealed record ProofResultBundleContract(
     IReadOnlyList<ProofScenarioExpectation> ScenarioExpectations,
     IReadOnlyList<string> Notes);
 
+public sealed record ProofHarnessImportTarget(
+    string Name,
+    string RelativePath,
+    string Purpose,
+    IReadOnlyList<string> RefreshedFields);
+
 public sealed record ProofHarnessBundleManifest(
     string ContractVersion,
     string TargetBody,
     string CanonicalEntryPoint,
+    ProofHarnessArtifactEntrypoints ArtifactEntrypoints,
     IReadOnlyList<ProofHarnessBundleArtifact> RequiredArtifacts,
     IReadOnlyList<ProofHarnessComponentReference> Components,
+    IReadOnlyList<ProofHarnessScenarioReference> ScenarioCatalog,
     IReadOnlyList<ProofHarnessHostRequirement> HostRequirements,
+    ProofHarnessReplayableEvidenceContract ReplayableEvidence,
     ProofResultBundleContract ResultBundleContract,
+    IReadOnlyList<ProofHarnessImportTarget> ImportTargets,
     IReadOnlyList<string> ExpectedResultFiles,
     IReadOnlyList<string> Notes);
 
@@ -177,6 +216,41 @@ internal static class ExternalProofHarnessSupport
         };
     }
 
+    public static IReadOnlyList<string> BuildPlannedOnlyAxes(IEnumerable<ProofExecutionState> proofExecutions)
+    {
+        return proofExecutions
+            .Where(static proof => string.Equals(proof.ExecutedStatus, "planned-only", StringComparison.OrdinalIgnoreCase))
+            .Select(static proof => proof.Axis)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<string> BuildExecutedImportedAxes(IEnumerable<ProofExecutionState> proofExecutions)
+    {
+        return proofExecutions
+            .Where(static proof => proof.ImportedResultAvailable ||
+                                   !string.Equals(proof.ExecutedStatus, "planned-only", StringComparison.OrdinalIgnoreCase))
+            .Select(static proof => $"{proof.Axis}:{proof.ExecutedStatus}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<string> CollectImportedHostDetails(IEnumerable<ProofExecutionState> proofExecutions)
+    {
+        return proofExecutions
+            .SelectMany(static proof => proof.HostDetails)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static IReadOnlyList<string> CollectImportedEvidenceArtifacts(IEnumerable<ProofExecutionState> proofExecutions)
+    {
+        return proofExecutions
+            .SelectMany(static proof => proof.EvidenceArtifacts)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public static ProofHarnessBundleManifest BuildBundleManifest(
         string targetBody,
         RuntimeValidationExecutionPlan runtimePlan,
@@ -184,15 +258,33 @@ internal static class ExternalProofHarnessSupport
         WindowsUiE2EAutomationPlan windowsUiAutomation,
         ConversionMatrixProofReport conversionMatrixProof)
     {
+        const string matrixProofReport = "conversion-matrix-proof.json";
+        const string runtimeValidationPlan = "runtime-validation-plan.json";
+        const string runtimeValidationHarness = "runtime-validation-harness.json";
+        const string liveGameExecutionPlan = "live-game-execution.json";
+        const string runtimeObservationTemplate = "runtime-observation-bundle.template.json";
+        const string desktopWorkflowAutomation = "desktop-workflow-automation.json";
+        const string windowsUiE2EAutomation = "windows-ui-e2e-automation.json";
+
+        var artifactEntrypoints = new ProofHarnessArtifactEntrypoints(
+            MatrixProofReport: matrixProofReport,
+            RuntimeValidationPlan: runtimeValidationPlan,
+            RuntimeValidationHarness: runtimeValidationHarness,
+            LiveGameExecutionPlan: liveGameExecutionPlan,
+            RuntimeObservationTemplate: runtimeObservationTemplate,
+            DesktopWorkflowAutomation: desktopWorkflowAutomation,
+            WindowsUiE2EAutomation: windowsUiE2EAutomation,
+            ResultBundle: ResultBundleFileName);
+
         var requiredArtifacts = new[]
         {
-            new ProofHarnessBundleArtifact("Matrix proof", "conversion-matrix-proof.json", "Top-level proof state and release-gate gaps.", true),
-            new ProofHarnessBundleArtifact("Runtime validation plan", "runtime-validation-plan.json", "Planned runtime release-gate steps.", true),
-            new ProofHarnessBundleArtifact("Runtime automation harness", "runtime-validation-harness.json", "Runtime probe dispatch/assertion contract.", true),
-            new ProofHarnessBundleArtifact("Live-game execution plan", "live-game-execution.json", "Live-game save/launcher/scenario proof contract.", true),
-            new ProofHarnessBundleArtifact("Runtime observation template", "runtime-observation-bundle.template.json", "Expected runtime observation/evidence template.", true),
-            new ProofHarnessBundleArtifact("Desktop workflow automation", "desktop-workflow-automation.json", "Desktop review and artifact/state snapshot.", true),
-            new ProofHarnessBundleArtifact("Windows UI E2E plan", "windows-ui-e2e-automation.json", "Windows UI automation selectors, flows, and steps.", true),
+            new ProofHarnessBundleArtifact("Matrix proof", matrixProofReport, "Top-level proof state and release-gate gaps.", true),
+            new ProofHarnessBundleArtifact("Runtime validation plan", runtimeValidationPlan, "Planned runtime release-gate steps.", true),
+            new ProofHarnessBundleArtifact("Runtime automation harness", runtimeValidationHarness, "Runtime probe dispatch/assertion contract.", true),
+            new ProofHarnessBundleArtifact("Live-game execution plan", liveGameExecutionPlan, "Live-game save/launcher/scenario proof contract.", true),
+            new ProofHarnessBundleArtifact("Runtime observation template", runtimeObservationTemplate, "Expected runtime observation/evidence template.", true),
+            new ProofHarnessBundleArtifact("Desktop workflow automation", desktopWorkflowAutomation, "Desktop review and artifact/state snapshot.", true),
+            new ProofHarnessBundleArtifact("Windows UI E2E plan", windowsUiE2EAutomation, "Windows UI automation selectors, flows, and steps.", true),
             new ProofHarnessBundleArtifact("Canonical result bundle", ResultBundleFileName, "Imported external proof results written back into the output root.", false),
         };
 
@@ -201,7 +293,7 @@ internal static class ExternalProofHarnessSupport
             new ProofHarnessComponentReference(
                 Component: "runtime-automation",
                 HarnessKind: runtimePlan.AutomationHarness?.BootstrapContract.HarnessKind ?? "runtime-validation-runner",
-                PlanArtifacts: ["runtime-validation-plan.json", "runtime-validation-harness.json", BundleManifestFileName],
+                PlanArtifacts: [runtimeValidationPlan, runtimeValidationHarness, BundleManifestFileName],
                 ProofAxes: runtimePlan.AutomationHarness?.BlockingProofAxes ?? ["runtime-automation"],
                 MatrixCoordinatesTargeted: runtimePlan.AutomationHarness?.MatrixCombinationsTargeted ?? ["body-skeleton-plugin-runtime"],
                 RequiredHostCapabilities:
@@ -220,7 +312,7 @@ internal static class ExternalProofHarnessSupport
             new ProofHarnessComponentReference(
                 Component: "live-game-execution",
                 HarnessKind: liveGameExecution.BootstrapContract.HarnessKind,
-                PlanArtifacts: ["live-game-execution.json", "runtime-observation-bundle.template.json", BundleManifestFileName],
+                PlanArtifacts: [liveGameExecutionPlan, runtimeObservationTemplate, BundleManifestFileName],
                 ProofAxes: liveGameExecution.BlockingProofAxes,
                 MatrixCoordinatesTargeted: liveGameExecution.MatrixCombinationsTargeted,
                 RequiredHostCapabilities: liveGameExecution.RequiredHostCapabilities,
@@ -235,7 +327,7 @@ internal static class ExternalProofHarnessSupport
             new ProofHarnessComponentReference(
                 Component: "desktop-e2e",
                 HarnessKind: windowsUiAutomation.BootstrapContract.HarnessKind,
-                PlanArtifacts: ["desktop-workflow-automation.json", "windows-ui-e2e-automation.json", BundleManifestFileName],
+                PlanArtifacts: [desktopWorkflowAutomation, windowsUiE2EAutomation, BundleManifestFileName],
                 ProofAxes: windowsUiAutomation.BlockingProofAxes,
                 MatrixCoordinatesTargeted: windowsUiAutomation.MatrixCombinationsTargeted,
                 RequiredHostCapabilities:
@@ -254,6 +346,20 @@ internal static class ExternalProofHarnessSupport
                 ])
         };
 
+        var scenarioCatalog = liveGameExecution.ScenarioProfiles
+            .Select(profile => new ProofHarnessScenarioReference(
+                Scenario: profile.Name,
+                Component: "live-game-execution",
+                ValidationSaveProfile: profile.ValidationSaveProfile,
+                EvidenceDirectory: $"{EvidenceRootDirectory}/scenario-observations/{BuildScenarioEvidenceKey(profile.Name)}/",
+                ProofAxes: profile.ProofAxes ?? ["live-game-execution"],
+                MatrixCoordinatesTargeted: profile.MatrixCoordinatesTargeted ?? liveGameExecution.MatrixCombinationsTargeted,
+                ObservationChannels: profile.ObservationChannels,
+                RelatedArtifacts: profile.RelatedArtifacts,
+                ProofDeliverables: profile.ProofDeliverables,
+                BlocksRelease: profile.BlocksRelease))
+            .ToArray();
+
         var evidenceLocations = new[]
         {
             new ProofEvidenceLocation("Host summary", $"{EvidenceRootDirectory}/host-summary.txt", "Host/version/harness details captured during external execution.", true),
@@ -265,6 +371,27 @@ internal static class ExternalProofHarnessSupport
             new ProofEvidenceLocation("Scenario observations", $"{EvidenceRootDirectory}/scenario-observations/", "Per-scenario observations keyed by ScenarioMatrix names.", true),
             new ProofEvidenceLocation("Load order state", $"{EvidenceRootDirectory}/load-order-state/", "Launcher/mod-stack/save-profile evidence.", false)
         };
+
+        var replayableEvidence = new ProofHarnessReplayableEvidenceContract(
+            EvidenceRoot: EvidenceRootDirectory,
+            Locations: evidenceLocations,
+            RequiredObservationChannels: liveGameExecution.ObservationChannels
+                .Concat(["screenshots", "step-traces", "runtime-logs"])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            RequiredEvidenceCategories:
+            [
+                "screenshots",
+                "runtime-logs",
+                "step-traces",
+                "scenario-observations",
+                "probe-observations"
+            ],
+            Notes:
+            [
+                "Scenario observation directories must remain keyed by the exported ScenarioMatrix names so imported proof can be matched back to the right live-game scenarios.",
+                "Step traces, runtime logs, screenshots, and probe/scenario observations should be replayable without re-discovering the originating plan artifacts."
+            ]);
 
         var resultContract = new ProofResultBundleContract(
             ContractVersion: ContractVersion,
@@ -279,7 +406,11 @@ internal static class ExternalProofHarnessSupport
                 "Host",
                 "ComponentResults",
                 "ScenarioResults",
-                "ProbeResults"
+                "ProbeResults",
+                "MissingExpectedArtifacts",
+                "MissingExpectedScenarios",
+                "MissingExpectedProbes",
+                "Notes"
             ],
             EvidenceLocations: evidenceLocations,
             ScenarioExpectations: liveGameExecution.ScenarioProfiles
@@ -298,22 +429,51 @@ internal static class ExternalProofHarnessSupport
             ]);
 
         var hostRequirements = BuildHostRequirements(liveGameExecution, windowsUiAutomation);
+        var importTargets = new[]
+        {
+            new ProofHarnessImportTarget(
+                "Runtime validation plan",
+                runtimeValidationPlan,
+                "Refreshes runtime proof coverage after an external result import.",
+                ["ExecutionCoverage", "ProofExecution", "ProofResultBundlePath", "HarnessBundleManifestPath"]),
+            new ProofHarnessImportTarget(
+                "Live-game execution plan",
+                liveGameExecutionPlan,
+                "Refreshes live-game proof coverage after an external result import.",
+                ["IntegrationCoverage", "ProofExecution", "ProofResultBundlePath", "HarnessBundleManifestPath"]),
+            new ProofHarnessImportTarget(
+                "Windows UI E2E automation",
+                windowsUiE2EAutomation,
+                "Refreshes Desktop E2E proof coverage after an external result import.",
+                ["Coverage", "ProofExecution", "ProofResultBundlePath", "HarnessBundleManifestPath"]),
+            new ProofHarnessImportTarget(
+                "Matrix proof",
+                matrixProofReport,
+                "Refreshes top-level planned-vs-executed proof state and blocking gaps after an external result import.",
+                ["ProofCoverage", "StrictProofReady", "ProofExecutionStatus", "ProofExecutions", "MissingProofAxes", "ProofHarnessBundleManifestPath", "ProofResultBundlePath"])
+        };
 
         return new ProofHarnessBundleManifest(
             ContractVersion: ContractVersion,
             TargetBody: targetBody,
             CanonicalEntryPoint: BundleManifestFileName,
+            ArtifactEntrypoints: artifactEntrypoints,
             RequiredArtifacts: requiredArtifacts,
             Components: components,
+            ScenarioCatalog: scenarioCatalog,
             HostRequirements: hostRequirements,
+            ReplayableEvidence: replayableEvidence,
             ResultBundleContract: resultContract,
+            ImportTargets: importTargets,
             ExpectedResultFiles:
             [
                 ResultBundleFileName,
                 $"{EvidenceRootDirectory}/host-summary.txt",
                 $"{EvidenceRootDirectory}/screenshots/",
                 $"{EvidenceRootDirectory}/runtime-logs/",
-                $"{EvidenceRootDirectory}/step-traces/"
+                $"{EvidenceRootDirectory}/step-traces/",
+                $"{EvidenceRootDirectory}/scenario-observations/",
+                $"{EvidenceRootDirectory}/probe-observations/"
             ],
             Notes:
             [
@@ -401,6 +561,10 @@ internal static class ExternalProofHarnessSupport
             Axes = updatedAxes,
             ProofExecutionStatus = DeriveOverallProofExecutionStatus(summary),
             ProofExecutions = proofExecutions,
+            PlannedOnlyProofAxes = BuildPlannedOnlyAxes(proofExecutions),
+            ExecutedImportedProofAxes = BuildExecutedImportedAxes(proofExecutions),
+            ImportedHostDetails = CollectImportedHostDetails(proofExecutions),
+            ImportedEvidenceArtifacts = CollectImportedEvidenceArtifacts(proofExecutions),
             ProofHarnessBundleManifestPath = manifestPath,
             ProofResultBundlePath = resultBundlePath
         };
@@ -477,9 +641,10 @@ internal static class ExternalProofHarnessSupport
             }
 
             var hostDetails = BuildHostDetails(bundle.Host);
+            var hostLooksWindows = HostLooksWindows(bundle.Host);
             var runtimeProof = BuildRuntimeProofExecution(bundle, runtimePlan, hostDetails);
-            var liveGameProof = BuildLiveGameProofExecution(bundle, liveGameExecution, hostDetails);
-            var desktopProof = BuildDesktopProofExecution(bundle, windowsUiAutomation, hostDetails);
+            var liveGameProof = BuildLiveGameProofExecution(bundle, liveGameExecution, hostDetails, hostLooksWindows);
+            var desktopProof = BuildDesktopProofExecution(bundle, windowsUiAutomation, hostDetails, hostLooksWindows);
             return new ImportedProofBundleSummary(bundle, runtimeProof, liveGameProof, desktopProof);
         }
         catch (Exception ex)
@@ -523,14 +688,31 @@ internal static class ExternalProofHarnessSupport
             .Concat(probeResults.Values.SelectMany(static result => result.EvidenceArtifacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var missingEvidenceItems = BuildMissingEvidenceItems(
+            evidence,
+            ("runtime-logs", $"{EvidenceRootDirectory}/runtime-logs/"),
+            ("step-traces", $"{EvidenceRootDirectory}/step-traces/"),
+            ("probe-observations", $"{EvidenceRootDirectory}/probe-observations/"));
+        var probesMissingEvidence = probeResults.Values
+            .Where(static result => result.EvidenceArtifacts.Count == 0)
+            .Select(static result => $"probe-evidence:{result.ProbeId}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var componentMissingArtifacts = FilterMissingExpectedArtifacts(
+            bundle.MissingExpectedArtifacts,
+            $"{EvidenceRootDirectory}/runtime-logs/",
+            $"{EvidenceRootDirectory}/step-traces/",
+            $"{EvidenceRootDirectory}/probe-observations/");
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
+            .Concat(missingEvidenceItems.Length > 0 ? [$"Runtime proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : [])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var executedItemCount = probeResults.Count;
-        var missingItemCount = missingProbeIds.Length;
-        var strict = executedItemCount > 0 && missingItemCount == 0 && failedProbeIds.Length == 0;
-        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failedProbeIds.Length);
+        var missingItemCount = missingProbeIds.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
+        var failureCount = failedProbeIds.Length + probesMissingEvidence.Length;
+        var strict = executedItemCount > 0 && missingItemCount == 0 && failureCount == 0;
+        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failureCount);
 
         return new ProofExecutionState(
             Axis: "runtime-automation",
@@ -541,7 +723,13 @@ internal static class ExternalProofHarnessSupport
             PlannedItemCount: expectedProbeIds.Length,
             ExecutedItemCount: executedItemCount,
             MissingItemCount: missingItemCount,
-            MissingItems: missingProbeIds.Concat(failedProbeIds).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            MissingItems: missingProbeIds
+                .Concat(failedProbeIds)
+                .Concat(probesMissingEvidence)
+                .Concat(missingEvidenceItems)
+                .Concat(componentMissingArtifacts)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             EvidenceArtifacts: evidence,
             HostDetails: hostDetails,
             Notes: notes);
@@ -550,9 +738,12 @@ internal static class ExternalProofHarnessSupport
     private static ProofExecutionState BuildLiveGameProofExecution(
         ImportedProofResultBundle bundle,
         LiveGameExecutionPlan liveGameExecution,
-        IReadOnlyList<string> hostDetails)
+        IReadOnlyList<string> hostDetails,
+        bool hostLooksWindows)
     {
-        var expectedScenarioNames = liveGameExecution.ScenarioProfiles.Select(static profile => profile.Name).ToArray();
+        var expectedScenarioProfiles = liveGameExecution.ScenarioProfiles
+            .ToDictionary(static profile => profile.Name, StringComparer.OrdinalIgnoreCase);
+        var expectedScenarioNames = expectedScenarioProfiles.Keys.ToArray();
         var scenarioResults = bundle.ScenarioResults
             .Where(result => !string.IsNullOrWhiteSpace(result.Scenario))
             .GroupBy(result => result.Scenario, StringComparer.OrdinalIgnoreCase)
@@ -570,18 +761,44 @@ internal static class ExternalProofHarnessSupport
             .Select(static result => result.Scenario)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var scenarioEvidenceMismatches = scenarioResults.Values
+            .Where(result => expectedScenarioProfiles.TryGetValue(result.Scenario, out var profile) &&
+                             !ContainsEvidencePrefix(result.EvidenceArtifacts, $"{EvidenceRootDirectory}/scenario-observations/{BuildScenarioEvidenceKey(profile.Name)}/"))
+            .Select(static result => $"scenario-evidence:{result.Scenario}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var scenarioSaveProfileMismatches = scenarioResults.Values
+            .Where(result => expectedScenarioProfiles.TryGetValue(result.Scenario, out var profile) &&
+                             !string.Equals(result.ValidationSaveProfile, profile.ValidationSaveProfile, StringComparison.OrdinalIgnoreCase))
+            .Select(static result => $"scenario-save-profile:{result.Scenario}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var evidence = (component?.EvidenceArtifacts ?? [])
             .Concat(scenarioResults.Values.SelectMany(static result => result.EvidenceArtifacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var missingEvidenceItems = BuildMissingEvidenceItems(
+            evidence,
+            ("screenshots", $"{EvidenceRootDirectory}/screenshots/"),
+            ("runtime-logs", $"{EvidenceRootDirectory}/runtime-logs/"),
+            ("scenario-observations", $"{EvidenceRootDirectory}/scenario-observations/"));
+        var componentMissingArtifacts = FilterMissingExpectedArtifacts(
+            bundle.MissingExpectedArtifacts,
+            $"{EvidenceRootDirectory}/screenshots/",
+            $"{EvidenceRootDirectory}/runtime-logs/",
+            $"{EvidenceRootDirectory}/scenario-observations/");
+        var hostRequirementItems = hostLooksWindows ? [] : ["host:windows"];
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
+            .Concat(hostLooksWindows ? [] : ["Live-game proof was imported from a non-Windows host."])
+            .Concat(missingEvidenceItems.Length > 0 ? [$"Live-game proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : [])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var executedItemCount = scenarioResults.Count;
-        var missingItemCount = missingScenarioNames.Length;
-        var strict = executedItemCount > 0 && missingItemCount == 0 && failedScenarioNames.Length == 0;
-        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failedScenarioNames.Length);
+        var missingItemCount = missingScenarioNames.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
+        var failureCount = failedScenarioNames.Length + scenarioEvidenceMismatches.Length + scenarioSaveProfileMismatches.Length + hostRequirementItems.Length;
+        var strict = executedItemCount > 0 && missingItemCount == 0 && failureCount == 0;
+        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failureCount);
 
         return new ProofExecutionState(
             Axis: "live-game-execution",
@@ -592,7 +809,15 @@ internal static class ExternalProofHarnessSupport
             PlannedItemCount: expectedScenarioNames.Length,
             ExecutedItemCount: executedItemCount,
             MissingItemCount: missingItemCount,
-            MissingItems: missingScenarioNames.Concat(failedScenarioNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            MissingItems: missingScenarioNames
+                .Concat(failedScenarioNames)
+                .Concat(scenarioEvidenceMismatches)
+                .Concat(scenarioSaveProfileMismatches)
+                .Concat(missingEvidenceItems)
+                .Concat(componentMissingArtifacts)
+                .Concat(hostRequirementItems)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             EvidenceArtifacts: evidence,
             HostDetails: hostDetails,
             Notes: notes);
@@ -601,7 +826,8 @@ internal static class ExternalProofHarnessSupport
     private static ProofExecutionState BuildDesktopProofExecution(
         ImportedProofResultBundle bundle,
         WindowsUiE2EAutomationPlan windowsUiAutomation,
-        IReadOnlyList<string> hostDetails)
+        IReadOnlyList<string> hostDetails,
+        bool hostLooksWindows)
     {
         var expectedFlows = windowsUiAutomation.SupportedFlows;
         var component = bundle.ComponentResults.FirstOrDefault(static result =>
@@ -613,12 +839,25 @@ internal static class ExternalProofHarnessSupport
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var evidence = component?.EvidenceArtifacts?.Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? [];
+        var missingEvidenceItems = BuildMissingEvidenceItems(
+            evidence,
+            ("screenshots", $"{EvidenceRootDirectory}/screenshots/"),
+            ("step-traces", $"{EvidenceRootDirectory}/step-traces/"));
+        var componentMissingArtifacts = FilterMissingExpectedArtifacts(
+            bundle.MissingExpectedArtifacts,
+            $"{EvidenceRootDirectory}/screenshots/",
+            $"{EvidenceRootDirectory}/step-traces/");
+        var hostRequirementItems = hostLooksWindows ? [] : ["host:windows"];
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
+            .Concat(hostLooksWindows ? [] : ["Desktop E2E proof was imported from a non-Windows host."])
+            .Concat(missingEvidenceItems.Length > 0 ? [$"Desktop proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : [])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var strict = executedFlows.Count > 0 && missingFlows.Length == 0 && StatusMeansPass(component?.Status);
-        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingFlows.Length, StatusMeansFail(component?.Status) ? 1 : 0);
+        var missingItemCount = missingFlows.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
+        var failureCount = (StatusMeansFail(component?.Status) ? 1 : 0) + hostRequirementItems.Length;
+        var strict = executedFlows.Count > 0 && missingItemCount == 0 && failureCount == 0 && StatusMeansPass(component?.Status);
+        var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failureCount);
 
         return new ProofExecutionState(
             Axis: "desktop-e2e",
@@ -628,8 +867,13 @@ internal static class ExternalProofHarnessSupport
             StrictProofSatisfied: strict,
             PlannedItemCount: expectedFlows.Count,
             ExecutedItemCount: executedFlows.Count,
-            MissingItemCount: missingFlows.Length,
-            MissingItems: missingFlows,
+            MissingItemCount: missingItemCount,
+            MissingItems: missingFlows
+                .Concat(missingEvidenceItems)
+                .Concat(componentMissingArtifacts)
+                .Concat(hostRequirementItems)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             EvidenceArtifacts: evidence,
             HostDetails: hostDetails,
             Notes: notes);
@@ -641,6 +885,11 @@ internal static class ExternalProofHarnessSupport
     {
         var requirements = new List<ProofHarnessHostRequirement>();
 
+        requirements.Add(new ProofHarnessHostRequirement(
+            "desktop-e2e",
+            "windows-host",
+            "Desktop UI proof requires a Windows-capable host that can drive the WinForms application and capture UI evidence.",
+            true));
         requirements.AddRange(windowsUiAutomation.BootstrapContract.LaunchActions.Select(static action =>
             new ProofHarnessHostRequirement("desktop-e2e", action, "Required Windows UI runner launch/action capability.", true)));
         requirements.Add(new ProofHarnessHostRequirement(
@@ -650,7 +899,31 @@ internal static class ExternalProofHarnessSupport
                 ? "Embedded preview/runtime support is required to validate the in-app preview path."
                 : "Embedded preview/runtime support is optional for this run.",
             windowsUiAutomation.RequiresEmbeddedPreviewRuntimeForInAppPreview));
+        requirements.Add(new ProofHarnessHostRequirement(
+            "desktop-e2e",
+            "evidence-capture",
+            "The harness must emit screenshots plus replayable step traces under proof-evidence/ for every required Desktop flow.",
+            true));
 
+        requirements.Add(new ProofHarnessHostRequirement(
+            "live-game-execution",
+            "windows-host",
+            liveGameExecution.RequiresWindowsHost
+                ? "Live-game proof requires a Windows host with the target Skyrim installation and external launcher control."
+                : "A Windows host is recommended for the supported external live-game workflow.",
+            liveGameExecution.RequiresWindowsHost));
+        requirements.Add(new ProofHarnessHostRequirement(
+            "live-game-execution",
+            "game-install",
+            "The host must provide the target Skyrim runtime plus the converted output staged into the expected mod stack.",
+            true));
+        requirements.Add(new ProofHarnessHostRequirement(
+            "live-game-execution",
+            "mod-stack-prerequisites",
+            liveGameExecution.RequiresDeployedModManagerLoadOrder
+                ? "A deployed mod-manager load order matching the exported output is required for live-game validation."
+                : "A representative mod stack is recommended for live-game validation.",
+            liveGameExecution.RequiresDeployedModManagerLoadOrder));
         requirements.AddRange(liveGameExecution.RequiredHostCapabilities.Select(static capability =>
             new ProofHarnessHostRequirement("live-game-execution", capability, "Required capability for the live-game external runner.", true)));
         requirements.Add(new ProofHarnessHostRequirement(
@@ -664,6 +937,16 @@ internal static class ExternalProofHarnessSupport
             "live-game-execution",
             "validation-save-profiles",
             string.Join(", ", liveGameExecution.ValidationSaveProfiles),
+            true));
+        requirements.Add(new ProofHarnessHostRequirement(
+            "live-game-execution",
+            "observation-channels",
+            string.Join(", ", liveGameExecution.ObservationChannels),
+            liveGameExecution.ObservationChannels.Count > 0));
+        requirements.Add(new ProofHarnessHostRequirement(
+            "live-game-execution",
+            "evidence-capture",
+            "The harness must emit scenario observations, screenshots, and runtime logs under proof-evidence/ so imported proof can be replayed.",
             true));
 
         return requirements
@@ -764,6 +1047,40 @@ internal static class ExternalProofHarnessSupport
         string.Equals(status, "fail", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HostLooksWindows(ImportedProofHostDetails host) =>
+        !string.IsNullOrWhiteSpace(host.OperatingSystem) &&
+        host.OperatingSystem.Contains("windows", StringComparison.OrdinalIgnoreCase);
+
+    private static string[] BuildMissingEvidenceItems(
+        IEnumerable<string> evidenceArtifacts,
+        params (string Label, string Prefix)[] requiredPrefixes)
+    {
+        return requiredPrefixes
+            .Where(requirement => !ContainsEvidencePrefix(evidenceArtifacts, requirement.Prefix))
+            .Select(static requirement => $"evidence:{requirement.Label}")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] FilterMissingExpectedArtifacts(
+        IEnumerable<string> missingExpectedArtifacts,
+        params string[] relevantPrefixes)
+    {
+        return missingExpectedArtifacts
+            .Where(artifact => relevantPrefixes.Any(prefix => NormalizeEvidencePath(artifact).StartsWith(NormalizeEvidencePath(prefix), StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool ContainsEvidencePrefix(IEnumerable<string> evidenceArtifacts, string expectedPrefix)
+    {
+        var normalizedPrefix = NormalizeEvidencePath(expectedPrefix);
+        return evidenceArtifacts.Any(artifact => NormalizeEvidencePath(artifact).StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeEvidencePath(string? path) =>
+        (path ?? string.Empty).Replace('\\', '/').Trim();
 
     private static string BuildScenarioEvidenceKey(string scenarioName)
     {

@@ -706,6 +706,10 @@ public sealed record ConversionMatrixProofReport(
     bool StrictProofReady,
     string ProofExecutionStatus,
     IReadOnlyList<ProofExecutionState> ProofExecutions,
+    IReadOnlyList<string> PlannedOnlyProofAxes,
+    IReadOnlyList<string> ExecutedImportedProofAxes,
+    IReadOnlyList<string> ImportedHostDetails,
+    IReadOnlyList<string> ImportedEvidenceArtifacts,
     string? ProofHarnessBundleManifestPath,
     string? ProofResultBundlePath,
     IReadOnlyList<string> MissingProofAxes,
@@ -32357,6 +32361,12 @@ internal sealed class LocalExportService(
             matrixCoordinates
                 .Select(static coordinate => coordinate.Replace(':', '-').Replace('/', '-'))
                 .Select(static coordinate => coordinate.Replace(' ', '-').ToLowerInvariant()));
+        var proofExecutions = new[]
+        {
+            runtimePlan.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("runtime-automation", runtimePlan.PlannedExecutionCoverage, runtimePlan.AutomationHarness?.Probes.Count ?? 0),
+            liveGameExecution.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("live-game-execution", liveGameExecution.PlannedIntegrationCoverage, liveGameExecution.ScenarioProfiles.Count),
+            windowsUiAutomation.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("desktop-e2e", windowsUiAutomation.PlannedCoverage, windowsUiAutomation.FlowProfiles.Count)
+        };
 
         return new ConversionMatrixProofReport(
             TargetBody: targetBody,
@@ -32369,12 +32379,11 @@ internal sealed class LocalExportService(
             ProofCoverage: proofCoverage,
             StrictProofReady: missingProofAxes.Length == 0,
             ProofExecutionStatus: DeriveProofExecutionStatus(runtimePlan.ProofExecution, liveGameExecution.ProofExecution, windowsUiAutomation.ProofExecution),
-            ProofExecutions: new[]
-            {
-                runtimePlan.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("runtime-automation", runtimePlan.PlannedExecutionCoverage, runtimePlan.AutomationHarness?.Probes.Count ?? 0),
-                liveGameExecution.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("live-game-execution", liveGameExecution.PlannedIntegrationCoverage, liveGameExecution.ScenarioProfiles.Count),
-                windowsUiAutomation.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("desktop-e2e", windowsUiAutomation.PlannedCoverage, windowsUiAutomation.FlowProfiles.Count)
-            },
+            ProofExecutions: proofExecutions,
+            PlannedOnlyProofAxes: ExternalProofHarnessSupport.BuildPlannedOnlyAxes(proofExecutions),
+            ExecutedImportedProofAxes: ExternalProofHarnessSupport.BuildExecutedImportedAxes(proofExecutions),
+            ImportedHostDetails: ExternalProofHarnessSupport.CollectImportedHostDetails(proofExecutions),
+            ImportedEvidenceArtifacts: ExternalProofHarnessSupport.CollectImportedEvidenceArtifacts(proofExecutions),
             ProofHarnessBundleManifestPath: ExternalProofHarnessSupport.BundleManifestFileName,
             ProofResultBundlePath: ExternalProofHarnessSupport.ResultBundleFileName,
             MissingProofAxes: missingProofAxes,

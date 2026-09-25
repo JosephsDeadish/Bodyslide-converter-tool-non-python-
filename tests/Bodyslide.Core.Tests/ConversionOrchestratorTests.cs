@@ -18783,6 +18783,9 @@ public sealed class RealisticModPackFixtureTests
             var proofManifestJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "proof-harness-bundle.json"));
             using var proofManifest = JsonDocument.Parse(proofManifestJson);
             Assert.Equal("proof-harness-bundle.json", proofManifest.RootElement.GetProperty("CanonicalEntryPoint").GetString());
+            Assert.Equal(
+                "conversion-matrix-proof.json",
+                proofManifest.RootElement.GetProperty("ArtifactEntrypoints").GetProperty("MatrixProofReport").GetString());
             Assert.Contains(
                 proofManifest.RootElement.GetProperty("RequiredArtifacts").EnumerateArray().Select(static artifact => artifact.GetProperty("RelativePath").GetString()),
                 static artifact => string.Equals(artifact, "runtime-validation-plan.json", StringComparison.OrdinalIgnoreCase));
@@ -18795,6 +18798,11 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 proofManifest.RootElement.GetProperty("HostRequirements").EnumerateArray().Select(static requirement => requirement.GetProperty("Requirement").GetString()),
                 static requirement => string.Equals(requirement, "validation-save-profiles", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("proof-evidence", proofManifest.RootElement.GetProperty("ReplayableEvidence").GetProperty("EvidenceRoot").GetString());
+            Assert.NotEmpty(proofManifest.RootElement.GetProperty("ScenarioCatalog").EnumerateArray());
+            Assert.Contains(
+                proofManifest.RootElement.GetProperty("ImportTargets").EnumerateArray().Select(static target => target.GetProperty("RelativePath").GetString()),
+                static relativePath => string.Equals(relativePath, "conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -18928,6 +18936,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("executed-incomplete", incompleteRuntimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("externally-executed-incomplete", incompleteRuntimePlan.RootElement.GetProperty("ExecutionCoverage").GetString());
             Assert.Equal("executed-incomplete", incompleteMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.NotEmpty(incompleteMatrixProof.RootElement.GetProperty("ExecutedImportedProofAxes").EnumerateArray());
             Assert.Contains(
                 incompleteMatrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static axis => axis.GetString()),
                 static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase));
@@ -18948,6 +18957,10 @@ public sealed class RealisticModPackFixtureTests
             Assert.Equal("executed-pass", passingLiveGamePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", passingWindowsUiPlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
             Assert.Equal("executed-pass", passingMatrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Empty(passingMatrixProof.RootElement.GetProperty("PlannedOnlyProofAxes").EnumerateArray());
+            Assert.Contains(
+                passingMatrixProof.RootElement.GetProperty("ExecutedImportedProofAxes").EnumerateArray().Select(static axis => axis.GetString()),
+                static axis => string.Equals(axis, "runtime-automation:executed-pass", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(
                 passingMatrixProof.RootElement.GetProperty("MissingProofAxes").EnumerateArray().Select(static axis => axis.GetString()),
                 static axis => string.Equals(axis, "runtime-automation", StringComparison.OrdinalIgnoreCase) ||
@@ -18967,6 +18980,141 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 passingSnapshot.Artifacts,
                 artifact => string.Equals(artifact.DisplayPath, "proof-result-bundle.json", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DesktopWorkflowAutomation_BuildFromOutputDirectory_MarksImportedProofIncompleteWhenEvidenceLayoutIsMissing()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticAlienSparseCustomPluginModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            using var runtimeHarness = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-harness.json")));
+            using var liveGameExecution = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json")));
+            using var windowsUiAutomation = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json")));
+
+            var probeIds = runtimeHarness.RootElement.GetProperty("Probes").EnumerateArray()
+                .Select(static probe => probe.GetProperty("ProbeId").GetString())
+                .Where(static probeId => !string.IsNullOrWhiteSpace(probeId))
+                .Cast<string>()
+                .ToArray();
+            var scenarios = liveGameExecution.RootElement.GetProperty("ScenarioProfiles").EnumerateArray()
+                .ToDictionary(
+                    static scenario => scenario.GetProperty("Name").GetString()!,
+                    static scenario => scenario.GetProperty("ValidationSaveProfile").GetString()!,
+                    StringComparer.OrdinalIgnoreCase);
+            var flows = windowsUiAutomation.RootElement.GetProperty("SupportedFlows").EnumerateArray()
+                .Select(static flow => flow.GetString())
+                .Where(static flow => !string.IsNullOrWhiteSpace(flow))
+                .Cast<string>()
+                .ToArray();
+
+            var payload = new
+            {
+                ContractVersion = "1.0",
+                HarnessKind = "external-proof-evidence-check",
+                OverallStatus = "pass",
+                Host = new
+                {
+                    OperatingSystem = "Windows 11",
+                    HarnessRunner = "WinAppDriver + Skyrim harness",
+                    Launcher = "SKSE",
+                    ModManager = "MO2",
+                    SaveProfile = "full-load-order-integration-save",
+                    ObservationMode = "screenshots-and-traces",
+                    Capabilities = new[] { "windows-host-control", "validation-save-selection", "ui-screenshot-capture" }
+                },
+                ComponentResults = new object[]
+                {
+                    new
+                    {
+                        Component = "runtime-automation",
+                        Status = "pass",
+                        ExecutedItems = probeIds,
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { "proof-evidence/runtime-logs/runtime.log" },
+                        Notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        Component = "live-game-execution",
+                        Status = "pass",
+                        ExecutedItems = scenarios.Keys.ToArray(),
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { "proof-evidence/screenshots/live-game.png" },
+                        Notes = Array.Empty<string>()
+                    },
+                    new
+                    {
+                        Component = "desktop-e2e",
+                        Status = "pass",
+                        ExecutedItems = flows,
+                        MissingItems = Array.Empty<string>(),
+                        EvidenceArtifacts = new[] { "proof-evidence/screenshots/desktop.png" },
+                        Notes = Array.Empty<string>()
+                    }
+                },
+                ScenarioResults = scenarios.Select(entry => new
+                {
+                    Scenario = entry.Key,
+                    Status = "pass",
+                    ValidationSaveProfile = entry.Value,
+                    ObservedSignals = new[] { "runtime-scenarios-dispatched", "host-observations-captured" },
+                    MissingSignals = Array.Empty<string>(),
+                    EvidenceArtifacts = new[] { $"proof-evidence/scenario-observations/{entry.Key.Replace(' ', '-').ToLowerInvariant()}/notes.txt" },
+                    Notes = Array.Empty<string>()
+                }).ToArray(),
+                ProbeResults = probeIds.Select(id => new
+                {
+                    ProbeId = id,
+                    Status = "pass",
+                    ObservedSignals = new[] { "assertion-passed", "artifact-captured" },
+                    MissingSignals = Array.Empty<string>(),
+                    EvidenceArtifacts = new[] { $"proof-evidence/probe-observations/{id}.json" },
+                    Notes = Array.Empty<string>()
+                }).ToArray(),
+                MissingExpectedArtifacts = Array.Empty<string>(),
+                MissingExpectedScenarios = Array.Empty<string>(),
+                MissingExpectedProbes = Array.Empty<string>(),
+                Notes = new[] { "Imported bundle intentionally omits some top-level evidence categories for regression coverage." }
+            };
+
+            await File.WriteAllTextAsync(
+                Path.Combine(outputDirectory, "proof-result-bundle.json"),
+                JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+
+            DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
+
+            using var runtimePlan = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "runtime-validation-plan.json")));
+            using var refreshedLiveGame = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "live-game-execution.json")));
+            using var refreshedWindowsUi = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "windows-ui-e2e-automation.json")));
+            using var matrixProof = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-matrix-proof.json")));
+
+            Assert.Equal("executed-incomplete", runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Contains(
+                runtimePlan.RootElement.GetProperty("ProofExecution").GetProperty("MissingItems").EnumerateArray().Select(static item => item.GetString()),
+                static item => string.Equals(item, "evidence:step-traces", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("executed-incomplete", refreshedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Contains(
+                refreshedLiveGame.RootElement.GetProperty("ProofExecution").GetProperty("MissingItems").EnumerateArray().Select(static item => item.GetString()),
+                static item => string.Equals(item, "evidence:runtime-logs", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("executed-incomplete", refreshedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("ExecutedStatus").GetString());
+            Assert.Contains(
+                refreshedWindowsUi.RootElement.GetProperty("ProofExecution").GetProperty("MissingItems").EnumerateArray().Select(static item => item.GetString()),
+                static item => string.Equals(item, "evidence:step-traces", StringComparison.OrdinalIgnoreCase));
+            Assert.Equal("executed-incomplete", matrixProof.RootElement.GetProperty("ProofExecutionStatus").GetString());
+            Assert.Empty(matrixProof.RootElement.GetProperty("PlannedOnlyProofAxes").EnumerateArray());
+            Assert.NotEmpty(matrixProof.RootElement.GetProperty("ImportedEvidenceArtifacts").EnumerateArray());
         }
         finally
         {

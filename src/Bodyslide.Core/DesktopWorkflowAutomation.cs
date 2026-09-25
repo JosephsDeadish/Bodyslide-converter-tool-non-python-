@@ -137,7 +137,12 @@ internal static class DesktopWorkflowAutomation
         }
         AppendMetricRow(rows, reportMetrics, "Missing proof axes");
         AppendMetricRow(rows, reportMetrics, "Blocking proof gaps");
+        AppendMetricRow(rows, reportMetrics, "Planned proof coverage");
         AppendMetricRow(rows, reportMetrics, "Proof execution status");
+        AppendMetricRow(rows, reportMetrics, "Planned-only proof axes");
+        AppendMetricRow(rows, reportMetrics, "Executed/imported proof axes");
+        AppendMetricRow(rows, reportMetrics, "Proof host OS");
+        AppendMetricRow(rows, reportMetrics, "Proof runner");
         AppendMetricRow(rows, reportMetrics, "Pack status");
         AppendMetricRow(rows, reportMetrics, "Needs review");
         AppendMetricRow(rows, reportMetrics, "High risk");
@@ -505,6 +510,10 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
                     Add(metrics, reportName, "Proof execution status", TryReadString(root, "ProofExecutionStatus"), filePath);
                     Add(metrics, reportName, "Imported proof executions", CountNestedArray(root, "ProofExecutions"), filePath);
+                    Add(metrics, reportName, "Planned-only proof axes", TryReadArray(root, "PlannedOnlyProofAxes"), filePath);
+                    Add(metrics, reportName, "Executed/imported proof axes", TryReadArray(root, "ExecutedImportedProofAxes"), filePath);
+                    Add(metrics, reportName, "Imported proof host details", TryReadArray(root, "ImportedHostDetails"), filePath);
+                    Add(metrics, reportName, "Imported evidence artifacts", TryReadArray(root, "ImportedEvidenceArtifacts"), filePath);
                     Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
                     Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
@@ -515,8 +524,12 @@ internal static class DesktopWorkflowAutomation
                 case "proof-harness-bundle.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Canonical entrypoint", TryReadString(root, "CanonicalEntryPoint"), filePath);
+                    Add(metrics, reportName, "Artifact entrypoints", TryReadArtifactEntrypoints(root), filePath);
                     Add(metrics, reportName, "Harness components", CountNestedArray(root, "Components"), filePath);
+                    Add(metrics, reportName, "Scenario catalog", CountNestedArray(root, "ScenarioCatalog"), filePath);
                     Add(metrics, reportName, "Host requirements", CountNestedArray(root, "HostRequirements"), filePath);
+                    Add(metrics, reportName, "Replayable evidence locations", CountNestedArray(root, "ReplayableEvidence", "Locations"), filePath);
+                    Add(metrics, reportName, "Import targets", CountNestedArray(root, "ImportTargets"), filePath);
                     Add(metrics, reportName, "Expected result files", TryReadArray(root, "ExpectedResultFiles"), filePath);
                     break;
                 case "proof-result-bundle.json":
@@ -680,6 +693,20 @@ internal static class DesktopWorkflowAutomation
         TryGetProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? string.Join(", ", value.EnumerateArray().Select(static item => item.ToString()))
             : null;
+
+    private static string? TryReadArtifactEntrypoints(JsonElement element)
+    {
+        if (!TryGetProperty(element, "ArtifactEntrypoints", out var value) || value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return string.Join(
+            ", ",
+            value.EnumerateObject()
+                .Select(static property => $"{property.Name}={property.Value}")
+                .ToArray());
+    }
 
     private static string? TryReadTopIssueSummary(JsonElement element)
     {
@@ -1100,6 +1127,22 @@ internal static class DesktopWorkflowAutomation
                 "Open the conversion-matrix proof report (per-conversion or pack-level) and review which body, topology, skeleton, plugin, runtime, or Desktop proof axes are still blocking a universal-ready claim.",
                 $"{matrixProofMetric.Property}: {matrixProofMetric.Value}",
                 matrixProofMetric.FilePath,
+                Blocking: true));
+        }
+
+        var proofExecutionMetric = FindMetric(reportMetrics, "Proof execution status", static value => !value.Equals("executed-pass", StringComparison.OrdinalIgnoreCase));
+        if (proofExecutionMetric is not null)
+        {
+            var guidance = proofExecutionMetric.Value.Equals("planned-only", StringComparison.OrdinalIgnoreCase)
+                ? "Open proof-harness-bundle.json, run the required Windows/Desktop/runtime/live-game harness work, then import proof-result-bundle.json so proof stops being plan-only."
+                : "Open proof-result-bundle.json and proof-harness-bundle.json, then resolve the incomplete or failing imported proof evidence before release.";
+            steps.Add(new DesktopWorkflowAutomationStep(
+                "External proof import",
+                guidance,
+                $"{proofExecutionMetric.Property}: {proofExecutionMetric.Value}",
+                FindMetricFile(reportMetrics, "Canonical entrypoint")
+                ?? FindMetricFile(reportMetrics, "Proof execution status")
+                ?? proofExecutionMetric.FilePath,
                 Blocking: true));
         }
 
