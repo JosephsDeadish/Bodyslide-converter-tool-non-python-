@@ -7392,7 +7392,7 @@ public sealed class ConversionOrchestrator(
             if (authoritativePartitionSlots.Count > 0)
             {
                 var preserveSlotSet = new HashSet<int>();
-                if (ShouldPreserveGenitalsPartition(normalized.Request.TargetBody, analysis))
+                if (ShouldPreserveGenitalsPartition(normalized.Request.TargetBody, analysis, weighted.DeformationCage))
                 {
                     preserveSlotSet.Add(56);
                 }
@@ -7600,14 +7600,94 @@ public sealed class ConversionOrchestrator(
             : partitions;
     }
 
-    private static bool ShouldPreserveGenitalsPartition(string targetBody, MeshAnalysis analysis) =>
+    internal static bool ShouldPreserveGenitalsPartition(string targetBody, MeshAnalysis analysis, DeformationCage? deformationCage) =>
         !analysis.IsFootwear &&
         !string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase) &&
         analysis.HeadgearSubType is null &&
-        (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
-         string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
-         string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
-         string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase));
+        TargetBodySupportsGenitalsPartition(targetBody) &&
+        HasGenitalsPartitionEvidence(deformationCage);
+
+    private static bool TargetBodySupportsGenitalsPartition(string targetBody)
+    {
+        if (BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata))
+        {
+            var supportRegions = metadata.ExpectedSemanticRegions.Count > 0
+                ? metadata.ExpectedSemanticRegions
+                : BodySupportMetadataHeuristics.NormalizeSupportRegionList(metadata.SliderNames);
+            if (supportRegions.Contains("genitals", StringComparer.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasGenitalsPartitionEvidence(DeformationCage? deformationCage)
+    {
+        if (deformationCage is null)
+        {
+            return false;
+        }
+
+        static bool HasSignal(IEnumerable<string>? values) => values?.Any(IsGenitalsPartitionSignal) == true;
+
+        if (HasSignal(deformationCage.Regions?.Keys))
+        {
+            return true;
+        }
+
+        if (deformationCage.IslandControls is not { Count: > 0 } islandControls)
+        {
+            return false;
+        }
+
+        foreach (var islandControl in islandControls)
+        {
+            if (HasSignal(islandControl.CageRegions) ||
+                HasSignal(islandControl.SemanticLabels) ||
+                HasSignal(islandControl.AuthoredRegions?.Select(static region => region.RegionName)))
+            {
+                return true;
+            }
+
+            if (islandControl.BoundaryLoops?.Any(loop => HasSignal(loop.CageRegions)) == true)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsGenitalsPartitionSignal(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        var normalized = BodySupportMetadataHeuristics.NormalizeSupportRegion(candidate);
+        if (normalized is "genitals" or "vagina" or "anus")
+        {
+            return true;
+        }
+
+        var value = candidate.Trim();
+        return value.Contains("groin", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("crotch", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("pubic", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("labia", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("sheath", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("shaft", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("glans", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("foreskin", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("scrot", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("balls", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string ResolvePhysicsProfile(ConversionRequest request, ImportedArmor armor, ConversionPreset? preset)
     {
@@ -15218,12 +15298,7 @@ internal sealed class BasicPartitionRebuildingService : IPartitionRebuildingServ
         // Physics-capable bodies get the genitals partition for compatibility (body slots only).
         bool isHeadgearPart = string.Equals(analysis.MeshType, "headgear", StringComparison.OrdinalIgnoreCase)
             || analysis.HeadgearSubType is not null;
-        if (!isHeadgearPart &&
-            !analysis.IsFootwear &&
-            (string.Equals(targetBody, "3BA", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(targetBody, "BHUNP", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(targetBody, "SAM", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(targetBody, "HIMBO", StringComparison.OrdinalIgnoreCase)))
+        if (ConversionOrchestrator.ShouldPreserveGenitalsPartition(targetBody, analysis, mesh.DeformationCage))
         {
             slots.Add(56); // Genitals
         }

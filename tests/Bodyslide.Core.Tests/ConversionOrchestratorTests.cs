@@ -23672,6 +23672,66 @@ public sealed class ConversionReadmeGeneratorTests
     }
 
     [Fact]
+    public async Task BasicPartitionRebuildingService_DoesNotAddGenitalsPartitionWithoutGenitalEvidence()
+    {
+        var mesh = new WeightedMesh(
+            "cloth",
+            "default",
+            false,
+            DeformationCage: new DeformationCage(
+                "smooth-adaptive-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["chest"] = new(0.75f, 0.20f),
+                    ["waist"] = new(0.52f, 0.16f)
+                },
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "torso_only",
+                        IslandId: 0,
+                        CageRegions: ["chest", "waist"],
+                        SemanticLabels: ["core-panel-island"])
+                ]));
+        var analysis = new MeshAnalysis("cloth", false, 1);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "3BA", CancellationToken.None);
+
+        Assert.DoesNotContain(result.Partitions, l => l.StartsWith("56:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BasicPartitionRebuildingService_AddsGenitalsPartitionWhenIslandEvidenceExists()
+    {
+        var mesh = new WeightedMesh(
+            "physics-enabled",
+            "default",
+            true,
+            DeformationCage: new DeformationCage(
+                "physics-stabilized-cage",
+                Regions: new Dictionary<string, CageRegion>(StringComparer.OrdinalIgnoreCase),
+                IslandControls:
+                [
+                    new CageIslandControl(
+                        MeshKey: "genital_panel",
+                        IslandId: 0,
+                        CageRegions: ["genitals", "pelvis"],
+                        SemanticLabels: ["genital-guard-island"],
+                        AuthoredRegions:
+                        [
+                            new CageIslandAuthoredRegion("vagina", new CageRegion(0.18f, 0.08f))
+                        ])
+                ]));
+        var analysis = new MeshAnalysis("physics-enabled", true, 1);
+        var service = new BasicPartitionRebuildingService();
+
+        var result = await service.RebuildAsync(mesh, analysis, "3BA", CancellationToken.None);
+
+        Assert.Contains(result.Partitions, l => l.StartsWith("56:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task BasicPartitionRebuildingService_UsesIslandCageRegionsToAugmentSlots()
     {
         var mesh = new WeightedMesh(
