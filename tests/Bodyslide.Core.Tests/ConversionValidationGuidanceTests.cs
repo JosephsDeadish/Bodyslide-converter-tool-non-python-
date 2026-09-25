@@ -174,6 +174,8 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Equal(DesktopSmokeTestContract.ExpectedPhysicsCount, root.GetProperty("physics").GetInt32());
         Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("tabs").GetInt32());
         Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabs").GetInt32());
+        Assert.Equal(0, root.GetProperty("tabTitles").GetArrayLength());
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabTitles").GetArrayLength());
     }
 
     [Fact]
@@ -193,6 +195,8 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, root.GetProperty("status").GetString());
         Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount - 1, root.GetProperty("tabs").GetInt32());
         Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabs").GetInt32());
+        Assert.Equal(0, root.GetProperty("tabTitles").GetArrayLength());
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabTitles").GetArrayLength());
     }
 
     [Fact]
@@ -212,12 +216,14 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, root.GetProperty("status").GetString());
         Assert.Equal(DesktopSmokeTestContract.ExpectedTargetCount - 1, root.GetProperty("targets").GetInt32());
         Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("tabs").GetInt32());
+        Assert.Equal(0, root.GetProperty("tabTitles").GetArrayLength());
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, root.GetProperty("expectedTabTitles").GetArrayLength());
     }
 
     [Fact]
     public void DesktopSmokeTestContract_CreateReady_UsesCatalogCountsAndExpectedDesktopTabCount()
     {
-        const int expectedDesktopTabs = DesktopSmokeTestContract.ExpectedDesktopTabCount;
+        var expectedDesktopTabs = DesktopSmokeTestContract.ExpectedDesktopTabCount;
 
         var payload = DesktopSmokeTestContract.CreateReady("SlideSmith Desktop", expectedDesktopTabs);
         var json = DesktopSmokeTestContract.Serialize(payload);
@@ -230,6 +236,8 @@ public sealed class ConversionValidationGuidanceTests
         Assert.Equal(PhysicsProfileCatalog.All.Count, payload.Physics);
         Assert.Equal(expectedDesktopTabs, payload.Tabs);
         Assert.Equal(expectedDesktopTabs, payload.ExpectedTabs);
+        Assert.Empty(payload.TabTitles);
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabTitles, payload.ExpectedTabTitles);
 
         using var document = System.Text.Json.JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -285,10 +293,47 @@ public sealed class ConversionValidationGuidanceTests
             targets,
             profiles,
             physics,
-            DesktopSmokeTestContract.ExpectedDesktopTabCount);
+            DesktopSmokeTestContract.ExpectedDesktopTabTitles);
 
         Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, payload.Status);
         Assert.Equal(BodyTypeCatalog.All.Count, payload.Targets);
+    }
+
+    [Fact]
+    public void DesktopSmokeTestContract_Create_UsesReadyStatusWhenOptionNamesAndTabTitlesMatchExpectedDesktopLayout()
+    {
+        var payload = DesktopSmokeTestContract.Create(
+            "SlideSmith Desktop",
+            PresetCatalog.All.Select(static preset => preset.Name).ToArray(),
+            BodyTypeCatalog.All.Select(static body => body.Name).ToArray(),
+            DeformationProfileModifier.All.ToArray(),
+            PhysicsProfileCatalog.All.Select(PhysicsProfileCatalog.ToDisplayName).ToArray(),
+            DesktopSmokeTestContract.ExpectedDesktopTabTitles);
+
+        Assert.Equal(DesktopSmokeTestContract.ReadyStatus, payload.Status);
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, payload.Tabs);
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabTitles, payload.TabTitles);
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabTitles, payload.ExpectedTabTitles);
+    }
+
+    [Fact]
+    public void DesktopSmokeTestContract_Create_UsesMismatchStatusWhenTabTitlesDoNotMatchExpectedDesktopLayout()
+    {
+        var tabTitles = DesktopSmokeTestContract.ExpectedDesktopTabTitles.ToArray();
+        tabTitles[^1] = "Diagnostics";
+
+        var payload = DesktopSmokeTestContract.Create(
+            "SlideSmith Desktop",
+            PresetCatalog.All.Select(static preset => preset.Name).ToArray(),
+            BodyTypeCatalog.All.Select(static body => body.Name).ToArray(),
+            DeformationProfileModifier.All.ToArray(),
+            PhysicsProfileCatalog.All.Select(PhysicsProfileCatalog.ToDisplayName).ToArray(),
+            tabTitles);
+
+        Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, payload.Status);
+        Assert.Equal(DesktopSmokeTestContract.ExpectedDesktopTabCount, payload.Tabs);
+        Assert.Equal("Diagnostics", payload.TabTitles[^1]);
+        Assert.Equal(DesktopSmokeTestContract.CacheTabTitle, payload.ExpectedTabTitles[^1]);
     }
 
     [Fact]
@@ -309,7 +354,7 @@ public sealed class ConversionValidationGuidanceTests
             targets,
             profiles,
             physics,
-            DesktopSmokeTestContract.ExpectedDesktopTabCount);
+            DesktopSmokeTestContract.ExpectedDesktopTabTitles);
 
         Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, payload.Status);
         Assert.Equal(PhysicsProfileCatalog.All.Count, payload.Physics);

@@ -1139,9 +1139,9 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Multiline = true,
         };
-        var logTabPage = new TabPage("Log") { Name = "logTabPage" };
+        var logTabPage = new TabPage(DesktopSmokeTestContract.LogTabTitle) { Name = "logTabPage" };
         logTabPage.Controls.Add(_logTextBox);
-        _previewTabPage = new TabPage("Preview") { Name = "previewTabPage" };
+        _previewTabPage = new TabPage(DesktopSmokeTestContract.PreviewTabTitle) { Name = "previewTabPage" };
         _previewPanel = new Panel
         {
             Dock = DockStyle.Fill,
@@ -1155,7 +1155,7 @@ public sealed class MainForm : Form
         _previewTabPage.Controls.Add(_previewPanel);
         _resultsTabControl.TabPages.Add(logTabPage);
         _resultsTabControl.TabPages.Add(_previewTabPage);
-        _inspectTabPage = new TabPage("Inspect") { Name = "inspectTabPage" };
+        _inspectTabPage = new TabPage(DesktopSmokeTestContract.InspectTabTitle) { Name = "inspectTabPage" };
         _inspectListView = new ListView
         {
             Name = "inspectListView",
@@ -1169,7 +1169,7 @@ public sealed class MainForm : Form
         _inspectListView.Columns.Add("Value", -2);
         _inspectTabPage.Controls.Add(_inspectListView);
         _resultsTabControl.TabPages.Add(_inspectTabPage);
-        _summaryTabPage = new TabPage("Summary") { Name = "summaryTabPage" };
+        _summaryTabPage = new TabPage(DesktopSmokeTestContract.SummaryTabTitle) { Name = "summaryTabPage" };
         _summaryListView = new ListView
         {
             Name = "summaryListView",
@@ -1183,7 +1183,7 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
-        _guidanceTabPage = new TabPage("Next actions") { Name = "guidanceTabPage" };
+        _guidanceTabPage = new TabPage(DesktopSmokeTestContract.NextActionsTabTitle) { Name = "guidanceTabPage" };
         _guidanceListView = new ListView
         {
             Name = "guidanceListView",
@@ -1201,7 +1201,7 @@ public sealed class MainForm : Form
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
         _resultsTabControl.TabPages.Add(_guidanceTabPage);
-        _reportsTabPage = new TabPage("Reports") { Name = "reportsTabPage" };
+        _reportsTabPage = new TabPage(DesktopSmokeTestContract.ReportsTabTitle) { Name = "reportsTabPage" };
         _reportsListView = new ListView
         {
             Name = "reportsListView",
@@ -1218,7 +1218,7 @@ public sealed class MainForm : Form
         _reportsListView.DoubleClick += (_, _) => OpenSelectedReport();
         _reportsTabPage.Controls.Add(_reportsListView);
         _resultsTabControl.TabPages.Add(_reportsTabPage);
-        _catalogTabPage = new TabPage("Catalog") { Name = "catalogTabPage" };
+        _catalogTabPage = new TabPage(DesktopSmokeTestContract.CatalogTabTitle) { Name = "catalogTabPage" };
         _catalogListView = new ListView
         {
             Name = "catalogListView",
@@ -1233,7 +1233,7 @@ public sealed class MainForm : Form
         _catalogListView.Columns.Add("Details", -2);
         _catalogTabPage.Controls.Add(_catalogListView);
         _resultsTabControl.TabPages.Add(_catalogTabPage);
-        _readinessTabPage = new TabPage("Readiness") { Name = "readinessTabPage" };
+        _readinessTabPage = new TabPage(DesktopSmokeTestContract.ReadinessTabTitle) { Name = "readinessTabPage" };
         _readinessListView = new ListView
         {
             Name = "readinessListView",
@@ -1248,7 +1248,7 @@ public sealed class MainForm : Form
         _readinessListView.Columns.Add("Details", -2);
         _readinessTabPage.Controls.Add(_readinessListView);
         _resultsTabControl.TabPages.Add(_readinessTabPage);
-        _artifactsTabPage = new TabPage("Files") { Name = "artifactsTabPage" };
+        _artifactsTabPage = new TabPage(DesktopSmokeTestContract.FilesTabTitle) { Name = "artifactsTabPage" };
         _artifactsListView = new ListView
         {
             Name = "artifactsListView",
@@ -1264,7 +1264,7 @@ public sealed class MainForm : Form
         _artifactsListView.DoubleClick += (_, _) => OpenSelectedArtifact();
         _artifactsTabPage.Controls.Add(_artifactsListView);
         _resultsTabControl.TabPages.Add(_artifactsTabPage);
-        _cacheTabPage = new TabPage("Cache") { Name = "cacheTabPage" };
+        _cacheTabPage = new TabPage(DesktopSmokeTestContract.CacheTabTitle) { Name = "cacheTabPage" };
         _cacheListView = new ListView
         {
             Name = "cacheListView",
@@ -1354,7 +1354,7 @@ public sealed class MainForm : Form
             GetSelectableOptionItems(_targetComboBox),
             GetSelectableOptionItems(_profileComboBox),
             GetSelectableOptionItems(_physicsComboBox),
-            _resultsTabControl.TabPages.Count);
+            GetTabTitles(_resultsTabControl));
     }
 
     internal string GetSmokeTestSummaryJson()
@@ -3319,6 +3319,18 @@ public sealed class MainForm : Form
             .Where(static value => !string.IsNullOrWhiteSpace(value) &&
                                    !value.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase))
             .Select(static value => value!.Trim())
+            .ToArray();
+    }
+
+    private static string[] GetTabTitles(TabControl tabControl)
+    {
+        ArgumentNullException.ThrowIfNull(tabControl);
+
+        return tabControl.TabPages
+            .Cast<TabPage>()
+            .Select(static tabPage => tabPage.Text?.Trim())
+            .Where(static title => !string.IsNullOrWhiteSpace(title))
+            .Select(static title => title!)
             .ToArray();
     }
 
