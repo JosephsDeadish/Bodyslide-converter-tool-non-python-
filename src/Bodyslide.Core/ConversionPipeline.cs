@@ -24847,13 +24847,52 @@ internal sealed class LocalExportService(
             try
             {
                 var document = System.Xml.Linq.XDocument.Load(ospPath);
+                static bool IsTrueLike(string? value) =>
+                    string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(value, "1", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+
+                static HashSet<string> ReadSliderNames(System.Xml.Linq.XElement sliderSet, bool zap) =>
+                    sliderSet.Elements()
+                        .Where(static child => string.Equals(child.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
+                        .Where(child => IsTrueLike((string?)child.Attribute("zap")) == zap)
+                        .Select(static child => (string?)child.Attribute("name"))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Select(static value => value!.Trim())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
                 static string NormalizeBodySlidePath(string? value) =>
                     string.IsNullOrWhiteSpace(value)
                         ? string.Empty
                         : value.Trim().Replace('\\', '/').Trim('/');
 
+                static string GetBodySlideLeafName(string? value)
+                {
+                    var normalized = NormalizeBodySlidePath(value);
+                    if (string.IsNullOrWhiteSpace(normalized))
+                    {
+                        return string.Empty;
+                    }
+
+                    var lastSeparator = normalized.LastIndexOf('/');
+                    return lastSeparator >= 0 && lastSeparator < normalized.Length - 1
+                        ? normalized[(lastSeparator + 1)..]
+                        : normalized;
+                }
+
                 var projectName = Path.GetFileName(shapeDataDirectory);
                 var expectedSetFolderSuffix = NormalizeBodySlidePath(Path.Combine("CalienteTools", "BodySlide", "ShapeData", projectName));
+                var expectedGender = BodyTypeCatalog.TryGetGender(armor, request.TargetBody, out var resolvedTargetGender)
+                    ? resolvedTargetGender
+                    : null;
+                var sliderSets = document.Descendants()
+                    .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (sliderSets.Length == 0)
+                {
+                    problems.Add("OSP does not declare any BodySlide SliderSet entries.");
+                }
+
                 var sliderElements = document.Descendants()
                     .Where(static element => string.Equals(element.Name.LocalName, "Slider", StringComparison.OrdinalIgnoreCase))
                     .ToArray();
@@ -24881,11 +24920,51 @@ internal sealed class LocalExportService(
                     problems.Add($"OSP slider list is missing: {string.Join(", ", missingOspSliders.Take(4))}");
                 }
 
+                if (sliderSets.Length > 0)
+                {
+                    var expectedRegularSliders = bodySlideProject.Sliders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var expectedZapSliders = (bodySlideProject.ZapSliders ?? Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var baselineRegularSliders = ReadSliderNames(sliderSets[0], zap: false);
+                    var baselineZapSliders = ReadSliderNames(sliderSets[0], zap: true);
+                    var inconsistentSliderSets = new List<string>();
+
+                    foreach (var sliderSet in sliderSets)
+                    {
+                        var sliderSetName = ((string?)sliderSet.Attribute("name"))?.Trim();
+                        sliderSetName = string.IsNullOrWhiteSpace(sliderSetName) ? "<unnamed>" : sliderSetName;
+                        var regularSliders = ReadSliderNames(sliderSet, zap: false);
+                        var zapSliders = ReadSliderNames(sliderSet, zap: true);
+                        if (!regularSliders.SetEquals(expectedRegularSliders))
+                        {
+                            var missing = expectedRegularSliders.Except(regularSliders, StringComparer.OrdinalIgnoreCase).Take(3).ToArray();
+                            var extra = regularSliders.Except(expectedRegularSliders, StringComparer.OrdinalIgnoreCase).Take(3).ToArray();
+                            problems.Add($"OSP SliderSet '{sliderSetName}' does not match expected BodySlide sliders. Missing: {string.Join(", ", missing)} Extra: {string.Join(", ", extra)}".Trim());
+                        }
+
+                        if (!zapSliders.SetEquals(expectedZapSliders))
+                        {
+                            var missingZap = expectedZapSliders.Except(zapSliders, StringComparer.OrdinalIgnoreCase).Take(3).ToArray();
+                            var extraZap = zapSliders.Except(expectedZapSliders, StringComparer.OrdinalIgnoreCase).Take(3).ToArray();
+                            problems.Add($"OSP SliderSet '{sliderSetName}' does not match expected zap sliders. Missing: {string.Join(", ", missingZap)} Extra: {string.Join(", ", extraZap)}".Trim());
+                        }
+
+                        if (!regularSliders.SetEquals(baselineRegularSliders) || !zapSliders.SetEquals(baselineZapSliders))
+                        {
+                            inconsistentSliderSets.Add(sliderSetName);
+                        }
+                    }
+
+                    if (inconsistentSliderSets.Count > 0)
+                    {
+                        problems.Add($"OSP SliderSet entries do not declare identical slider coverage across meshes: {string.Join(", ", inconsistentSliderSets.Take(4))}");
+                    }
+                }
+
                 var sourceFiles = document.Descendants()
                     .Where(static element => string.Equals(element.Name.LocalName, "SourceFile", StringComparison.OrdinalIgnoreCase))
                     .Select(static element => element.Value?.Trim())
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
-                    .Select(static value => Path.GetFileName(value))
+                    .Select(static value => GetBodySlideLeafName(value))
                     .Where(static value => !string.IsNullOrWhiteSpace(value))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
@@ -24952,7 +25031,8 @@ internal sealed class LocalExportService(
                     .Where(static element => string.Equals(element.Name.LocalName, "OutputFile", StringComparison.OrdinalIgnoreCase))
                     .Select(element => new
                     {
-                        FileName = Path.GetFileName(element.Value?.Trim()),
+                        FileName = GetBodySlideLeafName(element.Value),
+                        Gender = ((string?)element.Attribute("gender"))?.Trim(),
                         OutputPath = element.Parent?.Elements()
                             .FirstOrDefault(static child => string.Equals(child.Name.LocalName, "OutputPath", StringComparison.OrdinalIgnoreCase))
                             ?.Value
@@ -24982,6 +25062,29 @@ internal sealed class LocalExportService(
                     if (missingOutputFileMatches.Length > 0)
                     {
                         problems.Add($"OSP OutputFile entries do not match staged generated meshes: {string.Join(", ", missingOutputFileMatches.Take(3))}");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(expectedGender))
+                    {
+                        var invalidGenderEntries = outputFileEntries
+                            .Where(entry => !string.Equals(entry.Gender, expectedGender, StringComparison.OrdinalIgnoreCase))
+                            .Select(entry => $"{entry.FileName} ({entry.Gender ?? "<missing>"})")
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+                        if (invalidGenderEntries.Length > 0)
+                        {
+                            problems.Add($"OSP OutputFile gender must stay '{expectedGender}' for target body '{request.TargetBody}': {string.Join(", ", invalidGenderEntries.Take(4))}");
+                        }
+                    }
+
+                    var declaredGenders = outputFileEntries
+                        .Select(static entry => entry.Gender)
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    if (declaredGenders.Length > 1)
+                    {
+                        problems.Add($"OSP OutputFile gender attributes are inconsistent across meshes: {string.Join(", ", declaredGenders)}");
                     }
                 }
 

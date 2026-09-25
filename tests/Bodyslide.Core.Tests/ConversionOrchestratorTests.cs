@@ -2143,6 +2143,39 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(">cuirass_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains(">boots_0.nif</OutputFile>", ospXml, StringComparison.Ordinal);
             Assert.Contains(">boots_1.nif</OutputFile>", ospXml, StringComparison.Ordinal);
+
+            var document = System.Xml.Linq.XDocument.Parse(ospXml);
+            var sliderSets = document.Descendants("SliderSet").ToArray();
+            Assert.Equal(2, sliderSets.Length);
+
+            var baselineSliders = sliderSets[0]
+                .Elements("Slider")
+                .Where(element => !string.Equals((string?)element.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
+                .Select(element => (string?)element.Attribute("name"))
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Cast<string>()
+                .ToArray();
+            Assert.NotEmpty(baselineSliders);
+            Assert.All(
+                sliderSets,
+                sliderSet =>
+                {
+                    var sliderNames = sliderSet.Elements("Slider")
+                        .Where(element => !string.Equals((string?)element.Attribute("zap"), "true", StringComparison.OrdinalIgnoreCase))
+                        .Select(element => (string?)element.Attribute("name"))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Cast<string>()
+                        .ToArray();
+                    Assert.Equal(baselineSliders, sliderNames);
+
+                    var outputGenders = sliderSet.Elements("OutputFile")
+                        .Select(element => (string?)element.Attribute("gender"))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Cast<string>()
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    Assert.Equal(new[] { "female" }, outputGenders, StringComparer.OrdinalIgnoreCase);
+                });
         }
         finally
         {
@@ -25801,12 +25834,101 @@ public sealed class OutputCompletenessTests
                 armor,
                 outputDirectory,
                 [],
-                new BodySlideProject("SemanticProject", "CBBE", ["Belly"], "<BodySlideProject/>"),
+                new BodySlideProject("SemanticProject", "CBBE", ["Waist"], "<BodySlideProject/>"),
                 new PluginAnalysisResult([], [], string.Empty));
 
             var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("SetFolder", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("missing ShapeData NIFs", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildPackageArtifactIssues_FlagsMultiSliderSetParityAndGenderMismatch()
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.svg"), "<svg/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview.html"), "<html/>");
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html/>");
+
+            var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith", "cbbe");
+            Directory.CreateDirectory(stagedMeshDirectory);
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "cuirass_0.nif"), "mesh");
+            File.WriteAllText(Path.Combine(stagedMeshDirectory, "boots_0.nif"), "mesh");
+
+            var sliderSetDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            Directory.CreateDirectory(sliderSetDirectory);
+            File.WriteAllText(
+                Path.Combine(sliderSetDirectory, "ParityProject.osp"),
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <SliderSetInfo version="1">
+                  <SliderSet name="ParityProject Cuirass" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\ParityProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\ParityProject\cuirass_0.nif</SourceFile>
+                    <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
+                    <OutputFile gender="female" use="true">cuirass_0.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                    <Slider name="Butt" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                  <SliderSet name="ParityProject Boots" baseShape="Base Shape" bsversion="20">
+                    <SetFolder>CalienteTools\BodySlide\ShapeData\ParityProject</SetFolder>
+                    <SourceFile>CalienteTools\BodySlide\ShapeData\ParityProject\boots_0.nif</SourceFile>
+                    <OutputPath>meshes\slidesmith\cbbe\</OutputPath>
+                    <OutputFile gender="male" use="true">boots_0.nif</OutputFile>
+                    <Slider name="Belly" invert="false" zap="false" uv="false"><Low value="0" /><High value="100" /></Slider>
+                  </SliderSet>
+                </SliderSetInfo>
+                """);
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", "ParityProject");
+            Directory.CreateDirectory(shapeDataDirectory);
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "cuirass_0.nif"), "mesh");
+            File.WriteAllText(Path.Combine(shapeDataDirectory, "boots_0.nif"), "mesh");
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly.bsd"), BuildBsdPayload("Belly", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Belly_1.bsd"), BuildBsdPayload("Belly", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Butt.bsd"), BuildBsdPayload("Butt", isHighWeight: false, [(0.1f, 0.0f, 0.0f)]));
+            File.WriteAllBytes(Path.Combine(shapeDataDirectory, "Butt_1.bsd"), BuildBsdPayload("Butt", isHighWeight: true, [(0.1f, 0.0f, 0.0f)]));
+
+            Directory.CreateDirectory(Path.Combine(outputDirectory, "fomod"));
+            File.WriteAllText(
+                Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"),
+                "<config><folder source=\"meshes\" destination=\"meshes\" priority=\"0\" /><folder source=\"CalienteTools\" destination=\"CalienteTools\" priority=\"0\" /></config>");
+            File.WriteAllText(Path.Combine(outputDirectory, "fomod", "info.xml"), "<fomod/>");
+
+            var request = new ConversionRequest(
+                InputPath: Path.Combine(outputDirectory, "input.nif"),
+                TargetBody: "CBBE",
+                OutputDirectory: outputDirectory,
+                GenerateBodySlideFiles: true);
+            var armor = new ImportedArmor(request.InputPath, [request.InputPath], [], [], []);
+
+            var issues = LocalExportService.BuildPackageArtifactIssues(
+                request,
+                armor,
+                outputDirectory,
+                [],
+                new BodySlideProject("ParityProject", "CBBE", ["Belly", "Butt"], "<BodySlideProject/>"),
+                new PluginAnalysisResult([], [], string.Empty));
+
+            var semanticIssue = Assert.Single(issues, issue => issue.Code.Equals("bodyslide-semantic-mismatch", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("identical slider coverage", semanticIssue.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(
+                semanticIssue.Message.Contains("gender must stay 'female'", StringComparison.OrdinalIgnoreCase) ||
+                semanticIssue.Message.Contains("gender attributes are inconsistent", StringComparison.OrdinalIgnoreCase),
+                $"Expected gender validation signal in semantic issue, but got: {semanticIssue.Message}");
         }
         finally
         {
