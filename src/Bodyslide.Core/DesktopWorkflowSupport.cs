@@ -329,7 +329,7 @@ internal static class DesktopWorkflowSupport
         if (index + 1 < args.Count)
         {
             var next = args[index + 1];
-            if (!string.IsNullOrWhiteSpace(next) && !next.StartsWith('-'))
+            if (!string.IsNullOrWhiteSpace(next) && !LooksLikeRecognizedOptionToken(next))
             {
                 value = next;
                 consumedIndex = index + 1;
@@ -338,6 +338,20 @@ internal static class DesktopWorkflowSupport
         }
 
         return true;
+    }
+
+    private static bool LooksLikeRecognizedOptionToken(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var separatorIndex = arg.IndexOf('=');
+        var key = separatorIndex >= 0 ? arg[2..separatorIndex] : arg[2..];
+        return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeCandidatePath(string? path)
