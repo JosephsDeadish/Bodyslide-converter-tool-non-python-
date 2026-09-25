@@ -440,8 +440,8 @@ public sealed class MainForm : Form
         {
             AutoSize = true,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Anchor = AnchorStyles.Right,
+            WrapContents = true,
+            Anchor = AnchorStyles.Left,
             Margin = new Padding(12, 0, 0, 0),
         };
         var themeLabel = new Label
@@ -1316,21 +1316,33 @@ public sealed class MainForm : Form
         {
             UpdateResponsiveLayout();
             UpdateMainSplitLayout();
+            UpdateListViewColumnLayouts();
         };
         FormClosing += (_, _) => SaveUiSettings();
         Shown += async (_, _) =>
         {
             _allowUserMainSplitOverride = true;
-            if (_startupResultLoadHandled ||
-                string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
+            if (!_startupResultLoadHandled &&
+                !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
+                _startupResultLoadHandled = true;
+                await LoadResultDirectoryAsync(
+                    _launchOptions.StartupOutputDirectory,
+                    _launchOptions.FromModOrganizerLauncher ? "MO2 launcher argument" : "launcher argument");
                 return;
             }
 
-            _startupResultLoadHandled = true;
-            await LoadResultDirectoryAsync(
-                _launchOptions.StartupOutputDirectory,
-                _launchOptions.FromModOrganizerLauncher ? "MO2 launcher argument" : "launcher argument");
+            if (!string.IsNullOrWhiteSpace(_launchOptions.StartupInputPath) &&
+                (File.Exists(_launchOptions.StartupInputPath) || Directory.Exists(_launchOptions.StartupInputPath)))
+            {
+                _inputTextBox.Text = _launchOptions.StartupInputPath;
+                _statusLabel.Text = _launchOptions.FromModOrganizerLauncher
+                    ? "Ready — input loaded from MO2 launcher."
+                    : "Ready — input loaded from launcher.";
+                AppendLog(_launchOptions.FromModOrganizerLauncher
+                    ? $"Startup input loaded from MO2 launcher: {_launchOptions.StartupInputPath}"
+                    : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
+            }
         };
     }
 
@@ -1467,6 +1479,70 @@ public sealed class MainForm : Form
         if (_mainSplitContainer.SplitterDistance != splitterDistance)
         {
             _mainSplitContainer.SplitterDistance = splitterDistance;
+        }
+    }
+
+    private void UpdateListViewColumnLayouts()
+    {
+        AutoSizeListViewColumns(_inspectListView, 240, 520);
+        AutoSizeListViewColumns(_summaryListView, 220, 420);
+        AutoSizeListViewColumns(_guidanceListView, 180, 100, 460);
+        AutoSizeListViewColumns(_reportsListView, 260, 180, 420);
+        AutoSizeListViewColumns(_catalogListView, 170, 180, 480);
+        AutoSizeListViewColumns(_readinessListView, 180, 110, 420);
+        AutoSizeListViewColumns(_artifactsListView, 260, 520);
+        AutoSizeListViewColumns(_cacheListView, 220, 80, 120, 180, 70, 100, 150, 320);
+        AutoSizeListViewColumns(_customProfilesListView, 520);
+    }
+
+    private static void AutoSizeListViewColumns(ListView listView, params int[] minimumWidths)
+    {
+        if (listView.IsDisposed ||
+            listView.View != View.Details ||
+            listView.Columns.Count == 0)
+        {
+            return;
+        }
+
+        var widths = new int[listView.Columns.Count];
+        try
+        {
+            listView.AutoResizeColumns(ColumnHeaderAutoResizeStyle.HeaderSize);
+            for (var index = 0; index < listView.Columns.Count; index++)
+            {
+                widths[index] = listView.Columns[index].Width;
+            }
+
+            if (listView.Items.Count > 0)
+            {
+                listView.AutoResizeColumns(ColumnHeaderAutoResizeStyle.ColumnContent);
+                for (var index = 0; index < listView.Columns.Count; index++)
+                {
+                    widths[index] = Math.Max(widths[index], listView.Columns[index].Width);
+                }
+            }
+        }
+        catch
+        {
+            return;
+        }
+
+        var availableWidth = Math.Max(0, listView.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4);
+        var fixedWidthTotal = 0;
+        for (var index = 0; index < listView.Columns.Count - 1; index++)
+        {
+            widths[index] = Math.Max(widths[index], index < minimumWidths.Length ? minimumWidths[index] : 0);
+            fixedWidthTotal += widths[index];
+        }
+
+        var lastIndex = listView.Columns.Count - 1;
+        var minimumLastWidth = lastIndex < minimumWidths.Length ? minimumWidths[lastIndex] : 220;
+        widths[lastIndex] = Math.Max(widths[lastIndex], minimumLastWidth);
+        widths[lastIndex] = Math.Max(widths[lastIndex], availableWidth - fixedWidthTotal);
+
+        for (var index = 0; index < listView.Columns.Count; index++)
+        {
+            listView.Columns[index].Width = widths[index];
         }
     }
 
@@ -1815,6 +1891,7 @@ public sealed class MainForm : Form
 
         _catalogListView.Items.Add(new ListViewItem(["Target alias", "all / any / *", "Expands to every supported body type."]));
         _catalogListView.EndUpdate();
+        AutoSizeListViewColumns(_catalogListView, 170, 180, 480);
     }
 
     private IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReadinessReport()
@@ -1849,6 +1926,7 @@ public sealed class MainForm : Form
         }
 
         _readinessListView.EndUpdate();
+        AutoSizeListViewColumns(_readinessListView, 180, 110, 420);
     }
 
     private void RunSelfCheck()
@@ -2265,21 +2343,26 @@ public sealed class MainForm : Form
                     cancellationToken);
             }
 
-            _statusLabel.Text = "Conversion finished. Loading reports, preview, and guidance...";
+            ShowProgressValue(Math.Max(_progressBar.Value, 88), "Conversion finished. Loading preview...");
             await Task.Yield();
             _lastOutputDirectory = GetBestOutputDirectory(results);
             _lastPreviewPath = GetFirstExistingOutputFile(results, PreviewFileCandidates);
             _lastBatchReportPath = GetFirstExistingOutputFile(results, "batch-report.json");
             UpdatePathActionStates();
             _ = await LoadPreviewInAppWithTimeoutAsync(_lastPreviewPath);
+            ShowProgressValue(Math.Max(_progressBar.Value, 92), "Preview ready. Building summary and report views...");
             await Task.Yield();
             var workflowSnapshot = await BuildWorkflowSnapshotAsync(results, _lastPreviewPath, cancellationToken);
             PopulateSummaryTab(workflowSnapshot.SummaryRows);
             PopulateReportsTab(workflowSnapshot.ReportMetrics);
+            ShowProgressValue(Math.Max(_progressBar.Value, 96), "Reports ready. Building files and next actions...");
             await Task.Yield();
             PopulateArtifactsTab(workflowSnapshot.Artifacts);
             var guidanceNeedsReview = await PopulateGuidanceTabAsync(results, _lastPreviewPath, cancellationToken);
             ApplyValidationGatePresentation(workflowSnapshot.ValidationState, guidanceNeedsReview);
+            ShowProgressValue(100, guidanceNeedsReview
+                ? "Conversion complete. Review next actions before shipping."
+                : "Conversion complete. Preview and reports are ready.");
 
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
@@ -2462,6 +2545,16 @@ public sealed class MainForm : Form
         _progressBar.Minimum = 0;
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
+        _statusLabel.Text = statusText;
+    }
+
+    private void ShowProgressValue(int percent, string statusText)
+    {
+        _progressBar.Style = ProgressBarStyle.Continuous;
+        _progressBar.MarqueeAnimationSpeed = 0;
+        _progressBar.Minimum = 0;
+        _progressBar.Maximum = 100;
+        _progressBar.Value = Math.Clamp(percent, 0, 100);
         _statusLabel.Text = statusText;
     }
 
@@ -2760,6 +2853,8 @@ public sealed class MainForm : Form
         {
             _summaryListView.Items.Add(new ListViewItem([row.Property, row.Value]));
         }
+
+        AutoSizeListViewColumns(_summaryListView, 220, 420);
     }
 
     private void ApplyGuidanceItemStyles(UiThemePalette palette)
@@ -2870,6 +2965,7 @@ public sealed class MainForm : Form
             _guidanceListView.EndUpdate();
         }
 
+        AutoSizeListViewColumns(_guidanceListView, 180, 100, 460);
         UpdateGuidanceActionButtonState();
 
         return buildResult.RequiresReview ||
@@ -3067,6 +3163,8 @@ public sealed class MainForm : Form
         {
             _inspectListView.EndUpdate();
         }
+
+        AutoSizeListViewColumns(_inspectListView, 240, 520);
     }
 
     private void ClearInspectionTab(string message)
@@ -3087,6 +3185,7 @@ public sealed class MainForm : Form
             _inspectListView.EndUpdate();
         }
 
+        AutoSizeListViewColumns(_inspectListView, 180, 420);
         ClearAutoDetectedSourceHint(refreshDetails: true);
     }
 
@@ -3830,6 +3929,8 @@ public sealed class MainForm : Form
         {
             _cacheListView.EndUpdate();
         }
+
+        AutoSizeListViewColumns(_cacheListView, 220, 80, 120, 180, 70, 100, 150, 320);
     }
 
     private void RefreshCustomProfilesList(string? selectedPath = null)
@@ -3861,6 +3962,7 @@ public sealed class MainForm : Form
             _customProfilesListView.EndUpdate();
         }
 
+        AutoSizeListViewColumns(_customProfilesListView, 520);
         UpdatePathActionStates();
     }
 
@@ -4122,6 +4224,7 @@ public sealed class MainForm : Form
             _artifactsListView.EndUpdate();
         }
 
+        AutoSizeListViewColumns(_artifactsListView, 260, 520);
         _openArtifactButton.Enabled = _artifactsListView.SelectedItems.Count > 0;
     }
 
@@ -4158,6 +4261,7 @@ public sealed class MainForm : Form
             _reportsListView.EndUpdate();
         }
 
+        AutoSizeListViewColumns(_reportsListView, 260, 180, 420);
         _openReportButton.Enabled = _reportsListView.SelectedItems.Count > 0;
     }
 

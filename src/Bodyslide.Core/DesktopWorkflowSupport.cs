@@ -1,8 +1,8 @@
 namespace Bodyslide.Core;
 
-internal sealed record DesktopLaunchOptions(string? StartupOutputDirectory, bool FromModOrganizerLauncher)
+internal sealed record DesktopLaunchOptions(string? StartupOutputDirectory, string? StartupInputPath, bool FromModOrganizerLauncher)
 {
-    internal static DesktopLaunchOptions Empty { get; } = new(null, false);
+    internal static DesktopLaunchOptions Empty { get; } = new(null, null, false);
 }
 
 internal static class DesktopWorkflowSupport
@@ -188,8 +188,10 @@ internal static class DesktopWorkflowSupport
         string? candidatePath = null;
         var fromMo2 = args.Any(static arg =>
             !string.IsNullOrWhiteSpace(arg) &&
-            (arg.Contains("mo2", StringComparison.OrdinalIgnoreCase) ||
-             arg.Contains("modorganizer", StringComparison.OrdinalIgnoreCase)));
+            (arg.Equals("--mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
+             arg.Equals("--modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
+             arg.StartsWith("--mo2-launcher=", StringComparison.OrdinalIgnoreCase) ||
+             arg.StartsWith("--modorganizer-launcher=", StringComparison.OrdinalIgnoreCase)));
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -218,8 +220,10 @@ internal static class DesktopWorkflowSupport
             }
         }
 
+        var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath);
         return new DesktopLaunchOptions(
-            TryResolveResultOutputDirectory(candidatePath),
+            startupOutputDirectory,
+            startupOutputDirectory is null ? TryResolveExistingInputPath(candidatePath) : null,
             fromMo2);
     }
 
@@ -249,9 +253,7 @@ internal static class DesktopWorkflowSupport
             currentDirectory = Path.GetDirectoryName(currentDirectory);
         }
 
-        return Directory.Exists(normalizedCandidate)
-            ? Path.GetFullPath(normalizedCandidate)
-            : Path.GetDirectoryName(Path.GetFullPath(normalizedCandidate));
+        return null;
     }
 
     public static bool LooksLikeSlideSmithOutputDirectory(string? directory)
@@ -274,6 +276,24 @@ internal static class DesktopWorkflowSupport
         }
 
         return false;
+    }
+
+    public static string? TryResolveExistingInputPath(string? candidatePath)
+    {
+        var normalizedCandidate = NormalizeCandidatePath(candidatePath);
+        if (string.IsNullOrWhiteSpace(normalizedCandidate))
+        {
+            return null;
+        }
+
+        if (File.Exists(normalizedCandidate))
+        {
+            return Path.GetFullPath(normalizedCandidate);
+        }
+
+        return Directory.Exists(normalizedCandidate)
+            ? Path.GetFullPath(normalizedCandidate)
+            : null;
     }
 
     private static bool TryReadNamedArgumentValue(

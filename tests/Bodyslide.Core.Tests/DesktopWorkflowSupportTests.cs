@@ -43,6 +43,34 @@ public sealed class DesktopWorkflowSupportTests
                 ]);
 
             Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_UsesExistingPathAsStartupInputWhenItIsNotASlideSmithResult()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "mo2-mod");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--mo2-launcher",
+                    inputFile
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
             Assert.True(options.FromModOrganizerLauncher);
         }
         finally
