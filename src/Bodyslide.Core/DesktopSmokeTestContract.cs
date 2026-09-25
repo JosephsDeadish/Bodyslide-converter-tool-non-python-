@@ -36,6 +36,47 @@ public static class DesktopSmokeTestContract
 
     public static DesktopSmokeTestSummary Create(
         string title,
+        IReadOnlyCollection<string> presets,
+        IReadOnlyCollection<string> targets,
+        IReadOnlyCollection<string> profiles,
+        IReadOnlyCollection<string> physics,
+        int tabs)
+    {
+        ArgumentNullException.ThrowIfNull(presets);
+        ArgumentNullException.ThrowIfNull(targets);
+        ArgumentNullException.ThrowIfNull(profiles);
+        ArgumentNullException.ThrowIfNull(physics);
+
+        var countsMatch = presets.Count == ExpectedPresetCount &&
+            targets.Count == ExpectedTargetCount &&
+            profiles.Count == ExpectedProfileCount &&
+            physics.Count == ExpectedPhysicsCount;
+        var optionsMatch = MatchesExpectedOptions(
+                presets,
+                PresetCatalog.All.Select(static preset => preset.Name)) &&
+            MatchesExpectedOptions(
+                targets,
+                BodyTypeCatalog.All.Select(static body => body.Name)) &&
+            MatchesExpectedOptions(
+                profiles,
+                DeformationProfileModifier.All) &&
+            MatchesExpectedOptions(
+                physics,
+                PhysicsProfileCatalog.All.Select(PhysicsProfileCatalog.ToDisplayName));
+
+        return new DesktopSmokeTestSummary(
+            tabs == ExpectedDesktopTabCount && countsMatch && optionsMatch ? ReadyStatus : LayoutMismatchStatus,
+            title,
+            presets.Count,
+            targets.Count,
+            profiles.Count,
+            physics.Count,
+            tabs,
+            ExpectedDesktopTabCount);
+    }
+
+    public static DesktopSmokeTestSummary Create(
+        string title,
         int presets,
         int targets,
         int profiles,
@@ -88,5 +129,24 @@ public static class DesktopSmokeTestContract
         int tabs)
     {
         return Serialize(Create(title, presets, targets, profiles, physics, tabs));
+    }
+
+    private static bool MatchesExpectedOptions(
+        IReadOnlyCollection<string> actual,
+        IEnumerable<string> expected)
+    {
+        var normalizedActual = actual
+            .Select(static value => value?.Trim())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var normalizedExpected = expected
+            .Select(static value => value?.Trim())
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalizedActual.Length == normalizedExpected.Length &&
+               normalizedActual.SequenceEqual(normalizedExpected, StringComparer.OrdinalIgnoreCase);
     }
 }

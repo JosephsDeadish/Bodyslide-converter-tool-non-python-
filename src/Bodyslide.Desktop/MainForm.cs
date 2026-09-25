@@ -1350,10 +1350,10 @@ public sealed class MainForm : Form
     {
         return DesktopSmokeTestContract.Create(
             Text,
-            CountSelectableOptionItems(_presetComboBox),
-            CountSelectableOptionItems(_targetComboBox),
-            CountSelectableOptionItems(_profileComboBox),
-            CountSelectableOptionItems(_physicsComboBox),
+            GetSelectableOptionItems(_presetComboBox),
+            GetSelectableOptionItems(_targetComboBox),
+            GetSelectableOptionItems(_profileComboBox),
+            GetSelectableOptionItems(_physicsComboBox),
             _resultsTabControl.TabPages.Count);
     }
 
@@ -3309,15 +3309,17 @@ public sealed class MainForm : Form
         return DesktopWorkflowSupport.ReadOptionalSelection(comboBox.SelectedItem?.ToString());
     }
 
-    private static int CountSelectableOptionItems(ComboBox comboBox)
+    private static string[] GetSelectableOptionItems(ComboBox comboBox)
     {
         ArgumentNullException.ThrowIfNull(comboBox);
 
         return comboBox.Items
             .Cast<object?>()
             .Select(static item => item?.ToString())
-            .Count(static value => !string.IsNullOrWhiteSpace(value) &&
-                                   !value.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase));
+            .Where(static value => !string.IsNullOrWhiteSpace(value) &&
+                                   !value.Trim().Equals("(auto)", StringComparison.OrdinalIgnoreCase))
+            .Select(static value => value!.Trim())
+            .ToArray();
     }
 
     private static string? ReadOptionalPathValue(string? path) =>

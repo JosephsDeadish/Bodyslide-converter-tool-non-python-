@@ -268,6 +268,54 @@ public sealed class ConversionValidationGuidanceTests
     }
 
     [Fact]
+    public void DesktopSmokeTestContract_Create_UsesMismatchStatusWhenOptionNamesDoNotMatchExpectedCatalog()
+    {
+        var presets = PresetCatalog.All.Select(static preset => preset.Name).ToArray();
+        var targets = BodyTypeCatalog.All.Select(static body => body.Name).ToArray();
+        var profiles = DeformationProfileModifier.All.ToArray();
+        var physics = PhysicsProfileCatalog.All
+            .Select(PhysicsProfileCatalog.ToDisplayName)
+            .ToArray();
+
+        targets[0] = "DefinitelyNotARealTarget";
+
+        var payload = DesktopSmokeTestContract.Create(
+            "SlideSmith Desktop",
+            presets,
+            targets,
+            profiles,
+            physics,
+            DesktopSmokeTestContract.ExpectedDesktopTabCount);
+
+        Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, payload.Status);
+        Assert.Equal(BodyTypeCatalog.All.Count, payload.Targets);
+    }
+
+    [Fact]
+    public void DesktopSmokeTestContract_Create_UsesMismatchStatusWhenOptionListContainsDuplicateInsteadOfFullCatalog()
+    {
+        var presets = PresetCatalog.All.Select(static preset => preset.Name).ToArray();
+        var targets = BodyTypeCatalog.All.Select(static body => body.Name).ToArray();
+        var profiles = DeformationProfileModifier.All.ToArray();
+        var physics = PhysicsProfileCatalog.All
+            .Select(PhysicsProfileCatalog.ToDisplayName)
+            .ToArray();
+
+        physics[^1] = physics[0];
+
+        var payload = DesktopSmokeTestContract.Create(
+            "SlideSmith Desktop",
+            presets,
+            targets,
+            profiles,
+            physics,
+            DesktopSmokeTestContract.ExpectedDesktopTabCount);
+
+        Assert.Equal(DesktopSmokeTestContract.LayoutMismatchStatus, payload.Status);
+        Assert.Equal(PhysicsProfileCatalog.All.Count, payload.Physics);
+    }
+
+    [Fact]
     public void FixtureBodyProfiles_ParseAndMatchTheirBodySlideOutputPaths()
     {
         var fixtureRoot = GetFixtureRoot();
