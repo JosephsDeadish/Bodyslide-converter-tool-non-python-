@@ -251,7 +251,10 @@ public static class SkeletonSupportPathResolver
             ? 1
             : 0;
 
-        var preferredDirectoryPenalty = normalized.Contains("/meshes/actors/character/character assets/", StringComparison.OrdinalIgnoreCase)
+        var preferredDirectoryPenalty =
+            normalized.Contains("/meshes/actors/character/character assets/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/meshes/actors/character/character assets female/", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("/meshes/actors/character/character assets male/", StringComparison.OrdinalIgnoreCase)
             ? 0
             : 1;
 

@@ -709,8 +709,8 @@ internal static class ExternalProofHarnessSupport
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var executedItemCount = probeResults.Count;
-        var missingItemCount = missingProbeIds.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
-        var failureCount = failedProbeIds.Length + probesMissingEvidence.Length;
+        var missingItemCount = missingProbeIds.Length + probesMissingEvidence.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
+        var failureCount = failedProbeIds.Length;
         var strict = executedItemCount > 0 && missingItemCount == 0 && failureCount == 0;
         var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failureCount);
 
@@ -781,22 +781,24 @@ internal static class ExternalProofHarnessSupport
             evidence,
             ("screenshots", $"{EvidenceRootDirectory}/screenshots/"),
             ("runtime-logs", $"{EvidenceRootDirectory}/runtime-logs/"),
-            ("scenario-observations", $"{EvidenceRootDirectory}/scenario-observations/"));
+            ("scenario-observations", $"{EvidenceRootDirectory}/scenario-observations/"),
+            ("load-order-state", $"{EvidenceRootDirectory}/load-order-state/"));
         var componentMissingArtifacts = FilterMissingExpectedArtifacts(
             bundle.MissingExpectedArtifacts,
             $"{EvidenceRootDirectory}/screenshots/",
             $"{EvidenceRootDirectory}/runtime-logs/",
-            $"{EvidenceRootDirectory}/scenario-observations/");
-        var hostRequirementItems = hostLooksWindows ? [] : ["host:windows"];
+            $"{EvidenceRootDirectory}/scenario-observations/",
+            $"{EvidenceRootDirectory}/load-order-state/");
+        var hostRequirementItems = hostLooksWindows ? Array.Empty<string>() : ["host:windows"];
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
-            .Concat(hostLooksWindows ? [] : ["Live-game proof was imported from a non-Windows host."])
-            .Concat(missingEvidenceItems.Length > 0 ? [$"Live-game proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : [])
+            .Concat(hostLooksWindows ? Array.Empty<string>() : ["Live-game proof was imported from a non-Windows host."])
+            .Concat(missingEvidenceItems.Length > 0 ? [$"Live-game proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var executedItemCount = scenarioResults.Count;
-        var missingItemCount = missingScenarioNames.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
-        var failureCount = failedScenarioNames.Length + scenarioEvidenceMismatches.Length + scenarioSaveProfileMismatches.Length + hostRequirementItems.Length;
+        var missingItemCount = missingScenarioNames.Length + scenarioEvidenceMismatches.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;
+        var failureCount = failedScenarioNames.Length + scenarioSaveProfileMismatches.Length + hostRequirementItems.Length;
         var strict = executedItemCount > 0 && missingItemCount == 0 && failureCount == 0;
         var executedStatus = DetermineExecutionStatus(component?.Status, strict, missingItemCount, failureCount);
 
@@ -842,16 +844,18 @@ internal static class ExternalProofHarnessSupport
         var missingEvidenceItems = BuildMissingEvidenceItems(
             evidence,
             ("screenshots", $"{EvidenceRootDirectory}/screenshots/"),
-            ("step-traces", $"{EvidenceRootDirectory}/step-traces/"));
+            ("step-traces", $"{EvidenceRootDirectory}/step-traces/"),
+            ("selector-logs", $"{EvidenceRootDirectory}/selector-logs/"));
         var componentMissingArtifacts = FilterMissingExpectedArtifacts(
             bundle.MissingExpectedArtifacts,
             $"{EvidenceRootDirectory}/screenshots/",
-            $"{EvidenceRootDirectory}/step-traces/");
-        var hostRequirementItems = hostLooksWindows ? [] : ["host:windows"];
+            $"{EvidenceRootDirectory}/step-traces/",
+            $"{EvidenceRootDirectory}/selector-logs/");
+        var hostRequirementItems = hostLooksWindows ? Array.Empty<string>() : ["host:windows"];
         var notes = (component?.Notes ?? [])
             .Concat(bundle.Notes)
-            .Concat(hostLooksWindows ? [] : ["Desktop E2E proof was imported from a non-Windows host."])
-            .Concat(missingEvidenceItems.Length > 0 ? [$"Desktop proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : [])
+            .Concat(hostLooksWindows ? Array.Empty<string>() : ["Desktop E2E proof was imported from a non-Windows host."])
+            .Concat(missingEvidenceItems.Length > 0 ? [$"Desktop proof import is missing expected evidence categories: {string.Join(", ", missingEvidenceItems)}"] : Array.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var missingItemCount = missingFlows.Length + missingEvidenceItems.Length + componentMissingArtifacts.Length;

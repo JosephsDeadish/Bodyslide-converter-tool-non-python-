@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Text;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -18823,6 +18824,24 @@ public sealed class RealisticModPackFixtureTests
             IReadOnlyList<string> flows,
             bool complete)
         {
+            static string BuildScenarioEvidenceKey(string scenario)
+            {
+                var builder = new StringBuilder();
+                foreach (var character in scenario.Trim().ToLowerInvariant())
+                {
+                    if (char.IsLetterOrDigit(character))
+                    {
+                        builder.Append(character);
+                    }
+                    else if (builder.Length == 0 || builder[^1] != '-')
+                    {
+                        builder.Append('-');
+                    }
+                }
+
+                return builder.ToString().Trim('-');
+            }
+
             var selectedProbeIds = complete ? probeIds : probeIds.Take(Math.Max(1, probeIds.Count - 1)).ToArray();
             var selectedScenarioNames = complete ? scenarios.Keys.ToArray() : scenarios.Keys.Take(Math.Max(1, scenarios.Count - 1)).ToArray();
             var selectedFlows = complete ? flows : flows.Take(Math.Max(1, flows.Count - 1)).ToArray();
@@ -18860,7 +18879,7 @@ public sealed class RealisticModPackFixtureTests
                         Status = status,
                         ExecutedItems = selectedScenarioNames,
                         MissingItems = complete ? Array.Empty<string>() : scenarios.Keys.Except(selectedScenarioNames, StringComparer.OrdinalIgnoreCase).ToArray(),
-                        EvidenceArtifacts = new[] { "proof-evidence/scenario-observations/", "proof-evidence/screenshots/live-game.png" },
+                        EvidenceArtifacts = new[] { "proof-evidence/scenario-observations/", "proof-evidence/screenshots/live-game.png", "proof-evidence/runtime-logs/live-game.log", "proof-evidence/load-order-state/loadorder.txt" },
                         Notes = complete ? Array.Empty<string>() : new[] { "One live-game scenario is still missing." }
                     },
                     new
@@ -18869,7 +18888,7 @@ public sealed class RealisticModPackFixtureTests
                         Status = status,
                         ExecutedItems = selectedFlows,
                         MissingItems = complete ? Array.Empty<string>() : flows.Except(selectedFlows, StringComparer.OrdinalIgnoreCase).ToArray(),
-                        EvidenceArtifacts = new[] { "proof-evidence/screenshots/desktop.png", "proof-evidence/selector-logs/selectors.json" },
+                        EvidenceArtifacts = new[] { "proof-evidence/screenshots/desktop.png", "proof-evidence/selector-logs/selectors.json", "proof-evidence/step-traces/desktop.json" },
                         Notes = complete ? Array.Empty<string>() : new[] { "One desktop flow is still missing." }
                     }
                 },
@@ -18880,7 +18899,7 @@ public sealed class RealisticModPackFixtureTests
                     ValidationSaveProfile = scenarios[name],
                     ObservedSignals = new[] { "runtime-scenarios-dispatched", "host-observations-captured" },
                     MissingSignals = Array.Empty<string>(),
-                    EvidenceArtifacts = new[] { $"proof-evidence/scenario-observations/{name.Replace(' ', '-').ToLowerInvariant()}/notes.txt" },
+                    EvidenceArtifacts = new[] { $"proof-evidence/scenario-observations/{BuildScenarioEvidenceKey(name)}/notes.txt" },
                     Notes = Array.Empty<string>()
                 }).ToArray(),
                 ProbeResults = selectedProbeIds.Select(id => new
