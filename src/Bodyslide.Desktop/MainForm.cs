@@ -124,6 +124,8 @@ public sealed class MainForm : Form
         "in-game-validation.json",
         "live-game-execution.json",
         "mod-stack-cross-validation.json",
+        "proof-harness-bundle.json",
+        "proof-result-bundle.json",
         "topology-correspondence.json",
         "runtime-validation-plan.json",
         "runtime-validation-harness.json",
@@ -2974,6 +2976,11 @@ public sealed class MainForm : Form
 
     private static GuidanceBuildResult BuildGuidanceBuildResult(IReadOnlyList<string> outputDirectories, string? previewPath)
     {
+        foreach (var outputDirectory in outputDirectories)
+        {
+            ExternalProofHarnessSupport.RefreshImportedProofState(outputDirectory);
+        }
+
         var requiresReview = false;
         var gateStatus = "ready";
         var gateRank = ConversionValidationPresentation.GetGateRank(gateStatus);
@@ -3840,6 +3847,8 @@ public sealed class MainForm : Form
             "windows-ui-e2e-automation.json" => "Open UI harness plan",
             "desktop-workflow-automation.json" => "Open desktop flow",
             "live-game-execution.json" => "Open live-game plan",
+            "proof-harness-bundle.json" => "Open proof manifest",
+            "proof-result-bundle.json" => "Open imported proof",
             "runtime-validation-plan.json" or "runtime-validation-harness.json" => "Open runtime plan",
             "topology-correspondence.json" => "Open topology report",
             "mod-stack-cross-validation.json" => "Open mod-stack proof",
@@ -4392,7 +4401,11 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Can convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanConvert")), filePath);
                     AddReportMetric(reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     AddReportMetric(reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
+                    AddReportMetric(reportName, "Planned execution coverage", TryReadString(root, "PlannedExecutionCoverage"), filePath);
                     AddReportMetric(reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
+                    AddReportMetric(reportName, "Runtime proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    AddReportMetric(reportName, "Runtime imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    AddReportMetric(reportName, "Missing imported probes", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     AddReportMetric(reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     AddReportMetric(reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
                     AddReportMetric(reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
@@ -4417,7 +4430,11 @@ public sealed class MainForm : Form
                     break;
                 case "live-game-execution.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Planned live-game coverage", TryReadString(root, "PlannedIntegrationCoverage"), filePath);
                     AddReportMetric(reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    AddReportMetric(reportName, "Live-game proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    AddReportMetric(reportName, "Live-game imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    AddReportMetric(reportName, "Missing live-game scenarios", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     AddReportMetric(reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
                     AddReportMetric(reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
@@ -4436,7 +4453,10 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
                     AddReportMetric(reportName, "Matrix coordinate key", TryReadString(root, "MatrixCoordinateKey"), filePath);
                     AddReportMetric(reportName, "Matrix coordinates", TryReadArray(root, "MatrixCoordinates"), filePath);
+                    AddReportMetric(reportName, "Planned proof coverage", TryReadString(root, "PlannedProofCoverage"), filePath);
                     AddReportMetric(reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    AddReportMetric(reportName, "Proof execution status", TryReadString(root, "ProofExecutionStatus"), filePath);
+                    AddReportMetric(reportName, "Imported proof executions", CountNestedArray(root, "ProofExecutions"), filePath);
                     AddReportMetric(reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     AddReportMetric(reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
                     AddReportMetric(reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
@@ -4499,7 +4519,11 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
                     break;
                 case "windows-ui-e2e-automation.json":
+                    AddReportMetric(reportName, "Planned UI coverage", TryReadString(root, "PlannedCoverage"), filePath);
                     AddReportMetric(reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    AddReportMetric(reportName, "UI proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    AddReportMetric(reportName, "UI imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    AddReportMetric(reportName, "Missing UI flows", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     AddReportMetric(reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
                     AddReportMetric(reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     AddReportMetric(reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
@@ -4510,6 +4534,23 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "UI selectors", CountNestedArray(root, "Selectors"), filePath);
                     AddReportMetric(reportName, "UI automation steps", CountNestedArray(root, "Steps"), filePath);
                     AddReportMetric(reportName, "UI step highlights", TryReadWindowsUiStepHighlights(root), filePath);
+                    break;
+                case "proof-harness-bundle.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Canonical entrypoint", TryReadString(root, "CanonicalEntryPoint"), filePath);
+                    AddReportMetric(reportName, "Harness components", CountNestedArray(root, "Components"), filePath);
+                    AddReportMetric(reportName, "Host requirements", CountNestedArray(root, "HostRequirements"), filePath);
+                    AddReportMetric(reportName, "Expected result files", TryReadArray(root, "ExpectedResultFiles"), filePath);
+                    break;
+                case "proof-result-bundle.json":
+                    AddReportMetric(reportName, "Harness overall status", TryReadString(root, "OverallStatus"), filePath);
+                    AddReportMetric(reportName, "Harness kind", TryReadString(root, "HarnessKind"), filePath);
+                    AddReportMetric(reportName, "Proof host OS", TryReadNestedString(root, "Host", "OperatingSystem"), filePath);
+                    AddReportMetric(reportName, "Proof runner", TryReadNestedString(root, "Host", "HarnessRunner"), filePath);
+                    AddReportMetric(reportName, "Proof components", CountNestedArray(root, "ComponentResults"), filePath);
+                    AddReportMetric(reportName, "Imported scenarios", CountNestedArray(root, "ScenarioResults"), filePath);
+                    AddReportMetric(reportName, "Imported probes", CountNestedArray(root, "ProbeResults"), filePath);
+                    AddReportMetric(reportName, "Missing expected probes", TryReadArray(root, "MissingExpectedProbes"), filePath);
                     break;
                 case "mod-stack-cross-validation.json":
                     AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -5417,6 +5458,7 @@ public sealed class MainForm : Form
             using var document = OpenJsonDocument(reportPath);
             var root = document.RootElement;
             var proofCoverage = TryReadString(root, "ProofCoverage") ?? "unknown";
+            var proofExecutionStatus = TryReadString(root, "ProofExecutionStatus") ?? "planned-only";
             var strictProofReady = TryReadBoolValue(root, "StrictProofReady") == true;
             var missingProofAxes = ReadArrayValues(root, "MissingProofAxes");
             var blockingGaps = ReadArrayValues(root, "BlockingGaps");
@@ -5454,7 +5496,7 @@ public sealed class MainForm : Form
             add(
                 area,
                 "Warning",
-                $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}).{axisSummary}{dimensionSummary}{combinationSummary}",
+                $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}; proof execution: {proofExecutionStatus}).{axisSummary}{dimensionSummary}{combinationSummary}",
                 guidanceTarget);
 
             if (blockingGaps.Count > 0)

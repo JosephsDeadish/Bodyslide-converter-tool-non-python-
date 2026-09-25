@@ -10,11 +10,11 @@ public static class ConversionMatrixProofGuidance
             "topology-transfer" or "strict-layout" =>
                 "Hard topology correspondence is not fully proven yet. Open topology-correspondence.json and preview-workbench.html, then review the highest-risk regions before treating the conversion as universal.",
             "desktop-e2e" =>
-                "Windows desktop end-to-end coverage still depends on an external harness. Open desktop-workflow-automation.json or windows-ui-e2e-automation.json and complete that click-path proof on a Windows host.",
+                "Windows desktop end-to-end coverage still depends on an external harness. Open proof-harness-bundle.json, execute the Windows UI flow, then import proof-result-bundle.json so the Desktop click-path proof stops being plan-only.",
             "live-game-execution" =>
-                "Live-game validation is still external. Open live-game-execution.json and complete the scenario/save-driven proof on the target Windows mod stack before release.",
+                "Live-game validation is still external. Open proof-harness-bundle.json, complete the live-game scenario/save proof on the target Windows mod stack, then import proof-result-bundle.json before release.",
             "runtime-automation" =>
-                "Runtime automation is still exported as a harness contract. Open runtime-validation-plan.json and runtime-validation-harness.json to finish the missing automation proof outside the desktop app.",
+                "Runtime automation is still exported as a harness contract. Open proof-harness-bundle.json, run the external runtime probes, and import proof-result-bundle.json to turn runtime proof from planned to executed.",
             "plugin-modstack" =>
                 "Mixed body × skeleton × plugin-family coverage still needs stricter matrix proof. Open mod-stack-cross-validation.json and plugin-patches.json, then validate the real load-order combination before release.",
             "custom-skeleton" =>
@@ -29,9 +29,9 @@ public static class ConversionMatrixProofGuidance
         NormalizeAxis(axis) switch
         {
             "topology-transfer" or "strict-layout" => ["topology-correspondence.json", "preview-workbench.html"],
-            "desktop-e2e" => ["desktop-workflow-automation.json", "windows-ui-e2e-automation.json"],
-            "live-game-execution" => ["live-game-execution.json", "runtime-validation-plan.json"],
-            "runtime-automation" => ["runtime-validation-harness.json", "runtime-validation-plan.json"],
+            "desktop-e2e" => ["proof-harness-bundle.json", "windows-ui-e2e-automation.json", "desktop-workflow-automation.json"],
+            "live-game-execution" => ["proof-harness-bundle.json", "live-game-execution.json", "runtime-validation-plan.json"],
+            "runtime-automation" => ["proof-harness-bundle.json", "runtime-validation-harness.json", "runtime-validation-plan.json"],
             "plugin-modstack" => ["mod-stack-cross-validation.json", "plugin-patches.json"],
             "custom-skeleton" => ["skeleton-compatibility.json"],
             "body-support" => ["conversion-matrix-proof.json", "conversion-quality.json"],

@@ -665,6 +665,7 @@ public sealed record RuntimeObservationBundleContract(
 public sealed record LiveGameExecutionPlan(
     string TargetBody,
     string ValidationGate,
+    string PlannedIntegrationCoverage,
     string IntegrationCoverage,
     IReadOnlyList<string> BlockingProofAxes,
     IReadOnlyList<string> MatrixCombinationsTargeted,
@@ -678,16 +679,21 @@ public sealed record LiveGameExecutionPlan(
     IReadOnlyList<string> ObservationChannels,
     IReadOnlyList<string> ValidationSaveProfiles,
     IReadOnlyList<string> LimitationNotes,
+    ProofExecutionState? ProofExecution,
+    string? HarnessBundleManifestPath,
+    string? ProofResultBundlePath,
     ExternalHarnessBootstrapContract BootstrapContract,
     RuntimeObservationBundleContract ObservationBundleContract,
     IReadOnlyList<LiveGameExecutionScenarioProfile> ScenarioProfiles,
     IReadOnlyList<LiveGameExecutionProbe> Probes);
 public sealed record ConversionMatrixProofAxis(
     string Axis,
+    string PlannedCoverage,
     string Coverage,
     bool StrictlyProven,
     IReadOnlyList<string> Signals,
-    IReadOnlyList<string> RequiredArtifacts);
+    IReadOnlyList<string> RequiredArtifacts,
+    ProofExecutionState? ProofExecution = null);
 public sealed record ConversionMatrixProofReport(
     string TargetBody,
     string TargetBodyFamily,
@@ -695,8 +701,13 @@ public sealed record ConversionMatrixProofReport(
     ConversionReadinessAssessment? ConversionReadiness,
     string MatrixCoordinateKey,
     IReadOnlyList<string> MatrixCoordinates,
+    string PlannedProofCoverage,
     string ProofCoverage,
     bool StrictProofReady,
+    string ProofExecutionStatus,
+    IReadOnlyList<ProofExecutionState> ProofExecutions,
+    string? ProofHarnessBundleManifestPath,
+    string? ProofResultBundlePath,
     IReadOnlyList<string> MissingProofAxes,
     IReadOnlyList<string> BlockingGaps,
     IReadOnlyList<ConversionMatrixProofAxis> Axes,
@@ -760,12 +771,16 @@ public sealed record RuntimeValidationExecutionPlan(
     bool ManualCleanupLikely,
     bool RuntimeVerificationRequired,
     IReadOnlyList<string> Caveats,
+    string PlannedExecutionCoverage,
     string ExecutionCoverage,
     bool RequiresLiveGameExecution,
     bool SupportsAutomatedGameExecution,
     bool RequiresExternalGameHarness,
     bool RequiresModdedTestEnvironment,
     IReadOnlyList<string> LimitationNotes,
+    ProofExecutionState? ProofExecution,
+    string? HarnessBundleManifestPath,
+    string? ProofResultBundlePath,
     RuntimeAutomationHarness? AutomationHarness,
     IReadOnlyList<RuntimeValidationExecutionStep> Steps);
 public sealed record WindowsUiAutomationSelector(
@@ -793,6 +808,7 @@ public sealed record WindowsUiE2EFlowProfile(
     public IReadOnlyList<string> ProofDeliverables { get; init; } = [];
 }
 public sealed record WindowsUiE2EAutomationPlan(
+    string PlannedCoverage,
     string Coverage,
     IReadOnlyList<string> BlockingProofAxes,
     IReadOnlyList<string> MatrixCombinationsTargeted,
@@ -802,6 +818,9 @@ public sealed record WindowsUiE2EAutomationPlan(
     IReadOnlyList<string> SupportedFlows,
     IReadOnlyList<string> AutomationSignals,
     IReadOnlyList<string> LimitationNotes,
+    ProofExecutionState? ProofExecution,
+    string? HarnessBundleManifestPath,
+    string? ProofResultBundlePath,
     ExternalHarnessBootstrapContract BootstrapContract,
     IReadOnlyList<WindowsUiAutomationSelector> Selectors,
     IReadOnlyList<WindowsUiE2EFlowProfile> FlowProfiles,
@@ -20547,6 +20566,26 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(qualityReport, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
 
+        var windowsUiAutomationPath = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
+        await File.WriteAllTextAsync(
+            windowsUiAutomationPath,
+            JsonSerializer.Serialize(windowsUiAutomation, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(windowsUiAutomationPath);
+
+        var proofHarnessBundleManifestPath = Path.Combine(outputDirectory, ExternalProofHarnessSupport.BundleManifestFileName);
+        var proofHarnessBundleManifest = ExternalProofHarnessSupport.BuildBundleManifest(
+            request.TargetBody,
+            runtimeValidationPlan,
+            liveGameExecution,
+            windowsUiAutomation,
+            conversionMatrixProof);
+        await File.WriteAllTextAsync(
+            proofHarnessBundleManifestPath,
+            JsonSerializer.Serialize(proofHarnessBundleManifest, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(proofHarnessBundleManifestPath);
+
         var desktopWorkflowAutomationPath = Path.Combine(outputDirectory, "desktop-workflow-automation.json");
         var preferredPreviewPath = File.Exists(previewWorkbenchPath)
             ? previewWorkbenchPath
@@ -20557,13 +20596,6 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(desktopWorkflowSnapshot, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(desktopWorkflowAutomationPath);
-
-        var windowsUiAutomationPath = Path.Combine(outputDirectory, "windows-ui-e2e-automation.json");
-        await File.WriteAllTextAsync(
-            windowsUiAutomationPath,
-            JsonSerializer.Serialize(windowsUiAutomation, new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-        outputFiles.Add(windowsUiAutomationPath);
 
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
@@ -30757,6 +30789,7 @@ internal sealed class LocalExportService(
             "desktop-workflow-automation.json",
             "in-game-validation.json",
             "live-game-execution.json",
+            "proof-harness-bundle.json",
             "runtime-observation-bundle.template.json",
             "topology-correspondence.json",
             "runtime-validation-harness.json",
@@ -30796,6 +30829,8 @@ internal sealed class LocalExportService(
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("live-game-execution.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("proof-harness-bundle.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("proof-result-bundle.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("runtime-observation-bundle.template.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("topology-correspondence.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("mod-stack-cross-validation.json", StringComparison.OrdinalIgnoreCase) ||
@@ -31005,7 +31040,13 @@ internal sealed class LocalExportService(
             "A real live-game pass still requires an external harness or scripted test environment in the final modded game install.",
             "Blocking runtime probes still require host-side observation or assertion capture on the final skeleton, body, and load-order combination."
         };
+        var plannedExecutionCoverage = "external-harness-ready";
         var automationHarness = BuildRuntimeAutomationHarness(report, steps, limitationNotes, matrixProofContext);
+        var proofExecution = ExternalProofHarnessSupport.CreatePlannedExecutionState(
+            "runtime-automation",
+            plannedExecutionCoverage,
+            automationHarness.Probes.Count,
+            "External runtime harness execution has not been imported yet.");
 
         return new RuntimeValidationExecutionPlan(
             report.TargetBody,
@@ -31015,12 +31056,16 @@ internal sealed class LocalExportService(
             report.ManualCleanupLikely,
             report.RuntimeVerificationRequired,
             report.Caveats,
-            ExecutionCoverage: "external-harness-ready",
+            PlannedExecutionCoverage: plannedExecutionCoverage,
+            ExecutionCoverage: plannedExecutionCoverage,
             RequiresLiveGameExecution: true,
             SupportsAutomatedGameExecution: true,
             RequiresExternalGameHarness: true,
             RequiresModdedTestEnvironment: true,
             LimitationNotes: limitationNotes,
+            ProofExecution: proofExecution,
+            HarnessBundleManifestPath: ExternalProofHarnessSupport.BundleManifestFileName,
+            ProofResultBundlePath: ExternalProofHarnessSupport.ResultBundleFileName,
             AutomationHarness: automationHarness,
             steps);
     }
@@ -31161,10 +31206,18 @@ internal sealed class LocalExportService(
                 "release-gate-result"
             ]);
 
+        var plannedIntegrationCoverage = "external-live-game-harness";
+        var proofExecution = ExternalProofHarnessSupport.CreatePlannedExecutionState(
+            "live-game-execution",
+            plannedIntegrationCoverage,
+            scenarioProfiles.Count,
+            "External live-game execution has not been imported yet.");
+
         return new LiveGameExecutionPlan(
             runtimePlan.TargetBody,
             runtimePlan.ValidationGate,
-            "external-live-game-harness",
+            PlannedIntegrationCoverage: plannedIntegrationCoverage,
+            IntegrationCoverage: plannedIntegrationCoverage,
             BlockingProofAxes:
             [
                 "live-game-execution",
@@ -31188,6 +31241,9 @@ internal sealed class LocalExportService(
             ObservationChannels: observationChannels,
             ValidationSaveProfiles: validationSaveProfiles,
             LimitationNotes: limitationNotes,
+            ProofExecution: proofExecution,
+            HarnessBundleManifestPath: ExternalProofHarnessSupport.BundleManifestFileName,
+            ProofResultBundlePath: ExternalProofHarnessSupport.ResultBundleFileName,
             BootstrapContract: bootstrapContract,
             ObservationBundleContract: observationBundleContract,
             ScenarioProfiles: scenarioProfiles,
@@ -31457,8 +31513,10 @@ internal sealed class LocalExportService(
             ]);
         var flowProfiles = BuildWindowsUiFlowProfiles(matrixProofContext);
 
+        var plannedCoverage = "external-windows-ui-harness-ready";
         return new WindowsUiE2EAutomationPlan(
-            Coverage: "external-windows-ui-harness-ready",
+            PlannedCoverage: plannedCoverage,
+            Coverage: plannedCoverage,
             BlockingProofAxes:
             [
                 "desktop-e2e",
@@ -31497,6 +31555,13 @@ internal sealed class LocalExportService(
                 "The generated plan exposes stable WinForms Name selectors and preview HTML data-testid selectors, but execution still requires an external Windows UI harness.",
                 "WinForms dialogs, browser/runtime prompts, and true in-process WebView automation are not executed inside the core library or Linux test environment."
             ],
+            ProofExecution: ExternalProofHarnessSupport.CreatePlannedExecutionState(
+                "desktop-e2e",
+                plannedCoverage,
+                flowProfiles.Count,
+                "External Windows UI execution has not been imported yet."),
+            HarnessBundleManifestPath: ExternalProofHarnessSupport.BundleManifestFileName,
+            ProofResultBundlePath: ExternalProofHarnessSupport.ResultBundleFileName,
             BootstrapContract: bootstrapContract,
             Selectors: selectors,
             FlowProfiles: flowProfiles,
@@ -32046,6 +32111,9 @@ internal sealed class LocalExportService(
         var physicsCompatibility = matrixProofContext.PhysicsCompatibility;
         var bodySupportAxis = new ConversionMatrixProofAxis(
             Axis: "body-support",
+            PlannedCoverage: conversionReadiness.TargetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase)
+                ? "catalog-backed"
+                : "partial-or-review-backed",
             Coverage: conversionReadiness.TargetBodySupportReliability.Equals("direct", StringComparison.OrdinalIgnoreCase)
                 ? "catalog-backed"
                 : "partial-or-review-backed",
@@ -32066,6 +32134,9 @@ internal sealed class LocalExportService(
 
         var topologyAxis = new ConversionMatrixProofAxis(
             Axis: "topology-transfer",
+            PlannedCoverage: topologyCorrespondence.UsesTrueSemanticCorrespondence
+                ? topologyCorrespondence.CorrespondenceScope
+                : "heuristic-correspondence",
             Coverage: topologyCorrespondence.UsesTrueSemanticCorrespondence
                 ? topologyCorrespondence.CorrespondenceScope
                 : "heuristic-correspondence",
@@ -32092,6 +32163,11 @@ internal sealed class LocalExportService(
 
         var strictLayoutAxis = new ConversionMatrixProofAxis(
             Axis: "strict-layout",
+            PlannedCoverage: partitionSignals is null
+                ? "not-applicable"
+                : partitionSignals.StrictOwnershipLayoutReady
+                    ? "ownership-preserved"
+                    : "ownership-review-required",
             Coverage: partitionSignals is null
                 ? "not-applicable"
                 : partitionSignals.StrictOwnershipLayoutReady
@@ -32115,6 +32191,7 @@ internal sealed class LocalExportService(
 
         var skeletonAxis = new ConversionMatrixProofAxis(
             Axis: "custom-skeleton",
+            PlannedCoverage: skeletonMapping.RemapCertainty?.Classification ?? BuildSourceSkeletonInferenceReliability(skeletonMapping),
             Coverage: skeletonMapping.RemapCertainty?.Classification ?? BuildSourceSkeletonInferenceReliability(skeletonMapping),
             StrictlyProven: !skeletonMapping.SourceSkeletonUsedSparseInference &&
                             skeletonMapping.UnsupportedBones.Count == 0 &&
@@ -32139,6 +32216,7 @@ internal sealed class LocalExportService(
 
         var pluginAxis = new ConversionMatrixProofAxis(
             Axis: "plugin-modstack",
+            PlannedCoverage: modStackCrossValidation is null ? "no-plugin-proof-required" : "plugin-aware",
             Coverage: modStackCrossValidation is null ? "no-plugin-proof-required" : "plugin-aware",
             StrictlyProven: modStackCrossValidation is null ||
                             (!modStackCrossValidation.RequiresLoadOrderValidation &&
@@ -32165,30 +32243,37 @@ internal sealed class LocalExportService(
 
         var runtimeAxis = new ConversionMatrixProofAxis(
             Axis: "runtime-automation",
+            PlannedCoverage: runtimePlan.PlannedExecutionCoverage,
             Coverage: runtimePlan.ExecutionCoverage,
-            StrictlyProven: runtimePlan.SupportsAutomatedGameExecution &&
-                            !runtimePlan.RequiresExternalGameHarness &&
-                            !runtimePlan.RequiresModdedTestEnvironment,
+            StrictlyProven: runtimePlan.ProofExecution?.StrictProofSatisfied == true ||
+                            (runtimePlan.SupportsAutomatedGameExecution &&
+                             !runtimePlan.RequiresExternalGameHarness &&
+                             !runtimePlan.RequiresModdedTestEnvironment),
             Signals:
             [
                 $"supports-automated-game-execution:{runtimePlan.SupportsAutomatedGameExecution}",
                 $"requires-external-game-harness:{runtimePlan.RequiresExternalGameHarness}",
                 $"requires-modded-test-environment:{runtimePlan.RequiresModdedTestEnvironment}",
-                $"automation-probe-count:{runtimePlan.AutomationHarness?.Probes.Count ?? 0}"
+                $"automation-probe-count:{runtimePlan.AutomationHarness?.Probes.Count ?? 0}",
+                $"planned-status:{runtimePlan.ProofExecution?.PlannedStatus ?? runtimePlan.PlannedExecutionCoverage}",
+                $"executed-status:{runtimePlan.ProofExecution?.ExecutedStatus ?? "planned-only"}"
             ],
             RequiredArtifacts:
             [
                 "runtime-validation-plan.json",
                 "runtime-validation-harness.json",
                 "in-game-validation.json"
-            ]);
+            ],
+            ProofExecution: runtimePlan.ProofExecution);
 
         var liveGameAxis = new ConversionMatrixProofAxis(
             Axis: "live-game-execution",
+            PlannedCoverage: liveGameExecution.PlannedIntegrationCoverage,
             Coverage: liveGameExecution.IntegrationCoverage,
-            StrictlyProven: !liveGameExecution.RequiresExternalHarness &&
-                            !liveGameExecution.RequiresWindowsHost &&
-                            liveGameExecution.Probes.Count > 0,
+            StrictlyProven: liveGameExecution.ProofExecution?.StrictProofSatisfied == true ||
+                            (!liveGameExecution.RequiresExternalHarness &&
+                             !liveGameExecution.RequiresWindowsHost &&
+                             liveGameExecution.Probes.Count > 0),
             Signals:
             [
                 $"requires-windows-host:{liveGameExecution.RequiresWindowsHost}",
@@ -32196,34 +32281,42 @@ internal sealed class LocalExportService(
                 $"validation-save-count:{liveGameExecution.ValidationSaveProfiles.Count}",
                 $"scenario-profile-count:{liveGameExecution.ScenarioProfiles.Count}",
                 $"observation-contract-status:{liveGameExecution.ObservationBundleContract.Status}",
-                $"observation-scenario-count:{liveGameExecution.ObservationBundleContract.Scenarios.Count}"
+                $"observation-scenario-count:{liveGameExecution.ObservationBundleContract.Scenarios.Count}",
+                $"planned-status:{liveGameExecution.ProofExecution?.PlannedStatus ?? liveGameExecution.PlannedIntegrationCoverage}",
+                $"executed-status:{liveGameExecution.ProofExecution?.ExecutedStatus ?? "planned-only"}"
             ],
             RequiredArtifacts:
             [
                 "live-game-execution.json",
                 "runtime-validation-plan.json",
                 "runtime-observation-bundle.template.json"
-            ]);
+            ],
+            ProofExecution: liveGameExecution.ProofExecution);
 
         var desktopAxis = new ConversionMatrixProofAxis(
             Axis: "desktop-e2e",
+            PlannedCoverage: windowsUiAutomation.PlannedCoverage,
             Coverage: windowsUiAutomation.Coverage,
-            StrictlyProven: !windowsUiAutomation.RequiresWindowsHost &&
-                            !windowsUiAutomation.RequiresExternalUiHarness &&
-                            windowsUiAutomation.SupportedFlows.Count > 0,
+            StrictlyProven: windowsUiAutomation.ProofExecution?.StrictProofSatisfied == true ||
+                            (!windowsUiAutomation.RequiresWindowsHost &&
+                             !windowsUiAutomation.RequiresExternalUiHarness &&
+                             windowsUiAutomation.SupportedFlows.Count > 0),
             Signals:
             [
                 $"requires-windows-host:{windowsUiAutomation.RequiresWindowsHost}",
                 $"requires-external-ui-harness:{windowsUiAutomation.RequiresExternalUiHarness}",
                 $"supported-flow-count:{windowsUiAutomation.SupportedFlows.Count}",
-                $"flow-profile-count:{windowsUiAutomation.FlowProfiles.Count}"
+                $"flow-profile-count:{windowsUiAutomation.FlowProfiles.Count}",
+                $"planned-status:{windowsUiAutomation.ProofExecution?.PlannedStatus ?? windowsUiAutomation.PlannedCoverage}",
+                $"executed-status:{windowsUiAutomation.ProofExecution?.ExecutedStatus ?? "planned-only"}"
             ],
             RequiredArtifacts:
             [
                 "desktop-workflow-automation.json",
                 "windows-ui-e2e-automation.json",
                 "preview-workbench.html"
-            ]);
+            ],
+            ProofExecution: windowsUiAutomation.ProofExecution);
 
         var axes = new[]
         {
@@ -32272,8 +32365,18 @@ internal sealed class LocalExportService(
             ConversionReadiness: conversionReadiness,
             MatrixCoordinateKey: matrixCoordinateKey,
             MatrixCoordinates: matrixCoordinates,
+            PlannedProofCoverage: proofCoverage,
             ProofCoverage: proofCoverage,
             StrictProofReady: missingProofAxes.Length == 0,
+            ProofExecutionStatus: DeriveProofExecutionStatus(runtimePlan.ProofExecution, liveGameExecution.ProofExecution, windowsUiAutomation.ProofExecution),
+            ProofExecutions: new[]
+            {
+                runtimePlan.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("runtime-automation", runtimePlan.PlannedExecutionCoverage, runtimePlan.AutomationHarness?.Probes.Count ?? 0),
+                liveGameExecution.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("live-game-execution", liveGameExecution.PlannedIntegrationCoverage, liveGameExecution.ScenarioProfiles.Count),
+                windowsUiAutomation.ProofExecution ?? ExternalProofHarnessSupport.CreatePlannedExecutionState("desktop-e2e", windowsUiAutomation.PlannedCoverage, windowsUiAutomation.FlowProfiles.Count)
+            },
+            ProofHarnessBundleManifestPath: ExternalProofHarnessSupport.BundleManifestFileName,
+            ProofResultBundlePath: ExternalProofHarnessSupport.ResultBundleFileName,
             MissingProofAxes: missingProofAxes,
             BlockingGaps: blockingGaps,
             Axes: axes,
@@ -32319,16 +32422,62 @@ internal sealed class LocalExportService(
                 "Mixed master/light/plugin-family chains still require real full-load-order validation.",
             "plugin-modstack" =>
                 "Plugin-family ambiguity or race/plugin review still blocks strict plugin proof.",
+            "runtime-automation" when string.Equals(runtimePlan.ProofExecution?.ExecutedStatus, "executed-fail", StringComparison.OrdinalIgnoreCase) =>
+                "Imported runtime harness results still show failing probes or blocking assertions.",
+            "runtime-automation" when string.Equals(runtimePlan.ProofExecution?.ExecutedStatus, "executed-incomplete", StringComparison.OrdinalIgnoreCase) =>
+                "Imported runtime harness results are incomplete and still miss planned probes or evidence.",
             "runtime-automation" when runtimePlan.RequiresExternalGameHarness || runtimePlan.RequiresModdedTestEnvironment =>
                 "Runtime automation is exported as an external harness contract rather than executed proof inside SlideSmith.",
+            "live-game-execution" when string.Equals(liveGameExecution.ProofExecution?.ExecutedStatus, "executed-fail", StringComparison.OrdinalIgnoreCase) =>
+                "Imported live-game proof still shows failing scenario runs or missing success signals.",
+            "live-game-execution" when string.Equals(liveGameExecution.ProofExecution?.ExecutedStatus, "executed-incomplete", StringComparison.OrdinalIgnoreCase) =>
+                "Imported live-game proof is incomplete and still misses required scenarios, saves, or evidence.",
             "live-game-execution" when liveGameExecution.RequiresExternalHarness || liveGameExecution.RequiresWindowsHost =>
                 "Live-game validation still requires an external Windows host and launcher-driven harness.",
             "live-game-execution" when liveGameExecution.ObservationBundleContract.Scenarios.Count == 0 =>
                 "Live-game proof is missing a concrete observation-bundle contract for scenario result capture.",
+            "desktop-e2e" when string.Equals(windowsUiAutomation.ProofExecution?.ExecutedStatus, "executed-fail", StringComparison.OrdinalIgnoreCase) =>
+                "Imported Windows UI proof still shows failing desktop flow execution.",
+            "desktop-e2e" when string.Equals(windowsUiAutomation.ProofExecution?.ExecutedStatus, "executed-incomplete", StringComparison.OrdinalIgnoreCase) =>
+                "Imported Windows UI proof is incomplete and still misses expected Desktop flow coverage or evidence.",
             "desktop-e2e" when windowsUiAutomation.RequiresExternalUiHarness || windowsUiAutomation.RequiresWindowsHost =>
                 "Desktop E2E remains an external Windows UI harness plan rather than an executed in-repo proof.",
             _ => $"Axis '{axis.Axis}' is not yet strictly proven."
         };
+    }
+
+    private static string DeriveProofExecutionStatus(
+        ProofExecutionState? runtimeProof,
+        ProofExecutionState? liveGameProof,
+        ProofExecutionState? desktopProof)
+    {
+        var statuses = new[] { runtimeProof?.ExecutedStatus, liveGameProof?.ExecutedStatus, desktopProof?.ExecutedStatus }
+            .Where(static status => !string.IsNullOrWhiteSpace(status))
+            .ToArray();
+
+        if (statuses.Length == 0 || statuses.All(static status => string.Equals(status, "planned-only", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "planned-only";
+        }
+
+        if (statuses.Any(static status => string.Equals(status, "import-error", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "import-error";
+        }
+
+        if (statuses.Any(static status => string.Equals(status, "executed-fail", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "executed-fail";
+        }
+
+        if (statuses.Any(static status => string.Equals(status, "executed-incomplete", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "executed-incomplete";
+        }
+
+        return statuses.Any(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase))
+            ? "executed-pass"
+            : "planned-only";
     }
 
 

@@ -312,8 +312,10 @@ output/
 | `conversion-matrix-proof.json` | Cross-axis proof summary showing which body-support, topology, skeleton, plugin/mod-stack, runtime, live-game, and Desktop E2E axes are or are not strictly proven yet, plus the remaining blocking gaps and review artifacts |
 | `runtime-validation-plan.json` | Release-gate execution plan derived from the in-game validation report; documents what still needs a live game harness or manual runtime pass before the output is truly trusted |
 | `runtime-validation-harness.json` | External-harness contract for runtime validation automation: dispatch actions, expected assertions, failure signals, and which probes require full-load-order launches or manual observation |
+| `proof-harness-bundle.json` | Canonical external-proof entrypoint linking the Desktop UI flow, runtime harness, live-game execution plan, Windows host requirements, expected evidence layout, and the `proof-result-bundle.json` import contract |
 | `mod-stack-cross-validation.json` | Mixed plugin/race/body-family review summary: plugin/master counts, distinct mesh families, skeleton reliability, race warnings, and recommended runtime/load-order scenarios for large real mod stacks |
 | `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
+| `proof-result-bundle.json` | External-harness result import written back into the output root; records host details, per-axis pass/fail status, scenario coverage, probe coverage, evidence references, and any missing proof inputs |
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
@@ -329,6 +331,14 @@ output/
 When a matching cache entry exists for the same armor mesh + target body, the converter reuses prior regional morphing data and marks `learning-cache:hit` / `learning-cache:reused` in pipeline steps. The cache is written to both the local output folder (`.conversion-learning-cache.json`) **and** a shared global location (`%APPDATA%\SlideSmith\` on Windows, `~/.config/slidesmith/` on Linux/macOS) so the tool learns from all prior conversions across different armor packs. Use `--cache-path` to specify a custom global cache location.
 
 When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each requested body/preset is exported into its own subfolder under the selected output root so multiple conversions never overwrite each other.
+
+### Supported external Windows proof workflow
+
+1. Run a conversion and treat `proof-harness-bundle.json` as the single canonical entrypoint for external proof execution.
+2. On the Windows harness host, open the bundle manifest and collect the referenced runtime, live-game, Desktop UI, and observation/template artifacts instead of discovering them ad hoc.
+3. Execute the required Desktop UI flows, runtime probes, and live-game scenarios on the target Windows/mod-stack/game install while writing evidence to the machine-readable locations declared in `proof-harness-bundle.json` (for example `proof-evidence/screenshots/`, `proof-evidence/runtime-logs/`, `proof-evidence/step-traces/`, and `proof-evidence/scenario-observations/`).
+4. Write the completed `proof-result-bundle.json` back into the output root with host details, per-axis status, executed flows/probes/scenarios, missing items, and evidence references keyed to the exported `ScenarioMatrix` names.
+5. Reload that output directory in SlideSmith/Desktop review. The app will re-ingest `proof-result-bundle.json`, refresh `runtime-validation-plan.json`, `live-game-execution.json`, `windows-ui-e2e-automation.json`, and `conversion-matrix-proof.json`, and surface the new planned-vs-executed proof state in reports/guidance.
 
 ## Issue #2 progress comparison
 

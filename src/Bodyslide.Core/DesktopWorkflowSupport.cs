@@ -25,6 +25,8 @@ internal static class DesktopWorkflowSupport
         "conversion-quality.json",
         "armor-pack-validation.json",
         "desktop-workflow-automation.json",
+        "proof-harness-bundle.json",
+        "proof-result-bundle.json",
         "runtime-validation-plan.json",
         "live-game-execution.json"
     ];

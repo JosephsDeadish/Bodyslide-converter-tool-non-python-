@@ -61,6 +61,8 @@ internal static class DesktopWorkflowAutomation
             return new DesktopWorkflowAutomationSnapshot([], [], [], [], emptyValidationState, emptyContract);
         }
 
+        ExternalProofHarnessSupport.RefreshImportedProofState(outputDirectory);
+
         var files = Directory
             .EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
@@ -135,6 +137,7 @@ internal static class DesktopWorkflowAutomation
         }
         AppendMetricRow(rows, reportMetrics, "Missing proof axes");
         AppendMetricRow(rows, reportMetrics, "Blocking proof gaps");
+        AppendMetricRow(rows, reportMetrics, "Proof execution status");
         AppendMetricRow(rows, reportMetrics, "Pack status");
         AppendMetricRow(rows, reportMetrics, "Needs review");
         AppendMetricRow(rows, reportMetrics, "High risk");
@@ -425,7 +428,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Can physics-convert", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanPhysicsConvert")), filePath);
                     Add(metrics, reportName, "Can safely animate", FormatBool(TryReadNestedBoolValue(root, "ConversionReadiness", "CanSafelyAnimate")), filePath);
                     Add(metrics, reportName, "Skeleton remap safety", TryReadNestedString(root, "ConversionReadiness", "SkeletonRemapSafety"), filePath);
+                    Add(metrics, reportName, "Planned execution coverage", TryReadString(root, "PlannedExecutionCoverage"), filePath);
                     Add(metrics, reportName, "Execution coverage", TryReadString(root, "ExecutionCoverage"), filePath);
+                    Add(metrics, reportName, "Runtime proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    Add(metrics, reportName, "Runtime imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    Add(metrics, reportName, "Missing imported probes", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     Add(metrics, reportName, "Live game required", FormatBool(TryReadBoolValue(root, "RequiresLiveGameExecution")), filePath);
                     Add(metrics, reportName, "Automated game execution", FormatBool(TryReadBoolValue(root, "SupportsAutomatedGameExecution")), filePath);
                     Add(metrics, reportName, "External game harness", FormatBool(TryReadBoolValue(root, "RequiresExternalGameHarness")), filePath);
@@ -452,7 +459,11 @@ internal static class DesktopWorkflowAutomation
                     break;
                 case "live-game-execution.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Planned live-game coverage", TryReadString(root, "PlannedIntegrationCoverage"), filePath);
                     Add(metrics, reportName, "Live-game integration coverage", TryReadString(root, "IntegrationCoverage"), filePath);
+                    Add(metrics, reportName, "Live-game proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    Add(metrics, reportName, "Live-game imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    Add(metrics, reportName, "Missing live-game scenarios", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     Add(metrics, reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
                     Add(metrics, reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
@@ -490,13 +501,33 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
                     Add(metrics, reportName, "Matrix coordinate key", TryReadString(root, "MatrixCoordinateKey"), filePath);
                     Add(metrics, reportName, "Matrix coordinates", TryReadArray(root, "MatrixCoordinates"), filePath);
+                    Add(metrics, reportName, "Planned proof coverage", TryReadString(root, "PlannedProofCoverage"), filePath);
                     Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    Add(metrics, reportName, "Proof execution status", TryReadString(root, "ProofExecutionStatus"), filePath);
+                    Add(metrics, reportName, "Imported proof executions", CountNestedArray(root, "ProofExecutions"), filePath);
                     Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
                     Add(metrics, reportName, "Missing proof axes", TryReadArray(root, "MissingProofAxes"), filePath);
                     Add(metrics, reportName, "Blocking proof gaps", TryReadArray(root, "BlockingGaps"), filePath);
                     Add(metrics, reportName, "Matrix axes", CountNestedArray(root, "Axes"), filePath);
                     Add(metrics, reportName, "Strictly proven axes", CountObjectsWithBool(root, "Axes", "StrictlyProven", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
+                case "proof-harness-bundle.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Canonical entrypoint", TryReadString(root, "CanonicalEntryPoint"), filePath);
+                    Add(metrics, reportName, "Harness components", CountNestedArray(root, "Components"), filePath);
+                    Add(metrics, reportName, "Host requirements", CountNestedArray(root, "HostRequirements"), filePath);
+                    Add(metrics, reportName, "Expected result files", TryReadArray(root, "ExpectedResultFiles"), filePath);
+                    break;
+                case "proof-result-bundle.json":
+                    Add(metrics, reportName, "Harness overall status", TryReadString(root, "OverallStatus"), filePath);
+                    Add(metrics, reportName, "Harness kind", TryReadString(root, "HarnessKind"), filePath);
+                    Add(metrics, reportName, "Proof host OS", TryReadNestedString(root, "Host", "OperatingSystem"), filePath);
+                    Add(metrics, reportName, "Proof runner", TryReadNestedString(root, "Host", "HarnessRunner"), filePath);
+                    Add(metrics, reportName, "Proof components", CountNestedArray(root, "ComponentResults"), filePath);
+                    Add(metrics, reportName, "Imported scenarios", CountNestedArray(root, "ScenarioResults"), filePath);
+                    Add(metrics, reportName, "Imported probes", CountNestedArray(root, "ProbeResults"), filePath);
+                    Add(metrics, reportName, "Missing expected probes", TryReadArray(root, "MissingExpectedProbes"), filePath);
                     break;
                 case "conversion-matrix-pack-proof.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
@@ -554,7 +585,11 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "GUI flow highlights", TryReadGuiFlowHighlights(root), filePath);
                     break;
                 case "windows-ui-e2e-automation.json":
+                    Add(metrics, reportName, "Planned UI coverage", TryReadString(root, "PlannedCoverage"), filePath);
                     Add(metrics, reportName, "UI automation coverage", TryReadString(root, "Coverage"), filePath);
+                    Add(metrics, reportName, "UI proof execution", TryReadNestedString(root, "ProofExecution", "ExecutedStatus"), filePath);
+                    Add(metrics, reportName, "UI imported proof", FormatBool(TryReadNestedBoolValue(root, "ProofExecution", "ImportedResultAvailable")), filePath);
+                    Add(metrics, reportName, "Missing UI flows", TryReadNestedArray(root, "ProofExecution", "MissingItems"), filePath);
                     Add(metrics, reportName, "Blocking proof axes", TryReadArray(root, "BlockingProofAxes"), filePath);
                     Add(metrics, reportName, "Matrix combinations targeted", TryReadArray(root, "MatrixCombinationsTargeted"), filePath);
                     Add(metrics, reportName, "Windows host required", FormatBool(TryReadBoolValue(root, "RequiresWindowsHost")), filePath);
