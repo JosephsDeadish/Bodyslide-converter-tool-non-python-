@@ -2,6 +2,36 @@ namespace Bodyslide.Core;
 
 public static class SkeletonSupportPathResolver
 {
+    private static readonly string[] PositiveSkeletonNameTokens =
+    [
+        "skeleton",
+        "rig",
+        "bone",
+        "xpms",
+        "xpmse"
+    ];
+
+    private static readonly string[] NegativeSkeletonNameTokens =
+    [
+        "body",
+        "armor",
+        "cuirass",
+        "boots",
+        "gauntlet",
+        "glove",
+        "helmet",
+        "helm",
+        "hood",
+        "outfit",
+        "dress",
+        "shirt",
+        "pants",
+        "head",
+        "hair",
+        "hand",
+        "foot"
+    ];
+
     private static readonly string[] PreferredRelativeDirectories =
     [
         Path.Combine("meshes", "actors", "character", "character assets"),
@@ -78,8 +108,7 @@ public static class SkeletonSupportPathResolver
                 continue;
             }
 
-            var candidate = Directory
-                .EnumerateFiles(candidateDirectory, "skeleton*.nif", SearchOption.TopDirectoryOnly)
+            var candidate = EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly)
                 .OrderBy(path => GetCandidateScore(path))
                 .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();
@@ -97,7 +126,8 @@ public static class SkeletonSupportPathResolver
     {
         skeletonNifPath = null;
 
-        var bestFallback = EnumerateFilesDepthFirst(rootDirectory, maxDepth: 5, "skeleton*.nif")
+        var bestFallback = EnumerateFilesDepthFirst(rootDirectory, maxDepth: 5, "*.nif")
+            .Where(IsHeuristicSkeletonCandidate)
             .OrderBy(path => GetCandidateScore(path))
             .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
@@ -108,6 +138,20 @@ public static class SkeletonSupportPathResolver
 
         skeletonNifPath = Path.GetFullPath(bestFallback);
         return true;
+    }
+
+    private static IEnumerable<string> EnumerateSkeletonCandidates(string directory, SearchOption searchOption)
+    {
+        foreach (var exact in Directory.EnumerateFiles(directory, "skeleton*.nif", searchOption))
+        {
+            yield return exact;
+        }
+
+        foreach (var heuristic in Directory.EnumerateFiles(directory, "*.nif", searchOption)
+                     .Where(IsHeuristicSkeletonCandidate))
+        {
+            yield return heuristic;
+        }
     }
 
     private static IEnumerable<string> EnumerateFilesDepthFirst(string rootDirectory, int maxDepth, string searchPattern)
@@ -173,9 +217,35 @@ public static class SkeletonSupportPathResolver
     {
         var score = 0;
         var fileName = Path.GetFileName(path);
+        var fileStem = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
         if (fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase))
         {
-            score -= 20;
+            score -= 40;
+        }
+        else if (fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 25;
+        }
+
+        if (fileStem.Contains("xpms", StringComparison.OrdinalIgnoreCase) ||
+            fileStem.Contains("xpmse", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 10;
+        }
+
+        if (fileStem.Contains("rig", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 8;
+        }
+
+        if (fileStem.Contains("bone", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 5;
+        }
+
+        if (NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 20;
         }
 
         var normalized = path.Replace('\\', '/');
@@ -193,5 +263,21 @@ public static class SkeletonSupportPathResolver
         }
 
         return score + normalized.Count(static c => c == '/');
+    }
+
+    private static bool IsHeuristicSkeletonCandidate(string path)
+    {
+        var fileStem = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(fileStem))
+        {
+            return false;
+        }
+
+        if (NegativeSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return PositiveSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 }

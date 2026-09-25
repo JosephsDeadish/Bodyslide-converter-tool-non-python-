@@ -85,6 +85,37 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
         Assert.Equal(Path.GetFullPath(baseSkeletonPath), result);
     }
 
+    [Fact]
+    public void TryResolveSkeletonNifPath_ResolvesCustomRigNamedNifFromPreferredDirectory()
+    {
+        var modRoot = Path.Combine(_root, "CustomRigPack");
+        var meshesDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets");
+        Directory.CreateDirectory(meshesDirectory);
+
+        var rigPath = Path.Combine(meshesDirectory, "feline_rig.nif");
+        File.WriteAllText(rigPath, "rig");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(rigPath), result);
+    }
+
+    [Fact]
+    public void TryResolveSkeletonNifPath_DoesNotMistakeBodyMeshesForSkeletons()
+    {
+        var modRoot = Path.Combine(_root, "BodyOnlyPack");
+        var meshesDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets");
+        Directory.CreateDirectory(meshesDirectory);
+
+        File.WriteAllText(Path.Combine(meshesDirectory, "femalebody_0.nif"), "body");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.False(resolved);
+        Assert.Null(result);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
