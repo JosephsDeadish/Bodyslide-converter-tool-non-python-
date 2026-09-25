@@ -158,7 +158,7 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, and `meta/slidesmith-bundle.json` |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable bundle containing `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
@@ -171,8 +171,8 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, publish a single-file Linux CLI binary, and upload it as a temporary Actions artifact.
-- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
-- **Pull requests:** publish both Windows executables, package them as one bundle zip artifact, and upload it for startup/packaging verification.
+- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip with FOMOD + `meta.ini` metadata for MO2/Vortex installs, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
+- **Pull requests:** publish both Windows executables, package them as one MO2/Vortex-friendly bundle zip artifact, and upload it for startup/packaging verification.
 
 All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
 

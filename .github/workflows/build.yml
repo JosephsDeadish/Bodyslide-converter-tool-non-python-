@@ -148,11 +148,15 @@ jobs:
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
           Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           Copy-Item README.md (Join-Path $bundleRoot "README.md") -Force
           $bundleMetadata = [ordered]@{
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.md"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
             sourceDesktopPublish = "artifacts/win-x64"
             sourceCliPublish = "artifacts/win-x64-cli"
           } | ConvertTo-Json
@@ -321,6 +325,22 @@ jobs:
           }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/ModuleConfig.xml"))) {
+            throw "Missing fomod/ModuleConfig.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/info.xml"))) {
+            throw "Missing fomod/info.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta.ini"))) {
+            throw "Missing meta.ini in bundle zip."
+          }
+
+          $moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
+          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="README.md"', 'source="meta.ini"')) {
+            if ($moduleConfig -notmatch [regex]::Escape($requiredEntry)) {
+              throw "Bundle FOMOD metadata is missing installer entry $requiredEntry."
+            }
           }
 
       - name: Set Windows artifact name
