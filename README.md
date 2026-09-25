@@ -257,6 +257,8 @@ output/
     BodySlide/
       SliderSets/
         <ArmorName>.osp          ← BodySlide slider-set project (when slider export is enabled)
+      SliderGroups/
+        <ArmorName>.xml          ← BodySlide batch-build/search groups (when slider export is enabled)
       ShapeData/<ArmorName>/
         <ArmorName>.nif          ← BodySlide source-shape reference mesh (when enabled)
         <Slider>.bsd             ← low-weight slider morph (one per slider, when enabled)
@@ -275,6 +277,7 @@ output/
     smp-config.xml               ← staged SMP physics XML for mod-manager/manual Data installs
   cbpc-config.xml                ← compatibility/root copy of generated CBPC physics XML
   smp-config.xml                 ← compatibility/root copy of generated SMP physics XML
+  meta.ini                       ← neutral MO2 package metadata
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
@@ -289,11 +292,13 @@ output/
 | `meshes/slidesmith/<body>/<ArmorName>.nif` | Data-relative staged mesh; pointed to by the generated plugin |
 | `meshes/slidesmith/<body>/<stem>_ground.nif` | Ground/loot mesh companion for every converted NIF variant |
 | `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/SliderGroups/<ArmorName>.xml` | BodySlide group definitions so converted single-piece and batch outputs show up under predictable SlideSmith/body filters for search and Batch Build |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
 | `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
+| `meta.ini` | Neutral Mod Organizer 2 metadata for the packaged output so the installed mod folder/archive keeps basic name/version/author context without depending on manual tagging |
 | `SKSE/Plugins/CBPCSystem/cbpc-config.xml` | Data-relative staged CBPC physics config for direct installation into Skyrim's SKSE plugin layout |
 | `SKSE/Plugins/hdtSMP64/smp-config.xml` | Data-relative staged SMP physics config for direct installation into Skyrim's SKSE plugin layout |
 | `cbpc-config.xml` | Compatibility/root copy of the generated CBPC physics config for inspection or manual relocation |

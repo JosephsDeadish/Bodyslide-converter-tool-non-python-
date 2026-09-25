@@ -1180,12 +1180,16 @@ internal static class ConversionValidationGuidance
                 "Open dependency-map.json and the meshes/slidesmith output folder, re-run the conversion for the missing variants, and do not package the mod until every referenced staged mesh exists under the Data-relative output path.",
             "missing-fomod-module-config" =>
                 "Rebuild fomod/ModuleConfig.xml before release, restore the missing installer entries, and test the package in MO2 or Vortex so the staged meshes, plugins, and support files install into the same layout that passed local validation.",
+            "missing-meta-ini" =>
+                "Regenerate meta.ini before release so Mod Organizer 2 users receive neutral package metadata alongside the FOMOD installer without relying on manual tagging.",
             "fomod-missing-folder-entry" or
             "fomod-missing-root-plugin-entry" or
             "fomod-missing-root-support-entry" =>
                 "Open fomod/ModuleConfig.xml, add the missing meshes/plugins/support-file install entries, and test the package in MO2 or Vortex before release.",
             "missing-bodyslide-osp" =>
                 "Re-run with slider export enabled and confirm CalienteTools/BodySlide/SliderSets contains the generated .osp project before publishing BodySlide-capable output.",
+            "missing-bodyslide-slider-groups" =>
+                "Re-run with slider export enabled and confirm CalienteTools/BodySlide/SliderGroups contains the generated grouping XML so BodySlide can batch-build the converted sets under the expected filters.",
             "missing-bodyslide-shape-data" =>
                 "Inspect CalienteTools/BodySlide/ShapeData and re-run before release so the generated outfit ships with its full BodySlide ShapeData folder instead of a partial slider package.",
             "missing-bodyslide-reference-nif" =>
@@ -1215,6 +1219,7 @@ internal static class ConversionValidationGuidance
             "zip-missing-readme" or
             "zip-missing-fomod-module-config" or
             "zip-missing-fomod-info" or
+            "zip-missing-meta-ini" or
             "zip-missing-dependency-map" or
             "zip-missing-conversion-quality-report" or
             "zip-missing-skeleton-compatibility-report" or
@@ -1229,6 +1234,7 @@ internal static class ConversionValidationGuidance
             "zip-missing-root-plugin" or
             "zip-missing-root-support-file" or
             "zip-missing-bodyslide-osp" or
+            "zip-missing-bodyslide-slider-groups" or
             "zip-missing-bodyslide-shape-data" or
             "zip-missing-bodyslide-reference-nif" or
             "zip-missing-bodyslide-slider-payload" or
@@ -1309,24 +1315,29 @@ internal static class ConversionValidationGuidance
                 ["fomod/ModuleConfig.xml", "armor-pack-validation.json", "conversion-quality.json"],
             "missing-fomod-info" =>
                 ["fomod/info.xml", "armor-pack-validation.json", "conversion-quality.json"],
+            "missing-meta-ini" =>
+                ["meta.ini", "armor-pack-validation.json", "conversion-quality.json"],
             "fomod-missing-folder-entry" or "fomod-missing-root-plugin-entry" or "fomod-missing-root-support-entry" =>
                 ["fomod/ModuleConfig.xml", "armor-pack-validation.json"],
             "missing-root-support-file" =>
                 ["armor-pack-validation.json", "conversion-quality.json"],
             "missing-bodyslide-osp" =>
                 ["CalienteTools/BodySlide/SliderSets/", "conversion-quality.json"],
+            "missing-bodyslide-slider-groups" =>
+                ["CalienteTools/BodySlide/SliderGroups/", "conversion-quality.json"],
             "missing-bodyslide-shape-data" or "missing-bodyslide-reference-nif" or "missing-bodyslide-slider-payload" or "bodyslide-semantic-mismatch" =>
                 ["CalienteTools/BodySlide/ShapeData/", "conversion-quality.json"],
             "missing-xedit-script" or "missing-plugin-patch-report" =>
                 ["plugin-patches.json", "conversion-quality.json"],
             "missing-root-plugin" or "missing-preview-workbench" or "missing-preview-html" or "missing-preview-svg" or
             "missing-output-zip" or "zip-missing-readme" or "zip-missing-fomod-module-config" or
-            "zip-missing-fomod-info" or "zip-missing-dependency-map" or
+            "zip-missing-fomod-info" or "zip-missing-meta-ini" or "zip-missing-dependency-map" or
             "zip-missing-conversion-quality-report" or "zip-missing-skeleton-compatibility-report" or
             "zip-missing-race-compatibility-report" or "zip-missing-pose-report" or "zip-missing-world-physics-report" or
             "zip-missing-preview-svg" or "zip-missing-preview-html" or "zip-missing-preview-workbench" or
             "zip-missing-staged-cbpc-config" or "zip-missing-staged-smp-config" or
             "zip-missing-root-plugin" or "zip-missing-root-support-file" or "zip-missing-bodyslide-osp" or
+            "zip-missing-bodyslide-slider-groups" or
             "zip-missing-bodyslide-shape-data" or "zip-missing-bodyslide-reference-nif" or
             "zip-missing-bodyslide-slider-payload" or "zip-missing-xedit-script" or
             "zip-missing-plugin-patch-report" or "zip-missing-staged-mesh-output" or "invalid-output-zip" =>
@@ -1628,7 +1639,14 @@ public sealed record ExportIslandRoutingSummary(
 /// <summary>Identifies which body regions an armor piece primarily covers and how that was determined.</summary>
 public sealed record ArmorRegionBinding(IReadOnlyList<string> CoveredRegions, string DetectionMethod);
 
-public sealed record BodySlideProject(string ProjectName, string TargetBody, IReadOnlyList<string> Sliders, string OspXml, IReadOnlyList<string>? ZapSliders = null);
+public sealed record BodySlideProject(
+    string ProjectName,
+    string TargetBody,
+    IReadOnlyList<string> Sliders,
+    string OspXml,
+    IReadOnlyList<string>? ZapSliders = null,
+    IReadOnlyList<string>? SliderSetNames = null,
+    string? SliderGroupsXml = null);
 public sealed record TextureSummary(
     int TotalCount,
     IReadOnlyList<string> DiffuseFiles,
@@ -15891,9 +15909,16 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         var sliders = resolved.Sliders;
         var zapSliders = resolved.ZapSliders;
         var gender = resolved.Gender;
-        var ospXml = BuildOspXml(sliders, zapSliders, BodySlideLayoutPlanner.BuildTargets(armor, projectName), gender);
+        var targets = BodySlideLayoutPlanner.BuildTargets(armor, projectName);
+        var ospXml = BuildOspXml(sliders, zapSliders, targets, gender);
+        var sliderSetNames = targets
+            .Select(static target => target.SliderSetName)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var sliderGroupsXml = BuildSliderGroupsXml(projectName, targetBody, sliderSetNames);
 
-        return new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders);
+        return new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders, sliderSetNames, sliderGroupsXml);
     }
 
     private static string BuildOspXml(
@@ -15936,6 +15961,45 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
             sb.AppendLine("    </SliderSet>");
         }
         sb.AppendLine("</SliderSetInfo>");
+        return sb.ToString();
+    }
+
+    internal static string BuildSliderGroupsXml(
+        string projectName,
+        string targetBody,
+        IReadOnlyList<string> sliderSetNames)
+    {
+        var groupNames = new[]
+            {
+                "SlideSmith",
+                string.IsNullOrWhiteSpace(targetBody) ? null : targetBody.Trim(),
+                string.IsNullOrWhiteSpace(targetBody) ? null : $"SlideSmith - {targetBody.Trim()}",
+                string.IsNullOrWhiteSpace(projectName) ? null : projectName.Trim()
+            }
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(static name => name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var memberNames = sliderSetNames
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<SliderGroups>");
+        foreach (var groupName in groupNames)
+        {
+            sb.AppendLine($"  <Group name=\"{Escape(groupName)}\">");
+            foreach (var memberName in memberNames)
+            {
+                sb.AppendLine($"    <Member name=\"{Escape(memberName)}\" />");
+            }
+
+            sb.AppendLine("  </Group>");
+        }
+
+        sb.AppendLine("</SliderGroups>");
         return sb.ToString();
     }
 
@@ -18896,6 +18960,7 @@ internal static class ConversionReadmeGenerator
         if (bsdFiles.Count > 0)
         {
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderSets\\    ← BodySlide .osp project");
+            sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\SliderGroups\\  ← BodySlide batch-build/search groups");
             sb.AppendLine($"      Data\\CalienteTools\\BodySlide\\ShapeData\\{bodySlideProject.ProjectName}\\  ← .bsd sliders + source NIF");
         }
         if (outputFiles.Any(path => path.EndsWith(Path.Combine("SKSE", "Plugins", "hdtSMP64", "smp-config.xml"), StringComparison.OrdinalIgnoreCase)))
@@ -18966,11 +19031,13 @@ internal static class ConversionReadmeGenerator
             sb.AppendLine($"  BodySlide project: {bodySlideProject.ProjectName}");
             sb.AppendLine($"  Target body:       {request.TargetBody}");
             sb.AppendLine($"  Sliders included:  {bodySlideProject.Sliders.Count}");
+            sb.AppendLine($"  Batch groups:      SlideSmith, {request.TargetBody}, SlideSmith - {request.TargetBody}");
             sb.AppendLine();
             sb.AppendLine("  To build in BodySlide:");
             sb.AppendLine($"    1. Open BodySlide and search for '{bodySlideProject.ProjectName}'.");
-            sb.AppendLine("    2. Select your body preset and click 'Build'.");
-            sb.AppendLine("    3. For physics sliders, also build the _1 (high-weight) variant.");
+            sb.AppendLine($"    2. Use the '{request.TargetBody}' or 'SlideSmith - {request.TargetBody}' group filter for batch builds.");
+            sb.AppendLine("    3. Select your body preset and click 'Build'.");
+            sb.AppendLine("    4. For physics sliders, also build the _1 (high-weight) variant.");
             sb.AppendLine();
         }
 
@@ -19618,6 +19685,15 @@ internal sealed class LocalExportService(
             await File.WriteAllTextAsync(ospPath, bodySlideProject.OspXml, cancellationToken);
             outputFiles.Add(ospPath);
 
+            var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+            Directory.CreateDirectory(sliderGroupsDirectory);
+            var sliderGroupsPath = Path.Combine(sliderGroupsDirectory, $"{bodySlideProject.ProjectName}.xml");
+            await File.WriteAllTextAsync(
+                sliderGroupsPath,
+                bodySlideProject.SliderGroupsXml ?? BodySlideOspProjectService.BuildSliderGroupsXml(bodySlideProject.ProjectName, bodySlideProject.TargetBody, bodySlideProject.SliderSetNames ?? [bodySlideProject.ProjectName]),
+                cancellationToken);
+            outputFiles.Add(sliderGroupsPath);
+
             // BSD slider data, TRI morph files, and the BodySlide source-shape NIF all belong under
             // Data\CalienteTools\BodySlide\ShapeData\<project>\ so BodySlide can locate them when the
             // user opens the slider editor.  The source NIF is a copy of the primary converted mesh and
@@ -20018,6 +20094,7 @@ internal sealed class LocalExportService(
         Directory.CreateDirectory(fomodDirectory);
         var fomodModuleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
         var fomodInfoPath = Path.Combine(fomodDirectory, "info.xml");
+        var metaIniPath = Path.Combine(outputDirectory, "meta.ini");
         var packageName = Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "SlideSmith Package";
 
         // Collect Data-relative folder names that exist in the output at FOMOD generation time.
@@ -20049,6 +20126,11 @@ internal sealed class LocalExportService(
             cancellationToken);
         outputFiles.Add(fomodModuleConfigPath);
         outputFiles.Add(fomodInfoPath);
+        await File.WriteAllTextAsync(
+            metaIniPath,
+            BuildMetaIni(packageName, request.TargetBody, pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0),
+            cancellationToken);
+        outputFiles.Add(metaIniPath);
 
         // Write a human-readable README.txt explaining the generated files, where to
         // install them, and what manual steps may still be required.  This satisfies
@@ -25532,6 +25614,15 @@ internal sealed class LocalExportService(
                     $"Expected BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp' was not generated."));
             }
 
+            var sliderGroupsPath = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups", $"{bodySlideProject.ProjectName}.xml");
+            if (!HasFile(sliderGroupsPath))
+            {
+                issues.Add(new ConversionValidationIssue(
+                    "missing-bodyslide-slider-groups",
+                    "medium",
+                    $"Expected BodySlide SliderGroups file for '{bodySlideProject.ProjectName}' was not generated."));
+            }
+
             var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData", bodySlideProject.ProjectName);
             var hasShapeData = Directory.Exists(shapeDataDirectory)
                 && (HasAnyFile(shapeDataDirectory, "*.nif")
@@ -25579,6 +25670,9 @@ internal sealed class LocalExportService(
             AddMissingFileIssue("plugin-patches.json", "missing-plugin-patch-report", "medium",
                 "plugin-patches.json was not generated, so plugin rewrite guidance and verification output are missing.");
         }
+
+        AddMissingFileIssue("meta.ini", "missing-meta-ini", "low",
+            "meta.ini was not generated, so Mod Organizer 2 package metadata is missing from the packaged output.");
 
         if (request.OutputZip)
         {
@@ -25702,6 +25796,14 @@ internal sealed class LocalExportService(
                             "The distributable ZIP is missing fomod/info.xml, so the packaged FOMOD metadata is incomplete."));
                     }
 
+                    if (!ZipContains("meta.ini"))
+                    {
+                        issues.Add(new ConversionValidationIssue(
+                            "zip-missing-meta-ini",
+                            "low",
+                            "The distributable ZIP is missing meta.ini, so Mod Organizer 2 package metadata is absent from the archive."));
+                    }
+
                     if (!ZipContainsPrefix($"meshes/slidesmith/{safeBodyToken}"))
                     {
                         issues.Add(new ConversionValidationIssue(
@@ -25751,6 +25853,7 @@ internal sealed class LocalExportService(
                     if (request.GenerateBodySlideFiles)
                     {
                         var zipOspPath = $"CalienteTools/BodySlide/SliderSets/{bodySlideProject.ProjectName}.osp";
+                        var zipSliderGroupsPath = $"CalienteTools/BodySlide/SliderGroups/{bodySlideProject.ProjectName}.xml";
                         var zipShapeDataPrefix = $"CalienteTools/BodySlide/ShapeData/{bodySlideProject.ProjectName}";
                         if (!ZipContains(zipOspPath))
                         {
@@ -25758,6 +25861,14 @@ internal sealed class LocalExportService(
                                 "zip-missing-bodyslide-osp",
                                 "medium",
                                 $"The distributable ZIP is missing BodySlide SliderSets project '{bodySlideProject.ProjectName}.osp'."));
+                        }
+
+                        if (!ZipContains(zipSliderGroupsPath))
+                        {
+                            issues.Add(new ConversionValidationIssue(
+                                "zip-missing-bodyslide-slider-groups",
+                                "medium",
+                                $"The distributable ZIP is missing BodySlide SliderGroups file for '{bodySlideProject.ProjectName}'."));
                         }
 
                         if (!ZipContainsPrefix(zipShapeDataPrefix))
@@ -30546,6 +30657,24 @@ internal sealed class LocalExportService(
             """;
     }
 
+    private static string BuildMetaIni(string packageName, string targetBody, bool hasPluginArtifacts)
+    {
+        var safePackage = string.IsNullOrWhiteSpace(packageName) ? "SlideSmith Conversion" : packageName.Trim();
+        var safeTargetBody = string.IsNullOrWhiteSpace(targetBody) ? "Unknown" : targetBody.Trim();
+        var description = hasPluginArtifacts
+            ? $"Auto-generated SlideSmith conversion for {safeTargetBody}. Includes plugin-aware packaging guidance; install as a separate mod below the source armor/body mod."
+            : $"Auto-generated SlideSmith conversion for {safeTargetBody}. Install as a separate mod below the source armor/body mod.";
+
+        return $$"""
+            [General]
+            gameName=Skyrim Special Edition
+            name={{safePackage}} - SlideSmith
+            version=0.1
+            author=SlideSmith
+            description={{description}}
+            """;
+    }
+
     private static string BuildFomodInfoXml(string packageName, IReadOnlyList<string> rootFileNames)
     {
         var safePackage = XmlEscape(packageName);
@@ -30578,6 +30707,7 @@ internal sealed class LocalExportService(
         var files = new List<string>
         {
             "README.txt",
+            "meta.ini",
             "dependency-map.json",
             "conversion-quality.json",
             "conversion-matrix-proof.json",
@@ -30615,7 +30745,8 @@ internal sealed class LocalExportService(
     private static bool IsFomodRootSupportFile(string? fileName) =>
         !string.IsNullOrWhiteSpace(fileName) &&
         (fileName.Equals("README.txt", StringComparison.OrdinalIgnoreCase) ||
-         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("meta.ini", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||

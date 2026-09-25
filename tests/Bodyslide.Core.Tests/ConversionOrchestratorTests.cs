@@ -1830,15 +1830,28 @@ public sealed class ConversionOrchestratorTests
             var fomodDirectory = Path.Combine(outputDirectory, "fomod");
             var moduleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
             var infoPath = Path.Combine(fomodDirectory, "info.xml");
+            var metaIniPath = Path.Combine(outputDirectory, "meta.ini");
+            var sliderGroupsPath = Directory
+                .EnumerateFiles(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups"), "*.xml", SearchOption.TopDirectoryOnly)
+                .Single();
             Assert.True(File.Exists(moduleConfigPath));
             Assert.True(File.Exists(infoPath));
+            Assert.True(File.Exists(metaIniPath));
 
             var moduleConfig = await File.ReadAllTextAsync(moduleConfigPath);
             var infoXml = await File.ReadAllTextAsync(infoPath);
+            var metaIni = await File.ReadAllTextAsync(metaIniPath);
+            var sliderGroupsXml = await File.ReadAllTextAsync(sliderGroupsPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("[General]", metaIni, StringComparison.Ordinal);
+            Assert.Contains("gameName=Skyrim Special Edition", metaIni, StringComparison.Ordinal);
+            Assert.Contains("author=SlideSmith", metaIni, StringComparison.Ordinal);
+            Assert.Contains("<Group name=\"CBBE\">", sliderGroupsXml, StringComparison.Ordinal);
+            Assert.Contains("<Group name=\"SlideSmith - CBBE\">", sliderGroupsXml, StringComparison.Ordinal);
+            Assert.Contains("<Member name=\"cuirass_CBBE\"", sliderGroupsXml, StringComparison.Ordinal);
             Assert.DoesNotContain("plugin-patches.json", moduleConfig, StringComparison.Ordinal);
             Assert.DoesNotContain("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
             Assert.DoesNotContain("race-compatibility.json", moduleConfig, StringComparison.Ordinal);
@@ -15536,12 +15549,19 @@ public sealed class RealisticModPackFixtureTests
             var sliderSetsDirectory = Path.Combine(cuirassOutput.OutputDirectory, "CalienteTools", "BodySlide", "SliderSets");
             Assert.True(Directory.Exists(sliderSetsDirectory));
             Assert.NotEmpty(Directory.GetFiles(sliderSetsDirectory, "*.osp"));
+            var sliderGroupsDirectory = Path.Combine(cuirassOutput.OutputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+            Assert.True(Directory.Exists(sliderGroupsDirectory));
+            var sliderGroupPath = Directory.GetFiles(sliderGroupsDirectory, "*.xml").Single();
+            var sliderGroupsXml = await File.ReadAllTextAsync(sliderGroupPath);
+            Assert.Contains("<Group name=\"3BA\">", sliderGroupsXml, StringComparison.Ordinal);
+            Assert.Contains("<Group name=\"SlideSmith - 3BA\">", sliderGroupsXml, StringComparison.Ordinal);
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "CBPCSystem", "cbpc-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "SKSE", "Plugins", "hdtSMP64", "smp-config.xml")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "conversion-quality.json")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "dependency-map.json")));
+            Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "meta.ini")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "README.txt")));
             Assert.True(File.Exists(Path.Combine(cuirassOutput.OutputDirectory, "fomod", "ModuleConfig.xml")));
 
@@ -19256,6 +19276,7 @@ public sealed class RealisticModPackFixtureTests
 
             using var archive = ZipFile.OpenRead(zipPath);
             AssertZipContainsEntry(archive, "README.txt");
+            AssertZipContainsEntry(archive, "meta.ini");
             AssertZipContainsEntry(archive, "conversion-quality.json");
             AssertZipContainsEntry(archive, "plugin-patches.json");
             AssertZipContainsEntry(archive, "preview.html");
@@ -19264,6 +19285,10 @@ public sealed class RealisticModPackFixtureTests
             AssertZipContainsEntry(archive, "fomod/info.xml");
             AssertZipContainsEntry(archive, "SKSE/Plugins/hdtSMP64/devious_restraint.xml");
             AssertZipContainsEntry(archive, stagedMeshPath!);
+            var sliderGroupsPath = Directory
+                .EnumerateFiles(Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups"), "*.xml", SearchOption.TopDirectoryOnly)
+                .Single();
+            AssertZipContainsEntry(archive, Path.GetRelativePath(outputDirectory, sliderGroupsPath).Replace('\\', '/'));
 
             var zippedQualityJson = ReadZipEntryText(archive, "conversion-quality.json");
             Assert.Contains("\"Code\": \"plugin-link-partial-family-failure\"", zippedQualityJson, StringComparison.Ordinal);
@@ -19276,6 +19301,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Mod Organizer 2 / Vortex", zippedReadme, StringComparison.Ordinal);
             Assert.Contains("preview-workbench.html", zippedReadme, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("plugin-patches.json", zippedReadme, StringComparison.OrdinalIgnoreCase);
+            var zippedMetaIni = ReadZipEntryText(archive, "meta.ini");
+            Assert.Contains("[General]", zippedMetaIni, StringComparison.Ordinal);
+            Assert.Contains("author=SlideSmith", zippedMetaIni, StringComparison.Ordinal);
 
             AssertZipMatchesDirectory(archive, outputDirectory);
         }
@@ -25575,6 +25603,7 @@ public sealed class OutputCompletenessTests
         try
         {
             File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "meta.ini"), "[General]");
             File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "race-compatibility.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
@@ -25627,6 +25656,7 @@ public sealed class OutputCompletenessTests
         try
         {
             File.WriteAllText(Path.Combine(outputDirectory, "README.txt"), "readme");
+            File.WriteAllText(Path.Combine(outputDirectory, "meta.ini"), "[General]");
             File.WriteAllText(Path.Combine(outputDirectory, "dependency-map.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "pose-simulation-report.json"), "{}");
             File.WriteAllText(Path.Combine(outputDirectory, "world-physics.json"), "{}");
@@ -25695,12 +25725,15 @@ public sealed class OutputCompletenessTests
             Assert.Contains("zip-missing-preview-workbench", codes);
             Assert.Contains("zip-missing-fomod-module-config", codes);
             Assert.Contains("zip-missing-fomod-info", codes);
+            Assert.Contains("zip-missing-meta-ini", codes);
             Assert.Contains("zip-missing-staged-mesh-output", codes);
             Assert.Contains("missing-staged-cbpc-config", codes);
             Assert.Contains("missing-staged-smp-config", codes);
             Assert.Contains("zip-missing-staged-cbpc-config", codes);
             Assert.Contains("zip-missing-staged-smp-config", codes);
             Assert.Contains("zip-missing-bodyslide-osp", codes);
+            Assert.Contains("missing-bodyslide-slider-groups", codes);
+            Assert.Contains("zip-missing-bodyslide-slider-groups", codes);
             Assert.Contains("zip-missing-bodyslide-shape-data", codes);
             Assert.Contains("zip-missing-root-plugin", codes);
             Assert.Contains("zip-missing-xedit-script", codes);

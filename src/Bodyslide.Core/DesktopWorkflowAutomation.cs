@@ -1169,13 +1169,16 @@ internal static class DesktopWorkflowAutomation
                 artifact.DisplayPath.Contains("CalienteTools", StringComparison.OrdinalIgnoreCase) &&
                 artifact.DisplayPath.Contains("BodySlide", StringComparison.OrdinalIgnoreCase)))
         {
+            var sliderGroupsPath = FindArtifactPath(artifacts, artifact =>
+                NormalizeArtifactPath(artifact.DisplayPath).Contains("calientetools/bodyslide/slidergroups/", StringComparison.OrdinalIgnoreCase));
             steps.Add(new DesktopWorkflowAutomationStep(
                 "BodySlide",
-                "Open the generated BodySlide OSP/ShapeData artifacts and confirm the Desktop output still builds correctly in BodySlide or Outfit Studio.",
+                "Open the generated BodySlide OSP/SliderGroups/ShapeData artifacts and confirm the output appears in the expected BodySlide groups and still builds correctly in BodySlide or Outfit Studio.",
                 "BodySlide slider assets detected",
                 FindArtifactPath(artifacts, artifact =>
                     artifact.DisplayPath.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
-                    artifact.DisplayPath.Contains("ShapeData", StringComparison.OrdinalIgnoreCase)),
+                    artifact.DisplayPath.Contains("ShapeData", StringComparison.OrdinalIgnoreCase))
+                ?? sliderGroupsPath,
                 Blocking: false));
         }
 
@@ -1183,13 +1186,15 @@ internal static class DesktopWorkflowAutomation
             NormalizeArtifactPath(artifact.DisplayPath).Equals("fomod/moduleconfig.xml", StringComparison.OrdinalIgnoreCase));
         var fomodInfoPath = FindArtifactPath(artifacts, static artifact =>
             NormalizeArtifactPath(artifact.DisplayPath).Equals("fomod/info.xml", StringComparison.OrdinalIgnoreCase));
-        if (fomodModuleConfigPath is not null || fomodInfoPath is not null)
+        var metaIniPath = FindArtifactPath(artifacts, static artifact =>
+            NormalizeArtifactPath(artifact.DisplayPath).Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
+        if (fomodModuleConfigPath is not null || fomodInfoPath is not null || metaIniPath is not null)
         {
             steps.Add(new DesktopWorkflowAutomationStep(
                 "FOMOD packaging",
-                "Open the generated fomod/ModuleConfig.xml and fomod/info.xml from the Files tab and verify the MO2/Vortex install mapping and package metadata before sharing.",
+                "Open the generated fomod/ModuleConfig.xml, fomod/info.xml, and meta.ini from the Files tab and verify the MO2/Vortex install mapping and package metadata before sharing.",
                 "FOMOD installer artifacts detected",
-                fomodModuleConfigPath ?? fomodInfoPath,
+                fomodModuleConfigPath ?? fomodInfoPath ?? metaIniPath,
                 Blocking: false));
         }
 

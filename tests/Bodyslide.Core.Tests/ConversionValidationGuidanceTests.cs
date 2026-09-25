@@ -618,6 +618,8 @@ public sealed class ConversionValidationGuidanceTests
             [
                 new ConversionValidationIssue("missing-fomod-module-config", "medium", "fomod/ModuleConfig.xml was not generated."),
                 new ConversionValidationIssue("missing-fomod-info", "medium", "fomod/info.xml was not generated."),
+                new ConversionValidationIssue("missing-meta-ini", "low", "meta.ini was not generated."),
+                new ConversionValidationIssue("missing-bodyslide-slider-groups", "medium", "BodySlide SliderGroups XML was not generated."),
                 new ConversionValidationIssue("missing-root-support-file", "medium", "A root support report is missing."),
                 new ConversionValidationIssue("zip-missing-root-support-file", "medium", "The distributable ZIP is missing a root support report."),
             ]);
@@ -627,10 +629,14 @@ public sealed class ConversionValidationGuidanceTests
 
         Assert.Contains(actions, action => action.Contains("fomod/ModuleConfig.xml", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("fomod/info.xml", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("meta.ini", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(actions, action => action.Contains("SliderGroups", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("root support report", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(actions, action => action.Contains("armor-pack-validation.json", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("fomod/ModuleConfig.xml", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("fomod/info.xml", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(artifacts, artifact => artifact.Equals("CalienteTools/BodySlide/SliderGroups/", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(artifacts, artifact => artifact.Equals("armor-pack-validation.json", StringComparison.OrdinalIgnoreCase));
     }
 

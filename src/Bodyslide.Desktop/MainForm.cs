@@ -5234,6 +5234,16 @@ public sealed class MainForm : Form
         string outputDirectory,
         Action<string, string, string, string?> add)
     {
+        var metaIniPath = ResolveExistingGuidancePath(outputDirectory, "meta.ini");
+        if (metaIniPath is not null)
+        {
+            add(
+                "Packaging assets",
+                "Info",
+                "Open meta.ini from Files to verify the generated Mod Organizer 2 package metadata before sharing the conversion output.",
+                metaIniPath);
+        }
+
         var moduleConfigPath = ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"));
         if (moduleConfigPath is not null)
         {
@@ -5252,6 +5262,22 @@ public sealed class MainForm : Form
                 "Info",
                 "Open fomod/info.xml from Files to verify the generated package metadata and install notes before sharing the conversion output.",
                 infoPath);
+        }
+
+        var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+        if (Directory.Exists(sliderGroupsDirectory))
+        {
+            var sliderGroupsPath = Directory
+                .EnumerateFiles(sliderGroupsDirectory, "*.xml", SearchOption.TopDirectoryOnly)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(sliderGroupsPath))
+            {
+                add(
+                    "BodySlide assets",
+                    "Info",
+                    "Open the generated BodySlide SliderGroups XML from Files to verify the converted sets will appear under the expected BodySlide batch-build groups.",
+                    sliderGroupsPath);
+            }
         }
     }
 
@@ -5805,8 +5831,17 @@ public sealed class MainForm : Form
 
         if (normalized.StartsWith("fomod-", StringComparison.OrdinalIgnoreCase) ||
             normalized.Equals("missing-fomod-module-config", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase))
+            normalized.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("missing-meta-ini", StringComparison.OrdinalIgnoreCase))
         {
+            if (normalized.Equals("missing-meta-ini", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResolveExistingGuidancePath(outputDirectory, "meta.ini")
+                    ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"))
+                    ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "info.xml"))
+                    ?? fallbackPath;
+            }
+
             return ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "ModuleConfig.xml"))
                 ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("fomod", "info.xml"))
                 ?? ResolveExistingGuidancePath(outputDirectory, "fomod")
@@ -5965,6 +6000,7 @@ public sealed class MainForm : Form
         code.Equals("missing-staged-mesh-output", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-fomod-module-config", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-fomod-info", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("missing-meta-ini", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-output-zip", StringComparison.OrdinalIgnoreCase) ||
         code.Equals("missing-root-support-file", StringComparison.OrdinalIgnoreCase);
 
@@ -5982,6 +6018,7 @@ public sealed class MainForm : Form
     private static string? ResolveBodySlideGuidanceTargetPath(string outputDirectory)
     {
         return ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "ShapeData"))
+            ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderGroups"))
             ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderSets"))
             ?? ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide"))
             ?? ResolveExistingGuidancePath(outputDirectory, "conversion-quality.json")
@@ -6117,11 +6154,13 @@ public sealed class MainForm : Form
             "preview-workbench" => "preview-workbench.html",
             "fomod-module-config" => "fomod/ModuleConfig.xml",
             "fomod-info" => "fomod/info.xml",
+            "meta-ini" => "meta.ini",
             "staged-mesh-output" => "the generated meshes/slidesmith output",
             "xedit-script" => "patch-armor.pas",
             "plugin-patch-report" => "plugin-patches.json",
             "output-zip" => "the final distributable zip",
             "bodyslide-osp" => "the generated BodySlide SliderSets .osp file",
+            "bodyslide-slider-groups" => "the generated BodySlide SliderGroups XML",
             "bodyslide-shape-data" => "the generated BodySlide ShapeData payloads",
             "bodyslide-reference-nif" => "the BodySlide reference NIF",
             "bodyslide-slider-payload" => "the generated BSD/TRI slider payloads",
