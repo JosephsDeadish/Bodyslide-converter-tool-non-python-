@@ -120,6 +120,24 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolveSkeletonNifPath_DirectBodyMeshFallsBackToContainingSkeletonDirectory()
+    {
+        var modRoot = Path.Combine(_root, "BodyMeshInputPack");
+        var meshesDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets");
+        Directory.CreateDirectory(meshesDirectory);
+
+        var bodyPath = Path.Combine(meshesDirectory, "femalebody_0.nif");
+        var skeletonPath = Path.Combine(meshesDirectory, "skeleton.nif");
+        File.WriteAllText(bodyPath, "body");
+        File.WriteAllText(skeletonPath, "skeleton");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(bodyPath, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(skeletonPath), result);
+    }
+
+    [Fact]
     public void TryResolveSkeletonNifPath_DoesNotMistakeBodyMeshesForSkeletons()
     {
         var modRoot = Path.Combine(_root, "BodyOnlyPack");

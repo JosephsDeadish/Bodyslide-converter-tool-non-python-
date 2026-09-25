@@ -53,8 +53,13 @@ public static class SkeletonSupportPathResolver
             var fullPath = Path.GetFullPath(normalizedPath);
             if (Path.GetExtension(fullPath).Equals(".nif", StringComparison.OrdinalIgnoreCase))
             {
-                skeletonNifPath = fullPath;
-                return true;
+                if (LooksLikeDirectSkeletonCandidate(fullPath))
+                {
+                    skeletonNifPath = fullPath;
+                    return true;
+                }
+
+                return TryResolveFromDirectory(Path.GetDirectoryName(fullPath), out skeletonNifPath);
             }
 
             return TryResolveFromDirectory(Path.GetDirectoryName(fullPath), out skeletonNifPath);
@@ -289,6 +294,16 @@ public static class SkeletonSupportPathResolver
         }
 
         return PositiveSkeletonNameTokens.Any(token => fileStem.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool LooksLikeDirectSkeletonCandidate(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        var fileStem = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+
+        return fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase) ||
+               fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
+               IsHeuristicSkeletonCandidate(path);
     }
 
     private readonly record struct SkeletonCandidateRank(
