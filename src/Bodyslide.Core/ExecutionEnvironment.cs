@@ -60,7 +60,8 @@ public static class ExecutionEnvironment
                 return false;
             }
 
-            var currentDirectory = Path.GetFullPath(Environment.CurrentDirectory);
+            var currentDirectory = Path.GetFullPath(Environment.CurrentDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (string.Equals(currentDirectory, executionRoot, FileSystemPathComparison))
             {
                 return false;

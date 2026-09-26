@@ -55,6 +55,7 @@ public static class DesktopUiSettingsStore
 
         string? tempPath = null;
         var settingsLock = AcquireExclusiveSettingsLock(settingsPath);
+        var lockPath = settingsLock.Name;
         try
         {
             using (settingsLock)
@@ -72,6 +73,17 @@ public static class DesktopUiSettingsStore
                 try
                 {
                     File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(lockPath))
+            {
+                try
+                {
+                    File.Delete(lockPath);
                 }
                 catch
                 {

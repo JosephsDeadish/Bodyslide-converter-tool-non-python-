@@ -146,7 +146,7 @@ public sealed class DesktopUiSettingsStoreTests
                 root.GetProperty("theme").GetString() is "Dark" or "Light",
                 "Expected persisted theme to be either Dark or Light.");
             Assert.Single(root.GetProperty("customProfilePaths").EnumerateArray());
-            Assert.True(File.Exists($"{settingsPath}.lock"));
+            Assert.False(File.Exists($"{settingsPath}.lock"));
         }
         finally
         {
