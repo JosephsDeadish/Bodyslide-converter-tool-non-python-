@@ -13940,6 +13940,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("beast", khajiitRace.Groups);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCO CBBE", out var cocoRule));
         Assert.Equal("COCO CBBE", cocoRule.Body);
+        Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("COCOBody CBBE", out var cocoAliasRule));
+        Assert.Equal("COCO CBBE", cocoAliasRule.Body);
         Assert.True(RaceCompatibilityCatalog.TryGetBodyRule("Cathay Reborn", out var felineRule));
         Assert.Equal("Feline Humanoid", felineRule.Body);
         Assert.Contains("khajiit", felineRule.CompatibleGroups);

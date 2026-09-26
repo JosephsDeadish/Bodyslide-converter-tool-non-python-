@@ -46,7 +46,9 @@ internal static class RaceCompatibilityCatalog
             return false;
         }
 
-        var canonicalBody = BodyTypeCatalog.ResolveName(bodyName);
+        var canonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(bodyName, out var resolvedCanonicalBody)
+            ? resolvedCanonicalBody
+            : BodyTypeCatalog.ResolveName(bodyName);
         return Data.Value.BodyRules.TryGetValue(canonicalBody, out rule!);
     }
 
