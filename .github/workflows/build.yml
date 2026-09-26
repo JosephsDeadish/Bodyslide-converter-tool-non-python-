@@ -293,11 +293,15 @@ jobs:
           New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
           Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
           Copy-Item README.md (Join-Path $bundleRoot "README.md") -Force
           $bundleMetadata = [ordered]@{
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
             readme = "README.md"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
             sourceDesktopPublish = "artifacts/win-x64"
             sourceCliPublish = "artifacts/win-x64-cli"
           } | ConvertTo-Json
