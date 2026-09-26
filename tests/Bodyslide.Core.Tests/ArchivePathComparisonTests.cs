@@ -126,69 +126,69 @@ namespace Bodyslide.Core.Tests
                     writer.Write("dummy");
                 }
 
-                [Fact]
-                public void ExtractToTemporaryWorkspace_ReportsArchiveProgress()
-                {
-                    var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-                    Directory.CreateDirectory(workingDirectory);
-
-                    try
-                    {
-                        var zipPath = Path.Combine(workingDirectory, "progress.zip");
-                        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-                        {
-                            var first = archive.CreateEntry("meshes/armor_0.nif");
-                            using (var stream = first.Open())
-                            using (var writer = new StreamWriter(stream))
-                            {
-                                writer.Write("mesh");
-                            }
-
-                            var second = archive.CreateEntry("textures/armor_0.dds");
-                            using (var stream = second.Open())
-                            using (var writer = new StreamWriter(stream))
-                            {
-                                writer.Write("texture");
-                            }
-                        }
-
-                        var updates = new List<ArchiveExtractionHelper.ArchiveExtractionProgress>();
-                        var extracted = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
-                            zipPath,
-                            "test-progress",
-                            onProgress: update => updates.Add(update));
-
-                        try
-                        {
-                            Assert.NotEmpty(updates);
-                            var last = updates[^1];
-                            Assert.Equal(2, last.ProcessedEntries);
-                            Assert.Equal(2, last.TotalEntries);
-                            Assert.True(File.Exists(Path.Combine(extracted, "meshes", "armor_0.nif")));
-                            Assert.True(File.Exists(Path.Combine(extracted, "textures", "armor_0.dds")));
-                        }
-                        finally
-                        {
-                            if (Directory.Exists(extracted))
-                            {
-                                Directory.Delete(extracted, recursive: true);
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        if (Directory.Exists(workingDirectory))
-                        {
-                            Directory.Delete(workingDirectory, recursive: true);
-                        }
-                    }
-                }
-
                 using var cancellation = new CancellationTokenSource();
                 cancellation.Cancel();
 
                 Assert.Throws<OperationCanceledException>(() =>
                     ArchiveExtractionHelper.ExtractToTemporaryWorkspace(zipPath, "test-cancel", cancellation.Token));
+            }
+            finally
+            {
+                if (Directory.Exists(workingDirectory))
+                {
+                    Directory.Delete(workingDirectory, recursive: true);
+                }
+            }
+        }
+
+        [Fact]
+        public void ExtractToTemporaryWorkspace_ReportsArchiveProgress()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+
+            try
+            {
+                var zipPath = Path.Combine(workingDirectory, "progress.zip");
+                using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    var first = archive.CreateEntry("meshes/armor_0.nif");
+                    using (var stream = first.Open())
+                    using (var writer = new StreamWriter(stream))
+                    {
+                        writer.Write("mesh");
+                    }
+
+                    var second = archive.CreateEntry("textures/armor_0.dds");
+                    using (var stream = second.Open())
+                    using (var writer = new StreamWriter(stream))
+                    {
+                        writer.Write("texture");
+                    }
+                }
+
+                var updates = new List<ArchiveExtractionHelper.ArchiveExtractionProgress>();
+                var extracted = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
+                    zipPath,
+                    "test-progress",
+                    onProgress: update => updates.Add(update));
+
+                try
+                {
+                    Assert.NotEmpty(updates);
+                    var last = updates[^1];
+                    Assert.Equal(2, last.ProcessedEntries);
+                    Assert.Equal(2, last.TotalEntries);
+                    Assert.True(File.Exists(Path.Combine(extracted, "meshes", "armor_0.nif")));
+                    Assert.True(File.Exists(Path.Combine(extracted, "textures", "armor_0.dds")));
+                }
+                finally
+                {
+                    if (Directory.Exists(extracted))
+                    {
+                        Directory.Delete(extracted, recursive: true);
+                    }
+                }
             }
             finally
             {

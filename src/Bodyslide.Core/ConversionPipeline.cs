@@ -10453,7 +10453,7 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = ZipFile.OpenRead(archivePath);
-        var totalEntries = archive.Entries.Count;
+        var totalEntries = archive.Entries.Count();
         var processedEntries = 0;
         foreach (var entry in archive.Entries)
         {
@@ -10510,7 +10510,7 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
-        var totalEntries = archive.Entries.Count;
+        var totalEntries = archive.Entries.Count();
         var processedEntries = 0;
         foreach (var entry in archive.Entries)
         {
