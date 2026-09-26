@@ -153,4 +153,28 @@ public sealed class DesktopUiSettingsStoreTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void Save_RecoversFromStaleLockFile()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+
+        try
+        {
+            var settingsPath = Path.Combine(workingDirectory, "ui-settings.json");
+            var existingProfile = Path.Combine(workingDirectory, "custom-profile.json");
+            File.WriteAllText(existingProfile, "{ }");
+            File.WriteAllText($"{settingsPath}.lock", string.Empty);
+
+            DesktopUiSettingsStore.Save(settingsPath, new DesktopUiSettings("Dark", [existingProfile]));
+
+            Assert.True(File.Exists(settingsPath));
+            Assert.False(File.Exists($"{settingsPath}.lock"));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }

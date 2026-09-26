@@ -146,7 +146,24 @@ public static class DesktopUiSettingsStore
         {
             try
             {
-                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (File.Exists(lockPath))
+            {
+                try
+                {
+                    using var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                    File.Delete(lockPath);
+                    continue;
+                }
+                catch (IOException) when (attempt < maxAttempts)
+                {
+                    Thread.Sleep(retryDelayMilliseconds);
+                }
+                catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+                {
+                    Thread.Sleep(retryDelayMilliseconds);
+                }
             }
             catch (IOException) when (attempt < maxAttempts)
             {
