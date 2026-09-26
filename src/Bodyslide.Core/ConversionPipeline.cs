@@ -7886,7 +7886,49 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
 
         if (ArchiveExtractionHelper.IsSupportedArchive(request.InputPath))
         {
-            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(request.InputPath, "bodyslide-batch-extract", cancellationToken);
+            var archiveLabel = Path.GetFileName(request.InputPath);
+            progress?.Report(new BatchProgressUpdate(
+                Completed: 0,
+                Total: 1,
+                CurrentFile: archiveLabel,
+                Success: false,
+                Stage: "Extracting archive",
+                StageIndex: 1,
+                StageCount: 3,
+                IsItemCompleted: false));
+            var extractedArchive = ArchiveExtractionHelper.ExtractToTemporaryWorkspace(
+                request.InputPath,
+                "bodyslide-batch-extract",
+                cancellationToken,
+                extractionProgress =>
+                {
+                    if (extractionProgress.ProcessedEntries % 25 != 0 && extractionProgress.TotalEntries is not null)
+                    {
+                        return;
+                    }
+
+                    var progressSuffix = extractionProgress.TotalEntries is int totalEntries
+                        ? $"{extractionProgress.ProcessedEntries}/{Math.Max(1, totalEntries)}"
+                        : extractionProgress.ProcessedEntries.ToString(CultureInfo.InvariantCulture);
+                    progress?.Report(new BatchProgressUpdate(
+                        Completed: 0,
+                        Total: 1,
+                        CurrentFile: archiveLabel,
+                        Success: false,
+                        Stage: $"Extracting archive ({progressSuffix} entries)",
+                        StageIndex: 1,
+                        StageCount: 3,
+                        IsItemCompleted: false));
+                });
+            progress?.Report(new BatchProgressUpdate(
+                Completed: 0,
+                Total: 1,
+                CurrentFile: archiveLabel,
+                Success: false,
+                Stage: "Scanning extracted archive",
+                StageIndex: 2,
+                StageCount: 3,
+                IsItemCompleted: false));
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -10332,6 +10374,8 @@ internal sealed class LocalArmorImportService : IArmorImportService
 
 internal static class ArchiveExtractionHelper
 {
+    public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry);
+
     private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
 
     public static bool IsSupportedArchive(string path)
@@ -10348,34 +10392,39 @@ internal static class ArchiveExtractionHelper
     public static string ExtractToTemporaryWorkspace(
         string archivePath,
         string tempFolderPrefix,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<ArchiveExtractionProgress>? onProgress = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var tempDirectory = Path.Combine(Path.GetTempPath(), tempFolderPrefix, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
-        ExtractArchive(archivePath, tempDirectory, cancellationToken);
+        ExtractArchive(archivePath, tempDirectory, cancellationToken, onProgress);
         return tempDirectory;
     }
 
-    private static void ExtractArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
+    private static void ExtractArchive(
+        string archivePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken,
+        Action<ArchiveExtractionProgress>? onProgress)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (archivePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractZipArchive(archivePath, destinationDirectory, cancellationToken);
+            ExtractZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress);
             return;
         }
 
         if (archivePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
         {
-            ExtractSevenZipArchive(archivePath, destinationDirectory, cancellationToken);
+            ExtractSevenZipArchive(archivePath, destinationDirectory, cancellationToken, onProgress);
             return;
         }
 
         if (archivePath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
         {
             using var archiveStream = File.OpenRead(archivePath);
-            ExtractTarArchive(archiveStream, destinationDirectory, cancellationToken);
+            ExtractTarArchive(archiveStream, destinationDirectory, cancellationToken, onProgress);
             return;
         }
 
@@ -10384,14 +10433,18 @@ internal static class ArchiveExtractionHelper
         {
             using var archiveStream = File.OpenRead(archivePath);
             using var gzipStream = new GZipStream(archiveStream, CompressionMode.Decompress);
-            ExtractTarArchive(gzipStream, destinationDirectory, cancellationToken);
+            ExtractTarArchive(gzipStream, destinationDirectory, cancellationToken, onProgress);
             return;
         }
 
         throw new NotSupportedException($"Unsupported archive format: {archivePath}");
     }
 
-    private static void ExtractZipArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
+    private static void ExtractZipArchive(
+        string archivePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken,
+        Action<ArchiveExtractionProgress>? onProgress)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -10400,6 +10453,8 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = ZipFile.OpenRead(archivePath);
+        var totalEntries = archive.Entries.Count;
+        var processedEntries = 0;
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10423,6 +10478,8 @@ internal static class ArchiveExtractionHelper
             if (isDirectory)
             {
                 Directory.CreateDirectory(destinationPath);
+                processedEntries++;
+                onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
                 continue;
             }
 
@@ -10432,11 +10489,19 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            entry.ExtractToFile(destinationPath, overwrite: true);
+            using var entryStream = entry.Open();
+            using var outputStream = File.Create(destinationPath);
+            CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
+            processedEntries++;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
         }
     }
 
-    private static void ExtractSevenZipArchive(string archivePath, string destinationDirectory, CancellationToken cancellationToken)
+    private static void ExtractSevenZipArchive(
+        string archivePath,
+        string destinationDirectory,
+        CancellationToken cancellationToken,
+        Action<ArchiveExtractionProgress>? onProgress)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -10445,6 +10510,8 @@ internal static class ArchiveExtractionHelper
         }
 
         using var archive = SevenZipArchive.OpenArchive(archivePath, new ReaderOptions());
+        var totalEntries = archive.Entries.Count;
+        var processedEntries = 0;
         foreach (var entry in archive.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10470,7 +10537,9 @@ internal static class ArchiveExtractionHelper
 
             using var entryStream = entry.OpenEntryStream();
             using var outputStream = File.Create(destinationPath);
-            entryStream.CopyTo(outputStream);
+            CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
+            processedEntries++;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.Key));
 
             if (entry.LastModifiedTime is { } lastModified)
             {
@@ -10479,7 +10548,11 @@ internal static class ArchiveExtractionHelper
         }
     }
 
-    private static void ExtractTarArchive(Stream tarStream, string destinationDirectory, CancellationToken cancellationToken)
+    private static void ExtractTarArchive(
+        Stream tarStream,
+        string destinationDirectory,
+        CancellationToken cancellationToken,
+        Action<ArchiveExtractionProgress>? onProgress)
     {
         var destinationRoot = Path.GetFullPath(destinationDirectory);
         if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
@@ -10489,6 +10562,7 @@ internal static class ArchiveExtractionHelper
 
         using var reader = new TarReader(tarStream, leaveOpen: true);
         TarEntry? entry;
+        var processedEntries = 0;
         while ((entry = reader.GetNextEntry()) is not null)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10509,6 +10583,8 @@ internal static class ArchiveExtractionHelper
             if (entry.EntryType is TarEntryType.Directory or TarEntryType.DirectoryList)
             {
                 Directory.CreateDirectory(destinationPath);
+                processedEntries++;
+                onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
                 continue;
             }
 
@@ -10526,10 +10602,28 @@ internal static class ArchiveExtractionHelper
             using var outputStream = File.Create(destinationPath);
             if (entry.DataStream is { } entryStream)
             {
-                entryStream.CopyTo(outputStream);
+                CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
             }
+            processedEntries++;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
 
             File.SetLastWriteTimeUtc(destinationPath, entry.ModificationTime.UtcDateTime);
+        }
+    }
+
+    private static void CopyStreamWithCancellation(Stream input, Stream output, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[81920];
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = input.Read(buffer, 0, buffer.Length);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            output.Write(buffer, 0, read);
         }
     }
 }
