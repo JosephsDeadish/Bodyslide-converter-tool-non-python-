@@ -11,6 +11,7 @@ using SharpCompress.Writers.SevenZip;
 
 namespace Bodyslide.Core.Tests;
 
+[Collection("NonParallel")]
 public sealed class ConversionOrchestratorTests
 {
     [Fact]
