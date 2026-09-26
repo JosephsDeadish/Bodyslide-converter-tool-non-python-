@@ -149,11 +149,10 @@ jobs:
           Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
-          Copy-Item README.md (Join-Path $bundleRoot "README.md") -Force
           $bundleMetadata = [ordered]@{
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
-            readme = "README.md"
+            readme = "README.txt"
             fomodModuleConfig = "fomod/ModuleConfig.xml"
             fomodInfo = "fomod/info.xml"
             modOrganizerMetadata = "meta.ini"
@@ -179,8 +178,8 @@ jobs:
           if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
             throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
           }
-          if (!(Test-Path (Join-Path $extractPath "README.md"))) {
-            throw "Missing README.md in bundle zip."
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
           }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
@@ -206,7 +205,7 @@ jobs:
             |---|---|
             | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
             | `SlideSmith-CLI.exe` | Windows command-line tool |
-            | `slidesmith-win-x64-bundle.zip` | Windows bundle with `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, and `meta/slidesmith-bundle.json` |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, and `meta/slidesmith-bundle.json` |
             | `slidesmith-linux-x64.zip` | Linux CLI binary |
 
             **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
@@ -294,11 +293,10 @@ jobs:
           Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
           Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
           Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
-          Copy-Item README.md (Join-Path $bundleRoot "README.md") -Force
           $bundleMetadata = [ordered]@{
             desktop = "desktop/SlideSmith.exe"
             cli = "cli/SlideSmith-CLI.exe"
-            readme = "README.md"
+            readme = "README.txt"
             fomodModuleConfig = "fomod/ModuleConfig.xml"
             fomodInfo = "fomod/info.xml"
             modOrganizerMetadata = "meta.ini"
@@ -324,8 +322,8 @@ jobs:
           if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
             throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
           }
-          if (!(Test-Path (Join-Path $extractPath "README.md"))) {
-            throw "Missing README.md in bundle zip."
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
           }
           if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
             throw "Missing meta/slidesmith-bundle.json in bundle zip."
@@ -341,7 +339,7 @@ jobs:
           }
 
           $moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
-          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="README.md"', 'source="meta.ini"')) {
+          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="README.txt"', 'source="meta.ini"')) {
             if ($moduleConfig -notmatch [regex]::Escape($requiredEntry)) {
               throw "Bundle FOMOD metadata is missing installer entry $requiredEntry."
             }

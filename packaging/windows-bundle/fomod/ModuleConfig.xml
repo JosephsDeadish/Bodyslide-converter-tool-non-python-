@@ -12,7 +12,7 @@
                 <folder source="desktop" destination="desktop" priority="0" />
                 <folder source="cli" destination="cli" priority="0" />
                 <folder source="meta" destination="meta" priority="0" />
-                <file source="README.md" destination="README.md" priority="0" />
+                <file source="README.txt" destination="README.txt" priority="0" />
                 <file source="meta.ini" destination="meta.ini" priority="0" />
               </files>
               <conditionFlags />

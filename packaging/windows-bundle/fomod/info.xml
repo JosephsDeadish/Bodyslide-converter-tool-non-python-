@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <fomod>
   <Name>SlideSmith Windows Bundle</Name>
-  <Author>SlideSmith</Author>
+  <Author>DeadOnTheInside</Author>
   <Version MachineVersion="1.0">1.0</Version>
   <Website></Website>
   <Description>Auto-generated Windows bundle metadata for SlideSmith. Install with Mod Organizer 2 or Vortex so the desktop GUI, CLI, readme, and bundle metadata stay together in one managed mod folder.</Description>
