@@ -10374,7 +10374,8 @@ internal static class ArchiveExtractionHelper
 
         if (archivePath.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
         {
-            TarFile.ExtractToDirectory(archivePath, destinationDirectory, overwriteFiles: true);
+            using var archiveStream = File.OpenRead(archivePath);
+            ExtractTarArchive(archiveStream, destinationDirectory, cancellationToken);
             return;
         }
 
@@ -10383,7 +10384,7 @@ internal static class ArchiveExtractionHelper
         {
             using var archiveStream = File.OpenRead(archivePath);
             using var gzipStream = new GZipStream(archiveStream, CompressionMode.Decompress);
-            TarFile.ExtractToDirectory(gzipStream, destinationDirectory, overwriteFiles: true);
+            ExtractTarArchive(gzipStream, destinationDirectory, cancellationToken);
             return;
         }
 
@@ -10475,6 +10476,60 @@ internal static class ArchiveExtractionHelper
             {
                 File.SetLastWriteTimeUtc(destinationPath, lastModified.ToUniversalTime());
             }
+        }
+    }
+
+    private static void ExtractTarArchive(Stream tarStream, string destinationDirectory, CancellationToken cancellationToken)
+    {
+        var destinationRoot = Path.GetFullPath(destinationDirectory);
+        if (!destinationRoot.EndsWith(Path.DirectorySeparatorChar))
+        {
+            destinationRoot += Path.DirectorySeparatorChar;
+        }
+
+        using var reader = new TarReader(tarStream, leaveOpen: true);
+        TarEntry? entry;
+        while ((entry = reader.GetNextEntry()) is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.Name))
+            {
+                continue;
+            }
+
+            var normalizedKey = entry.Name.Replace('\\', Path.DirectorySeparatorChar);
+            normalizedKey = normalizedKey.Replace('/', Path.DirectorySeparatorChar);
+
+            var destinationPath = Path.GetFullPath(Path.Combine(destinationDirectory, normalizedKey));
+            if (!destinationPath.StartsWith(destinationRoot, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Archive entry escapes extraction root: {entry.Name}");
+            }
+
+            if (entry.EntryType is TarEntryType.Directory or TarEntryType.DirectoryList)
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            if (entry.EntryType is TarEntryType.SymbolicLink or TarEntryType.HardLink)
+            {
+                throw new InvalidDataException($"Unsupported tar link entry: {entry.Name}");
+            }
+
+            var destinationParent = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationParent))
+            {
+                Directory.CreateDirectory(destinationParent);
+            }
+
+            using var outputStream = File.Create(destinationPath);
+            if (entry.DataStream is { } entryStream)
+            {
+                entryStream.CopyTo(outputStream);
+            }
+
+            File.SetLastWriteTimeUtc(destinationPath, entry.ModificationTime.UtcDateTime);
         }
     }
 }

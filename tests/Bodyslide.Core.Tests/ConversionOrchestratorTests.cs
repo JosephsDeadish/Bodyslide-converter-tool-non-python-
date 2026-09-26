@@ -5872,8 +5872,12 @@ public sealed class ConversionOrchestratorTests
             Assert.Equal(3, results.Count);
             Assert.All(results, r => Assert.True(r.Success));
 
-            // Progress events were reported — one per NIF.
-            Assert.Equal(3, progressEvents.Count(p => p.Total == 3));
+            // Progress completion events were reported — one per NIF.
+            var completedEvents = progressEvents
+                .Where(p => p.IsItemCompleted && p.Total == 3)
+                .ToList();
+            Assert.Equal(3, completedEvents.Count);
+            Assert.Equal(3, completedEvents.Select(p => p.CurrentFile).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         }
         finally
         {
