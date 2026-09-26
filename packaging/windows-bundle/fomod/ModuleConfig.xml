@@ -4,7 +4,7 @@
   <installSteps order="Explicit">
     <installStep name="Install SlideSmith">
       <optionalFileGroups order="Explicit">
-        <group name="Bundle">
+        <group name="Bundle" type="SelectExactlyOne">
           <plugins order="Explicit">
             <plugin name="Desktop + CLI">
               <description>Installs the SlideSmith desktop GUI and CLI into this managed mod folder for Mod Organizer 2 or Vortex. After installation, point your mod manager executable entry at desktop/SlideSmith.exe or cli/SlideSmith-CLI.exe inside the installed SlideSmith bundle.</description>

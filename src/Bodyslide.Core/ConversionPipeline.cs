@@ -30885,7 +30885,7 @@ internal sealed class LocalExportService(
               <installSteps order="Explicit">
                 <installStep name="Target Body">
                   <optionalFileGroups order="Explicit">
-                    <group name="Body">
+                    <group name="Body" type="SelectExactlyOne">
                       <plugins order="Explicit">
                         <plugin name="{{safeTargetBody}}">
                           <description>{{installDescription}}</description>

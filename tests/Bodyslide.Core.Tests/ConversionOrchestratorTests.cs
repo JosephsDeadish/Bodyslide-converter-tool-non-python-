@@ -1465,6 +1465,7 @@ public sealed class ConversionOrchestratorTests
             var moduleConfig = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"));
             Assert.Contains("TestArmor_patched.esm", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("TestArmor_SlidesmithPatch.esp", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<group name=\"Body\" type=\"SelectExactlyOne\">", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("README.txt", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("patch-armor.pas", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("conversion-quality.json", moduleConfig, StringComparison.Ordinal);
