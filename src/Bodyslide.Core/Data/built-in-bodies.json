@@ -1,0 +1,3209 @@
+[
+  {
+    "name": "CBBE",
+    "aliases": [
+      "Caliente's Beautiful Bodies Enhancer",
+      "CBBE Curvy",
+      "CBBE Slim",
+      "Shiva CBBE"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Baseline female body with predictable topology and broad armor support. No built-in physics by default; add cbpc or smp+cbpc via the Physics override to enable soft-body bones.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "femalebody_0",
+      "femalebody_1"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 0.96,
+      "pelvis": 1.05,
+      "legs": 1.03,
+      "shoulders": 1.01,
+      "breasts": 1.09,
+      "butt": 1.06,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.04,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "cbbe",
+      "caliente"
+    ],
+    "textureTokens": [
+      "femalebody_1",
+      "femalebody_0"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 6800,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.2,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.8,
+    "physicsBoneSignatures": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbbe",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "3BA",
+    "aliases": [
+      "3BBB",
+      "3BBB Amazing",
+      "CBBE 3BA",
+      "CBBE 3BBB"
+    ],
+    "gender": "female",
+    "defaultPhysics": "smp+cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "CBBE topology with extended soft-body physics weighting. SMP+CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "3ba",
+      "3bbb"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.12,
+      "waist": 0.95,
+      "pelvis": 1.06,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 1.13,
+      "butt": 1.08,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "3ba",
+      "cbbe",
+      "bodyslide"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [
+      "smp",
+      "cbpc",
+      "3bbb"
+    ],
+    "vertexCountMin": 9800,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.0,
+    "depthToWidthRatioMin": 0.33,
+    "depthToWidthRatioMax": 0.85,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC Belly01",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "BHUNP",
+    "aliases": [
+      "BHUNP 3BBB",
+      "UNP Special",
+      "UUNP Special"
+    ],
+    "gender": "female",
+    "defaultPhysics": "smp+cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "UUNP-family topology with broad regional weight painting and advanced physics. SMP+CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "bhunp",
+      "uunp special"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 0.94,
+      "pelvis": 1.07,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 1.11,
+      "butt": 1.07,
+      "belly": 1.03,
+      "arms": 1.01,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "bhunp"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 9800,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.0,
+    "depthToWidthRatioMin": 0.33,
+    "depthToWidthRatioMax": 0.85,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC LBreast01",
+      "NPC RBreast01",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "UNP",
+    "aliases": [],
+    "gender": "female",
+    "defaultPhysics": "cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Legacy female body family with lighter physics chain requirements. CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "unp",
+      "unpb"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 1.04,
+      "waist": 0.97,
+      "pelvis": 1.02,
+      "legs": 1.01,
+      "shoulders": 1.0,
+      "breasts": 1.04,
+      "butt": 1.02,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.02,
+      "calves": 1.01
+    },
+    "detectionTokens": [
+      "unp",
+      "unpb"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 5900,
+    "vertexCountMax": 6200,
+    "heightToWidthRatioMin": 4.3,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.75,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "UNPB",
+    "aliases": [
+      "UNP Blessed",
+      "PB",
+      "PB body",
+      "Blessed Body"
+    ],
+    "gender": "female",
+    "defaultPhysics": "cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "UNP Blessed variant with fuller UNP-family proportions and broader regional slider support. CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "unpb",
+      "unp blessed"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.95,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.0,
+      "breasts": 1.07,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "unpb",
+      "unp blessed"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "unpb"
+    ],
+    "physicsTokens": [
+      "cbpc",
+      "unpb"
+    ],
+    "vertexCountMin": 6200,
+    "vertexCountMax": 6800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.29,
+    "depthToWidthRatioMax": 0.78,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "UUNP",
+    "aliases": [
+      "Unified UNP",
+      "7Base",
+      "UN7B",
+      "7B Oppai",
+      "7BO",
+      "7Base Oppai",
+      "SevenBase Oppai",
+      "Wench Body 7B Oppai",
+      "7B Bombshell",
+      "SevenBase Bombshell",
+      "Shiva UUNP"
+    ],
+    "gender": "female",
+    "defaultPhysics": "cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Unified UNP BodySlide ecosystem with broader slider coverage than classic UNP while keeping XPMSSE-compatible weighting. CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "uunp",
+      "7base",
+      "un7b"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 0.95,
+      "pelvis": 1.05,
+      "legs": 1.03,
+      "shoulders": 1.01,
+      "breasts": 1.09,
+      "butt": 1.06,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.04,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "uunp",
+      "un7b",
+      "7base"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "uunp"
+    ],
+    "physicsTokens": [
+      "uunp",
+      "7base"
+    ],
+    "vertexCountMin": 8200,
+    "vertexCountMax": 9800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.82,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "COCO CBBE",
+    "aliases": [
+      "COCOBody CBBE",
+      "COCO Body CBBE",
+      "COCO CBBE 3BBB"
+    ],
+    "gender": "female",
+    "defaultPhysics": "smp+cbpc",
+    "skeletonFoundation": "XPMSSE + COCO weighting",
+    "notes": "COCO variant built on a CBBE-style body family with custom topology and heavier physics weighting. SMP+CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "coco",
+      "cocobody",
+      "cbbe"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.11,
+      "waist": 0.94,
+      "pelvis": 1.07,
+      "legs": 1.04,
+      "shoulders": 1.02,
+      "breasts": 1.12,
+      "butt": 1.09,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "coco",
+      "cbbe"
+    ],
+    "textureTokens": [
+      "coco",
+      "cbbe"
+    ],
+    "physicsTokens": [
+      "coco",
+      "cbpc",
+      "smp"
+    ],
+    "vertexCountMin": 9000,
+    "vertexCountMax": 10400,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.84,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "COCO UUNP",
+    "aliases": [
+      "COCOBody UUNP",
+      "COCO Body UUNP",
+      "COCO 7Base"
+    ],
+    "gender": "female",
+    "defaultPhysics": "smp+cbpc",
+    "skeletonFoundation": "XPMSSE + COCO weighting",
+    "notes": "COCO variant built on a UUNP-style body family with custom topology and broader regional weight painting. SMP+CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "referenceTokens": [
+      "coco",
+      "cocobody",
+      "uunp",
+      "7base"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "Arms",
+      "Shoulders",
+      "NarrowWaist",
+      "BreastsPhysics",
+      "ButtPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 0.94,
+      "pelvis": 1.08,
+      "legs": 1.04,
+      "shoulders": 1.02,
+      "breasts": 1.11,
+      "butt": 1.08,
+      "belly": 1.03,
+      "arms": 1.02,
+      "thighs": 1.05,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "coco",
+      "uunp",
+      "7base"
+    ],
+    "textureTokens": [
+      "coco",
+      "uunp"
+    ],
+    "physicsTokens": [
+      "coco",
+      "cbpc",
+      "smp",
+      "7base"
+    ],
+    "vertexCountMin": 9400,
+    "vertexCountMax": 10800,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.3,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.84,
+    "physicsBoneSignatures": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "NPC L Thigh",
+      "NPC R Thigh"
+    ],
+    "skeletonFramework": "xpmsse-female-advanced",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt",
+      "thighs"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "TBD",
+    "aliases": [
+      "Touched By Dibella",
+      "The Body Deluxe",
+      "Shiva TBD"
+    ],
+    "gender": "female",
+    "defaultPhysics": "cbpc",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Female body variant commonly used with CBPC-style setups. CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "referenceTokens": [
+      "tbd",
+      "touched by dibella"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "BreastsSmall",
+      "BreastsLarge",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.96,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.0,
+      "breasts": 1.07,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "tbd"
+    ],
+    "textureTokens": [
+      "femalebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 7400,
+    "vertexCountMax": 7900,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.2,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.82,
+    "physicsBoneSignatures": [
+      "TBD Breast",
+      "NPC Belly01",
+      "NPC L Butt"
+    ],
+    "skeletonFramework": "xpmsse-female-cbpc",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "butt"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "HIMBO",
+    "aliases": [
+      "Highly Improved Male Body Overhaul",
+      "HIMBO Body"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Modern male body with pec-driven physics. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "NPC L Lat",
+      "NPC R Lat",
+      "SAM Genitals",
+      "SAM Foreskin"
+    ],
+    "referenceTokens": [
+      "himbo"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Belly",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.1,
+      "waist": 1.02,
+      "pelvis": 1.04,
+      "legs": 1.06,
+      "shoulders": 1.12,
+      "breasts": 1.08,
+      "butt": 1.05,
+      "belly": 1.03,
+      "arms": 1.1,
+      "thighs": 1.07,
+      "calves": 1.05
+    },
+    "detectionTokens": [
+      "himbo",
+      "male"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 6600,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC LPec",
+      "NPC RPec"
+    ],
+    "skeletonFramework": "xpmsse-male-smp",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "SAM",
+    "aliases": [
+      "Shape Atlas for Men"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Male body ecosystem with custom shape presets and SMP support. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "NPC L Lat",
+      "NPC R Lat"
+    ],
+    "referenceTokens": [
+      "shapeatlasformen"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Belly",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.08,
+      "waist": 1.01,
+      "pelvis": 1.03,
+      "legs": 1.05,
+      "shoulders": 1.1,
+      "breasts": 1.05,
+      "butt": 1.04,
+      "belly": 1.02,
+      "arms": 1.08,
+      "thighs": 1.06,
+      "calves": 1.04
+    },
+    "detectionTokens": [
+      "sam"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 5800,
+    "vertexCountMax": 6200,
+    "heightToWidthRatioMin": 3.3,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "SOS GenitalsBase",
+      "SAM Genitals",
+      "SAM Foreskin",
+      "NPC L Breast01"
+    ],
+    "skeletonFramework": "sam-light",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "SAM Light",
+    "aliases": [
+      "SAMLight",
+      "SAM Lite",
+      "Shape Atlas Light"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Lightweight SAM-family male body with leaner proportions and the same custom skeleton ecosystem. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "SAM Genitals",
+      "SAM Foreskin",
+      "HDT Mouth"
+    ],
+    "referenceTokens": [
+      "sam light",
+      "samlight"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Belly",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.05,
+      "waist": 1.0,
+      "pelvis": 1.02,
+      "legs": 1.04,
+      "shoulders": 1.07,
+      "breasts": 1.03,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 1.05,
+      "thighs": 1.04,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "sam light",
+      "samlight"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [
+      "smp"
+    ],
+    "vertexCountMin": 5400,
+    "vertexCountMax": 5900,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.31,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "SAM Genitals",
+      "SAM Foreskin",
+      "NPC L Pec",
+      "NPC R Pec"
+    ],
+    "skeletonFramework": "sam-light",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals",
+      "mouth"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "SOS",
+    "aliases": [
+      "Schlongs of Skyrim",
+      "SOS Light",
+      "Schlongs of Skyrim Full"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "XPMSSE",
+    "notes": "Male body setup with genital bone support layered on XPMSSE. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "SOS GenitalsBase",
+      "SOS Genitals01",
+      "SOS Genitals02",
+      "SOS Foreskin",
+      "SOS Shaft",
+      "SOS Glans",
+      "SOS Scrotum"
+    ],
+    "referenceTokens": [
+      "schlongs",
+      "schlongsofskyrim"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Belly",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.05,
+      "waist": 1.0,
+      "pelvis": 1.02,
+      "legs": 1.04,
+      "shoulders": 1.06,
+      "breasts": 1.03,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 1.05,
+      "thighs": 1.04,
+      "calves": 1.03
+    },
+    "detectionTokens": [
+      "sos",
+      "soslight"
+    ],
+    "textureTokens": [
+      "malebody"
+    ],
+    "physicsTokens": [
+      "smp"
+    ],
+    "vertexCountMin": 6100,
+    "vertexCountMax": 6500,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.8,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "SOS GenitalsBase",
+      "SOS Genitals01",
+      "SOS Genitals02",
+      "SOS Foreskin",
+      "SOS Shaft",
+      "SOS Glans",
+      "SOS Scrotum"
+    ],
+    "skeletonFramework": "xpmsse-male-smp",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "UBE",
+    "aliases": [
+      "Ultimate Body Enhancer",
+      "UBE Body",
+      "UBE 2",
+      "Ultimate Body Enhancer 2"
+    ],
+    "gender": "female",
+    "defaultPhysics": "smp+cbpc",
+    "skeletonFoundation": "XPMSSE + custom UBE bones",
+    "notes": "High-detail framework; semantic soft-body mapping preferred over strict name-only mapping. SMP+CBPC enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Breast",
+      "NPC R Breast",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC L Breast02",
+      "NPC R Breast02",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt",
+      "BreastUpper",
+      "BreastLower",
+      "BreastOuter",
+      "BreastInner",
+      "ButtUpper",
+      "ButtLower",
+      "BellyLower",
+      "Vagina",
+      "VaginaDeep",
+      "Labia.L",
+      "Labia.R",
+      "Anus",
+      "AnusOuter",
+      "HDT Mouth",
+      "HDT Jaw",
+      "HDT JawLower",
+      "HDT JawUpper",
+      "HDT Tongue",
+      "HDT TongueMid",
+      "HDT TongueTip",
+      "HDT Throat",
+      "HDT ThroatLower"
+    ],
+    "referenceTokens": [
+      "ube",
+      "ubebody",
+      "ultimatebodyenhancer"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "BreastsShape",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "BreastsPhysics",
+      "ButtPhysics",
+      "BellyPhysics"
+    ],
+    "transformationField": {
+      "chest": 1.06,
+      "waist": 0.97,
+      "pelvis": 1.03,
+      "legs": 1.02,
+      "shoulders": 1.01,
+      "breasts": 1.06,
+      "butt": 1.03,
+      "belly": 1.02,
+      "arms": 1.01,
+      "thighs": 1.03,
+      "calves": 1.02
+    },
+    "detectionTokens": [
+      "ube",
+      "ubebody",
+      "ultimatebodyenhancer"
+    ],
+    "textureTokens": [
+      "ube",
+      "ubebody"
+    ],
+    "physicsTokens": [
+      "smp",
+      "cbpc",
+      "breastupper",
+      "breastouter",
+      "buttupper"
+    ],
+    "vertexCountMin": 6800,
+    "vertexCountMax": 7200,
+    "heightToWidthRatioMin": 4.3,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.3,
+    "depthToWidthRatioMax": 0.8,
+    "physicsBoneSignatures": [
+      "BreastUpper",
+      "BreastLower",
+      "BreastOuter",
+      "BreastInner",
+      "ButtUpper",
+      "ButtLower",
+      "BellyLower",
+      "Vagina",
+      "VaginaDeep",
+      "Labia.L",
+      "Labia.R",
+      "Anus",
+      "AnusOuter",
+      "HDT Mouth",
+      "HDT Jaw",
+      "HDT JawLower",
+      "HDT JawUpper",
+      "HDT Tongue",
+      "HDT TongueMid",
+      "HDT TongueTip",
+      "HDT Throat",
+      "HDT ThroatLower",
+      "NPC L Breast01",
+      "NPC R Breast01",
+      "NPC Belly",
+      "NPC L Butt",
+      "NPC R Butt"
+    ],
+    "skeletonFramework": "ube-extended",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "jaw",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "throat",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "breasts",
+      "butt",
+      "jaw",
+      "mouth",
+      "throat",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 9,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "TNG",
+    "aliases": [
+      "The New Gentleman",
+      "TNG Extended",
+      "TNGExtended",
+      "New Gentleman",
+      "The New Gentleman 2",
+      "TNG 2"
+    ],
+    "gender": "male",
+    "defaultPhysics": "smp",
+    "skeletonFoundation": "TNG Extended",
+    "notes": "Male body ecosystem with extended genital and scrotum bones layered on a broader XPMSSE-style male setup. SMP enabled by default.",
+    "availablePhysicsBones": [
+      "NPC L Pec",
+      "NPC R Pec",
+      "NPC Belly",
+      "TNG Genitals",
+      "TNG Foreskin",
+      "TNG Shaft",
+      "TNG Glans",
+      "TNG Balls",
+      "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
+      "HDT Throat"
+    ],
+    "referenceTokens": [
+      "tng",
+      "tngextended",
+      "newgentleman",
+      "the new gentleman",
+      "new gentleman"
+    ],
+    "sliderNames": [
+      "Body",
+      "Chest",
+      "Belly",
+      "Waist",
+      "Arms",
+      "Legs",
+      "Shoulders",
+      "Butt",
+      "Pecs",
+      "Thighs",
+      "Genitals"
+    ],
+    "transformationField": {
+      "chest": 1.09,
+      "waist": 1.01,
+      "pelvis": 1.04,
+      "legs": 1.05,
+      "shoulders": 1.11,
+      "breasts": 1.06,
+      "butt": 1.04,
+      "belly": 1.03,
+      "arms": 1.09,
+      "thighs": 1.06,
+      "calves": 1.04
+    },
+    "detectionTokens": [
+      "tng",
+      "tngextended",
+      "gentleman"
+    ],
+    "textureTokens": [
+      "malebody",
+      "tng"
+    ],
+    "physicsTokens": [
+      "tng",
+      "smp"
+    ],
+    "vertexCountMin": 6400,
+    "vertexCountMax": 6900,
+    "heightToWidthRatioMin": 3.2,
+    "heightToWidthRatioMax": 6.9,
+    "depthToWidthRatioMin": 0.32,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "TNG Genitals",
+      "TNG Foreskin",
+      "TNG Shaft",
+      "TNG Glans",
+      "TNG Balls",
+      "HDT Mouth",
+      "HDT Jaw",
+      "HDT Tongue",
+      "HDT TongueTip",
+      "HDT Throat",
+      "NPC L Pec",
+      "NPC R Pec"
+    ],
+    "skeletonFramework": "tng-extended",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "genitals",
+      "jaw",
+      "mouth",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "throat",
+      "tongue"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "genitals",
+      "jaw",
+      "mouth",
+      "throat",
+      "tongue"
+    ],
+    "minimumPhysicsSlotCount": 7,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Vanilla",
+    "aliases": [
+      "Vanilla Body",
+      "Skyrim Vanilla"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Vanilla Skyrim skeleton",
+    "notes": "Baseline Skyrim body data with minimal soft-body weighting. No built-in physics by default; physics override activates the belly bone.",
+    "availablePhysicsBones": [
+      "NPC Belly"
+    ],
+    "referenceTokens": [
+      "vanillafemale",
+      "vanillamale",
+      "vanilla"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 1.0,
+      "pelvis": 1.0,
+      "legs": 1.0,
+      "shoulders": 1.0,
+      "breasts": 1.0,
+      "butt": 1.0,
+      "belly": 1.0,
+      "arms": 1.0,
+      "thighs": 1.0,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "vanilla",
+      "femalebody",
+      "malebody"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "malebody"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 4000,
+    "vertexCountMax": 6100,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.9,
+    "physicsBoneSignatures": [],
+    "skeletonFramework": "vanilla-skyrim",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly"
+    ],
+    "minimumPhysicsSlotCount": 1,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "minimal"
+  },
+  {
+    "name": "Vanilla Beast",
+    "aliases": [
+      "Beast Vanilla",
+      "Khajiit Vanilla",
+      "Argonian Vanilla",
+      "Khajiit Body",
+      "Argonian Body",
+      "Saxhleel",
+      "Digitigrade Beast",
+      "Ohmes",
+      "Ohmes-Raht"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Beast-humanoid vanilla skeleton",
+    "notes": "Vanilla-aligned beast-race body target for Khajiit and Argonian armor paths, with tail-friendly skeleton expectations. No built-in physics by default.",
+    "availablePhysicsBones": [
+      "NPC Tail",
+      "NPC Belly",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4"
+    ],
+    "referenceTokens": [
+      "beast",
+      "khajiit",
+      "argonian",
+      "tail",
+      "saxhleel",
+      "ohmes"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "TailBase"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 1.0,
+      "pelvis": 1.01,
+      "legs": 1.0,
+      "shoulders": 1.0,
+      "breasts": 1.0,
+      "butt": 1.01,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.01,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "beast",
+      "khajiit",
+      "argonian",
+      "tail",
+      "saxhleel",
+      "ohmes",
+      "reptile",
+      "digitigrade"
+    ],
+    "textureTokens": [
+      "femalebody",
+      "malebody",
+      "tail",
+      "khajiit",
+      "argonian",
+      "scales",
+      "fur",
+      "wolf",
+      "fox"
+    ],
+    "physicsTokens": [],
+    "vertexCountMin": 4000,
+    "vertexCountMax": 6400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3"
+    ],
+    "skeletonFramework": "beast-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "minimal"
+  },
+  {
+    "name": "Serpentine Humanoid",
+    "aliases": [
+      "Lamia",
+      "Naga",
+      "Nagakin",
+      "Snakefolk",
+      "Serpentfolk",
+      "Half-Serpent",
+      "Coilborn"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Serpentine beast-humanoid skeleton",
+    "notes": "Humanoid serpent target for lamia, naga, and snakefolk ecosystems with strong tail and lower-body scaling expectations. No built-in physics by default; tail coil weighting, hip-to-tail seam placement, and ground contact should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "CoilRoot",
+      "CoilMid",
+      "CoilTip"
+    ],
+    "referenceTokens": [
+      "lamia",
+      "naga",
+      "nagakin",
+      "snake",
+      "serpent",
+      "serpentine",
+      "tail",
+      "coil"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "TailBase",
+      "TailLength",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 0.92,
+      "pelvis": 1.06,
+      "legs": 0.95,
+      "shoulders": 1.01,
+      "breasts": 0.99,
+      "butt": 1.05,
+      "belly": 1.02,
+      "arms": 1.0,
+      "thighs": 0.96,
+      "calves": 0.94
+    },
+    "detectionTokens": [
+      "lamia",
+      "naga",
+      "nagakin",
+      "snake",
+      "serpent",
+      "serpentine",
+      "tail",
+      "coil",
+      "cobra",
+      "viper"
+    ],
+    "textureTokens": [
+      "snake",
+      "serpent",
+      "scale",
+      "scales",
+      "tail",
+      "coil"
+    ],
+    "physicsTokens": [
+      "tail",
+      "coil"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 3.9,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "CoilTip"
+    ],
+    "skeletonFramework": "serpentine-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Goat Humanoid",
+    "aliases": [
+      "Goatkin",
+      "Goat Folk",
+      "Goat Reborn",
+      "Namira's Goat Reborn",
+      "Faun",
+      "Caprine",
+      "Cloven Hoof"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Horned beast-humanoid skeleton",
+    "notes": "Humanoid goat or satyr-style target for horned creature body mods, with tail-friendly proportions and hoof-aware lower-body scaling. No built-in physics by default; horn, tail, and digitigrade leg weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Horn.L",
+      "Horn.R",
+      "GoatHorn.L",
+      "GoatHorn.R",
+      "Hock.L",
+      "Hock.R"
+    ],
+    "referenceTokens": [
+      "goat",
+      "goatkin",
+      "satyr",
+      "hoof",
+      "horn",
+      "faun",
+      "caprine",
+      "cloven"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase"
+    ],
+    "transformationField": {
+      "chest": 0.98,
+      "waist": 0.97,
+      "pelvis": 1.03,
+      "legs": 1.05,
+      "shoulders": 1.0,
+      "breasts": 0.97,
+      "butt": 1.01,
+      "belly": 1.0,
+      "arms": 0.99,
+      "thighs": 1.04,
+      "calves": 1.06
+    },
+    "detectionTokens": [
+      "goat",
+      "goatkin",
+      "satyr",
+      "hoof",
+      "horn",
+      "faun",
+      "caprine",
+      "cloven",
+      "ramhorn"
+    ],
+    "textureTokens": [
+      "goat",
+      "beast",
+      "hoof",
+      "tail"
+    ],
+    "physicsTokens": [
+      "tail",
+      "horn",
+      "hoof"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 6900,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.7,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.95,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Horn.L",
+      "Horn.R",
+      "Hock.L",
+      "Hock.R"
+    ],
+    "skeletonFramework": "horned-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "horn",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "feet",
+      "horn",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 1,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "Hagraven",
+    "aliases": [
+      "Hag Raven",
+      "Hagraven Humanoid",
+      "Raven Hag",
+      "Crow Witch",
+      "Feather Witch"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Winged creature-humanoid skeleton",
+    "notes": "Winged humanoid target for hagraven-style body and armor mods. No built-in physics by default; wing, claw, and skin or feather seam alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Wing.L",
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather.L",
+      "Feather.R"
+    ],
+    "referenceTokens": [
+      "hagraven",
+      "hag",
+      "wing",
+      "feather",
+      "claw"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "WingSpan"
+    ],
+    "transformationField": {
+      "chest": 0.95,
+      "waist": 0.93,
+      "pelvis": 1.0,
+      "legs": 0.99,
+      "shoulders": 1.07,
+      "breasts": 0.92,
+      "butt": 0.98,
+      "belly": 1.01,
+      "arms": 1.08,
+      "thighs": 0.99,
+      "calves": 0.97
+    },
+    "detectionTokens": [
+      "hagraven",
+      "hag",
+      "wing",
+      "feather",
+      "ravenhag",
+      "crowwitch"
+    ],
+    "textureTokens": [
+      "hagraven",
+      "wing",
+      "feather"
+    ],
+    "physicsTokens": [
+      "wing"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7200,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.4,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.92,
+    "physicsBoneSignatures": [
+      "Wing.L",
+      "Wing.R",
+      "WingTip.L",
+      "WingTip.R"
+    ],
+    "skeletonFramework": "winged-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Spriggan",
+    "aliases": [
+      "Spriggan Humanoid",
+      "Spriggan Body",
+      "Briarfolk",
+      "Rootfolk",
+      "Dryad",
+      "Nature Spirit",
+      "Treefolk",
+      "Verdant Spirit",
+      "Branchwarden"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Branch or vine creature-humanoid skeleton",
+    "notes": "Humanoid nature-creature target for spriggan-style bodies with narrow torsos and branch or leaf appendages. No built-in physics by default; bark, leaf, branch, and vine seam alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Branch.L",
+      "Branch.R",
+      "BranchMid.L",
+      "BranchMid.R",
+      "BranchTip.L",
+      "BranchTip.R",
+      "Vine.L",
+      "Vine.R",
+      "VineMid.L",
+      "VineMid.R",
+      "RootClaw.L",
+      "RootClaw.R",
+      "LeafFrond.L",
+      "LeafFrond.R"
+    ],
+    "referenceTokens": [
+      "spriggan",
+      "branch",
+      "vine",
+      "bark",
+      "leaf",
+      "tendril",
+      "briar"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "BranchSpread"
+    ],
+    "transformationField": {
+      "chest": 0.94,
+      "waist": 0.91,
+      "pelvis": 0.98,
+      "legs": 1.01,
+      "shoulders": 1.05,
+      "breasts": 0.9,
+      "butt": 0.97,
+      "belly": 1.0,
+      "arms": 1.06,
+      "thighs": 1.0,
+      "calves": 1.01
+    },
+    "detectionTokens": [
+      "spriggan",
+      "branch",
+      "vine",
+      "bark",
+      "leaf",
+      "tendril",
+      "root",
+      "briarfolk",
+      "rootfolk",
+      "dryad"
+    ],
+    "textureTokens": [
+      "spriggan",
+      "bark",
+      "leaf",
+      "vine",
+      "branch",
+      "root"
+    ],
+    "physicsTokens": [
+      "vine",
+      "branch",
+      "tendril"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.5,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.9,
+    "physicsBoneSignatures": [
+      "Branch.L",
+      "Branch.R",
+      "BranchMid.L",
+      "BranchMid.R",
+      "Vine.L",
+      "Vine.R",
+      "VineMid.L",
+      "VineMid.R",
+      "RootClaw.L",
+      "RootClaw.R"
+    ],
+    "skeletonFramework": "spriggan-branch",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "branch",
+      "breasts",
+      "butt",
+      "chest",
+      "pelvis",
+      "shoulders",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "branch"
+    ],
+    "minimumPhysicsSlotCount": 2,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Equine Humanoid",
+    "aliases": [
+      "Horse Follower",
+      "Centaur",
+      "Ponyfolk",
+      "Marekin",
+      "Horsefolk",
+      "Marefolk",
+      "Equus",
+      "Hooffolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Equine beast-humanoid skeleton",
+    "notes": "Humanoid equine target for centaur, mare, and horse-follower body ecosystems with extended tail, hock, and hoof expectations. No built-in physics by default; tail swing, hock weighting, and hoof contact still need in-game review.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "Hock.L",
+      "Hock.R",
+      "Hoof.L",
+      "Hoof.R",
+      "ManeRoot",
+      "ManeTip",
+      "Forelock",
+      "TailTip",
+      "Fetlock.L",
+      "Fetlock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastKnot",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueMid",
+      "TongueTip"
+    ],
+    "referenceTokens": [
+      "horse",
+      "equine",
+      "centaur",
+      "hoof",
+      "mane"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "NeckLength",
+      "ManeLength",
+      "SheathLength",
+      "KnotSize",
+      "TongueTipLength"
+    ],
+    "transformationField": {
+      "chest": 1.01,
+      "waist": 0.98,
+      "pelvis": 1.04,
+      "legs": 1.07,
+      "shoulders": 1.02,
+      "breasts": 0.99,
+      "butt": 1.04,
+      "belly": 1.01,
+      "arms": 0.99,
+      "thighs": 1.06,
+      "calves": 1.08
+    },
+    "detectionTokens": [
+      "horse",
+      "equine",
+      "centaur",
+      "hoof",
+      "mane",
+      "marefolk",
+      "equus",
+      "pony"
+    ],
+    "textureTokens": [
+      "horse",
+      "equine",
+      "tail",
+      "hoof"
+    ],
+    "physicsTokens": [
+      "tail",
+      "hoof",
+      "mane"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7300,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.9,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.98,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail4",
+      "Tail5",
+      "Hock.L",
+      "Hock.R",
+      "Hoof.L",
+      "Hoof.R"
+    ],
+    "skeletonFramework": "equine-humanoid",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "mane",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "mane",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 9,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Avian Humanoid",
+    "aliases": [
+      "Harpy",
+      "Birdfolk",
+      "Ravenwing",
+      "Winged Avian",
+      "Featherfolk",
+      "Pinionfolk",
+      "Talonfolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Avian winged-humanoid skeleton",
+    "notes": "Wing-heavy humanoid target for harpy, ravenwing, and other avian follower ecosystems. No built-in physics by default; wing fold, feather spread, and talon/foot alignment should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "Wing.L",
+      "Wing.R",
+      "WingMid.L",
+      "WingMid.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather01.L",
+      "Feather01.R",
+      "Feather02.L",
+      "Feather02.R",
+      "Feather03.L",
+      "Feather03.R",
+      "Talon.L",
+      "Talon.R"
+    ],
+    "referenceTokens": [
+      "avian",
+      "harpy",
+      "bird",
+      "wing",
+      "feather",
+      "pinion"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "WingSpan",
+      "FeatherSpread"
+    ],
+    "transformationField": {
+      "chest": 0.97,
+      "waist": 0.94,
+      "pelvis": 1.0,
+      "legs": 0.99,
+      "shoulders": 1.08,
+      "breasts": 0.95,
+      "butt": 0.99,
+      "belly": 1.01,
+      "arms": 1.09,
+      "thighs": 0.98,
+      "calves": 0.97
+    },
+    "detectionTokens": [
+      "avian",
+      "harpy",
+      "bird",
+      "wing",
+      "feather",
+      "pinion",
+      "featherfolk",
+      "pinionfolk"
+    ],
+    "textureTokens": [
+      "avian",
+      "bird",
+      "wing",
+      "feather",
+      "pinion"
+    ],
+    "physicsTokens": [
+      "wing",
+      "feather"
+    ],
+    "vertexCountMin": 4400,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.6,
+    "depthToWidthRatioMin": 0.27,
+    "depthToWidthRatioMax": 0.93,
+    "physicsBoneSignatures": [
+      "Wing.L",
+      "Wing.R",
+      "WingMid.L",
+      "WingMid.R",
+      "WingTip.L",
+      "WingTip.R",
+      "Feather01.L",
+      "Feather01.R"
+    ],
+    "skeletonFramework": "avian-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "feet",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Feline Humanoid",
+    "aliases": [
+      "Cathay Reborn",
+      "Senche Humanoid",
+      "Ohmes Elite",
+      "Dagi-Raht",
+      "Pantherfolk",
+      "Tigerfolk",
+      "Leonin",
+      "Sabrecat Humanoid"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Feline beast-humanoid skeleton",
+    "notes": "Custom-race feline target for Cathay, leonine, panther, and other Khajiit-adjacent humanoid ecosystems with paw, digitigrade, and tail-aware proportions. No built-in physics by default; tail balance, paw contact, and digitigrade shin weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastKnot",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueMid",
+      "TongueTip"
+    ],
+    "referenceTokens": [
+      "cathay",
+      "senche",
+      "ohmes",
+      "dagi",
+      "khajiit",
+      "feline",
+      "panther",
+      "tiger",
+      "lion",
+      "leonin",
+      "sabrecat"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "PawWidth",
+      "SheathLength",
+      "KnotSize",
+      "TongueTipLength"
+    ],
+    "transformationField": {
+      "chest": 1.0,
+      "waist": 0.95,
+      "pelvis": 1.04,
+      "legs": 1.04,
+      "shoulders": 1.01,
+      "breasts": 0.98,
+      "butt": 1.03,
+      "belly": 1.01,
+      "arms": 0.99,
+      "thighs": 1.05,
+      "calves": 1.06
+    },
+    "detectionTokens": [
+      "cathay",
+      "senche",
+      "ohmes",
+      "dagi",
+      "khajiit",
+      "feline",
+      "panther",
+      "tiger",
+      "lion",
+      "leonin",
+      "sabrecat",
+      "digitigrade"
+    ],
+    "textureTokens": [
+      "khajiit",
+      "feline",
+      "fur",
+      "tail",
+      "paw",
+      "claw"
+    ],
+    "physicsTokens": [
+      "tail",
+      "paw",
+      "ear"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7000,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.94,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R",
+      "TailSheath",
+      "BeastVagina"
+    ],
+    "skeletonFramework": "digitigrade-beast",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 8,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Canine Humanoid",
+    "aliases": [
+      "Lykaios",
+      "Lupine",
+      "Wolffolk",
+      "Jackalfolk",
+      "Coyotefolk",
+      "Hyenafolk",
+      "Vulpine",
+      "Foxfolk"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Canine beast-humanoid skeleton",
+    "notes": "Custom-race canine target for wolf, jackal, hyena, fox, and Lykaios-style humanoid ecosystems with digitigrade feet, tail chains, and muzzle-heavy silhouettes. No built-in physics by default; tail swing, paw alignment, and hock weighting should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "PawFront.L",
+      "PawFront.R",
+      "PawRear.L",
+      "PawRear.R",
+      "Hock.L",
+      "Hock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastGlans",
+      "BeastKnot",
+      "BeastScrotum",
+      "BeastVagina",
+      "BeastAnus",
+      "JawLower",
+      "TongueMid",
+      "TongueTip"
+    ],
+    "referenceTokens": [
+      "lykaios",
+      "canine",
+      "wolf",
+      "lupine",
+      "vulpine",
+      "fox",
+      "jackal",
+      "coyote",
+      "hyena",
+      "gnoll"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "Thighs",
+      "Calves",
+      "TailBase",
+      "PawWidth",
+      "SheathLength",
+      "KnotSize",
+      "TongueTipLength"
+    ],
+    "transformationField": {
+      "chest": 1.01,
+      "waist": 0.96,
+      "pelvis": 1.05,
+      "legs": 1.05,
+      "shoulders": 1.02,
+      "breasts": 0.97,
+      "butt": 1.04,
+      "belly": 1.01,
+      "arms": 1.0,
+      "thighs": 1.06,
+      "calves": 1.07
+    },
+    "detectionTokens": [
+      "lykaios",
+      "canine",
+      "wolf",
+      "lupine",
+      "vulpine",
+      "fox",
+      "jackal",
+      "coyote",
+      "hyena",
+      "gnoll",
+      "digitigrade"
+    ],
+    "textureTokens": [
+      "wolf",
+      "fox",
+      "fur",
+      "tail",
+      "paw",
+      "claw"
+    ],
+    "physicsTokens": [
+      "tail",
+      "paw",
+      "hock"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7100,
+    "heightToWidthRatioMin": 4.1,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 0.96,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "PawFront.L",
+      "PawFront.R",
+      "Hock.L",
+      "Hock.R",
+      "TailSheath",
+      "BeastForeskin",
+      "BeastVagina"
+    ],
+    "skeletonFramework": "digitigrade-beast",
+    "expectedSemanticRegions": [
+      "anus",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "feet",
+      "genitals",
+      "jaw",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "tongue",
+      "vagina"
+    ],
+    "expectedCollisionRegions": [
+      "anus",
+      "belly",
+      "feet",
+      "genitals",
+      "jaw",
+      "tail",
+      "tongue",
+      "vagina"
+    ],
+    "minimumPhysicsSlotCount": 8,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Draconic Humanoid",
+    "aliases": [
+      "Dragonkin",
+      "Draconian",
+      "Drakefolk",
+      "Wyvernkin",
+      "Kobold",
+      "Scaled Dragonborn",
+      "Dragonfolk",
+      "Half-Dragon",
+      "Dragonblood"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Draconic beast-humanoid skeleton",
+    "notes": "Custom-race draconic target for dragonkin, kobold, and wyvern-adjacent humanoid ecosystems with horn, wing, and tail-heavy silhouettes. No built-in physics by default; horn seams, wing membranes, and tail-ground clearance should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "TailBarb",
+      "Wing.L",
+      "Wing.R",
+      "WingFinger01.L",
+      "WingFinger01.R"
+    ],
+    "referenceTokens": [
+      "dragonkin",
+      "draconic",
+      "draconian",
+      "drake",
+      "wyvern",
+      "kobold",
+      "scaled",
+      "tail",
+      "wing",
+      "horn",
+      "frill",
+      "spinefin",
+      "barb"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "Shoulders",
+      "Arms",
+      "TailBase",
+      "WingSpan",
+      "FrillWidth"
+    ],
+    "transformationField": {
+      "chest": 1.03,
+      "waist": 0.94,
+      "pelvis": 1.04,
+      "legs": 1.02,
+      "shoulders": 1.08,
+      "breasts": 0.96,
+      "butt": 1.03,
+      "belly": 1.02,
+      "arms": 1.06,
+      "thighs": 1.02,
+      "calves": 1.0
+    },
+    "detectionTokens": [
+      "dragonkin",
+      "draconic",
+      "draconian",
+      "drake",
+      "wyvern",
+      "kobold",
+      "scaled",
+      "wing",
+      "horn",
+      "tail"
+    ],
+    "textureTokens": [
+      "dragon",
+      "drake",
+      "scale",
+      "scales",
+      "wing",
+      "horn"
+    ],
+    "physicsTokens": [
+      "tail",
+      "wing",
+      "horn"
+    ],
+    "vertexCountMin": 4500,
+    "vertexCountMax": 7400,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.8,
+    "depthToWidthRatioMin": 0.29,
+    "depthToWidthRatioMax": 0.98,
+    "physicsBoneSignatures": [
+      "NPC Tail",
+      "TailBarb",
+      "Wing.L",
+      "Wing.R"
+    ],
+    "skeletonFramework": "draconic-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "frill",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "tail",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 3,
+    "minimumPhysicsChainDepth": 2,
+    "collisionComplexity": "standard"
+  },
+  {
+    "name": "Insectoid Humanoid",
+    "aliases": [
+      "Arachne",
+      "Chitinfolk",
+      "Mandiblekin",
+      "Hiveborn",
+      "Carapace Humanoid",
+      "Mantisfolk",
+      "Netchitin",
+      "Arachnid Humanoid",
+      "Hivekin",
+      "Scarabfolk",
+      "Beetleborn",
+      "Mothfolk",
+      "Vespid"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Insectoid chitin-wing skeleton",
+    "notes": "Custom-race insectoid target for arachne, mantis, hiveborn, and other chitin-heavy humanoid ecosystems with abdomen, antenna, mandible, and carapace-wing anatomy. No built-in physics by default; abdomen curl, mandible seams, and antenna collision should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "AbdomenRoot",
+      "AbdomenMid",
+      "AbdomenTip",
+      "Antenna.L",
+      "Antenna.R",
+      "AntennaMid.L",
+      "AntennaMid.R",
+      "Mandible.L",
+      "Mandible.R",
+      "MandibleMid.L",
+      "MandibleMid.R",
+      "AntennaTip.L",
+      "AntennaTip.R",
+      "MandibleTip.L",
+      "MandibleTip.R",
+      "CarapaceWing.L",
+      "CarapaceWing.R",
+      "CarapaceWingMid.L",
+      "CarapaceWingMid.R",
+      "CarapaceWingTip.L",
+      "CarapaceWingTip.R"
+    ],
+    "referenceTokens": [
+      "arachne",
+      "insectoid",
+      "chitin",
+      "mantis",
+      "hive",
+      "mandible",
+      "antenna",
+      "abdomen",
+      "carapace"
+    ],
+    "sliderNames": [
+      "Belly",
+      "WaistWidth",
+      "HipWidth",
+      "Shoulders",
+      "Arms",
+      "AbdomenLength",
+      "AntennaLength",
+      "MandibleSpread",
+      "WingSpan"
+    ],
+    "transformationField": {
+      "chest": 0.98,
+      "waist": 0.93,
+      "pelvis": 1.02,
+      "legs": 1.01,
+      "shoulders": 1.06,
+      "breasts": 0.9,
+      "butt": 0.98,
+      "belly": 1.08,
+      "arms": 1.04,
+      "thighs": 1.0,
+      "calves": 0.99
+    },
+    "detectionTokens": [
+      "arachne",
+      "insectoid",
+      "chitin",
+      "mantis",
+      "hive",
+      "mandible",
+      "antenna",
+      "abdomen",
+      "carapace"
+    ],
+    "textureTokens": [
+      "chitin",
+      "carapace",
+      "shell",
+      "mantis",
+      "insect",
+      "antenna"
+    ],
+    "physicsTokens": [
+      "abdomen",
+      "antenna",
+      "mandible",
+      "carapacewing"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7600,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 8.0,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 1.02,
+    "physicsBoneSignatures": [
+      "AbdomenRoot",
+      "AbdomenMid",
+      "AbdomenTip",
+      "Antenna.L",
+      "Antenna.R",
+      "Mandible.L",
+      "Mandible.R",
+      "CarapaceWing.L",
+      "CarapaceWing.R"
+    ],
+    "skeletonFramework": "insectoid-humanoid",
+    "expectedSemanticRegions": [
+      "antenna",
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "mandible",
+      "pelvis",
+      "shoulders",
+      "thighs",
+      "wing"
+    ],
+    "expectedCollisionRegions": [
+      "antenna",
+      "belly",
+      "mandible",
+      "wing"
+    ],
+    "minimumPhysicsSlotCount": 4,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  },
+  {
+    "name": "Aquatic Humanoid",
+    "aliases": [
+      "Sirenfolk",
+      "Merrow",
+      "Koi Humanoid",
+      "Leviathankin",
+      "Gillfolk",
+      "Nereid",
+      "Finfolk",
+      "Merfolk",
+      "Mermaid",
+      "Merman",
+      "Sea Dragonkin",
+      "Sirenborn"
+    ],
+    "gender": "female",
+    "defaultPhysics": "none",
+    "skeletonFoundation": "Aquatic fin-tail skeleton",
+    "notes": "Custom-race aquatic target for siren, koi, merrow, and other finned humanoid ecosystems with dorsal, pectoral, ventral, frill, whisker, and tail-fin anatomy. No built-in physics by default; fin spread, whisker drift, and tail-ground clearance should still be verified in-game.",
+    "availablePhysicsBones": [
+      "NPC Belly",
+      "NPC Tail",
+      "Tail1",
+      "Tail2",
+      "Tail3",
+      "Tail4",
+      "Tail5",
+      "TailFin",
+      "TailFinTip",
+      "Fin.Dorsal",
+      "Fin.DorsalTip",
+      "PectoralFin.L",
+      "PectoralFin.R",
+      "PectoralFinMid.L",
+      "PectoralFinMid.R",
+      "PectoralFinTip.L",
+      "PectoralFinTip.R",
+      "VentralFin.L",
+      "VentralFin.R",
+      "Whisker.L",
+      "Whisker.R",
+      "WhiskerMid.L",
+      "WhiskerMid.R",
+      "WhiskerTip.L",
+      "WhiskerTip.R",
+      "Frill.L",
+      "Frill.R",
+      "FrillMid.L",
+      "FrillMid.R",
+      "FrillTip.L",
+      "FrillTip.R"
+    ],
+    "referenceTokens": [
+      "aquatic",
+      "siren",
+      "merrow",
+      "koi",
+      "fin",
+      "frill",
+      "whisker",
+      "gill",
+      "tailfin",
+      "mermaid",
+      "merfolk",
+      "sirenborn",
+      "sea",
+      "mer"
+    ],
+    "sliderNames": [
+      "Belly",
+      "Butt",
+      "WaistWidth",
+      "HipWidth",
+      "TailBase",
+      "FinSpread",
+      "FrillWidth",
+      "WhiskerLength",
+      "Shoulders"
+    ],
+    "transformationField": {
+      "chest": 0.99,
+      "waist": 0.94,
+      "pelvis": 1.04,
+      "legs": 1.0,
+      "shoulders": 1.04,
+      "breasts": 0.94,
+      "butt": 1.02,
+      "belly": 1.05,
+      "arms": 1.01,
+      "thighs": 1.01,
+      "calves": 0.98
+    },
+    "detectionTokens": [
+      "aquatic",
+      "siren",
+      "merrow",
+      "koi",
+      "fin",
+      "frill",
+      "whisker",
+      "gill",
+      "tailfin",
+      "mermaid",
+      "merfolk"
+    ],
+    "textureTokens": [
+      "scale",
+      "scales",
+      "fin",
+      "gill",
+      "koi",
+      "siren",
+      "whisker"
+    ],
+    "physicsTokens": [
+      "fin",
+      "frill",
+      "whisker",
+      "tailfin"
+    ],
+    "vertexCountMin": 4300,
+    "vertexCountMax": 7600,
+    "heightToWidthRatioMin": 4.0,
+    "heightToWidthRatioMax": 7.9,
+    "depthToWidthRatioMin": 0.28,
+    "depthToWidthRatioMax": 1.0,
+    "physicsBoneSignatures": [
+      "TailFin",
+      "Fin.Dorsal",
+      "PectoralFin.L",
+      "PectoralFin.R",
+      "VentralFin.L",
+      "VentralFin.R",
+      "Whisker.L",
+      "Whisker.R",
+      "Frill.L",
+      "Frill.R"
+    ],
+    "skeletonFramework": "aquatic-humanoid",
+    "expectedSemanticRegions": [
+      "arms",
+      "belly",
+      "breasts",
+      "butt",
+      "chest",
+      "fin",
+      "frill",
+      "pelvis",
+      "shoulders",
+      "tail",
+      "thighs"
+    ],
+    "expectedCollisionRegions": [
+      "belly",
+      "breasts",
+      "fin",
+      "frill",
+      "tail"
+    ],
+    "minimumPhysicsSlotCount": 5,
+    "minimumPhysicsChainDepth": 3,
+    "collisionComplexity": "extended"
+  }
+]

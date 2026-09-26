@@ -3,7 +3,8 @@
 This repository contains the SlideSmith .NET conversion toolset (current version `1.0`) with both a Windows desktop GUI and a CLI app, bundling core conversion stages into one pipeline:
 
 - import scan (single `.nif`, plugin (`.esp`/`.esm`/`.esl`), armor folder, or archive input: `.zip` / `.7z` / `.tar` / `.tar.gz` / `.tgz`)
-- body signature detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE + CUSTOM fallback); bone-name scoring from physics XML
+- body signature detection (CBBE, UNP, UNPB, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SAM Light, SOS, TNG, UBE, Vanilla Beast, Goat Humanoid, Hagraven, Spriggan + CUSTOM fallback); bone-name scoring from physics XML
+- built-in target body aliases for common ecosystem names such as `3BBB` → `3BA`, `TNG Extended` → `TNG`, `Touched By Dibella` → `TBD`, `Shape Atlas for Men` → `SAM`, and `Beast Vanilla` → `Vanilla Beast`
 - custom body profile loading via `*.slidesmith-body.json` files placed beside the input assets, enabling named custom bodies with their own detection tokens, morph field, sliders, gender, and physics settings
 - mesh type analysis (cloth/leather/plate/skin-tight/physics-enabled/mixed) with headgear sub-type classification (full-helmet/hood/face-mask/circlet)
 - deformation cage generation
@@ -12,14 +13,16 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 - morph generation with **11 regional fields** (chest, waist, pelvis, legs, shoulders, breasts, butt, belly, arms, thighs, calves) tuned per body type
 - partition rebuilding (BSDismemberSkinInstance slot assignment): body/hands/feet for standard armor; full-helmet → slots 30+31 (Head+Hair); hood → slot 31 (Hair); face-mask → slot 30 (Head); circlet/crown/hat → slot 42 (Circlet)
 - clipping detection + auto-correction pass (including explicit armpit risk surfacing in pose simulation output)
-- physics profile generation (CBPC + SMP XML config file output)
-- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (`soft-body` is accepted as an alias for `smp+cbpc`)
+- physics profile generation (CBPC + SMP XML config file output, including extra target-specific secondary/genital bones when the target ecosystem exposes them)
+- physics profile selection override (`auto`, `none`, `cbpc`, `smp`, `smp+cbpc`) with built-in per-target defaults for direct body conversions (common aliases like `soft-body`, `full-soft-body`, `hdt-smp`, `fsmp`, and `cbp` are accepted and normalized automatically)
 - **vanilla armor database** — 65+ canonical Skyrim / DLC armors matched by mesh token for automatic profile recommendations
 - **voxel collision detection** — 8×8×8 grid penetration scan after auto-correction; per-region push-out offsets logged per mesh type
 - **deformation profile modifier** — fine-tunes regional morphs using 8 named profiles (balanced, curvy, slim, petite, athletic, muscular, lean, anime)
 - **BodySlide `.osp` project generation** — outputs a valid BodySlide slider-set XML alongside each converted armor when slider export is enabled
+- incomplete-source BodySlide fallback recovery that can infer likely source-body slider families plus fallback deformation-profile hints from nearby reference/body asset names when OSP/TRI/BSD support files are missing
+- topology-mismatched TRI/BSD reuse can conservatively retarget source morph deltas before falling back to fully synthetic slider output
 - **texture analysis** — detects DDS textures, classifies diffuse / normal / specular / glow / parallax / subsurface, identifies missing normal maps
-- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths
+- **plugin scanning + rewrite mapping** — scans `.esp`/`.esm`/`.esl` sidecar files for ARMA mesh paths, generates rewrite mappings, and outputs an auto-rewrite xEdit script covering world + first-person model paths, including modular device-style armor packs that split body/head/world variants
 - export package + manifest/log output
 - conversion learning cache output (`.conversion-learning-cache.json`) for repeated runs
 - real 3D preview/workbench output (`preview-workbench.html`) rendered from converted mesh vertices, plus diagnostics report (`preview.html`)
@@ -32,6 +35,7 @@ This repository contains the SlideSmith .NET conversion toolset (current version
 
 - `/src/Bodyslide.Core` - conversion pipeline + modules
 - `/src/Bodyslide.Desktop` - Windows GUI app (drag/drop, preset or manual destination mode, explicit source-body override, output-zip toggle, convert/cancel)
+  - supports startup result loading via `--load-result`, `--result`, `--output`, or an existing output-path argument (useful for MO2 launcher entries)
 - `/src/Bodyslide.Standalone` - CLI app entry point
 - `/tests/Bodyslide.Core.Tests` - focused orchestration and batch/preset tests
 
@@ -43,6 +47,9 @@ dotnet publish src/Bodyslide.Desktop/Bodyslide.Desktop.csproj --configuration Re
 
 # launch desktop GUI during development (Windows)
 dotnet run --project src/Bodyslide.Desktop
+
+# load an existing output folder directly in the Desktop app
+dotnet run --project src/Bodyslide.Desktop -- --load-result "<output folder|preview html|fomod\\ModuleConfig.xml>"
 
 # GUI features: drag/drop input (accepts .nif, plugin .esp/.esm/.esl, archive, or folder),
 # separate **"File..."** and **"Folder..."** browse buttons for the input field (no more double-dialog),
@@ -107,6 +114,8 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 # supply a skeleton NIF for accurate bone mapping (e.g. XPMSSE installed via mod manager)
 dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target "CBBE" --skeleton-nif "C:\Modlist\XPMSSE\meshes\actors\character\character assets\skeleton.nif"
+# You can also point --skeleton-nif at an XP32/XPMSSE mod folder or a related .pex file from the same mod;
+# SlideSmith will resolve the matching skeleton .nif automatically.
 
 # show built-in presets
 dotnet run --project src/Bodyslide.Standalone -- --list-presets
@@ -115,11 +124,12 @@ dotnet run --project src/Bodyslide.Standalone -- --list-presets
 dotnet run --project src/Bodyslide.Standalone -- --list-profiles
 
 # show supported body types with detection tokens, vertex-count hints,
-# skeleton foundation, and soft-body physics bone reference data
+# skeleton foundation, semantic/collision support regions, and soft-body physics coverage expectations
 dotnet run --project src/Bodyslide.Standalone -- --list-bodies
 
-# show deep reference info for one body (tokens, skeleton, SupportsPhysics, required physics bones, default/recommended physics, matching presets)
-dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BA"
+# show deep reference info for one body (canonical names and common aliases both work),
+# including semantic regions, collision focus, bilateral expectations, and minimum physics coverage
+dotnet run --project src/Bodyslide.Standalone -- --body-reference "3BBB"
 
 # show available physics profiles
 dotnet run --project src/Bodyslide.Standalone -- --list-physics
@@ -148,7 +158,7 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | Bundle containing both GUI + CLI side-by-side |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable bundle containing `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
@@ -161,8 +171,8 @@ This repository includes `.github/workflows/build.yml`, which runs automatically
 
 What it does:
 - **Every push/PR:** restore, build, test, publish a single-file Linux CLI binary, and upload it as a temporary Actions artifact.
-- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
-- **Pull requests:** publish both Windows executables, package them as one bundle zip artifact, and upload it for startup/packaging verification.
+- **Push to `main`/`master` (post-merge):** publish clean single-file Windows executables (Desktop GUI + CLI), create/update a Windows bundle zip with FOMOD + `meta.ini` metadata for MO2/Vortex installs, create or update the rolling **"SlideSmith — latest build"** GitHub Release entry, and attach all three Windows artifacts.
+- **Pull requests:** publish both Windows executables, package them as one MO2/Vortex-friendly bundle zip artifact, and upload it for startup/packaging verification.
 
 All published executables are self-contained single files — no installer, no extra DLLs, no debug symbols.
 
@@ -191,13 +201,45 @@ Place a `*.slidesmith-body.json` file anywhere beside the input mesh/folder/arch
 - `detectionTokens`
 - `textureTokens`
 - `physicsTokens`
+- `aliases`
+- `referenceTokens`
 - `vertexCountMin` / `vertexCountMax`
+- `heightToWidthRatioMin` / `heightToWidthRatioMax`
+- `depthToWidthRatioMin` / `depthToWidthRatioMax`
 - `transformationField` (`chest`, `waist`, `pelvis`, `legs`, `shoulders`, `breasts`, `butt`, `belly`, `arms`, `thighs`, `calves`)
 - `sliderNames`
+- `zapSliderNames`
 - `physicsBones`
 - `physicsProfile` (`none`, `cbpc`, `smp`, `smp+cbpc`)
+- `expectedSemanticRegions`
+- `expectedCollisionRegions`
+- `expectedBilateralRegions`
+- `minimumPhysicsSlotCount`
+- `minimumPhysicsChainDepth`
+- `minimumPhysicsFamilyCount`
+- `collisionComplexity` (`none`, `minimal`, `standard`, `extended`)
 - `gender` (`female` or `male`)
 - `bodyOutputPath`
+- `skeletonFoundation`
+- `skeletonFramework`
+
+When SlideSmith detects an unknown/incomplete target body or a low-confidence/custom detected source body, it now also writes starter templates such as `target-body-template.slidesmith-body.json` and `detected-source-body-template.slidesmith-body.json` into the output folder so you can refine and reuse them. Those starter templates now include semantic-region, collision-region, bilateral-region, collision-complexity, and minimum physics coverage hints so support quality can be strengthened instead of only naming the body and sliders.
+
+## Support tiers
+
+SlideSmith now emits a graded support tier in its validation outputs so the app does not pretend every successful file export is equally safe:
+
+- `mainstream-automatic` — strong body/skeleton/topology evidence; conversion, physics, and safe-animation signals all look good
+- `advanced-review-required` — conversion is viable, but runtime/body-fit/topology review is still required before release
+- `experimental-manual-cleanup` — conversion can proceed, but sparse skeleton evidence, heuristic-heavy topology, unsupported physics, or extreme body differences still make manual cleanup likely
+
+The generated JSON reports also separate:
+
+- `CanConvert`
+- `CanPhysicsConvert`
+- `CanSafelyAnimate`
+
+Use those fields together with `SupportTier` instead of treating every successful conversion as universally install-ready.
 
 ## Output files
 
@@ -215,6 +257,8 @@ output/
     BodySlide/
       SliderSets/
         <ArmorName>.osp          ← BodySlide slider-set project (when slider export is enabled)
+      SliderGroups/
+        <ArmorName>.xml          ← BodySlide batch-build/search groups (when slider export is enabled)
       ShapeData/<ArmorName>/
         <ArmorName>.nif          ← BodySlide source-shape reference mesh (when enabled)
         <Slider>.bsd             ← low-weight slider morph (one per slider, when enabled)
@@ -226,9 +270,14 @@ output/
   <PluginName>_SlidesmithPatch.esp ← minimal override patch ESP (ARMA-only)
   fomod/
     info.xml
-    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/
-  cbpc-config.xml                ← CBPC physics XML (when selected physics profile includes CBPC)
-  smp-config.xml                 ← SMP physics XML (when selected physics profile includes SMP)
+    ModuleConfig.xml             ← FOMOD with <files> entries for meshes/ + CalienteTools/ + SKSE/
+  SKSE/Plugins/CBPCSystem/
+    cbpc-config.xml              ← staged CBPC physics XML for mod-manager/manual Data installs
+  SKSE/Plugins/hdtSMP64/
+    smp-config.xml               ← staged SMP physics XML for mod-manager/manual Data installs
+  cbpc-config.xml                ← compatibility/root copy of generated CBPC physics XML
+  smp-config.xml                 ← compatibility/root copy of generated SMP physics XML
+  meta.ini                       ← neutral MO2 package metadata
   conversion-manifest.json       ← full pipeline log
   README.txt                     ← user-facing installation guide
   preview-workbench.html         ← real 3D point-cloud workbench from converted mesh vertices
@@ -243,17 +292,30 @@ output/
 | `meshes/slidesmith/<body>/<ArmorName>.nif` | Data-relative staged mesh; pointed to by the generated plugin |
 | `meshes/slidesmith/<body>/<stem>_ground.nif` | Ground/loot mesh companion for every converted NIF variant |
 | `CalienteTools/BodySlide/SliderSets/<ArmorName>.osp` | BodySlide slider-set project (open in BodySlide Studio) — written only when slider export is enabled |
+| `CalienteTools/BodySlide/SliderGroups/<ArmorName>.xml` | BodySlide group definitions so converted single-piece and batch outputs show up under predictable SlideSmith/body filters for search and Batch Build |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.nif` | BodySlide source-shape reference mesh; required for the slider editor to display the base mesh — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<Slider>.bsd` + `<Slider>_1.bsd` | Per-slider vertex-displacement morphs for BodySlide (low + high weight) — written only when slider export is enabled |
 | `CalienteTools/BodySlide/ShapeData/<ArmorName>/<ArmorName>.tri` + `<ArmorName>_1.tri` | TRI morph files for in-game RaceMenu morph interpolation — written only when slider export is enabled |
-| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/` and `CalienteTools/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
+| `fomod/ModuleConfig.xml` | FOMOD installer with populated `<files>` entries mapping `meshes/`, `CalienteTools/`, and `SKSE/` to Data sub-folders; mod managers (MO2, Vortex) read this to install all files correctly |
 | `fomod/info.xml` | FOMOD package metadata (name, version, author) |
-| `cbpc-config.xml` | CBPC physics config (breast/butt/belly for female; pec/belly for male) |
-| `smp-config.xml` | SMP physics config (NPC Breast01, NPC Belly, NPC Butt nodes, etc.) |
+| `meta.ini` | Neutral Mod Organizer 2 metadata for the packaged output so the installed mod folder/archive keeps basic name/version/author context without depending on manual tagging |
+| `SKSE/Plugins/CBPCSystem/cbpc-config.xml` | Data-relative staged CBPC physics config for direct installation into Skyrim's SKSE plugin layout |
+| `SKSE/Plugins/hdtSMP64/smp-config.xml` | Data-relative staged SMP physics config for direct installation into Skyrim's SKSE plugin layout |
+| `cbpc-config.xml` | Compatibility/root copy of the generated CBPC physics config for inspection or manual relocation |
+| `smp-config.xml` | Compatibility/root copy of the generated SMP physics config for inspection or manual relocation |
 | `conversion-manifest.json` | Full conversion log with all pipeline steps |
 | `dependency-map.json` | Per-mesh dependency map linking related textures, physics, body refs, plugin mesh references, **detected source body**, **ARMA FormIDs**, and **source skeleton** |
-| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, and the list of unsupported bones that have no target equivalent |
-| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, readiness score/status, and ISO-8601 generation timestamp |
+| `skeleton-compatibility.json` | Full bone-mapping report: source skeleton name, target skeleton name, every mapped bone pair, unsupported bones, source skeleton reliability, physics compatibility, and graded `SupportTier` / `CanConvert` / `CanPhysicsConvert` / `CanSafelyAnimate` signals |
+| `conversion-quality.json` | Machine-readable quality metrics: body-detection confidence + evidence, strategy used, per-region morphing, clipping/voxel/pose risk, topology drift warnings, BodySlide compatibility, graded support tier/readiness fields, and ISO-8601 generation timestamp |
+| `in-game-validation.json` | Runtime review plan summary: validation gate, support tier, conversion-readiness fields, scenario matrix, caveats, topology correspondence, and checklist guidance for live animation/body-fit review |
+| `topology-correspondence.json` | Dedicated topology review artifact: correspondence classification/confidence, semantic-vertex-matching status, unmatched focus regions, semantic anchor evidence, and review artifacts for manual cleanup decisions |
+| `conversion-matrix-proof.json` | Cross-axis proof summary showing which body-support, topology, skeleton, plugin/mod-stack, runtime, live-game, and Desktop E2E axes are or are not strictly proven yet, plus the remaining blocking gaps and review artifacts |
+| `runtime-validation-plan.json` | Release-gate execution plan derived from the in-game validation report; documents what still needs a live game harness or manual runtime pass before the output is truly trusted |
+| `runtime-validation-harness.json` | External-harness contract for runtime validation automation: dispatch actions, expected assertions, failure signals, and which probes require full-load-order launches or manual observation |
+| `proof-harness-bundle.json` | Canonical external-proof entrypoint linking the Desktop UI flow, runtime harness, live-game scenario catalog, explicit Windows host requirements, replayable evidence layout, import targets, and the `proof-result-bundle.json` contract |
+| `mod-stack-cross-validation.json` | Mixed plugin/race/body-family review summary: plugin/master counts, distinct mesh families, skeleton reliability, race warnings, and recommended runtime/load-order scenarios for large real mod stacks |
+| `desktop-workflow-automation.json` | Shared-output contract for Desktop/UI workflow coverage: preview/report state, artifact inventory, suggested GUI flow, and automation limitations for result-reload/report-rendering paths |
+| `proof-result-bundle.json` | External-harness result import written back into the output root; records host details, per-axis pass/fail status, scenario coverage, probe coverage, evidence references, and any missing proof inputs |
 | `armor-pack-validation.json` | Batch-only pack validation rollup: per-item readiness status/score, dominant issue codes, and pack-level ready/review/high-risk counts for real armor-pack runs |
 | `world-physics.json` | Dropped-item/world-object physics guidance: selected world mode (`static` or `rigid-proxy`), collision-shape recommendation, whether source/equipped physics were detected, ground-mesh availability, and practical install/runtime recommendations |
 | `plugin-patches.json` | Detected sidecar plugin mesh paths + structured rewrite mappings (`OriginalMeshPath` → `RewrittenMeshPath`) and per-mesh patch steps |
@@ -270,12 +332,20 @@ When a matching cache entry exists for the same armor mesh + target body, the co
 
 When `--targets` / `--presets` (or the desktop batch-entry boxes) are used, each requested body/preset is exported into its own subfolder under the selected output root so multiple conversions never overwrite each other.
 
+### Supported external Windows proof workflow
+
+1. Run a conversion and treat `proof-harness-bundle.json` as the single canonical entrypoint for external proof execution.
+2. On the Windows harness host, open the bundle manifest and use `ArtifactEntrypoints`, `ScenarioCatalog`, `ReplayableEvidence`, and `ImportTargets` to collect the referenced runtime, live-game, Desktop UI, and observation/template artifacts instead of discovering them ad hoc.
+3. Execute the required Desktop UI flows, runtime probes, and live-game scenarios on the target Windows/mod-stack/game install while writing evidence to the machine-readable locations declared in `proof-harness-bundle.json` (for example `proof-evidence/screenshots/`, `proof-evidence/runtime-logs/`, `proof-evidence/step-traces/`, `proof-evidence/probe-observations/`, and `proof-evidence/scenario-observations/`).
+4. Write the completed `proof-result-bundle.json` back into the output root with host details, per-axis status, executed flows/probes/scenarios, missing items, and evidence references keyed to the exported `ScenarioMatrix`/`ScenarioCatalog` names.
+5. Reload that output directory in SlideSmith/Desktop review. The app will re-ingest `proof-result-bundle.json`, refresh the files listed under `ImportTargets`, and surface the updated planned-vs-executed/imported proof state in reports/guidance.
+
 ## Issue #2 progress comparison
 
 Implemented from issue scope:
 - import scan across single mesh, folder, and archive input (`.zip`, `.7z`, `.tar`, `.tar.gz`, `.tgz`)
 - batch mesh discovery now skips support/body-reference NIFs (e.g., skeleton and body base/reference files) so only convertible armor/clothing meshes are processed
-- body detection (CBBE, UNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
+- body detection (CBBE, UNP, UUNP, COCO CBBE, COCO UUNP, HIMBO, BHUNP, 3BA, TBD, SAM, SOS, UBE, CUSTOM fallback); bone-name scoring from physics XML for higher confidence
 - body detection reference comparison now scores body-reference asset names (`*.tri`, `*.osp`, reference mesh names) against known body templates as additional evidence
 - body detection UV-signature evidence now samples mesh UV coverage/aspect ranges from readable NIF geometry and factors it into confidence scoring (`uv:u=... ,v=...`)
 - mesh analysis, cage/strategy stages, weight transfer, morph generation, partition rebuild, clipping detect/correct, physics configs

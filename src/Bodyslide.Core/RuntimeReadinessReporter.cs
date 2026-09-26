@@ -53,11 +53,17 @@ public static class RuntimeReadinessReporter
                 $"{PresetCatalog.All.Count} presets, {BodyTypeCatalog.All.Count} body types, {DeformationProfileModifier.All.Count} deformation profiles, {PhysicsProfileCatalog.All.Count} physics profiles"),
         };
 
+        checks.Add(CreateCatalogDataCheck());
         checks.Add(CreateExecutableCheck(currentExePath));
         checks.Add(CreatePipelineCheck());
+        checks.Add(CreateNifParsingCheck());
         checks.Add(CreateCacheCheck());
         checks.Add(CreateScratchWriteCheck());
         checks.Add(CreateStartupCrashLogWriteCheck());
+        checks.Add(CreateUniversalCoverageCheck());
+        checks.Add(CreateDesktopAutomationCoverageCheck());
+        checks.Add(CreateLiveGameAutomationCoverageCheck());
+        checks.Add(CreateStrictMatrixCoverageCheck());
 
         if (includeDesktopProbe)
         {
@@ -71,6 +77,204 @@ public static class RuntimeReadinessReporter
 
         return checks;
     }
+
+    private static RuntimeReadinessCheck CreateCatalogDataCheck()
+    {
+        try
+        {
+            var builtInBodies = BuiltInBodyMetadataCatalog.All;
+            var aliasCount = builtInBodies
+                .SelectMany(static body => body.Aliases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var skeletonFrameworkCount = SkeletonFrameworkCatalog.All.Count;
+            var skeletonCommonBoneCount = SkeletonMappingCatalog.CommonBones.Count;
+            var raceCompatibilityRuleCount = RaceCompatibilityCatalog.BodyRules.Count;
+            var physicsRepairGroupCount = PhysicsRepairCatalog.All.Count;
+            var explicitSupportMetadataCount = builtInBodies.Count(static body => body.HasExplicitSupportMetadata);
+            var consistencyIssues = ValidateCatalogConsistency();
+            _ = BodyDetectionTuningCatalog.Current;
+            _ = MeshBehaviorCatalog.Get("cloth");
+
+            return new(
+                "Catalog data",
+                consistencyIssues.Count == 0 ? "OK" : "Error",
+                consistencyIssues.Count == 0
+                    ? $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, explicit support expectations for {explicitSupportMetadataCount}/{builtInBodies.Count} bodies, verified body physics bone coverage"
+                    : $"{builtInBodies.Count} built-in bodies, {aliasCount} body aliases, {skeletonFrameworkCount} skeleton frameworks, {skeletonCommonBoneCount} common skeleton bones, {raceCompatibilityRuleCount} race rules, {physicsRepairGroupCount} physics repair groups, explicit support expectations for {explicitSupportMetadataCount}/{builtInBodies.Count} bodies; catalog consistency issues: {string.Join(" | ", consistencyIssues.Take(5))}");
+        }
+        catch (Exception ex)
+        {
+            return new("Catalog data", "Error", $"Embedded application data catalogs failed to load: {ex.Message}");
+        }
+    }
+
+    internal static IReadOnlyList<string> ValidateCatalogConsistency()
+    {
+        var issues = new List<string>();
+
+        foreach (var body in BuiltInBodyMetadataCatalog.All.OrderBy(static body => body.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!BodyTechnicalProfileCatalog.TryGet(body.Name, out var profile))
+            {
+                issues.Add($"Built-in body '{body.Name}' is missing its technical profile.");
+                continue;
+            }
+
+            var requiredBones = profile.RequiredPhysicsBones;
+            foreach (var bone in body.AvailablePhysicsBones
+                         .Concat(requiredBones)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (SkeletonMappingCatalog.TryResolveSupportedBone(bone, body.SkeletonFramework, out _))
+                {
+                    continue;
+                }
+
+                issues.Add($"{body.Name}: physics bone '{bone}' is not covered by skeleton framework '{body.SkeletonFramework}'");
+            }
+
+            ValidateSupportMetadataConsistency(body, profile, issues);
+        }
+
+        foreach (var rule in RaceCompatibilityCatalog.BodyRules.OrderBy(static rule => rule.Body, StringComparer.OrdinalIgnoreCase))
+        {
+            if (BuiltInBodyMetadataCatalog.TryResolveCanonicalName(rule.Body, out _))
+            {
+                continue;
+            }
+
+            issues.Add($"Race rule body '{rule.Body}' does not resolve to a known built-in body.");
+        }
+
+        return issues;
+    }
+
+    private static void ValidateSupportMetadataConsistency(
+        BuiltInBodyMetadata body,
+        BodyTechnicalProfileInfo profile,
+        List<string> issues)
+    {
+        if (!body.HasExplicitSupportMetadata)
+        {
+            issues.Add($"{body.Name}: built-in support metadata is inferred instead of explicit.");
+        }
+
+        var normalizedSemanticRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedSemanticRegions);
+        var normalizedCollisionRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedCollisionRegions);
+        var normalizedBilateralRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.ExpectedBilateralRegions);
+        var sliderRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(body.SliderNames);
+        var physicsRegions = BodySupportMetadataHeuristics.NormalizeSupportRegionList(profile.RequiredPhysicsBones.Concat(profile.PhysicsBoneSignatures));
+
+        if (normalizedSemanticRegions.Count == 0)
+        {
+            issues.Add($"{body.Name}: expected semantic regions are empty.");
+        }
+        else if (!sliderRegions.Intersect(normalizedSemanticRegions, StringComparer.OrdinalIgnoreCase).Any() &&
+                 !physicsRegions.Intersect(normalizedSemanticRegions, StringComparer.OrdinalIgnoreCase).Any())
+        {
+            issues.Add($"{body.Name}: expected semantic regions are not backed by sliderNames or physics bones.");
+        }
+
+        if (profile.SupportsPhysics)
+        {
+            if (normalizedCollisionRegions.Count == 0)
+            {
+                issues.Add($"{body.Name}: expected collision regions are empty despite physics support.");
+            }
+            else if (!physicsRegions.Intersect(normalizedCollisionRegions, StringComparer.OrdinalIgnoreCase).Any())
+            {
+                issues.Add($"{body.Name}: expected collision regions are not backed by physics bones.");
+            }
+        }
+
+        if (normalizedBilateralRegions.Count > 0 &&
+            !normalizedBilateralRegions.Intersect(normalizedSemanticRegions.Concat(normalizedCollisionRegions), StringComparer.OrdinalIgnoreCase).Any())
+        {
+            issues.Add($"{body.Name}: expected bilateral regions are not backed by semantic or collision regions.");
+        }
+
+        var normalizedCollisionComplexity = NormalizeCollisionComplexity(profile.CollisionComplexity);
+        if (normalizedCollisionComplexity is not ("none" or "minimal" or "standard" or "extended"))
+        {
+            issues.Add($"{body.Name}: collision complexity '{profile.CollisionComplexity}' is invalid.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumPhysicsSlotCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics slot count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsSlotCount > 0 && profile.PhysicsSlotCount > 0 && profile.MinimumPhysicsSlotCount > profile.PhysicsSlotCount)
+        {
+            issues.Add($"{body.Name}: minimum physics slot count {profile.MinimumPhysicsSlotCount} exceeds available slot count {profile.PhysicsSlotCount}.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumPhysicsChainDepth <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics chain depth must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsChainDepth > 0 && profile.PhysicsChainDepth > 0 && profile.MinimumPhysicsChainDepth > profile.PhysicsChainDepth)
+        {
+            issues.Add($"{body.Name}: minimum physics chain depth {profile.MinimumPhysicsChainDepth} exceeds available chain depth {profile.PhysicsChainDepth}.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumPhysicsFamilyCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum physics family count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumPhysicsFamilyCount > 0 && profile.PhysicsFamilyCount > 0 && profile.MinimumPhysicsFamilyCount > profile.PhysicsFamilyCount)
+        {
+            issues.Add($"{body.Name}: minimum physics family count {profile.MinimumPhysicsFamilyCount} exceeds available family count {profile.PhysicsFamilyCount}.");
+        }
+
+        if (profile.SupportsPhysics && profile.MinimumRuntimePhysicsNodeCount <= 0)
+        {
+            issues.Add($"{body.Name}: minimum runtime physics node count must be positive when physics bones are present.");
+        }
+        else if (profile.MinimumRuntimePhysicsNodeCount > 0 && profile.PhysicsNodeCount > 0 && profile.MinimumRuntimePhysicsNodeCount > profile.PhysicsNodeCount)
+        {
+            issues.Add($"{body.Name}: minimum runtime physics node count {profile.MinimumRuntimePhysicsNodeCount} exceeds available node count {profile.PhysicsNodeCount}.");
+        }
+
+        var supportWarnings = LocalExportService.EvaluateTargetBodySupportQuality(
+            body.ReferenceTokens,
+            body.SliderNames,
+            body.AvailablePhysicsBones,
+            body.ExpectedSemanticRegions,
+            body.ExpectedCollisionRegions,
+            body.ExpectedBilateralRegions,
+            body.MinimumPhysicsSlotCount,
+            body.MinimumPhysicsChainDepth,
+            body.MinimumPhysicsFamilyCount,
+            body.MinimumRuntimePhysicsNodeCount,
+            body.CollisionComplexity,
+            !string.IsNullOrWhiteSpace(body.SkeletonFramework) || !string.IsNullOrWhiteSpace(body.SkeletonFoundation),
+            profile.RecommendedPhysicsProfile,
+            body.PhysicsTokens,
+            profile.RecommendedPhysicsProfile,
+            body.HasExplicitSupportMetadata);
+        var structuralWarnings = supportWarnings
+            .Where(static warning =>
+                warning.Equals("referenceTokens-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("sliderNames-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("sliderNames-region-coverage", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedSemanticRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedCollisionRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("expectedBilateralRegions-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("skeletonFoundation/skeletonFramework-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("runtime-config-expectations-quality", StringComparison.OrdinalIgnoreCase) ||
+                warning.Equals("support-metadata-explicitness", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (structuralWarnings.Length > 0)
+        {
+            issues.Add($"{body.Name}: support metadata quality warnings: {string.Join(", ", structuralWarnings.Take(5))}");
+        }
+    }
+
+    private static string NormalizeCollisionComplexity(string? collisionComplexity) =>
+        string.IsNullOrWhiteSpace(collisionComplexity)
+            ? "none"
+            : collisionComplexity.Trim().ToLowerInvariant();
 
     private static RuntimeReadinessCheck CreateExecutableCheck(string? currentExePath)
     {
@@ -108,6 +312,18 @@ public static class RuntimeReadinessReporter
         catch (Exception ex)
         {
             return new("Core pipeline", "Error", $"Failed to initialize conversion modules: {ex.Message}");
+        }
+    }
+
+    private static RuntimeReadinessCheck CreateNifParsingCheck()
+    {
+        try
+        {
+            return new("NIF parsing", "OK", NifGeometrySignatureReader.GetCapabilitySummary());
+        }
+        catch (Exception ex)
+        {
+            return new("NIF parsing", "Warning", $"Could not verify NIF parsing capabilities: {ex.Message}");
         }
     }
 
@@ -190,6 +406,30 @@ public static class RuntimeReadinessReporter
             }
         }
     }
+
+    private static RuntimeReadinessCheck CreateUniversalCoverageCheck() =>
+        new(
+            "Universal coverage",
+            "Warning",
+            "SlideSmith can convert many real-world armors, but a true 'any armor to any body' claim still needs deeper proof for the hardest topology-correspondence cases.");
+
+    private static RuntimeReadinessCheck CreateDesktopAutomationCoverageCheck() =>
+        new(
+            "Desktop automation proof",
+            "Info",
+            "Real Windows click-path validation is still external and should be completed on a Windows host with WebView2 plus an external UI automation harness.");
+
+    private static RuntimeReadinessCheck CreateLiveGameAutomationCoverageCheck() =>
+        new(
+            "Live-game automation proof",
+            "Info",
+            "In-game/runtime verification is still exported as an external harness contract and must be finished against the target Windows mod stack outside this desktop app.");
+
+    private static RuntimeReadinessCheck CreateStrictMatrixCoverageCheck() =>
+        new(
+            "Strict matrix proof",
+            "Warning",
+            "Universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations, even when a single conversion looks healthy.");
 
     private static RuntimeReadinessCheck CreateDesktopProbeCheck(string? currentExePath)
     {

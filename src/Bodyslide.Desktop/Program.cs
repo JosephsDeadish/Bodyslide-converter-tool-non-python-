@@ -1,3 +1,4 @@
+using Bodyslide.Core;
 using System.Windows.Forms;
 
 namespace Bodyslide.Desktop;
@@ -5,20 +6,53 @@ namespace Bodyslide.Desktop;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += OnThreadException;
-        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+            Environment.ProcessPath,
+            AppContext.BaseDirectory);
+        RegisterGlobalExceptionHandlers();
+
+        if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
+        {
+            return RunSmokeTest();
+        }
 
         try
         {
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(DesktopWorkflowSupport.ParseLaunchOptions(args)));
+            return 0;
         }
         catch (Exception ex)
         {
             ShowFatalError(ex);
+            return 1;
+        }
+    }
+
+    private static void RegisterGlobalExceptionHandlers()
+    {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += OnThreadException;
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+    }
+
+    private static int RunSmokeTest()
+    {
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            using var form = new MainForm();
+            form.CreateControl();
+            var summary = form.GetSmokeTestSummary();
+            Console.WriteLine(DesktopSmokeTestContract.Serialize(summary));
+            return summary.Status == DesktopSmokeTestContract.ReadyStatus ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"SlideSmith desktop smoke test failed: {ex}");
+            return 1;
         }
     }
 
@@ -103,9 +137,17 @@ internal static class Program
             try
             {
                 Clipboard.SetText(crashDetails);
+                MessageBox.Show(dialog, "Crash details copied to the clipboard.", "SlideSmith", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch
+            catch (Exception clipboardEx)
             {
+                System.Diagnostics.Trace.TraceWarning($"Failed to copy crash details to the clipboard: {clipboardEx.Message}");
+                MessageBox.Show(
+                    dialog,
+                    "Clipboard access is unavailable on this machine right now. You can still use the crash log path shown above.",
+                    "Clipboard unavailable",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
             }
         };
         actions.Controls.Add(closeButton);

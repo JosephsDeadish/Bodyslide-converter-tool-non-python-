@@ -1,0 +1,18 @@
+{
+  "meshTokenWeight": 0.35,
+  "textureTokenWeight": 0.20,
+  "physicsTokenWeight": 0.10,
+  "physicsExpectationBoostValue": 0.10,
+  "boneSignatureWeight": 0.10,
+  "vertexCountWeight": 0.15,
+  "boundingRatioWeight": 0.05,
+  "uvSignatureWeight": 0.04,
+  "bodyReferenceTokenWeight": 0.08,
+  "bodyReferenceBoostValue": 0.22,
+  "ambiguityMargin": 0.12,
+  "ambiguityScoreFloor": 0.25,
+  "mediumConfidenceThreshold": 0.35,
+  "highConfidenceThreshold": 0.75,
+  "referencePriorityMargin": 0.34,
+  "sharedReferenceConfidenceFloor": 0.50
+}

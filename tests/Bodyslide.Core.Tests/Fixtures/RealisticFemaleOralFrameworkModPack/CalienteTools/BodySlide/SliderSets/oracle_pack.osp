@@ -1,0 +1,12 @@
+<SliderSetInfo version="1">
+  <SliderSet name="OracleSupport" set="UBE">
+    <OutputPath>meshes\armor\oracle\</OutputPath>
+    <OutputFile gender="f" use="true">oracle_vestment_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">oracle_vestment_1.nif</OutputFile>
+    <Slider name="LipPlump" />
+    <Slider name="TongueLength" />
+    <Slider name="JawWidth" />
+    <Slider name="ThroatDepth" />
+    <Slider name="HideTonguePiercing" />
+  </SliderSet>
+</SliderSetInfo>

@@ -1,0 +1,33 @@
+{
+  "name": "SamLightSupport Reference",
+  "aliases": [
+    "SAM Light Raider",
+    "Shape Atlas Scout"
+  ],
+  "referenceTokens": [
+    "samlight",
+    "sam",
+    "male",
+    "scout"
+  ],
+  "sliderNames": [
+    "Body",
+    "Chest",
+    "Belly",
+    "Thighs",
+    "Butt"
+  ],
+  "physicsBones": [
+    "NPC L Pec",
+    "NPC R Pec",
+    "NPC Belly",
+    "SAM Genitals",
+    "SAM Foreskin",
+    "HDT Mouth"
+  ],
+  "physicsProfile": "smp",
+  "gender": "male",
+  "skeletonFoundation": "SAM Light",
+  "skeletonFramework": "sam-light",
+  "bodyOutputPath": "meshes\\male/samlight\\variant\\"
+}

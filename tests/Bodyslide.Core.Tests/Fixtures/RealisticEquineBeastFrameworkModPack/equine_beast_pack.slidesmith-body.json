@@ -1,0 +1,42 @@
+{
+  "name": "Equine Beast Support",
+  "aliases": [
+    "Mare Harness",
+    "Centaur Sheath Rig"
+  ],
+  "referenceTokens": [
+    "equine",
+    "horse",
+    "sheath",
+    "knot",
+    "centaur"
+  ],
+  "sliderNames": [
+    "Belly",
+    "Butt",
+    "Thighs",
+    "TailBase",
+    "SheathLength",
+    "KnotSize",
+    "TongueTipLength"
+  ],
+  "physicsBones": [
+    "TailSheath",
+    "BeastForeskin",
+    "BeastGlans",
+    "BeastKnot",
+    "BeastScrotum",
+    "BeastVagina",
+    "BeastAnus",
+    "JawLower",
+    "TongueMid",
+    "TongueTip",
+    "ManeRoot",
+    "Fetlock.L"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Equine beast-humanoid skeleton",
+  "skeletonFramework": "equine-humanoid",
+  "bodyOutputPath": "meshes\\beast\\equine\\"
+}

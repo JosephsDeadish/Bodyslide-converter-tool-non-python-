@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="AlienSparse">
+  <bone name="MawLatch" />
+  <bone name="TongueBlade" />
+  <bone name="GulletCore" />
+  <bone name="TailNub" />
+  <bone name="PawPad.L" />
+  <bone name="PawPad.R" />
+  <bone name="SheathNode" />
+  <bone name="WombCore" />
+</system>

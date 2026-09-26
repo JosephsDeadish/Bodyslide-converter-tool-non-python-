@@ -1,0 +1,12 @@
+{
+  "name": "Beast Framework Support",
+  "aliases": ["Lykaios Rut", "Canine Sheath Harness"],
+  "referenceTokens": ["lykaios", "beast", "sheath", "foreskin", "scrotum"],
+  "sliderNames": ["Belly", "TailBase", "PawWidth", "SheathLength", "ForeskinLength", "TongueTipLength"],
+  "physicsBones": ["TailSheath", "BeastForeskin", "BeastGlans", "BeastScrotum", "BeastVagina", "BeastAnus", "TongueTip", "JawLower", "Tail2", "Hock.L"],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "skeletonFoundation": "Canine beast-humanoid skeleton",
+  "skeletonFramework": "digitigrade-beast",
+  "bodyOutputPath": "meshes\\beast\\lykaios\\"
+}

@@ -51,10 +51,18 @@ jobs:
           -p:DebugSymbols=false
           --output artifacts/linux-x64
 
+      - name: Smoke-test packaged Linux CLI
+        run: |
+          chmod +x artifacts/linux-x64/SlideSmith
+          artifacts/linux-x64/SlideSmith --self-check
+
       - name: Zip Linux CLI (single binary)
         run: |
           cd artifacts/linux-x64
           zip ../slidesmith-linux-x64.zip SlideSmith
+
+      - name: Verify Linux CLI zip contents
+        run: unzip -l artifacts/slidesmith-linux-x64.zip SlideSmith
 
       - name: Upload Linux CLI zip artifact
         uses: actions/upload-artifact@v4
@@ -121,8 +129,61 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          & artifacts/win-x64/SlideSmith.exe --smoke-test
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+
+      - name: Stage Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleRoot = "artifacts/win-bundle"
+          $desktopBundle = Join-Path $bundleRoot "desktop"
+          $cliBundle = Join-Path $bundleRoot "cli"
+          $metaBundle = Join-Path $bundleRoot "meta"
+          Remove-Item $bundleRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
+          $bundleMetadata = [ordered]@{
+            desktop = "desktop/SlideSmith.exe"
+            cli = "cli/SlideSmith-CLI.exe"
+            readme = "README.txt"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
+            sourceDesktopPublish = "artifacts/win-x64"
+            sourceCliPublish = "artifacts/win-x64-cli"
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
+
       - name: Create Windows bundle zip (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+        run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
+            throw "Missing desktop/SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
+            throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
+            throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
 
       - name: Upload Windows app zip artifact
         uses: actions/upload-artifact@v4
@@ -144,7 +205,7 @@ jobs:
             |---|---|
             | `SlideSmith.exe` | Windows desktop GUI (drag-and-drop armor, no terminal needed) |
             | `SlideSmith-CLI.exe` | Windows command-line tool |
-            | `slidesmith-win-x64-bundle.zip` | Windows bundle with both GUI + CLI side-by-side |
+            | `slidesmith-win-x64-bundle.zip` | Windows bundle with `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, and `meta/slidesmith-bundle.json` |
             | `slidesmith-linux-x64.zip` | Linux CLI binary |
 
             **Quick start (desktop):** download `SlideSmith.exe`, double-click it.
@@ -212,8 +273,77 @@ jobs:
       - name: Rename CLI exe to avoid collision
         run: Rename-Item artifacts/win-x64-cli/SlideSmith.exe SlideSmith-CLI.exe
 
+      - name: Smoke-test packaged Windows binaries
+        shell: pwsh
+        run: |
+          & artifacts/win-x64/SlideSmith.exe --smoke-test
+          & artifacts/win-x64-cli/SlideSmith-CLI.exe --self-check
+
+      - name: Stage Windows bundle contents
+        shell: pwsh
+        run: |
+          $bundleRoot = "artifacts/win-bundle"
+          $desktopBundle = Join-Path $bundleRoot "desktop"
+          $cliBundle = Join-Path $bundleRoot "cli"
+          $metaBundle = Join-Path $bundleRoot "meta"
+          Remove-Item $bundleRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $desktopBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $cliBundle -Force | Out-Null
+          New-Item -ItemType Directory -Path $metaBundle -Force | Out-Null
+          Copy-Item artifacts/win-x64/* $desktopBundle -Recurse -Force
+          Copy-Item artifacts/win-x64-cli/* $cliBundle -Recurse -Force
+          Copy-Item packaging/windows-bundle/* $bundleRoot -Recurse -Force
+          $bundleMetadata = [ordered]@{
+            desktop = "desktop/SlideSmith.exe"
+            cli = "cli/SlideSmith-CLI.exe"
+            readme = "README.txt"
+            fomodModuleConfig = "fomod/ModuleConfig.xml"
+            fomodInfo = "fomod/info.xml"
+            modOrganizerMetadata = "meta.ini"
+            sourceDesktopPublish = "artifacts/win-x64"
+            sourceCliPublish = "artifacts/win-x64-cli"
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $metaBundle "slidesmith-bundle.json") -Value $bundleMetadata -Encoding UTF8
+
       - name: Zip Windows bundle (desktop + CLI)
-        run: Compress-Archive -Path artifacts/win-x64/SlideSmith.exe,artifacts/win-x64-cli/SlideSmith-CLI.exe -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+        run: Compress-Archive -Path artifacts/win-bundle/* -DestinationPath artifacts/slidesmith-win-x64-bundle.zip
+
+      - name: Verify Windows bundle zip contents
+        shell: pwsh
+        run: |
+          $extractPath = Join-Path $env:RUNNER_TEMP "slidesmith-win-x64-bundle-check"
+          if (Test-Path $extractPath) {
+            Remove-Item $extractPath -Recurse -Force
+          }
+          Expand-Archive artifacts/slidesmith-win-x64-bundle.zip -DestinationPath $extractPath
+          if (!(Test-Path (Join-Path $extractPath "desktop/SlideSmith.exe"))) {
+            throw "Missing desktop/SlideSmith.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "cli/SlideSmith-CLI.exe"))) {
+            throw "Missing cli/SlideSmith-CLI.exe in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "README.txt"))) {
+            throw "Missing README.txt in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta/slidesmith-bundle.json"))) {
+            throw "Missing meta/slidesmith-bundle.json in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/ModuleConfig.xml"))) {
+            throw "Missing fomod/ModuleConfig.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "fomod/info.xml"))) {
+            throw "Missing fomod/info.xml in bundle zip."
+          }
+          if (!(Test-Path (Join-Path $extractPath "meta.ini"))) {
+            throw "Missing meta.ini in bundle zip."
+          }
+
+          $moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
+          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="README.txt"', 'source="meta.ini"')) {
+            if ($moduleConfig -notmatch [regex]::Escape($requiredEntry)) {
+              throw "Bundle FOMOD metadata is missing installer entry $requiredEntry."
+            }
+          }
 
       - name: Set Windows artifact name
         shell: pwsh

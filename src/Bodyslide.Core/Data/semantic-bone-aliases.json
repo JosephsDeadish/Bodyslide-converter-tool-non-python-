@@ -1,0 +1,190 @@
+{
+  "breast": [
+    "breast",
+    "bust",
+    "chest",
+    "pec",
+    "boob",
+    "bosom",
+    "nipple",
+    "support",
+    "lift",
+    "pushup",
+    "cleavage",
+    "twist",
+    "collider",
+    "collision"
+  ],
+  "butt": [
+    "butt",
+    "glute",
+    "gluteupper",
+    "glutelower",
+    "rear",
+    "rearcheek",
+    "cheek",
+    "rump",
+    "hip",
+    "booty",
+    "collision"
+  ],
+  "belly": [
+    "belly",
+    "abdomen",
+    "stomach",
+    "tummy",
+    "gut",
+    "womb",
+    "uterus",
+    "ovum",
+    "navel",
+    "torsofront"
+  ],
+  "thigh": [
+    "thigh",
+    "leg",
+    "upperleg",
+    "hamstring"
+  ],
+  "genitals": [
+    "genital",
+    "schlong",
+    "penis",
+    "shaft",
+    "foreskin",
+    "sheath",
+    "sheathtip",
+    "glans",
+    "knot",
+    "scrot",
+    "scrotum",
+    "testicle",
+    "ball",
+    "beastvagina",
+    "beastanus",
+    "vagina",
+    "clitoris",
+    "labia",
+    "anus",
+    "anal",
+    "groin",
+    "crotch",
+    "pubic",
+    "ovipositor",
+    "seed",
+    "sheathnode"
+  ],
+  "mouth": [
+    "mouth",
+    "maw",
+    "muzzle",
+    "snout",
+    "lip",
+    "jaw",
+    "jawlower",
+    "jawupper",
+    "tongue",
+    "tonguemid",
+    "tonguetip",
+    "tongueblade",
+    "teeth",
+    "palate",
+    "throat",
+    "throatlower",
+    "pharynx",
+    "gullet"
+  ],
+  "head": [
+    "head",
+    "face",
+    "brow",
+    "ear",
+    "horn"
+  ],
+  "heel": [
+    "heel",
+    "ankle",
+    "foot",
+    "pawpad",
+    "digitpad",
+    "pad"
+  ],
+  "hair": [
+    "hair",
+    "bang",
+    "mane",
+    "forelock",
+    "crest",
+    "ponytail",
+    "tail",
+    "strand",
+    "lock",
+    "pigtail"
+  ],
+  "tail": [
+    "tail",
+    "tails",
+    "tailnub",
+    "nubtail",
+    "caudal",
+    "pony",
+    "tassel",
+    "tentacle",
+    "tendril",
+    "plume"
+  ],
+  "wing": [
+    "wing",
+    "feather",
+    "pinion",
+    "vane"
+  ],
+  "fin": [
+    "fin",
+    "dorsalfin",
+    "pectoralfin",
+    "ventralfin",
+    "tailfin",
+    "spinefin",
+    "webfin",
+    "merfin"
+  ],
+  "frill": [
+    "frill",
+    "gillfrill",
+    "gillcrest",
+    "reeffrill",
+    "reefwhisker",
+    "crest",
+    "whisker",
+    "mane"
+  ],
+  "mane": [
+    "mane",
+    "forelock",
+    "manetip",
+    "crest"
+  ],
+  "branch": [
+    "branch",
+    "vine",
+    "tendril",
+    "briar",
+    "rootclaw",
+    "twig"
+  ],
+  "antenna": [
+    "antenna",
+    "feeler",
+    "mothfeeler",
+    "feelersway",
+    "tendril"
+  ],
+  "mandible": [
+    "mandible",
+    "mandiblearc",
+    "shellmandible",
+    "fang",
+    "pincer"
+  ]
+}

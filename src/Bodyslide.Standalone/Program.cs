@@ -1,6 +1,11 @@
 using Bodyslide.Core;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
+
+ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+    Environment.ProcessPath,
+    AppContext.BaseDirectory);
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
 
@@ -110,6 +115,10 @@ if (args.Contains("--list-bodies", StringComparer.OrdinalIgnoreCase))
             Console.WriteLine($"           supports physics: {(profile.SupportsPhysics ? "yes" : "no")}");
             Console.WriteLine($"           default physics: {defaultPhysicsDisplay} [{profile.DefaultPhysics}]");
             Console.WriteLine($"           recommended physics: {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+            Console.WriteLine($"           support regions: {FormatDisplayList(profile.ExpectedSemanticRegions)}");
+            Console.WriteLine($"           collision regions: {FormatDisplayList(profile.ExpectedCollisionRegions)} ({profile.CollisionComplexity})");
+            Console.WriteLine($"           bilateral regions: {FormatDisplayList(profile.ExpectedBilateralRegions)}");
+            Console.WriteLine($"           minimum physics coverage: slots {profile.MinimumPhysicsSlotCount}, families {profile.MinimumPhysicsFamilyCount}, chain depth {profile.MinimumPhysicsChainDepth}");
             Console.WriteLine($"           physics-capable bones: {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
             Console.WriteLine($"           notes: {profile.Notes}");
         }
@@ -131,7 +140,7 @@ if (args.Contains("--list-physics", StringComparer.OrdinalIgnoreCase))
             : $"{display} [{profile}]";
         Console.WriteLine($" - {label,-34}{(desc is not null ? $"  {desc}" : string.Empty)}");
     }
-    Console.WriteLine("Alias accepted: soft-body => smp+cbpc");
+    Console.WriteLine("Aliases accepted: soft-body / full-soft-body / hdt-smp / fsmp / cbp => canonical physics profiles");
     Console.WriteLine(" - auto         => use preset/custom/default target-body physics");
 
     return;
@@ -197,6 +206,9 @@ try
         {
             Console.WriteLine($" - {step}");
         }
+
+        WritePostConversionGuidance(result);
+        Console.WriteLine();
     }
 }
 catch (Exception ex)
@@ -281,17 +293,13 @@ static bool TryParseRequest(string[] args, out ConversionRequest request, out st
     if (!string.IsNullOrWhiteSpace(skeletonNif))
     {
         skeletonNif = skeletonNif.Trim().Trim('"');
-        if (!skeletonNif.EndsWith(".nif", StringComparison.OrdinalIgnoreCase))
+        if (!SkeletonSupportPathResolver.TryResolveSkeletonNifPath(skeletonNif, out var resolvedSkeletonNif))
         {
-            error = $"Invalid --skeleton-nif value '{skeletonNif}'. Provide a path to a .nif file.";
+            error = $"Could not resolve a usable skeleton .nif from '{skeletonNif}'. Provide a skeleton .nif directly, an XP32/XPMSSE mod folder, or a related .pex file from the same mod.";
             return false;
         }
 
-        if (!File.Exists(skeletonNif))
-        {
-            error = $"Could not find skeleton file '{skeletonNif}'. Check the path and try again.";
-            return false;
-        }
+        skeletonNif = resolvedSkeletonNif;
     }
 
     request = new ConversionRequest(
@@ -483,7 +491,7 @@ static void WriteUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  SlideSmith <armor path> <target body> [output directory]");
-    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--skeleton-nif <path to skeleton.nif>] [--output-zip] [--cache-path <path>]");
+    Console.WriteLine("  SlideSmith --input <armor path|folder|archive(.zip/.7z/.tar/.tar.gz/.tgz)> [--target <body|all>] [--targets <body1,body2|all>] [--output <directory>] [--preset <name>] [--presets <preset1,preset2>] [--profile <profile>] [--source <body>] [--physics <auto|none|cbpc|smp|smp+cbpc>] [--world-mode <auto|static|rigid-proxy>] [--build-sliders <true|false>] [--skeleton-nif <path to skeleton.nif|XP32 folder|related .pex>] [--output-zip] [--cache-path <path>]");
     Console.WriteLine("  SlideSmith --list-presets");
     Console.WriteLine("  SlideSmith --list-profiles");
     Console.WriteLine("  SlideSmith --list-bodies");
@@ -522,8 +530,7 @@ static void WriteBodyReference(string bodyName)
         return;
     }
 
-    var body = BodyTypeCatalog.All.FirstOrDefault(b => string.Equals(b.Name, requested, StringComparison.OrdinalIgnoreCase));
-    if (body is null)
+    if (!BodyTypeCatalog.TryResolve(requested, out var body))
     {
         Console.WriteLine($"Unknown body '{bodyName}'. Use --list-bodies to view valid names.");
         var suggestions = BodyTypeCatalog.All
@@ -549,6 +556,10 @@ static void WriteBodyReference(string bodyName)
         Console.WriteLine($" - Supports physics : {(profile.SupportsPhysics ? "yes" : "no")}");
         Console.WriteLine($" - Default physics  : {PhysicsProfileCatalog.ToDisplayName(profile.DefaultPhysics)} [{profile.DefaultPhysics}]");
         Console.WriteLine($" - Recommended phys : {PhysicsProfileCatalog.ToDisplayName(profile.RecommendedPhysicsProfile)} [{profile.RecommendedPhysicsProfile}]");
+        Console.WriteLine($" - Support regions  : {FormatDisplayList(profile.ExpectedSemanticRegions)}");
+        Console.WriteLine($" - Collision focus  : {FormatDisplayList(profile.ExpectedCollisionRegions)} ({profile.CollisionComplexity})");
+        Console.WriteLine($" - Bilateral pairs  : {FormatDisplayList(profile.ExpectedBilateralRegions)}");
+        Console.WriteLine($" - Min phys cover   : slots {profile.MinimumPhysicsSlotCount}, families {profile.MinimumPhysicsFamilyCount}, chain depth {profile.MinimumPhysicsChainDepth}");
         Console.WriteLine($" - Physics bones    : {(profile.SupportsPhysics ? string.Join(", ", profile.RequiredPhysicsBones) : "none")}");
         if (profile.SupportsPhysics)
         {
@@ -572,15 +583,104 @@ static void WriteBodyReference(string bodyName)
     Console.WriteLine($" - Matching presets : {(matchingPresets.Length == 0 ? "none" : string.Join(", ", matchingPresets))}");
 }
 
+static string FormatDisplayList(IReadOnlyList<string>? values) =>
+    values is { Count: > 0 }
+        ? string.Join(", ", values.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
+        : "none";
+
 static void WriteConversionGuide()
 {
     Console.WriteLine("SlideSmith conversion guide:");
     Console.WriteLine("  1) Pick a destination with --target <body> or --preset <name>.");
     Console.WriteLine("  2) If the source body is known, set --source <body> to improve mapping confidence.");
     Console.WriteLine("  3) Keep --physics auto unless you intentionally need none/cbpc/smp/smp+cbpc.");
-    Console.WriteLine("  4) Use --skeleton-nif <path> with your real XPMSSE/target skeleton for best bone mapping.");
+    Console.WriteLine("  4) Use --skeleton-nif <path> with your real XPMSSE/target skeleton support for best bone mapping.");
     Console.WriteLine("  5) Use --list-bodies, --body-reference <body>, --list-presets, and --list-physics before converting.");
     Console.WriteLine();
     Console.WriteLine("Recommended command pattern:");
     Console.WriteLine("  SlideSmith --input <armor> --source <known body> --target <destination body> --physics auto --skeleton-nif <path> --output <folder>");
+}
+
+static void WritePostConversionGuidance(ConversionResult result)
+{
+    var qualityReport = TryReadConversionQualityReport(result);
+    var targetBody = qualityReport?.TargetBody ?? "target body";
+    var validationSummary = qualityReport?.ValidationSummary;
+    if (validationSummary is null)
+    {
+        return;
+    }
+
+    Console.WriteLine(
+        $"Validation: {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} " +
+        $"(machine status: {validationSummary.Status}; " +
+        $"score {validationSummary.Score}; " +
+        $"high {validationSummary.HighSeverityCount}, " +
+        $"medium {validationSummary.MediumSeverityCount}, " +
+        $"low {validationSummary.LowSeverityCount})");
+    Console.WriteLine(ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status));
+
+    var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 3);
+    if (prioritizedIssues.Count > 0)
+    {
+        Console.WriteLine("Warnings:");
+        foreach (var issue in prioritizedIssues)
+        {
+            Console.WriteLine($" ! [{issue.Severity.ToUpperInvariant()}] {issue.Message}");
+        }
+    }
+    else if (validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("No immediate follow-up actions detected.");
+    }
+
+    var followUpActions = ConversionValidationGuidance.BuildFollowUpActions(
+        validationSummary,
+        targetBody,
+        maxActions: 4);
+    if (followUpActions.Count > 0)
+    {
+        Console.WriteLine("Next actions:");
+        foreach (var action in followUpActions)
+        {
+            Console.WriteLine($" -> {action}");
+        }
+    }
+}
+
+static ConversionQualityReport? TryReadConversionQualityReport(ConversionResult result)
+{
+    var qualityPath = result.OutputFiles.FirstOrDefault(path =>
+        path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase))
+        ?? Path.Combine(result.OutputDirectory, "conversion-quality.json");
+
+    if (string.IsNullOrWhiteSpace(qualityPath) || !File.Exists(qualityPath))
+    {
+        return null;
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<ConversionQualityReport>(
+            File.ReadAllText(qualityPath),
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+    }
+    catch (JsonException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        Console.Error.WriteLine($"Warning: could not read conversion-quality.json at '{qualityPath}': {ex.Message}");
+        return null;
+    }
 }

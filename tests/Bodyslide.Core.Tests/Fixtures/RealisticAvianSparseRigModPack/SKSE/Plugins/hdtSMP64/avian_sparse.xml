@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="AvianSparseRigPhysics">
+  <bone name="PinionFoldCtrl.L" />
+  <bone name="PinionFoldCtrl.R" />
+  <bone name="TalonRear.L" />
+  <bone name="TalonRear.R" />
+</system>

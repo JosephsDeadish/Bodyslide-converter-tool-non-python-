@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="SerpentineSparseRigPhysics">
+  <bone name="CoilNub" />
+  <bone name="CoilRing" />
+  <bone name="SerpentJaw" />
+</system>

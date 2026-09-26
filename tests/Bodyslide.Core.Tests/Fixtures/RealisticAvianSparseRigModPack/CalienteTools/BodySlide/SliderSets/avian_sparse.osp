@@ -1,0 +1,10 @@
+<SliderSetInfo version="1">
+  <SliderSet name="AvianSparseRig" set="Avian Humanoid">
+    <OutputPath>meshes\beast\avian_sparse\</OutputPath>
+    <OutputFile gender="f" use="true">avian_sparse_0.nif</OutputFile>
+    <OutputFile gender="f" use="true" morphfile="1">avian_sparse_1.nif</OutputFile>
+    <Slider name="WingSpan" />
+    <Slider name="FeatherSpread" />
+    <Slider name="TalonWidth" />
+  </SliderSet>
+</SliderSetInfo>

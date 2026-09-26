@@ -1,0 +1,57 @@
+{
+  "name": "Alien Hybrid",
+  "aliases": [
+    "Sparse Alien Hybrid",
+    "Mawbind Alien"
+  ],
+  "detectionTokens": [
+    "alienhybrid",
+    "mawbind",
+    "sparsealien"
+  ],
+  "referenceTokens": [
+    "alienhybrid",
+    "mawbind",
+    "tailnub",
+    "pawpad"
+  ],
+  "sliderNames": [
+    "Belly",
+    "Thighs",
+    "WaistWidth",
+    "TailBase",
+    "PawWidth",
+    "TongueTipLength",
+    "SheathLength"
+  ],
+  "zapSliderNames": [
+    "HideHarness"
+  ],
+  "physicsProfile": "smp",
+  "gender": "female",
+  "physicsBones": [
+    "NPC Belly",
+    "TailSheath",
+    "BeastVagina",
+    "BeastAnus",
+    "JawLower",
+    "TongueMid",
+    "TongueTip",
+    "PawFront.L",
+    "PawFront.R"
+  ],
+  "skeletonFoundation": "Digitigrade beast hybrid skeleton",
+  "skeletonFramework": "digitigrade-beast",
+  "bodyOutputPath": "meshes\\actors\\character\\character assets\\",
+  "transformationField": {
+    "chest": 0.98,
+    "waist": 0.95,
+    "pelvis": 1.04,
+    "legs": 1.03,
+    "breasts": 1.02,
+    "belly": 1.04,
+    "butt": 1.03,
+    "thighs": 1.07,
+    "calves": 1.05
+  }
+}

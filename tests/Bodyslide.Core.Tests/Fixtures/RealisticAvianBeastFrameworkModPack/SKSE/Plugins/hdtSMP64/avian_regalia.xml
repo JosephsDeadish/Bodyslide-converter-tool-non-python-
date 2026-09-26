@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="AvianFrameworkPhysics">
+  <bone name="WingMid.L" />
+  <bone name="WingMid.R" />
+  <bone name="WingTip.L" />
+  <bone name="WingTip.R" />
+  <bone name="WingMembrane.L" />
+  <bone name="WingMembrane.R" />
+  <bone name="Feather01.L" />
+  <bone name="Feather01.R" />
+  <bone name="Feather03.L" />
+  <bone name="Feather03.R" />
+  <bone name="Talon.L" />
+  <bone name="Talon.R" />
+</system>

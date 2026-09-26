@@ -1,0 +1,35 @@
+{
+  "name": "SosSupport Reference",
+  "aliases": [
+    "SOS Raider",
+    "Schlong Scout"
+  ],
+  "referenceTokens": [
+    "sos",
+    "schlong",
+    "male",
+    "raider"
+  ],
+  "sliderNames": [
+    "Body",
+    "Chest",
+    "Belly",
+    "Thighs",
+    "Genitals"
+  ],
+  "physicsBones": [
+    "NPC L Pec",
+    "NPC R Pec",
+    "NPC Belly",
+    "SOS GenitalsBase",
+    "SOS Foreskin",
+    "SOS Shaft",
+    "SOS Glans",
+    "SOS Scrotum"
+  ],
+  "physicsProfile": "smp",
+  "gender": "male",
+  "skeletonFoundation": "SOS",
+  "skeletonFramework": "xpmsse-male-smp",
+  "bodyOutputPath": "meshes\\male/sos\\variant\\"
+}

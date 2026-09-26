@@ -1,0 +1,352 @@
+using System.Globalization;
+using System.Reflection;
+using System.Text.Json;
+
+namespace Bodyslide.Core;
+
+internal sealed record RaceCompatibilityRace(string Name, uint FormId, IReadOnlyList<string> Groups);
+internal sealed record RaceCompatibilityBodyRule(
+    string Body,
+    IReadOnlyList<string> CompatibleGroups,
+    IReadOnlyList<string> WarningGroups,
+    string? WarningMessage);
+internal sealed record RaceCompatibilityInferenceRule(
+    string Name,
+    IReadOnlyList<string> Groups,
+    IReadOnlyList<string> EditorIdHints,
+    IReadOnlyList<string> PluginNameHints,
+    IReadOnlyList<string> MeshPathHints,
+    bool AllowGenericOnly = false);
+
+internal static class RaceCompatibilityCatalog
+{
+    private const string ResourceName = "Bodyslide.Core.Data.race-compatibility.json";
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    private static readonly Lazy<RaceCompatibilityCatalogData> Data = new(Load);
+
+    public static IReadOnlyCollection<RaceCompatibilityRace> Races => Data.Value.RacesByName.Values.ToArray();
+    public static IReadOnlyCollection<RaceCompatibilityBodyRule> BodyRules => Data.Value.BodyRules.Values.ToArray();
+
+    public static bool TryGetRace(uint formId, out RaceCompatibilityRace race) =>
+        Data.Value.RacesByFormId.TryGetValue(formId, out race!)
+        || Data.Value.RacesByFormId.TryGetValue(formId & 0x00FFFFFFu, out race!);
+
+    public static bool TryGetBodyRule(string bodyName, out RaceCompatibilityBodyRule rule)
+    {
+        rule = default!;
+        if (string.IsNullOrWhiteSpace(bodyName))
+        {
+            return false;
+        }
+
+        var canonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(bodyName, out var resolvedCanonicalBody)
+            ? resolvedCanonicalBody
+            : BodyTypeCatalog.ResolveName(bodyName);
+        return Data.Value.BodyRules.TryGetValue(canonicalBody, out rule!);
+    }
+
+    public static bool TryInferRaceFromContext(
+        string? editorId,
+        IReadOnlyList<string>? meshPaths,
+        IReadOnlyList<string>? pluginNames,
+        out RaceCompatibilityRace race)
+    {
+        race = default!;
+        var normalizedEditorId = NormalizeHintSource(editorId);
+        var normalizedMeshPaths = meshPaths?
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(NormalizeHintSource)
+            .ToArray() ?? [];
+        var normalizedPluginNames = pluginNames?
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Select(NormalizeHintSource)
+            .ToArray() ?? [];
+
+        if (string.IsNullOrWhiteSpace(normalizedEditorId) &&
+            normalizedMeshPaths.Length == 0 &&
+            normalizedPluginNames.Length == 0)
+        {
+            return false;
+        }
+
+        RaceCompatibilityInferenceRule? bestRule = null;
+        var bestScore = 0;
+        foreach (var rule in Data.Value.InferenceRules)
+        {
+            var score = ScoreInferenceRule(rule, normalizedEditorId, normalizedMeshPaths, normalizedPluginNames);
+            if (score > bestScore)
+            {
+                bestRule = rule;
+                bestScore = score;
+            }
+            else if (score > 0 && score == bestScore)
+            {
+                bestRule = null;
+            }
+        }
+
+        if (bestRule is null || bestScore <= 0)
+        {
+            return false;
+        }
+
+        race = new RaceCompatibilityRace(bestRule.Name, 0u, bestRule.Groups);
+        return true;
+    }
+
+    private static RaceCompatibilityCatalogData Load()
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName)
+            ?? throw new InvalidOperationException($"Embedded race compatibility resource '{ResourceName}' was not found.");
+        using var reader = new StreamReader(stream);
+        var raw = reader.ReadToEnd();
+        var dto = JsonSerializer.Deserialize<RaceCompatibilityCatalogDto>(raw, JsonOptions)
+            ?? throw new InvalidOperationException("Race compatibility metadata could not be deserialized.");
+
+        var races = (dto.Races ?? [])
+            .Select(NormalizeRace)
+            .ToArray();
+        var bodyRules = (dto.BodyRules ?? [])
+            .Select(NormalizeBodyRule)
+            .ToDictionary(static rule => rule.Body, StringComparer.OrdinalIgnoreCase);
+        var inferenceRules = (dto.InferenceRules ?? [])
+            .Select(NormalizeInferenceRule)
+            .ToArray();
+        EnsureNoDuplicateRaceFormIds(races);
+
+        return new RaceCompatibilityCatalogData(
+            races.ToDictionary(static race => race.FormId),
+            races.ToDictionary(static race => race.Name, StringComparer.OrdinalIgnoreCase),
+            bodyRules,
+            inferenceRules);
+    }
+
+    private static void EnsureNoDuplicateRaceFormIds(IReadOnlyList<RaceCompatibilityRace> races)
+    {
+        var seen = new Dictionary<uint, string>();
+        foreach (var race in races)
+        {
+            if (seen.TryGetValue(race.FormId, out var existingName))
+            {
+                throw new InvalidOperationException(
+                    $"Race compatibility metadata contained duplicate FormID 0x{race.FormId:X8} for races '{existingName}' and '{race.Name}'.");
+            }
+
+            seen[race.FormId] = race.Name;
+        }
+    }
+
+    private static RaceCompatibilityRace NormalizeRace(RaceCompatibilityRaceDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new InvalidOperationException("Race compatibility metadata contained a race without a name.");
+        }
+
+        if (string.IsNullOrWhiteSpace(dto.FormId))
+        {
+            throw new InvalidOperationException($"Race compatibility metadata contained a missing FormID for '{dto.Name}'.");
+        }
+
+        return new RaceCompatibilityRace(
+            dto.Name.Trim(),
+            ParseFormId(dto.FormId),
+            NormalizeStringList(dto.Groups));
+    }
+
+    private static RaceCompatibilityBodyRule NormalizeBodyRule(RaceCompatibilityBodyRuleDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Body))
+        {
+            throw new InvalidOperationException("Race compatibility metadata contained a body rule without a body name.");
+        }
+
+        var requestedBody = dto.Body.Trim();
+        var canonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(requestedBody, out var metadataCanonicalBody)
+            ? metadataCanonicalBody
+            : BodyTypeCatalog.TryResolve(requestedBody, out var canonicalBodyInfo)
+                ? canonicalBodyInfo.Name
+                : null;
+        if (string.IsNullOrWhiteSpace(canonicalBody))
+        {
+            throw new InvalidOperationException(
+                $"Race compatibility metadata contained an unknown body rule '{requestedBody}'.");
+        }
+
+        return new RaceCompatibilityBodyRule(
+            canonicalBody,
+            NormalizeStringList(dto.CompatibleGroups),
+            NormalizeStringList(dto.WarningGroups),
+            string.IsNullOrWhiteSpace(dto.WarningMessage) ? null : dto.WarningMessage.Trim());
+    }
+
+    private static RaceCompatibilityInferenceRule NormalizeInferenceRule(RaceCompatibilityInferenceRuleDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+        {
+            throw new InvalidOperationException("Race compatibility metadata contained an inference rule without a name.");
+        }
+
+        return new RaceCompatibilityInferenceRule(
+            dto.Name.Trim(),
+            NormalizeStringList(dto.Groups),
+            NormalizeStringList(dto.EditorIdHints),
+            NormalizeStringList(dto.PluginNameHints),
+            NormalizeStringList(dto.MeshPathHints),
+            dto.AllowGenericOnly);
+    }
+
+    private static uint ParseFormId(string value)
+    {
+        var trimmed = value.Trim();
+        var hexValue = trimmed.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[2..]
+            : trimmed;
+        return uint.Parse(hexValue, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    private static IReadOnlyList<string> NormalizeStringList(IEnumerable<string>? values) =>
+        values?
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+    private static int ScoreInferenceRule(
+        RaceCompatibilityInferenceRule rule,
+        string? normalizedEditorId,
+        IReadOnlyList<string> normalizedMeshPaths,
+        IReadOnlyList<string> normalizedPluginNames)
+    {
+        var score = 0;
+        var specificMatchFound = false;
+        if (!string.IsNullOrWhiteSpace(normalizedEditorId))
+        {
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.EditorIdHints, normalizedEditorId);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 8;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches * 2;
+            }
+        }
+
+        foreach (var pluginName in normalizedPluginNames)
+        {
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.PluginNameHints, pluginName);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 6;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches;
+            }
+        }
+
+        foreach (var meshPath in normalizedMeshPaths)
+        {
+            var (specificMatches, genericMatches) = ScoreHintMatches(rule.MeshPathHints, meshPath);
+            specificMatchFound |= specificMatches > 0;
+            score += specificMatches * 3;
+            if (specificMatches > 0 || rule.AllowGenericOnly)
+            {
+                score += genericMatches;
+            }
+        }
+
+        return specificMatchFound || rule.AllowGenericOnly
+            ? score
+            : 0;
+    }
+
+    private static (int SpecificMatches, int GenericMatches) ScoreHintMatches(
+        IReadOnlyList<string> hints,
+        string normalizedValue)
+    {
+        var specificMatches = 0;
+        var genericMatches = 0;
+        foreach (var hint in hints
+                     .Where(hint => normalizedValue.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (IsGenericInferenceHint(hint))
+            {
+                genericMatches++;
+            }
+            else
+            {
+                specificMatches++;
+            }
+        }
+
+        return (specificMatches, genericMatches);
+    }
+
+    private static bool IsGenericInferenceHint(string hint)
+    {
+        var normalized = NormalizeHintSource(hint);
+        return normalized.Equals("vampire", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("child", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("follower", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("custom race", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("customrace", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("custom", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeHintSource(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : string.Join(
+                ' ',
+                value.Trim()
+                    .Replace('\\', '/')
+                    .Replace('/', ' ')
+                    .Replace('-', ' ')
+                    .Replace('_', ' ')
+                    .Replace('.', ' ')
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private sealed record RaceCompatibilityCatalogData(
+        IReadOnlyDictionary<uint, RaceCompatibilityRace> RacesByFormId,
+        IReadOnlyDictionary<string, RaceCompatibilityRace> RacesByName,
+        IReadOnlyDictionary<string, RaceCompatibilityBodyRule> BodyRules,
+        IReadOnlyList<RaceCompatibilityInferenceRule> InferenceRules);
+
+    private sealed class RaceCompatibilityCatalogDto
+    {
+        public RaceCompatibilityRaceDto[]? Races { get; init; }
+        public RaceCompatibilityBodyRuleDto[]? BodyRules { get; init; }
+        public RaceCompatibilityInferenceRuleDto[]? InferenceRules { get; init; }
+    }
+
+    private sealed class RaceCompatibilityRaceDto
+    {
+        public string? Name { get; init; }
+        public string? FormId { get; init; }
+        public string[]? Groups { get; init; }
+    }
+
+    private sealed class RaceCompatibilityBodyRuleDto
+    {
+        public string? Body { get; init; }
+        public string[]? CompatibleGroups { get; init; }
+        public string[]? WarningGroups { get; init; }
+        public string? WarningMessage { get; init; }
+    }
+
+    private sealed class RaceCompatibilityInferenceRuleDto
+    {
+        public string? Name { get; init; }
+        public string[]? Groups { get; init; }
+        public string[]? EditorIdHints { get; init; }
+        public string[]? PluginNameHints { get; init; }
+        public string[]? MeshPathHints { get; init; }
+        public bool AllowGenericOnly { get; init; }
+    }
+}

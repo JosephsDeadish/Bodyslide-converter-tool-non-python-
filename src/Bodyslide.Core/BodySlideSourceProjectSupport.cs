@@ -1,0 +1,1370 @@
+using System.Xml.Linq;
+
+namespace Bodyslide.Core;
+
+internal sealed record ResolvedBodySlideSliders(
+    IReadOnlyList<string> Sliders,
+    IReadOnlyList<string> ZapSliders,
+    string Gender,
+    SourceMorphQualityMetrics? SourceMorphQuality = null,
+    IReadOnlyDictionary<string, SourceMorphPayloadVariants>? ReusableMorphPayloads = null,
+    SourceAssetSupportMetrics? SourceAssetSupport = null);
+
+internal sealed record FallbackBodySlideInference(
+    string? BodyName,
+    string? DeformationProfile,
+    IReadOnlyList<string> Signals);
+
+internal static class BodySlideSourceProjectSupport
+{
+    private static readonly IReadOnlyList<string> DefaultSliders = ["Belly", "Butt", "BreastsShape", "WaistWidth", "HipWidth"];
+    private static readonly StringComparison PathComparison = StringComparison.OrdinalIgnoreCase;
+    private static readonly SourceSliderCandidate EmptyCandidate = new(string.Empty, 0);
+
+    private static readonly IReadOnlyDictionary<string, string> ZapSliderHints =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bra"] = "HideBra",
+            ["panty"] = "HidePanties",
+            ["panties"] = "HidePanties",
+            ["underwear"] = "HidePanties",
+            ["sleeve"] = "HideSleeves",
+            ["cape"] = "HideCape",
+            ["cloak"] = "HideCloak",
+            ["hood"] = "HideHood",
+            ["mask"] = "HideMask"
+        };
+
+    private static readonly string[] ZapNamePrefixes =
+    [
+        "hide", "remove", "toggle", "strip", "delete"
+    ];
+
+    private sealed record BodySlideDiscoveryResult(
+        IReadOnlyList<string> Files,
+        bool HasReferenceAssets);
+
+    private sealed record BodySlideProjectProbe(
+        string OspPath,
+        string OspDirectory,
+        string? BodySlideRoot,
+        IReadOnlyList<string> ProjectNames,
+        IReadOnlyList<string> OutputPaths,
+        IReadOnlyList<string> OutputFiles,
+        IReadOnlyList<string> ReferencedPaths);
+
+    public static async Task<ResolvedBodySlideSliders> ResolveAsync(
+        ImportedArmor armor,
+        string targetBody,
+        CancellationToken cancellationToken)
+    {
+        var customProfileFound = CustomBodyProfileSupport.TryGetProfile(armor, targetBody, out var customProfile);
+        var baseSliders = customProfileFound
+            ? customProfile.SliderNames ?? DefaultSliders
+            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var metadata) && metadata.SliderNames.Count > 0
+                ? metadata.SliderNames
+                : DefaultSliders;
+        var sourceSupport = await ExtractSourceSupportAsync(armor, cancellationToken);
+        var fallbackInference = sourceSupport.Sliders.Count == 0
+            ? InferFallbackSupport(armor, targetBody)
+            : null;
+        var mergedSliders = MergeSliderLists(baseSliders, sourceSupport.Sliders);
+        if (sourceSupport.Sliders.Count == 0 &&
+            !string.IsNullOrWhiteSpace(fallbackInference?.BodyName) &&
+            BuiltInBodyMetadataCatalog.TryGet(fallbackInference.BodyName, out var inferredMetadata) &&
+            inferredMetadata.SliderNames.Count > 0)
+        {
+            mergedSliders = MergeSliderLists(mergedSliders, inferredMetadata.SliderNames);
+        }
+
+        var zapSliders = new HashSet<string>(customProfile?.ZapSliderNames ?? [], StringComparer.OrdinalIgnoreCase);
+        foreach (var slider in sourceSupport.ZapSliders.Select(static candidate => candidate.Name))
+        {
+            zapSliders.Add(slider);
+        }
+
+        var sliderSet = mergedSliders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(meshFile) ?? string.Empty;
+            foreach (var (hint, zapName) in ZapSliderHints)
+            {
+                if (fileName.Contains(hint, StringComparison.OrdinalIgnoreCase) && !sliderSet.Contains(zapName))
+                {
+                    zapSliders.Add(zapName);
+                }
+            }
+        }
+
+        zapSliders.ExceptWith(sliderSet);
+
+        var gender = customProfileFound && customProfile is not null
+            ? string.Equals(customProfile.Gender, "male", StringComparison.OrdinalIgnoreCase) ? "male" : "female"
+            : BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata)
+                ? builtInMetadata.Gender
+                : "female";
+
+        return new ResolvedBodySlideSliders(
+            mergedSliders,
+            zapSliders.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            gender,
+            sourceSupport.SourceMorphQuality,
+            sourceSupport.ReusableMorphPayloads,
+            sourceSupport.BuildAssetSupport(
+                baseSliders.Count > 0 && sourceSupport.Sliders.Count == 0,
+                HasReferenceBodyAssets(armor.BodyReferenceFiles) || sourceSupport.HasReferenceAssets,
+                fallbackInference));
+    }
+
+    public static FallbackBodySlideInference? InferFallbackSupport(
+        ImportedArmor armor,
+        string targetBody,
+        VanillaArmorEntry? vanillaEntry = null)
+    {
+        var evidence = armor.MeshFiles
+            .Concat(armor.TextureFiles)
+            .Concat(armor.PhysicsFiles)
+            .Concat(armor.BodyReferenceFiles)
+            .Select(path => Path.GetFileNameWithoutExtension(path) ?? path)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        if (evidence.Length == 0)
+        {
+            return vanillaEntry is null
+                ? null
+                : new FallbackBodySlideInference(null, vanillaEntry.RecommendedProfile, [$"vanilla:{vanillaEntry.RecommendedProfile}"]);
+        }
+
+        var inferredSourceBody = InferFallbackSourceBody(evidence, targetBody);
+        var profileSignals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var inferredProfile = InferDeformationProfile(evidence, vanillaEntry, profileSignals);
+        if (inferredSourceBody is null && string.IsNullOrWhiteSpace(inferredProfile))
+        {
+            return null;
+        }
+
+        var signals = new HashSet<string>(inferredSourceBody?.Signals ?? [], StringComparer.OrdinalIgnoreCase);
+        signals.UnionWith(profileSignals);
+        return new FallbackBodySlideInference(
+            inferredSourceBody?.BodyName,
+            inferredProfile,
+            signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    private static async Task<BodySlideSourceSupport> ExtractSourceSupportAsync(
+        ImportedArmor armor,
+        CancellationToken cancellationToken)
+    {
+        var sliders = new List<SourceSliderCandidate>();
+        var zapSliders = new List<SourceSliderCandidate>();
+        var hasOsp = false;
+        var hasTriPayloads = false;
+        var hasBsdPayloads = false;
+        var hasOsdPayloads = false;
+        var discovery = EnumerateAssociatedBodySlideFiles(armor);
+
+        foreach (var filePath in discovery.Files)
+        {
+            var extension = Path.GetExtension(filePath);
+            if (extension.Equals(".osp", StringComparison.OrdinalIgnoreCase))
+            {
+                hasOsp = true;
+                var fromOsp = await TryReadOspAsync(filePath, cancellationToken);
+                sliders.AddRange(fromOsp.Sliders);
+                zapSliders.AddRange(fromOsp.ZapSliders);
+            }
+            else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryReadBsdSlider(filePath, out var candidate))
+                {
+                    hasBsdPayloads |= candidate.ReusablePayload is not null;
+                    if (candidate.IsZap)
+                    {
+                        zapSliders.Add(candidate);
+                    }
+                    else
+                    {
+                        sliders.Add(candidate);
+                    }
+                }
+            }
+            else if (extension.Equals(".osd", StringComparison.OrdinalIgnoreCase))
+            {
+                hasOsdPayloads = true;
+                if (TryReadOsdSliders(filePath, out var osdCandidates))
+                {
+                    foreach (var candidate in osdCandidates)
+                    {
+                        if (candidate.IsZap)
+                        {
+                            zapSliders.Add(candidate);
+                        }
+                        else
+                        {
+                            sliders.Add(candidate);
+                        }
+                    }
+                }
+            }
+            else if (extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) &&
+                     TryReadTriPayload(filePath, out var triPayload, out var resolvedTriVertexCount) &&
+                     triPayload is not null)
+            {
+                foreach (var morph in triPayload.Morphs)
+                {
+                    var sliderName = NormalizeSliderFileName(morph.Name);
+                    var deltas = ResizePayloadDeltas(morph.Deltas, resolvedTriVertexCount);
+                    if (!TryCreatePayloadCandidate(
+                        sliderName,
+                        deltas,
+                        SourcePriority.TriPayloadBase,
+                        IsHighWeightVariant(morph.Name),
+                        "tri",
+                        out var candidate))
+                    {
+                        continue;
+                    }
+
+                    hasTriPayloads |= candidate.ReusablePayload is not null;
+                    if (candidate.IsZap)
+                    {
+                        zapSliders.Add(candidate);
+                    }
+                    else
+                    {
+                        sliders.Add(candidate);
+                    }
+                }
+            }
+        }
+
+        return new BodySlideSourceSupport(
+            CollapseCandidates(sliders),
+            CollapseCandidates(zapSliders),
+            hasOsp,
+            hasTriPayloads,
+            hasBsdPayloads,
+            hasOsdPayloads,
+            discovery.HasReferenceAssets);
+    }
+
+    private static BodySlideDiscoveryResult EnumerateAssociatedBodySlideFiles(ImportedArmor armor)
+    {
+        var sourceRoot = ResolveSourceRoot(armor.SourcePath);
+        var meshTokens = armor.MeshFiles
+            .Select(NormalizeMeshToken)
+            .Where(static token => !string.IsNullOrWhiteSpace(token))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var meshDirectories = armor.MeshFiles
+            .Select(Path.GetDirectoryName)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var explicitFiles = armor.BodyReferenceFiles
+            .Where(static path =>
+                path.EndsWith(".osp", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".osd", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".tri", StringComparison.OrdinalIgnoreCase) ||
+                IsLikelyBodySlideSupportXml(path));
+        var discoveredFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var hasReferenceAssets = false;
+
+        foreach (var location in EnumerateLikelyBodySlideRoots(sourceRoot, armor))
+        {
+            foreach (var path in EnumerateBodySlideSupportFiles(location.Root, location.SearchOption, meshTokens))
+            {
+                discoveredFiles.Add(path);
+            }
+
+            foreach (var ospPath in EnumerateOspFiles(location.Root, location.SearchOption))
+            {
+                if (!TryProbeOspProject(ospPath, out var probe) ||
+                    !IsAssociatedWithArmor(probe, meshTokens, meshDirectories))
+                {
+                    continue;
+                }
+
+                discoveredFiles.Add(ospPath);
+                foreach (var linkedAsset in ResolveLinkedProjectAssets(probe))
+                {
+                    var extension = Path.GetExtension(linkedAsset);
+                    if (extension.Equals(".nif", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasReferenceAssets = true;
+                    }
+                    else if (extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                             extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                             extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+                             extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                             IsLikelyBodySlideSupportXml(linkedAsset))
+                    {
+                        discoveredFiles.Add(linkedAsset);
+                    }
+                }
+            }
+        }
+
+        var files = explicitFiles
+            .Concat(discoveredFiles)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new BodySlideDiscoveryResult(files, hasReferenceAssets);
+    }
+
+    private static bool HasReferenceBodyAssets(IReadOnlyList<string> bodyReferenceFiles) =>
+        bodyReferenceFiles.Any(static path =>
+        {
+            var extension = Path.GetExtension(path);
+            return !extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) &&
+                   !extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) &&
+                   !extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
+        });
+
+    private static IEnumerable<SearchLocation> EnumerateLikelyBodySlideRoots(string sourceRoot, ImportedArmor armor)
+    {
+        var roots = new Dictionary<string, SearchOption>(StringComparer.OrdinalIgnoreCase);
+
+        static void AddRoot(IDictionary<string, SearchOption> map, string? root, SearchOption searchOption)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                return;
+            }
+
+            if (map.TryGetValue(root, out var existing) && existing == SearchOption.AllDirectories)
+            {
+                return;
+            }
+
+            map[root] = searchOption;
+        }
+
+        if (Directory.Exists(sourceRoot))
+        {
+            foreach (var candidateRoot in EnumerateAncestorDirectories(sourceRoot))
+            {
+                AddRoot(roots, Path.Combine(candidateRoot, "BodySlide"), SearchOption.AllDirectories);
+                AddRoot(roots, Path.Combine(candidateRoot, "CalienteTools", "BodySlide"), SearchOption.AllDirectories);
+            }
+        }
+
+        foreach (var meshFile in armor.MeshFiles)
+        {
+            var directory = Path.GetDirectoryName(meshFile);
+            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+        }
+
+        foreach (var bodyReferenceFile in armor.BodyReferenceFiles)
+        {
+            var directory = Path.GetDirectoryName(bodyReferenceFile);
+            AddRoot(roots, directory, SearchOption.TopDirectoryOnly);
+        }
+
+        return roots.Select(static pair => new SearchLocation(pair.Key, pair.Value));
+    }
+
+    private static IEnumerable<string> EnumerateAncestorDirectories(string directoryPath)
+    {
+        var current = new DirectoryInfo(directoryPath);
+        while (current is not null)
+        {
+            yield return current.FullName;
+            current = current.Parent;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateBodySlideSupportFiles(string root, SearchOption searchOption, IReadOnlyList<string> meshTokens)
+    {
+        if (!Directory.Exists(root))
+        {
+            return [];
+        }
+
+        if (searchOption == SearchOption.TopDirectoryOnly)
+        {
+            return EnumerateSupportedFiles(root)
+                .Where(path => IsAssociatedWithArmor(path, meshTokens));
+        }
+
+        var discovered = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            discovered.AddRange(EnumerateSupportedFiles(current)
+                .Where(path => IsAssociatedWithArmor(path, meshTokens)));
+
+            foreach (var directory in Directory.EnumerateDirectories(current))
+            {
+                if (ShouldTraverseBodySlideDirectory(root, directory, meshTokens))
+                {
+                    pending.Push(directory);
+                }
+            }
+        }
+
+        return discovered;
+    }
+
+    private static IEnumerable<string> EnumerateSupportedFiles(string root) =>
+        Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(root, "*.osd", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.bsd", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.tri", SearchOption.TopDirectoryOnly))
+            .Concat(Directory.EnumerateFiles(root, "*.xml", SearchOption.TopDirectoryOnly)
+                .Where(IsLikelyBodySlideSupportXml));
+
+    private static IEnumerable<string> EnumerateOspFiles(string root, SearchOption searchOption)
+    {
+        if (!Directory.Exists(root))
+        {
+            return [];
+        }
+
+        return searchOption == SearchOption.TopDirectoryOnly
+            ? Directory.EnumerateFiles(root, "*.osp", SearchOption.TopDirectoryOnly)
+            : Directory.EnumerateFiles(root, "*.osp", SearchOption.AllDirectories);
+    }
+
+    private static bool ShouldTraverseBodySlideDirectory(string searchRoot, string directoryPath, IReadOnlyList<string> meshTokens)
+    {
+        if (IsAssociatedWithArmor(directoryPath, meshTokens))
+        {
+            return true;
+        }
+
+        if (string.Equals(directoryPath, searchRoot, PathComparison))
+        {
+            return true;
+        }
+
+        var directoryName = Path.GetFileName(directoryPath);
+        return directoryName.Equals("BodySlide", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("CalienteTools", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("ShapeData", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("SliderSets", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("SliderGroups", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Presets", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Project", StringComparison.OrdinalIgnoreCase) ||
+               directoryName.Equals("Projects", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveSourceRoot(string sourcePath)
+    {
+        if (Directory.Exists(sourcePath))
+        {
+            return sourcePath;
+        }
+
+        return Path.GetDirectoryName(sourcePath) ?? sourcePath;
+    }
+
+    private static bool IsAssociatedWithArmor(string filePath, IReadOnlyList<string> meshTokens)
+    {
+        if (meshTokens.Count == 0)
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileNameWithoutExtension(filePath) ?? string.Empty;
+        if (meshTokens.Any(token => fileName.Contains(token, PathComparison)))
+        {
+            return true;
+        }
+
+        var directoryPath = Path.GetDirectoryName(filePath) ?? string.Empty;
+        return meshTokens.Any(token => directoryPath.Contains(token, PathComparison));
+    }
+
+    private static bool IsAssociatedWithArmor(
+        BodySlideProjectProbe probe,
+        IReadOnlyList<string> meshTokens,
+        IReadOnlyList<string> meshDirectories)
+    {
+        var score = ScoreAssociation(probe.OspPath, meshTokens);
+        score += probe.ProjectNames.Sum(projectName => ScoreAssociation(projectName, meshTokens));
+        score += probe.ReferencedPaths.Sum(reference => ScoreAssociation(reference, meshTokens));
+        score += probe.OutputFiles.Sum(outputFile => ScoreAssociation(outputFile, meshTokens));
+        score += probe.OutputPaths.Sum(outputPath => ScoreAssociation(outputPath, meshDirectories));
+        return score > 0;
+    }
+
+    private static int ScoreAssociation(string? value, IReadOnlyList<string> tokens)
+    {
+        if (string.IsNullOrWhiteSpace(value) || tokens.Count == 0)
+        {
+            return 0;
+        }
+
+        var score = 0;
+        foreach (var token in tokens)
+        {
+            if (!string.IsNullOrWhiteSpace(token) && value.Contains(token, PathComparison))
+            {
+                score++;
+            }
+        }
+
+        return score;
+    }
+
+    private static IEnumerable<string> ResolveLinkedProjectAssets(BodySlideProjectProbe probe)
+    {
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var reference in probe.ReferencedPaths)
+        {
+            foreach (var resolved in ResolveLinkedPathCandidates(probe, reference))
+            {
+                if (File.Exists(resolved))
+                {
+                    discovered.Add(resolved);
+                }
+            }
+        }
+
+        foreach (var projectName in probe.ProjectNames)
+        {
+            if (string.IsNullOrWhiteSpace(projectName) || string.IsNullOrWhiteSpace(probe.BodySlideRoot))
+            {
+                continue;
+            }
+
+            var shapeDataFolder = Path.Combine(probe.BodySlideRoot, "ShapeData", projectName);
+            if (!Directory.Exists(shapeDataFolder))
+            {
+                continue;
+            }
+
+            foreach (var asset in Directory.EnumerateFiles(shapeDataFolder, "*.*", SearchOption.TopDirectoryOnly)
+                         .Where(static path =>
+                         {
+                             var extension = Path.GetExtension(path);
+                             return extension.Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
+                                    extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                                    extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+                                    extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
+                         }))
+            {
+                discovered.Add(asset);
+            }
+        }
+
+        return discovered;
+    }
+
+    private static IEnumerable<string> ResolveLinkedPathCandidates(BodySlideProjectProbe probe, string referencedPath)
+    {
+        var normalized = referencedPath
+            .Replace('\\', Path.DirectorySeparatorChar)
+            .Replace('/', Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(probe.OspDirectory, normalized);
+        if (!string.IsNullOrWhiteSpace(probe.BodySlideRoot))
+        {
+            yield return Path.Combine(probe.BodySlideRoot, normalized);
+
+            var bodySlidePrefix = $"CalienteTools{Path.DirectorySeparatorChar}BodySlide{Path.DirectorySeparatorChar}";
+            if (normalized.StartsWith(bodySlidePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return Path.Combine(probe.BodySlideRoot, normalized[bodySlidePrefix.Length..]);
+            }
+        }
+    }
+
+    private static bool TryProbeOspProject(string ospPath, out BodySlideProjectProbe probe)
+    {
+        probe = new BodySlideProjectProbe(
+            ospPath,
+            Path.GetDirectoryName(ospPath) ?? string.Empty,
+            FindBodySlideRoot(Path.GetDirectoryName(ospPath)),
+            [],
+            [],
+            [],
+            []);
+
+        try
+        {
+            var document = XDocument.Load(ospPath, LoadOptions.None);
+            var projectNames = document
+                .Descendants("SliderSet")
+                .Select(static element => element.Attribute("name")?.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var outputPaths = document
+                .Descendants()
+                .Where(static element => element.Name.LocalName.Equals("OutputPath", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Value.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var outputFiles = document
+                .Descendants()
+                .Where(static element => element.Name.LocalName.Equals("OutputFile", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Value.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var referencedPaths = document
+                .Descendants()
+                .SelectMany(static element => element.Attributes().Select(attr => attr.Value).Append(element.Value))
+                .Select(static value => value.Trim())
+                .Where(IsSupportedBodySlideReferencePath)
+                .Select(static value => value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            probe = new BodySlideProjectProbe(
+                ospPath,
+                Path.GetDirectoryName(ospPath) ?? string.Empty,
+                FindBodySlideRoot(Path.GetDirectoryName(ospPath)),
+                projectNames,
+                outputPaths,
+                outputFiles,
+                referencedPaths);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSupportedBodySlideReferencePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(value);
+        return extension.Equals(".nif", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".tri", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsLikelyBodySlideSupportXml(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            !Path.GetExtension(path).Equals(".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedPath = path.Replace('\\', '/');
+        if (normalizedPath.Contains("/SliderGroups/", StringComparison.OrdinalIgnoreCase) ||
+            normalizedPath.Contains("/BodySlide/SliderGroups/", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            if (stream.Length <= 0 || stream.Length > 256 * 1024)
+            {
+                return false;
+            }
+
+            var buffer = new byte[Math.Min((int)stream.Length, 4096)];
+            var read = stream.Read(buffer, 0, buffer.Length);
+            if (read <= 0)
+            {
+                return false;
+            }
+
+            var snippet = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+            return snippet.Contains("<SliderGroups", StringComparison.OrdinalIgnoreCase) ||
+                   snippet.Contains("<SliderSetInfo", StringComparison.OrdinalIgnoreCase) ||
+                   snippet.Contains("<SliderSet", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string? FindBodySlideRoot(string? startDirectory)
+    {
+        var current = string.IsNullOrWhiteSpace(startDirectory) ? null : new DirectoryInfo(startDirectory);
+        while (current is not null)
+        {
+            if (current.Name.Equals("BodySlide", StringComparison.OrdinalIgnoreCase))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return null;
+    }
+
+    private static async Task<BodySlideSourceSupport> TryReadOspAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = File.OpenRead(filePath);
+            var document = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
+            var sliders = new List<SourceSliderCandidate>();
+            var zapSliders = new List<SourceSliderCandidate>();
+
+            foreach (var sliderElement in document.Descendants("Slider"))
+            {
+                var name = sliderElement.Attribute("name")?.Value?.Trim();
+                if (!IsLikelySliderName(name))
+                {
+                    continue;
+                }
+
+                var isZap = IsTruthy(sliderElement.Attribute("zap")?.Value);
+                if (isZap)
+                {
+                    zapSliders.Add(new SourceSliderCandidate(name!, SourcePriority.OspZap));
+                }
+                else
+                {
+                    sliders.Add(new SourceSliderCandidate(name!, SourcePriority.OspSlider));
+                }
+            }
+
+            return new BodySlideSourceSupport(
+                CollapseCandidates(sliders),
+                CollapseCandidates(zapSliders),
+                HasOsp: true,
+                HasTriPayloads: false,
+                HasBsdPayloads: false,
+                HasOsdPayloads: false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return new BodySlideSourceSupport([], [], HasOsp: true, HasTriPayloads: false, HasBsdPayloads: false, HasOsdPayloads: false);
+        }
+    }
+
+    private static string NormalizeMeshToken(string meshFilePath)
+    {
+        var token = Path.GetFileNameWithoutExtension(meshFilePath) ?? meshFilePath;
+        return token.EndsWith("_0", StringComparison.OrdinalIgnoreCase) || token.EndsWith("_1", StringComparison.OrdinalIgnoreCase)
+            ? token[..^2]
+            : token;
+    }
+
+    private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<SourceSliderCandidate> secondary)
+    {
+        var merged = new List<string>(primary.Count + secondary.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var slider in primary)
+        {
+            if (!IsLikelySliderName(slider) || !seen.Add(slider))
+            {
+                continue;
+            }
+
+            merged.Add(slider);
+        }
+
+        foreach (var slider in secondary.Select(static candidate => candidate.Name))
+        {
+            if (!IsLikelySliderName(slider) || !seen.Add(slider))
+            {
+                continue;
+            }
+
+            merged.Add(slider);
+        }
+
+        return merged;
+    }
+
+    private static IReadOnlyList<string> MergeSliderLists(IReadOnlyList<string> primary, IReadOnlyList<string> secondary)
+    {
+        var merged = new List<string>(primary.Count + secondary.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var slider in primary.Concat(secondary))
+        {
+            if (!IsLikelySliderName(slider) || !seen.Add(slider))
+            {
+                continue;
+            }
+
+            merged.Add(slider);
+        }
+
+        return merged;
+    }
+
+    private static InferredSourceBodySupport? InferFallbackSourceBody(IReadOnlyList<string> evidence, string targetBody)
+    {
+        var targetCanonicalBody = BuiltInBodyMetadataCatalog.TryResolveCanonicalName(targetBody, out var canonicalTargetBody)
+            ? canonicalTargetBody
+            : targetBody;
+
+        var best = default(InferredSourceBodySupport?);
+        foreach (var body in BuiltInBodyMetadataCatalog.All)
+        {
+            if (body.Name.Equals(targetCanonicalBody, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var signals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var score = 0;
+            score += ScoreTokens(body.ReferenceTokens, "reference", signals);
+            score += ScoreTokens(body.DetectionTokens, "detection", signals);
+            score += ScoreTokens(body.TextureTokens, "texture", signals);
+            score += ScoreTokens(body.Aliases, "alias", signals);
+
+            if (score < 4 || signals.Count == 0)
+            {
+                continue;
+            }
+
+            var candidate = new InferredSourceBodySupport(body.Name, score, signals.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+            if (best is null || candidate.Score > best.Score)
+            {
+                best = candidate;
+            }
+        }
+
+        return best;
+
+        int ScoreTokens(IEnumerable<string> tokens, string category, ISet<string> signals)
+        {
+            var score = 0;
+            foreach (var token in tokens.Where(static token => !string.IsNullOrWhiteSpace(token)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var fileToken in evidence)
+                {
+                    if (!fileToken.Contains(token, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    score += category switch
+                    {
+                        "reference" => 5,
+                        "alias" => 4,
+                        "detection" => 3,
+                        "texture" => 2,
+                        _ => 1
+                    };
+                    signals.Add($"{category}:{token}");
+                    break;
+                }
+            }
+
+            return score;
+        }
+    }
+
+    private static string? InferDeformationProfile(
+        IReadOnlyList<string> evidence,
+        VanillaArmorEntry? vanillaEntry,
+        ISet<string> signals)
+    {
+        var profileTokens = new (string Profile, string[] Tokens)[]
+        {
+            ("zeroed", ["zeroed"]),
+            ("muscular", ["muscular", "muscle", "buff"]),
+            ("athletic", ["athletic", "sport"]),
+            ("curvy", ["curvy", "curves", "thicc"]),
+            ("slim", ["slim", "slender", "thin"]),
+            ("petite", ["petite", "smallframe"]),
+            ("lean", ["lean"]),
+            ("anime", ["anime"]),
+            ("balanced", ["balanced", "vanilla"])
+        };
+
+        foreach (var (profile, tokens) in profileTokens)
+        {
+            foreach (var token in tokens)
+            {
+                if (evidence.Any(fileToken => fileToken.Contains(token, StringComparison.OrdinalIgnoreCase)))
+                {
+                    signals.Add($"profile:{token}");
+                    return profile;
+                }
+            }
+        }
+
+        if (vanillaEntry is not null)
+        {
+            signals.Add($"vanilla:{vanillaEntry.RecommendedProfile}");
+            return vanillaEntry.RecommendedProfile;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeSliderFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return string.Empty;
+        }
+
+        var normalized = fileName.Trim();
+        if (normalized.EndsWith("_0", StringComparison.OrdinalIgnoreCase) ||
+            normalized.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^2];
+        }
+
+        return normalized;
+    }
+
+    private static bool TryReadBsdSlider(string filePath, out SourceSliderCandidate candidate)
+    {
+        if (BsdMorphReader.TryRead(filePath, out var payload) && payload is not null)
+        {
+            return TryCreatePayloadCandidate(
+                NormalizeSliderFileName(payload.SliderName),
+                payload.Deltas,
+                payload.IsHighWeight ? SourcePriority.BsdHighWeightBase : SourcePriority.BsdLowWeightBase,
+                payload.IsHighWeight,
+                "bsd",
+                out candidate);
+        }
+
+        var sliderName = NormalizeSliderFileName(Path.GetFileNameWithoutExtension(filePath));
+        if (IsLikelyZapSliderName(sliderName) && !string.IsNullOrWhiteSpace(sliderName))
+        {
+            candidate = new SourceSliderCandidate(sliderName, SourcePriority.UnreadablePayloadZapFallback, IsZap: true);
+            return true;
+        }
+
+        candidate = EmptyCandidate;
+        return false;
+    }
+
+    private static bool TryReadOsdSliders(string filePath, out IReadOnlyList<SourceSliderCandidate> candidates)
+    {
+        candidates = [];
+        if (!OsdMorphReader.TryRead(filePath, out var payload) || payload is null || payload.Morphs.Count == 0)
+        {
+            return false;
+        }
+
+        var resolvedVertexCount = ResolveOsdPayloadVertexCount(filePath, payload.InferredVertexCount);
+        var extracted = new List<SourceSliderCandidate>(payload.Morphs.Count);
+        foreach (var morph in payload.Morphs)
+        {
+            var sliderName = NormalizeSliderFileName(morph.Name);
+            var vertexCount = Math.Max(resolvedVertexCount, morph.SparseDeltas.Count == 0
+                ? payload.InferredVertexCount
+                : morph.SparseDeltas.Max(static delta => delta.Index + 1));
+            if (vertexCount <= 0)
+            {
+                continue;
+            }
+
+            var deltas = new (float X, float Y, float Z)[vertexCount];
+            foreach (var (index, x, y, z) in morph.SparseDeltas)
+            {
+                if (index < 0 || index >= deltas.Length)
+                {
+                    continue;
+                }
+
+                deltas[index] = (x, y, z);
+            }
+
+            if (TryCreatePayloadCandidate(
+                sliderName,
+                deltas,
+                SourcePriority.OsdPayloadBase,
+                IsHighWeightVariant(morph.Name),
+                "osd",
+                out var candidate))
+            {
+                extracted.Add(candidate);
+            }
+        }
+
+        candidates = extracted;
+        return extracted.Count > 0;
+    }
+
+    private static bool TryReadTriPayload(
+        string filePath,
+        out TriMorphPayload? payload,
+        out int resolvedVertexCount)
+    {
+        payload = null;
+        resolvedVertexCount = 0;
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(filePath);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        if (!TriMorphReader.TryRead(bytes, out payload) || payload is null)
+        {
+            return false;
+        }
+
+        resolvedVertexCount = IsPirtTriPayload(bytes)
+            ? ResolveTriPayloadVertexCount(filePath, payload.VertexCount)
+            : payload.VertexCount;
+        return true;
+    }
+
+    private static bool IsPirtTriPayload(byte[] bytes) =>
+        bytes.Length >= 4 &&
+        bytes[0] == (byte)'P' &&
+        bytes[1] == (byte)'I' &&
+        bytes[2] == (byte)'R' &&
+        bytes[3] == (byte)'T';
+
+    private static IReadOnlyList<(float X, float Y, float Z)> ResizePayloadDeltas(
+        IReadOnlyList<(float X, float Y, float Z)> deltas,
+        int resolvedVertexCount)
+    {
+        if (resolvedVertexCount <= 0 || resolvedVertexCount == deltas.Count)
+        {
+            return deltas;
+        }
+
+        var resized = new (float X, float Y, float Z)[resolvedVertexCount];
+        var copyCount = Math.Min(resolvedVertexCount, deltas.Count);
+        for (var index = 0; index < copyCount; index++)
+        {
+            resized[index] = deltas[index];
+        }
+
+        return resized;
+    }
+
+    private static int ResolveTriPayloadVertexCount(string filePath, int inferredVertexCount)
+    {
+        var resolved = Math.Max(0, inferredVertexCount);
+        var directory = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return resolved;
+        }
+
+        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
+            if (vertices is { Count: > 0 })
+            {
+                resolved = Math.Max(resolved, vertices.Count);
+            }
+        }
+
+        return resolved;
+    }
+
+    private static int ResolveOsdPayloadVertexCount(string filePath, int inferredVertexCount)
+    {
+        var resolved = Math.Max(0, inferredVertexCount);
+        var directory = Path.GetDirectoryName(filePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return resolved;
+        }
+
+        foreach (var nifPath in Directory.EnumerateFiles(directory, "*.nif", SearchOption.TopDirectoryOnly))
+        {
+            var vertices = NifGeometrySignatureReader.TryReadFullVertices(nifPath);
+            if (vertices is { Count: > 0 })
+            {
+                resolved = Math.Max(resolved, vertices.Count);
+            }
+        }
+
+        return resolved;
+    }
+
+    private static bool TryCreatePayloadCandidate(
+        string sliderName,
+        IReadOnlyList<(float X, float Y, float Z)> deltas,
+        int basePriority,
+        bool isHighWeight,
+        string payloadKind,
+        out SourceSliderCandidate candidate)
+    {
+        var isZap = IsLikelyZapSliderName(sliderName);
+        if (string.IsNullOrWhiteSpace(sliderName))
+        {
+            candidate = EmptyCandidate;
+            return false;
+        }
+
+        var stats = MorphPayloadAnalysis.Analyze(deltas);
+        if (!isZap && stats.MeaningfulCount == 0)
+        {
+            candidate = EmptyCandidate;
+            return false;
+        }
+
+        candidate = new SourceSliderCandidate(
+            sliderName,
+            basePriority + ComputePayloadPriorityOffset(stats),
+            isZap,
+            stats,
+            new SourceMorphPayload(sliderName, isHighWeight, payloadKind, deltas.Count, deltas));
+        return true;
+    }
+
+    private static bool IsHighWeightVariant(string morphName) =>
+        !string.IsNullOrWhiteSpace(morphName) &&
+        morphName.Trim().EndsWith("_1", StringComparison.OrdinalIgnoreCase);
+
+    private static int ComputePayloadPriorityOffset(MorphDeltaStats stats)
+    {
+        if (stats.TotalCount <= 0)
+        {
+            return 0;
+        }
+
+        var densityScore = (int)Math.Round(Math.Clamp(stats.MeaningfulRatio, 0f, 1f) * 100);
+        var magnitudeScore = (int)Math.Round(Math.Clamp(stats.TotalMagnitude * 10f, 0f, 100f));
+        var peakScore = (int)Math.Round(Math.Clamp(stats.MaxMagnitude * 80f, 0f, 80f));
+        return densityScore + magnitudeScore + peakScore;
+    }
+
+    private static IReadOnlyList<SourceSliderCandidate> CollapseCandidates(IEnumerable<SourceSliderCandidate> candidates)
+    {
+        return candidates
+            .Where(static candidate => IsLikelySliderName(candidate.Name))
+            .GroupBy(
+                static candidate => $"{candidate.Name}\u001f{candidate.IsZap}\u001f{candidate.ReusablePayload?.IsHighWeight ?? false}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group
+                .OrderByDescending(static candidate => candidate.Priority)
+                .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderByDescending(static candidate => candidate.Priority)
+            .ThenBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsLikelyZapSliderName(string sliderName)
+    {
+        if (string.IsNullOrWhiteSpace(sliderName))
+        {
+            return false;
+        }
+
+        foreach (var prefix in ZapNamePrefixes)
+        {
+            if (sliderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            for (var i = 1; i < sliderName.Length; i++)
+            {
+                if (!IsTokenBoundary(sliderName, i))
+                {
+                    continue;
+                }
+
+                if (sliderName.AsSpan(i).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsTokenBoundary(string value, int index)
+    {
+        var current = value[index];
+        var previous = value[index - 1];
+        return current is '_' or '-' or ' ' ||
+               previous is '_' or '-' or ' ' ||
+               char.IsUpper(current) && !char.IsUpper(previous);
+    }
+
+    private static bool IsTruthy(string? value) =>
+        value is not null &&
+        (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+         value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+         value.Equals("yes", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsLikelySliderName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var candidate = value.Trim();
+        return candidate.Length >= 2 && candidate.Any(char.IsLetter);
+    }
+
+    private static SourceMorphQualityMetrics? BuildSourceMorphQuality(IEnumerable<SourceSliderCandidate> sliderCandidates, IEnumerable<SourceSliderCandidate> zapCandidates)
+    {
+        var payloadStats = sliderCandidates
+            .Concat(zapCandidates)
+            .Select(static candidate => candidate.PayloadStats)
+            .Where(static stats => stats is not null)
+            .Select(static stats => stats!.Value)
+            .ToArray();
+        if (payloadStats.Length == 0)
+        {
+            return null;
+        }
+
+        var meaningfulPayloadMorphCount = payloadStats.Count(static stats => stats.MeaningfulCount > 0);
+        var payloadStrengthScore = payloadStats
+            .Select(ComputePayloadStrengthScore)
+            .DefaultIfEmpty(0d)
+            .Average();
+        var payloadCoverageRatio = payloadStats.Length == 0
+            ? 0d
+            : (double)meaningfulPayloadMorphCount / payloadStats.Length;
+
+        return new SourceMorphQualityMetrics(
+            PayloadMorphCount: payloadStats.Length,
+            MeaningfulPayloadMorphCount: meaningfulPayloadMorphCount,
+            PayloadCoverageRatio: Math.Round(Math.Clamp(payloadCoverageRatio, 0d, 1d), 4),
+            PayloadStrengthScore: Math.Round(Math.Clamp(payloadStrengthScore, 0d, 1d), 4));
+    }
+
+    private static double ComputePayloadStrengthScore(MorphDeltaStats stats)
+    {
+        var density = Math.Clamp(stats.MeaningfulRatio, 0f, 1f);
+        var magnitude = Math.Clamp(stats.TotalMagnitude / 2f, 0f, 1f);
+        var peak = Math.Clamp(stats.MaxMagnitude / 0.06f, 0f, 1f);
+        return density * 0.5d + magnitude * 0.35d + peak * 0.15d;
+    }
+
+    private sealed record BodySlideSourceSupport(
+        IReadOnlyList<SourceSliderCandidate> Sliders,
+        IReadOnlyList<SourceSliderCandidate> ZapSliders,
+        bool HasOsp,
+        bool HasTriPayloads,
+        bool HasBsdPayloads,
+        bool HasOsdPayloads,
+        bool HasReferenceAssets = false)
+    {
+        public SourceMorphQualityMetrics? SourceMorphQuality => BuildSourceMorphQuality(Sliders, ZapSliders);
+
+        public IReadOnlyDictionary<string, SourceMorphPayloadVariants> ReusableMorphPayloads =>
+            BuildReusableMorphPayloads(Sliders, ZapSliders);
+
+        public SourceAssetSupportMetrics BuildAssetSupport(
+            bool usedFallbackSliders,
+            bool hasReferenceAssets,
+            FallbackBodySlideInference? fallbackInference)
+        {
+            var missingAssets = new List<string>();
+            if (!HasOsp)
+            {
+                missingAssets.Add("osp");
+            }
+
+            if (!HasTriPayloads && !HasBsdPayloads && !HasOsdPayloads)
+            {
+                missingAssets.Add("morph-payloads");
+            }
+
+            if (!hasReferenceAssets)
+            {
+                missingAssets.Add("reference-assets");
+            }
+
+            return new SourceAssetSupportMetrics(
+                HasOsp,
+                HasTriPayloads,
+                HasBsdPayloads,
+                hasReferenceAssets,
+                usedFallbackSliders,
+                missingAssets,
+                ReusableMorphPayloads.Count,
+                fallbackInference?.BodyName,
+                fallbackInference?.Signals,
+                fallbackInference?.DeformationProfile,
+                HasOsdPayloads);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, SourceMorphPayloadVariants> BuildReusableMorphPayloads(
+        IEnumerable<SourceSliderCandidate> sliders,
+        IEnumerable<SourceSliderCandidate> zapSliders)
+    {
+        return sliders
+            .Concat(zapSliders)
+            .Where(static candidate => candidate.ReusablePayload is not null)
+            .GroupBy(static candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                static group => group.Key,
+                static group =>
+                {
+                    var lowWeight = group
+                        .Where(static candidate => candidate.ReusablePayload?.IsHighWeight is false)
+                        .OrderByDescending(static candidate => candidate.Priority)
+                        .Select(static candidate => candidate.ReusablePayload)
+                        .FirstOrDefault();
+                    var highWeight = group
+                        .Where(static candidate => candidate.ReusablePayload?.IsHighWeight is true)
+                        .OrderByDescending(static candidate => candidate.Priority)
+                        .Select(static candidate => candidate.ReusablePayload)
+                        .FirstOrDefault();
+
+                    return new SourceMorphPayloadVariants(lowWeight, highWeight);
+                },
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed record SourceSliderCandidate(
+        string Name,
+        int Priority,
+        bool IsZap = false,
+        MorphDeltaStats? PayloadStats = null,
+        SourceMorphPayload? ReusablePayload = null);
+    private sealed record InferredSourceBodySupport(string BodyName, int Score, IReadOnlyList<string> Signals);
+    private sealed record SearchLocation(string Root, SearchOption SearchOption);
+
+    private static class SourcePriority
+    {
+        public const int OspSlider = 100;
+        public const int OspZap = 100;
+        public const int TriPayloadBase = 220;
+        public const int OsdPayloadBase = 240;
+        public const int BsdLowWeightBase = 260;
+        public const int BsdHighWeightBase = 300;
+        public const int UnreadablePayloadZapFallback = 40;
+    }
+}

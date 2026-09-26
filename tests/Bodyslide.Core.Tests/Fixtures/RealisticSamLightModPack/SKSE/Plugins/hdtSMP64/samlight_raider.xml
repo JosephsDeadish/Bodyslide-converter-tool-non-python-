@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<system name="SamLightSupportPhysics">
+  <bone name="NPC L Pec" />
+  <bone name="NPC R Pec" />
+  <bone name="NPC Belly" />
+  <bone name="SAM Genitals" />
+  <bone name="SAM Foreskin" />
+  <bone name="HDT Mouth" />
+</system>
