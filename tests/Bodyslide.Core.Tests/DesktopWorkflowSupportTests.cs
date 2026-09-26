@@ -78,4 +78,30 @@ public sealed class DesktopWorkflowSupportTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var upper = Path.Combine(workingDirectory, "Armor");
+        var lower = Path.Combine(workingDirectory, "armor");
+        Directory.CreateDirectory(upper);
+        Directory.CreateDirectory(lower);
+
+        try
+        {
+            var common = DesktopWorkflowSupport.FindCommonDirectory([upper, lower]);
+
+            Assert.Equal(Path.GetFullPath(workingDirectory), common);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }

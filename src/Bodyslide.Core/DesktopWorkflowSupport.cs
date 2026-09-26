@@ -7,6 +7,9 @@ internal sealed record DesktopLaunchOptions(string? StartupOutputDirectory, stri
 
 internal static class DesktopWorkflowSupport
 {
+    private static readonly StringComparison FileSystemPathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private static readonly string[] DesktopResultArgumentNames =
     [
         "load-result",
@@ -90,7 +93,7 @@ internal static class DesktopWorkflowSupport
         }
 
         var first = results[0].OutputDirectory;
-        if (results.All(r => string.Equals(r.OutputDirectory, first, StringComparison.OrdinalIgnoreCase)))
+        if (results.All(r => string.Equals(r.OutputDirectory, first, FileSystemPathComparison)))
         {
             return first;
         }
@@ -167,8 +170,8 @@ internal static class DesktopWorkflowSupport
         {
             var matchPrefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var allMatch = normalized.All(path =>
-                string.Equals(path, candidate, StringComparison.OrdinalIgnoreCase) ||
-                path.StartsWith(matchPrefix, StringComparison.OrdinalIgnoreCase));
+                string.Equals(path, candidate, FileSystemPathComparison) ||
+                path.StartsWith(matchPrefix, FileSystemPathComparison));
             if (allMatch)
             {
                 return candidate;

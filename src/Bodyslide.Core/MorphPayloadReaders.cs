@@ -198,8 +198,15 @@ internal static class TriMorphReader
         }
 
         var offset = magic.Length;
-        var vertexCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
-        var morphCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
+        var rawVertexCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
+        var rawMorphCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]); offset += 4;
+        if (rawVertexCount > int.MaxValue || rawMorphCount > int.MaxValue)
+        {
+            return false;
+        }
+
+        var vertexCount = (int)rawVertexCount;
+        var morphCount = (int)rawMorphCount;
         if (vertexCount <= 0 || vertexCount > 250_000 || morphCount <= 0 || morphCount > 10_000)
         {
             return false;
@@ -222,7 +229,13 @@ internal static class TriMorphReader
 
             names.Add(Encoding.UTF8.GetString(bytes[offset..(offset + nameLength)]));
             offset += nameLength;
-            counts.Add((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]));
+            var rawDeltaCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes[offset..(offset + 4)]);
+            if (rawDeltaCount > int.MaxValue)
+            {
+                return false;
+            }
+
+            counts.Add((int)rawDeltaCount);
             offset += 4;
         }
 

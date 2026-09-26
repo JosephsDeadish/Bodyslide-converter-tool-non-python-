@@ -2,6 +2,9 @@ namespace Bodyslide.Core;
 
 public static class ExecutionEnvironment
 {
+    private static readonly StringComparison FileSystemPathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     public static string GetExecutionRoot(
         string? processPath = null,
         string? appContextBaseDirectory = null,
@@ -58,7 +61,7 @@ public static class ExecutionEnvironment
             }
 
             var currentDirectory = Path.GetFullPath(Environment.CurrentDirectory);
-            if (string.Equals(currentDirectory, executionRoot, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(currentDirectory, executionRoot, FileSystemPathComparison))
             {
                 return false;
             }

@@ -11811,6 +11811,20 @@ public sealed class BsdSliderDataTests
         }
 
         [Fact]
+        public void TriMorphReader_WithMorphCountOutsideIntRange_IsRejected()
+        {
+            using var ms = new MemoryStream();
+            using (var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
+            {
+                writer.Write(Encoding.ASCII.GetBytes("FRTRI003"));
+                writer.Write((uint)1);
+                writer.Write(uint.MaxValue);
+            }
+
+            Assert.False(TriMorphReader.TryRead(ms.ToArray(), out _));
+        }
+
+        [Fact]
         public void TriMorphReader_WithSparseDeltaCount_IsAccepted()
         {
             var bytes = BuildTriPayload(

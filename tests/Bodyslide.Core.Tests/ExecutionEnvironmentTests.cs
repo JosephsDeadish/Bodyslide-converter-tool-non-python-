@@ -68,4 +68,36 @@ public sealed class ExecutionEnvironmentTests
             Directory.Delete(inputDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryNormalizeCurrentDirectoryToExecutionRoot_TreatsCaseVariantPathsAsDistinctOnCaseSensitivePlatforms()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var lowerDirectory = Path.Combine(workingDirectory, "slidesmith");
+        var upperDirectory = Path.Combine(workingDirectory, "SLIDESMITH");
+        Directory.CreateDirectory(lowerDirectory);
+        Directory.CreateDirectory(upperDirectory);
+        var originalCurrentDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            Environment.CurrentDirectory = upperDirectory;
+            var processPath = Path.Combine(lowerDirectory, "SlideSmith");
+
+            var changed = ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(processPath);
+
+            Assert.True(changed);
+            Assert.Equal(Path.GetFullPath(lowerDirectory), Path.GetFullPath(Environment.CurrentDirectory));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalCurrentDirectory;
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
