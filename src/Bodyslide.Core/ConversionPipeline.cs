@@ -16023,12 +16023,28 @@ public static class DeformationProfileModifier
 /// </summary>
 internal sealed class BodySlideOspProjectService : IBodySlideProjectService
 {
+    private const int MaxSliderNameUtf8Bytes = 255;
+
     public async Task<BodySlideProject> GenerateAsync(ImportedArmor armor, ConvertedMesh mesh, string targetBody, CancellationToken cancellationToken)
     {
         var projectName = BodySlideLayoutPlanner.BuildProjectName(armor, targetBody);
         var resolved = await BodySlideSourceProjectSupport.ResolveAsync(armor, targetBody, cancellationToken);
-        var sliders = resolved.Sliders;
-        var zapSliders = resolved.ZapSliders;
+        var sliders = NormalizeSliderNames(resolved.Sliders);
+        if (sliders.Count == 0 &&
+            BuiltInBodyMetadataCatalog.TryGet(targetBody, out var builtInMetadata) &&
+            builtInMetadata.SliderNames.Count > 0)
+        {
+            sliders = NormalizeSliderNames(builtInMetadata.SliderNames);
+        }
+
+        if (sliders.Count == 0)
+        {
+            sliders = ["Body"];
+        }
+
+        var zapSliders = NormalizeSliderNames(resolved.ZapSliders)
+            .Where(slider => !sliders.Contains(slider, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
         var gender = resolved.Gender;
         var targets = BodySlideLayoutPlanner.BuildTargets(armor, projectName);
         var ospXml = BuildOspXml(sliders, zapSliders, targets, gender);
@@ -16040,6 +16056,103 @@ internal sealed class BodySlideOspProjectService : IBodySlideProjectService
         var sliderGroupsXml = BuildSliderGroupsXml(projectName, targetBody, sliderSetNames);
 
         return new BodySlideProject(projectName, targetBody, sliders, ospXml, zapSliders, sliderSetNames, sliderGroupsXml);
+    }
+
+    internal static IReadOnlyList<string> NormalizeSliderNames(IEnumerable<string>? sliderNames)
+    {
+        if (sliderNames is null)
+        {
+            return [];
+        }
+
+        var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<string>();
+        foreach (var rawName in sliderNames)
+        {
+            if (string.IsNullOrWhiteSpace(rawName))
+            {
+                continue;
+            }
+
+            var sanitized = SanitizeSliderName(rawName);
+            if (!string.IsNullOrWhiteSpace(sanitized) && unique.Add(sanitized))
+            {
+                ordered.Add(sanitized);
+            }
+        }
+
+        return ordered;
+    }
+
+    private static string SanitizeSliderName(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new char[trimmed.Length];
+        var count = 0;
+        var previousWasWhitespace = false;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (previousWasWhitespace)
+                {
+                    continue;
+                }
+
+                buffer[count++] = ' ';
+                previousWasWhitespace = true;
+                continue;
+            }
+
+            if (char.IsControl(ch))
+            {
+                continue;
+            }
+
+            buffer[count++] = ch;
+            previousWasWhitespace = false;
+        }
+
+        var normalized = new string(buffer, 0, count).Trim();
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        return TruncateUtf8(normalized, MaxSliderNameUtf8Bytes);
+    }
+
+    private static string TruncateUtf8(string value, int maxBytes)
+    {
+        if (maxBytes <= 0 || value.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var encoding = System.Text.Encoding.UTF8;
+        if (encoding.GetByteCount(value) <= maxBytes)
+        {
+            return value;
+        }
+
+        var chars = value.AsSpan();
+        var high = chars.Length;
+        while (high > 0)
+        {
+            high--;
+            var candidate = new string(chars[..high]);
+            if (encoding.GetByteCount(candidate) <= maxBytes)
+            {
+                return candidate.TrimEnd();
+            }
+        }
+
+        return string.Empty;
     }
 
     private static string BuildOspXml(
