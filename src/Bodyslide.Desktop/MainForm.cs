@@ -169,6 +169,8 @@ public sealed class MainForm : Form
         "pose-simulation-report.json",
         "world-physics.json",
         "plugin-patches.json",
+        "remaining-gaps-checklist.json",
+        "remaining-gaps-pack-checklist.json",
     ];
 
     private const int MainSplitPreferredDistance = 560;
@@ -4748,6 +4750,7 @@ public sealed class MainForm : Form
         {
             "preview-workbench.html" or "preview.html" => "Open preview",
             "conversion-matrix-proof.json" or "conversion-matrix-pack-proof.json" => "Open matrix proof",
+            "remaining-gaps-checklist.json" or "remaining-gaps-pack-checklist.json" => "Open gaps checklist",
             "windows-ui-e2e-automation.json" => "Open UI harness plan",
             "desktop-workflow-automation.json" => "Open desktop flow",
             "live-game-execution.json" => "Open live-game plan",
@@ -5491,6 +5494,17 @@ public sealed class MainForm : Form
                     AddReportMetric(reportName, "Matrix dimensions meeting minimum coverage", CountObjectsWithBool(root, "MatrixDimensionCoverage", "MeetsMinimumCoverage", expected: true), filePath);
                     AddReportMetric(reportName, "Matrix combinations", CountNestedArray(root, "MatrixCombinationCoverage"), filePath);
                     AddReportMetric(reportName, "Matrix combinations meeting minimum coverage", CountObjectsWithBool(root, "MatrixCombinationCoverage", "MeetsMinimumCoverage", expected: true), filePath);
+                    AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
+                case "remaining-gaps-checklist.json":
+                case "remaining-gaps-pack-checklist.json":
+                    AddReportMetric(reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    AddReportMetric(reportName, "Checklist source report", TryReadString(root, "SourceReport"), filePath);
+                    AddReportMetric(reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    AddReportMetric(reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    AddReportMetric(reportName, "Remaining proof gaps", CountNestedArray(root, "RemainingGaps"), filePath);
+                    AddReportMetric(reportName, "Remaining gap categories", DistinctNestedArrayValues(root, "RemainingGaps", "Category"), filePath);
+                    AddReportMetric(reportName, "Top remaining gaps", TryReadRemainingGapHighlights(root), filePath);
                     AddReportMetric(reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
                 case "topology-correspondence.json":
@@ -6472,6 +6486,17 @@ public sealed class MainForm : Form
             previewPath,
             add,
             ref requiresReview);
+
+        AppendGuidanceFromRemainingGapsChecklist(
+            Path.Combine(outputDirectory, "remaining-gaps-checklist.json"),
+            "Matrix gaps checklist",
+            add,
+            ref requiresReview);
+        AppendGuidanceFromRemainingGapsChecklist(
+            Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.json"),
+            "Pack gaps checklist",
+            add,
+            ref requiresReview);
     }
 
     private static void AppendGuidanceFromConversionMatrixProofReport(
@@ -6574,6 +6599,66 @@ public sealed class MainForm : Form
                     "Action",
                     BuildMatrixProofAxisActionText(axis),
                     ResolveMatrixProofGuidanceTargetPath(outputDirectory, previewPath, reportPath, [axis]));
+            }
+        }
+        catch (Exception ex)
+        {
+            requiresReview = true;
+            add(area, "Warning", $"Could not read {Path.GetFileName(reportPath)}: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendGuidanceFromRemainingGapsChecklist(
+        string reportPath,
+        string area,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        if (!File.Exists(reportPath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = OpenJsonDocument(reportPath);
+            var root = document.RootElement;
+            var strictProofReady = TryReadBoolValue(root, "StrictProofReady") == true;
+            var targetBody = TryReadString(root, "TargetBody") ?? "this output";
+            var sourceReport = TryReadString(root, "SourceReport") ?? "matrix proof report";
+            var proofCoverage = TryReadString(root, "ProofCoverage") ?? "unknown";
+            var gaps = new List<string>();
+            if (TryGetProperty(root, "RemainingGaps", out var remainingGaps) && remainingGaps.ValueKind == JsonValueKind.Array)
+            {
+                gaps.AddRange(remainingGaps.EnumerateArray()
+                    .Select(static item => TryReadString(item, "Description"))
+                    .Where(static item => !string.IsNullOrWhiteSpace(item))
+                    .Cast<string>());
+            }
+
+            if (strictProofReady || gaps.Count == 0)
+            {
+                add(
+                    area,
+                    "Info",
+                    $"{targetBody} has no remaining strict/universal blockers in {Path.GetFileName(sourceReport)}.",
+                    reportPath);
+                return;
+            }
+
+            requiresReview = true;
+            add(
+                area,
+                "Action",
+                $"{targetBody} still has {gaps.Count} concrete blocker(s) ({proofCoverage}). Start with: {gaps[0]}",
+                reportPath);
+            if (gaps.Count > 1)
+            {
+                add(
+                    $"{area} next blockers",
+                    "Action",
+                    $"Then work through: {BuildListPreview(gaps.Skip(1).Take(3).ToList())}",
+                    reportPath);
             }
         }
         catch (Exception ex)
@@ -7570,6 +7655,22 @@ public sealed class MainForm : Form
             .Take(4)
             .ToArray();
 
+        return items.Length == 0 ? null : string.Join("; ", items);
+    }
+
+    private static string? TryReadRemainingGapHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "RemainingGaps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var items = value
+            .EnumerateArray()
+            .Select(static item => TryReadString(item, "Description"))
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
         return items.Length == 0 ? null : string.Join("; ", items);
     }
 

@@ -565,6 +565,17 @@ internal static class DesktopWorkflowAutomation
                     Add(metrics, reportName, "Matrix combinations meeting minimum coverage", CountObjectsWithBool(root, "MatrixCombinationCoverage", "MeetsMinimumCoverage", expected: true), filePath);
                     Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
                     break;
+                case "remaining-gaps-checklist.json":
+                case "remaining-gaps-pack-checklist.json":
+                    Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
+                    Add(metrics, reportName, "Checklist source report", TryReadString(root, "SourceReport"), filePath);
+                    Add(metrics, reportName, "Proof coverage", TryReadString(root, "ProofCoverage"), filePath);
+                    Add(metrics, reportName, "Strict proof ready", FormatBool(TryReadBoolValue(root, "StrictProofReady")), filePath);
+                    Add(metrics, reportName, "Remaining proof gaps", CountNestedArray(root, "RemainingGaps"), filePath);
+                    Add(metrics, reportName, "Remaining gap categories", TryReadDistinctNestedArrayValues(root, "RemainingGaps", "Category"), filePath);
+                    Add(metrics, reportName, "Top remaining gaps", TryReadRemainingGapHighlights(root), filePath);
+                    Add(metrics, reportName, "Review artifacts", TryReadArray(root, "ReviewArtifacts"), filePath);
+                    break;
                 case "topology-correspondence.json":
                     Add(metrics, reportName, "Target body", TryReadString(root, "TargetBody"), filePath);
                     Add(metrics, reportName, "Support tier", TryReadString(root, "SupportTier"), filePath);
@@ -835,6 +846,40 @@ internal static class DesktopWorkflowAutomation
         TryGetProperty(element, arrayPropertyName, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Count(item => TryReadBoolValue(item, boolPropertyName) == expected)
             : 0;
+
+    private static string? TryReadDistinctNestedArrayValues(JsonElement element, string arrayPropertyName, string nestedPropertyName)
+    {
+        if (!TryGetProperty(element, arrayPropertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var values = value
+            .EnumerateArray()
+            .Select(item => TryReadString(item, nestedPropertyName))
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static entry => entry, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return values.Length == 0 ? null : string.Join(", ", values);
+    }
+
+    private static string? TryReadRemainingGapHighlights(JsonElement element)
+    {
+        if (!TryGetProperty(element, "RemainingGaps", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var highlights = value
+            .EnumerateArray()
+            .Select(static item => TryReadString(item, "Description"))
+            .Where(static item => !string.IsNullOrWhiteSpace(item))
+            .Take(4)
+            .ToArray();
+        return highlights.Length == 0 ? null : string.Join("; ", highlights);
+    }
 
     private static string? TryReadScenarioHighlights(JsonElement element)
     {
@@ -1119,6 +1164,7 @@ internal static class DesktopWorkflowAutomation
         }
 
         var matrixProofMetric = FindMetric(reportMetrics, "Strict proof ready", static value => value.Equals("No", StringComparison.OrdinalIgnoreCase))
+                                ?? FindMetric(reportMetrics, "Remaining proof gaps", static value => int.TryParse(value, out var count) && count > 0)
                                 ?? FindMetric(reportMetrics, "Missing proof axes");
         if (matrixProofMetric is not null)
         {

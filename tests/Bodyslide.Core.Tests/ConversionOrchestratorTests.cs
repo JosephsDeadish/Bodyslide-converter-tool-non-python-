@@ -19771,6 +19771,17 @@ public sealed class RealisticModPackFixtureTests
                           int.TryParse(metric.Value, out var combinationCount) &&
                           combinationCount >= 3);
             Assert.Contains(
+                desktopSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "remaining-gaps-pack-checklist.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Remaining proof gaps", StringComparison.OrdinalIgnoreCase) &&
+                          int.TryParse(metric.Value, out var remainingGapCount) &&
+                          remainingGapCount > 0);
+            Assert.Contains(
+                desktopSnapshot.ReportMetrics,
+                metric => string.Equals(metric.ReportName, "remaining-gaps-pack-checklist.json", StringComparison.OrdinalIgnoreCase) &&
+                          string.Equals(metric.Property, "Top remaining gaps", StringComparison.OrdinalIgnoreCase) &&
+                          !string.IsNullOrWhiteSpace(metric.Value));
+            Assert.Contains(
                 desktopSnapshot.SummaryRows,
                 row => string.Equals(row.Property, "Missing proof axes", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(
