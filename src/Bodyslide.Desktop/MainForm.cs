@@ -2746,9 +2746,10 @@ public sealed class MainForm : Form
         var physicsOverride = ReadOptionalComboValue(_physicsComboBox);
         var worldModeOverride = ReadOptionalComboValue(_worldModeComboBox);
         var cachePathOverride = ReadOptionalPathValue(_cachePathTextBox.Text);
-        var sourceOverride = string.IsNullOrWhiteSpace(_sourceComboBox.Text) || string.Equals(_sourceComboBox.Text, "(auto)", StringComparison.OrdinalIgnoreCase)
-            ? null
-            : _sourceComboBox.Text.Trim();
+        var sourceOverride = DesktopWorkflowSupport.ResolveSourceBodyOverride(
+            _sourceComboBox.Text,
+            _sourceComboBox.SelectedItem?.ToString(),
+            _autoDetectedSourceBody);
         if (!TryResolveSkeletonSupportPath(ReadOptionalPathValue(_skeletonNifTextBox.Text), out var skeletonNifPath))
         {
             return;

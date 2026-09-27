@@ -33,6 +33,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains(result.Steps, s => s.StartsWith("cage:", StringComparison.Ordinal));
             Assert.Contains(result.Steps, s => s.StartsWith("clipping:", StringComparison.Ordinal));
         }
+
         finally
         {
             File.Delete(inputFile);
@@ -12437,6 +12438,33 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_AvoidsMaleBodyResultWhenSourceSignalsAreFemaleOnly()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "femalebody_restraint_0.nif");
+        var texturePath = Path.Combine(workingDirectory, "femalebody_1.dds");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(texturePath, "texture");
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [texturePath], [], []);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.NotEqual("HIMBO", result.Body);
+            Assert.Contains(result.Evidence, static evidence => evidence.Equals("gender-cue:female", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SignatureBodyDetectionService_GroupsUnpbIntoUnpFamily()
     {
         var method = typeof(SignatureBodyDetectionService).GetMethod("GetBodyFamily", BindingFlags.NonPublic | BindingFlags.Static);
@@ -15155,6 +15183,16 @@ public sealed class DesktopWorkflowSupportTests
         var resolved = DesktopWorkflowSupport.ResolveDisplayedSourceBody("HIMBO", "(auto)", "BHUNP");
 
         Assert.Equal("HIMBO", resolved);
+    }
+
+    [Fact]
+    public void DesktopWorkflowSupport_ResolveSourceBodyOverride_UsesManualSelectionAndIgnoresAutoHint()
+    {
+        var manual = DesktopWorkflowSupport.ResolveSourceBodyOverride("BHUNP 3BBB", "(auto)", "HIMBO");
+        var auto = DesktopWorkflowSupport.ResolveSourceBodyOverride("(auto)", "(auto)", "BHUNP");
+
+        Assert.Equal("BHUNP", manual);
+        Assert.Null(auto);
     }
 
     [Fact]

@@ -60,6 +60,25 @@ internal static class DesktopWorkflowSupport
             : comboText.Trim();
     }
 
+    public static string? ResolveSourceBodyOverride(
+        string? comboText,
+        string? selectedItem,
+        string? autoDetectedSourceBody)
+    {
+        if (IsAutoSelectionText(comboText) && IsAutoSelectionText(selectedItem))
+        {
+            return null;
+        }
+
+        var displayed = ResolveDisplayedSourceBody(comboText, selectedItem, autoDetectedSourceBody);
+        if (string.IsNullOrWhiteSpace(displayed))
+        {
+            return null;
+        }
+
+        return BodyTypeCatalog.ResolveName(displayed);
+    }
+
     public static string? ReadOptionalPath(string? path) =>
         string.IsNullOrWhiteSpace(path) ? null : path.Trim();
 

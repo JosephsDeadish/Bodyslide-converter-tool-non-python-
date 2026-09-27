@@ -10930,6 +10930,34 @@ internal static class ArchiveExtractionHelper
 
 internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 {
+    private const double GenderCueMatchBoostValue = 0.06;
+    private const double GenderCueMismatchPenaltyValue = 0.18;
+    private static readonly HashSet<string> FemaleGenderCueTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "female",
+        "femalebody",
+        "cbbe",
+        "3ba",
+        "3bbb",
+        "bhunp",
+        "uunp",
+        "unp",
+        "unpb",
+        "tbd",
+        "coco",
+        "ssecbbe"
+    };
+    private static readonly HashSet<string> MaleGenderCueTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "male",
+        "malebody",
+        "himbo",
+        "sam",
+        "sos",
+        "tng",
+        "shapeatlasformen"
+    };
+
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var tuning = BodyDetectionTuningCatalog.Current;
@@ -10937,6 +10965,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var textureNames = BuildDetectionSignalNames(armor.TextureFiles);
         var physicsNames = BuildDetectionSignalNames(armor.PhysicsFiles);
         var bodyReferenceNames = BuildDetectionSignalNames(armor.BodyReferenceFiles);
+        var sourceGenderCue = InferSourceGenderCue(meshNames, textureNames, bodyReferenceNames, physicsNames);
         var geometrySignature = NifGeometrySignatureReader.TryReadBest(
             armor.MeshFiles.Concat(armor.BodyReferenceFiles.Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))));
 
@@ -10946,7 +10975,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
             .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, physicsContents, physicsBoneNames, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceGenderCue, physicsContents, physicsBoneNames, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenByDescending(result => result.ReferenceHitRatio)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
@@ -11273,6 +11302,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<string> textureNames,
         IReadOnlyList<string> physicsNames,
         IReadOnlyList<string> bodyReferenceNames,
+        string? sourceGenderCue,
         string physicsContents,
         IReadOnlySet<string> physicsBoneNames,
         MeshGeometrySignature? geometrySignature)
@@ -11369,6 +11399,13 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         var physicsExpectationSignal = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 1d : 0d;
         var referenceBoostSignal = referenceHitRatio >= 0.5 ? 1d : 0d;
         var linkedModReferenceBoostSignal = hasLinkedModStructureCue ? referenceHitRatio : 0d;
+        var templateGenderCue = ResolveTemplateGenderCue(template);
+        var hasGenderCueMatch = !string.IsNullOrWhiteSpace(sourceGenderCue) &&
+                                !string.IsNullOrWhiteSpace(templateGenderCue) &&
+                                sourceGenderCue.Equals(templateGenderCue, StringComparison.OrdinalIgnoreCase);
+        var hasGenderCueMismatch = !string.IsNullOrWhiteSpace(sourceGenderCue) &&
+                                   !string.IsNullOrWhiteSpace(templateGenderCue) &&
+                                   !hasGenderCueMatch;
         var score = Math.Clamp(
             (meshHitRatio * tuning.MeshTokenWeight) +
             (textureHitRatio * tuning.TextureTokenWeight) +
@@ -11380,7 +11417,9 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (uvSignatureScore * tuning.UvSignatureWeight) +
             (physicsExpectationSignal * tuning.PhysicsExpectationBoostValue) +
             (referenceBoostSignal * tuning.BodyReferenceBoostValue) +
-            (linkedModReferenceBoostSignal * tuning.LinkedModStructureReferenceBoostValue),
+            (linkedModReferenceBoostSignal * tuning.LinkedModStructureReferenceBoostValue) +
+            (hasGenderCueMatch ? GenderCueMatchBoostValue : 0d) -
+            (hasGenderCueMismatch ? GenderCueMismatchPenaltyValue : 0d),
             0,
             1);
 
@@ -11390,6 +11429,18 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             if (linkedModReferenceBoostSignal > 0)
             {
                 evidence.Add($"linked-structure-reference:{linkedModReferenceBoostSignal:P0}");
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(sourceGenderCue))
+        {
+            evidence.Add($"gender-cue:{sourceGenderCue}");
+            if (hasGenderCueMatch)
+            {
+                evidence.Add("gender-cue-match");
+            }
+            else if (hasGenderCueMismatch)
+            {
+                evidence.Add($"gender-cue-mismatch:{templateGenderCue}");
             }
         }
 
@@ -11566,6 +11617,83 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         }
 
         return false;
+    }
+
+    private static string? InferSourceGenderCue(params IReadOnlyList<string>[] signalGroups)
+    {
+        var femaleHits = 0;
+        var maleHits = 0;
+        foreach (var group in signalGroups)
+        {
+            foreach (var value in group)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var tokens = TokenizeSignal(value);
+                foreach (var token in tokens)
+                {
+                    if (FemaleGenderCueTokens.Contains(token))
+                    {
+                        femaleHits++;
+                    }
+
+                    if (MaleGenderCueTokens.Contains(token))
+                    {
+                        maleHits++;
+                    }
+                }
+            }
+        }
+
+        if (femaleHits == 0 && maleHits == 0)
+        {
+            return null;
+        }
+
+        if (femaleHits == maleHits)
+        {
+            return null;
+        }
+
+        return femaleHits > maleHits ? "female" : "male";
+    }
+
+    private static string? ResolveTemplateGenderCue(BodySignatureTemplate template)
+    {
+        if (BuiltInBodyMetadataCatalog.TryGet(template.Body, out var metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.Gender))
+        {
+            return metadata.Gender.Trim().ToLowerInvariant();
+        }
+
+        if (template.MeshTokens.Any(token => MaleGenderCueTokens.Contains(token)))
+        {
+            return "male";
+        }
+
+        if (template.MeshTokens.Any(token => FemaleGenderCueTokens.Contains(token)))
+        {
+            return "female";
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> TokenizeSignal(string value)
+    {
+        var normalized = value
+            .Replace('\\', ' ')
+            .Replace('/', ' ')
+            .Replace('_', ' ')
+            .Replace('-', ' ')
+            .Replace('.', ' ')
+            .Replace(':', ' ')
+            .ToLowerInvariant();
+        return normalized
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 }
 
