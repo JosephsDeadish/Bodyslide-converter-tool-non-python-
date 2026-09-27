@@ -24,7 +24,7 @@ public sealed class DesktopCustomBodyProfileTemplateCatalogTests
 
         Assert.Equal("Vanilla Beast", template.Name);
         Assert.Equal("female", template.Gender);
-        Assert.Equal(@"meshes\actors\character\character assets\", template.BodyOutputPath);
+        Assert.Equal(@"meshes\actors\character\character assets\beast\", template.BodyOutputPath);
         Assert.Contains("TailBase", template.SliderNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("Thighs", template.SliderNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("legs", template.TransformationField.Keys, StringComparer.OrdinalIgnoreCase);

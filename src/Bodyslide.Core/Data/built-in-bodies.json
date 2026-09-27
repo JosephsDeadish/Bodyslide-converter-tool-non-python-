@@ -1646,6 +1646,7 @@
       "Ohmes-Raht"
     ],
     "gender": "female",
+    "bodyOutputPath": "meshes\\actors\\character\\character assets\\beast\\",
     "defaultPhysics": "none",
     "skeletonFoundation": "Beast-humanoid vanilla skeleton",
     "notes": "Vanilla-aligned beast-race body target for Khajiit and Argonian armor paths, with tail-friendly skeleton expectations. No built-in physics by default.",

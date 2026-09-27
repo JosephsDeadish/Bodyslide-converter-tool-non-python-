@@ -17371,6 +17371,122 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task BatchConvert_RealisticMessyMixedEcosystemModPackDirectory_ProducesCrossConsistentBodySlideArtifacts()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMessyMixedEcosystemModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.True(result.Success);
+
+            var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+            var ospPath = Directory.GetFiles(sliderSetsDirectory, "*.osp", SearchOption.TopDirectoryOnly).Single();
+            var ospDocument = XDocument.Load(ospPath);
+            var sliderNames = ospDocument.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("Slider", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Attribute("name")?.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.NotEmpty(sliderNames);
+            var sliderSetNames = ospDocument.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SliderSet", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Attribute("name")?.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.NotEmpty(sliderSetNames);
+
+            var setFolders = ospDocument.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SetFolder", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!.Replace('\\', '/').Trim('/'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            Assert.NotEmpty(setFolders);
+            Assert.All(setFolders, setFolder =>
+                Assert.StartsWith("CalienteTools/BodySlide/ShapeData/", setFolder, StringComparison.OrdinalIgnoreCase));
+
+            var sourceFiles = ospDocument.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("SourceFile", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!.Replace('\\', '/').Trim('/'))
+                .ToArray();
+            Assert.NotEmpty(sourceFiles);
+            Assert.All(sourceFiles, sourceFile =>
+                Assert.StartsWith("CalienteTools/BodySlide/ShapeData/", sourceFile, StringComparison.OrdinalIgnoreCase));
+
+            var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+            var sliderGroupsPath = Directory.GetFiles(sliderGroupsDirectory, "*.xml", SearchOption.TopDirectoryOnly).Single();
+            var sliderGroupsDocument = XDocument.Load(sliderGroupsPath);
+            var sliderGroupMembers = sliderGroupsDocument.Descendants()
+                .Where(static element => element.Name.LocalName.Equals("Member", StringComparison.OrdinalIgnoreCase))
+                .Select(static element => element.Attribute("name")?.Value?.Trim())
+                .Where(static value => !string.IsNullOrWhiteSpace(value))
+                .Select(static value => value!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.NotEmpty(sliderGroupMembers);
+            Assert.All(sliderSetNames, sliderSetName => Assert.Contains(sliderSetName, sliderGroupMembers));
+
+            var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+            var shapeDataProjectDirectory = setFolders
+                .Select(static setFolder => Path.GetFileName(setFolder))
+                .Where(static folderName => !string.IsNullOrWhiteSpace(folderName))
+                .Select(folderName => Path.Combine(shapeDataDirectory, folderName!))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Single();
+            Assert.True(Directory.Exists(shapeDataProjectDirectory));
+
+            var bsdPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.bsd", SearchOption.TopDirectoryOnly);
+            var triPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.tri", SearchOption.TopDirectoryOnly);
+            var nifPaths = Directory.GetFiles(shapeDataProjectDirectory, "*.nif", SearchOption.TopDirectoryOnly);
+            Assert.NotEmpty(bsdPaths);
+            Assert.NotEmpty(triPaths);
+            Assert.NotEmpty(nifPaths);
+
+            foreach (var bsdPath in bsdPaths)
+            {
+                Assert.True(BsdMorphReader.TryRead(bsdPath, out var bsdPayload));
+                Assert.NotNull(bsdPayload);
+                var expectedSliderName = Path.GetFileNameWithoutExtension(bsdPath);
+                if (expectedSliderName.EndsWith("_1", StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedSliderName = expectedSliderName[..^2];
+                }
+
+                Assert.Equal(expectedSliderName, bsdPayload!.SliderName, ignoreCase: true);
+                Assert.True(bsdPayload.VertexCount > 0);
+            }
+
+            var triPayloads = triPaths
+                .Select(path =>
+                {
+                    Assert.True(TriMorphReader.TryRead(path, out var payload));
+                    Assert.NotNull(payload);
+                    return payload!;
+                })
+                .ToArray();
+            Assert.Contains(triPayloads.SelectMany(static payload => payload.Morphs).Select(static morph => morph.Name), sliderName =>
+                sliderNames.Contains(sliderName, StringComparer.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticFailureBsSubIndexModPackDirectory_FlagsUnsupportedFamilyInDiagnostics()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFailureBsSubIndexModPack");

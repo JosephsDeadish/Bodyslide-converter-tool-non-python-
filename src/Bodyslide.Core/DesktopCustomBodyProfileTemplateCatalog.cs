@@ -51,9 +51,11 @@ public static class DesktopCustomBodyProfileTemplateCatalog
             bodyInfo?.VertexCountMax ?? 0,
             transformationField.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase),
             sliderNames.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            string.Equals(gender, "male", StringComparison.OrdinalIgnoreCase)
-                ? @"meshes\actors\character\character assets male\"
-                : @"meshes\actors\character\character assets\",
+            hasMetadata && !string.IsNullOrWhiteSpace(metadata.BodyOutputPath)
+                ? metadata.BodyOutputPath
+                : string.Equals(gender, "male", StringComparison.OrdinalIgnoreCase)
+                    ? @"meshes\actors\character\character assets male\"
+                    : @"meshes\actors\character\character assets\",
             gender);
     }
 }

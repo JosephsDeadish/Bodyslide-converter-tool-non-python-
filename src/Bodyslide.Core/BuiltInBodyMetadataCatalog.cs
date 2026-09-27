@@ -33,6 +33,7 @@ internal sealed record BuiltInBodyMetadata(
     int MinimumPhysicsFamilyCount,
     int MinimumRuntimePhysicsNodeCount,
     string CollisionComplexity,
+    string BodyOutputPath,
     bool HasExplicitExpectedSemanticRegions,
     bool HasExplicitExpectedCollisionRegions,
     bool HasExplicitExpectedBilateralRegions,
@@ -267,6 +268,7 @@ internal static class BuiltInBodyMetadataCatalog
             string.IsNullOrWhiteSpace(dto.CollisionComplexity)
                 ? BodySupportMetadataHeuristics.InferCollisionComplexity(dto.AvailablePhysicsBones, dto.SliderNames, dto.PhysicsBoneSignatures)
                 : dto.CollisionComplexity.Trim(),
+            NormalizeBodyOutputPath(dto.BodyOutputPath, gender),
             dto.ExpectedSemanticRegions is { Length: > 0 },
             dto.ExpectedCollisionRegions is { Length: > 0 },
             dto.ExpectedBilateralRegions is { Length: > 0 },
@@ -310,6 +312,21 @@ internal static class BuiltInBodyMetadataCatalog
             .ToArray() ?? [];
     }
 
+    private static string NormalizeBodyOutputPath(string? outputPath, string gender)
+    {
+        if (!string.IsNullOrWhiteSpace(outputPath))
+        {
+            var normalized = outputPath.Trim().Replace('/', '\\');
+            return normalized.EndsWith('\\')
+                ? normalized
+                : $"{normalized}\\";
+        }
+
+        return gender.Equals("male", StringComparison.OrdinalIgnoreCase)
+            ? @"meshes\actors\character\character assets male\"
+            : @"meshes\actors\character\character assets\";
+    }
+
     private sealed class BuiltInBodyMetadataDto
     {
         public string? Name { get; init; }
@@ -341,6 +358,7 @@ internal static class BuiltInBodyMetadataCatalog
         public int MinimumPhysicsFamilyCount { get; init; }
         public int MinimumRuntimePhysicsNodeCount { get; init; }
         public string? CollisionComplexity { get; init; }
+        public string? BodyOutputPath { get; init; }
     }
 }
 

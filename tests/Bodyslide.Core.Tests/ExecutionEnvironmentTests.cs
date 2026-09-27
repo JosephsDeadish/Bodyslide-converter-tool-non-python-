@@ -72,12 +72,12 @@ public sealed class ExecutionEnvironmentTests
     [Fact]
     public void GetDefaultOutputRootForInput_TreatsNonExistentDirectoryPathAsDirectory()
     {
-        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "pack");
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "pack") + Path.DirectorySeparatorChar;
 
         var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
 
         Assert.Equal(
-            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            Path.Combine(Path.GetFullPath(inputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), "SlideSmith-output"),
             outputRoot);
     }
 
@@ -85,6 +85,18 @@ public sealed class ExecutionEnvironmentTests
     public void GetDefaultOutputRootForInput_TreatsNonExistentFilePathAsFile()
     {
         var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessFilePathAsFile()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "modarchive");
 
         var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
 

@@ -390,11 +390,24 @@ public sealed class ConversionValidationGuidanceTests
                 var match = System.Text.RegularExpressions.Regex.Match(ospText, "<OutputPath>(.*?)</OutputPath>");
                 Assert.True(match.Success, $"Missing OutputPath in {ospPath}.");
                 Assert.Equal(
-                    match.Groups[1].Value,
-                    bodyOutputPath,
+                    NormalizeBodySlidePathForComparison(match.Groups[1].Value),
+                    NormalizeBodySlidePathForComparison(bodyOutputPath),
                     ignoreCase: true);
             }
         }
+    }
+
+    private static string NormalizeBodySlidePathForComparison(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        return path
+            .Replace('\\', '/')
+            .Trim()
+            .Trim('/');
     }
 
     [Fact]

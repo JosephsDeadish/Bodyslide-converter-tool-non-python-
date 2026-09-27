@@ -140,6 +140,11 @@ public static class ExecutionEnvironment
             return true;
         }
 
-        return !Path.HasExtension(trimmedOriginal);
+        if (Path.HasExtension(trimmedOriginal))
+        {
+            return false;
+        }
+
+        return false;
     }
 }
