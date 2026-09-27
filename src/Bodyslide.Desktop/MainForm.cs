@@ -3023,6 +3023,14 @@ public sealed class MainForm : Form
                 return;
             }
 
+            var input = _inputTextBox.Text.Trim();
+            if (IsArchiveInputPath(input))
+            {
+                _statusLabel.Text = "Archive input selected. Click Inspect Input to run full archive analysis.";
+                AppendLog("Auto-inspection skipped for archive input to keep the UI responsive. Click Inspect Input when ready.");
+                return;
+            }
+
             await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
         }
         catch (OperationCanceledException)
@@ -3073,12 +3081,14 @@ public sealed class MainForm : Form
             ShowBusyProgress(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
             ClearInspectionTab(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
 
-            var inspection = await _inspector.InspectAsync(
-                input,
-                ResolveInspectionTargetBody(),
-                _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
-                _activeConversion.Token,
-                skeletonNifPath: skeletonNifPath);
+            var inspection = await Task.Run(
+                async () => await _inspector.InspectAsync(
+                    input,
+                    ResolveInspectionTargetBody(),
+                    _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
+                    _activeConversion.Token,
+                    skeletonNifPath: skeletonNifPath),
+                _activeConversion.Token);
 
             PopulateInspectionTab(inspection);
             ApplyDetectedSourceBodySelection(inspection.Detection);
@@ -3119,6 +3129,21 @@ public sealed class MainForm : Form
             _activeConversion = null;
             SetBusyState(isBusy: false);
         }
+    }
+
+    private static bool IsArchiveInputPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        var normalized = path.Trim();
+        return normalized.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".tar", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
     }
 
     private string? ResolveInspectionTargetBody()

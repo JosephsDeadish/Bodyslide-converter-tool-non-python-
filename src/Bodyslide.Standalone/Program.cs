@@ -378,7 +378,8 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
-        if (args.Length != 0 && !launchedFromModOrganizer)
+        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
+        if (args.Length != 0 && !launchedFromModOrganizer && explicitCliLaunch)
         {
             return false;
         }
@@ -493,8 +494,65 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
 static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? executablePath, string? workingDirectory) =>
     IsLikelyModOrganizerEnvironment() ||
     args.Any(IsMo2LauncherArg) ||
+    args.Any(IsLikelyLauncherPathArgument) ||
     (PathLooksLikeModOrganizerManagedLocation(executablePath) &&
      PathLooksLikeModOrganizerManagedLocation(workingDirectory));
+
+static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
+    args.Any(static arg =>
+    {
+        if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var option = arg[2..].Trim();
+        if (option.Length == 0)
+        {
+            return false;
+        }
+
+        var separatorIndex = option.IndexOf('=');
+        if (separatorIndex >= 0)
+        {
+            option = option[..separatorIndex];
+        }
+
+        if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+            option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return option.Equals("pause", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("help", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("h", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("list-bodies", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("list-presets", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("list-profiles", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("list-physics", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("self-check", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("conversion-guide", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("export-cache", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("input", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("targets", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("output", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("source-body", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("physics", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("cache-path", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("zip", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("skeleton-nif", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("skeleton-nif-path", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("generate-bodyslide-files", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("custom-profiles", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("world-drop-mode", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("shared-plugin-output", StringComparison.OrdinalIgnoreCase) ||
+               option.Equals("body-reference", StringComparison.OrdinalIgnoreCase);
+    });
 
 static bool IsMo2LauncherArg(string? arg)
 {
@@ -553,6 +611,29 @@ static bool PathLooksLikeModOrganizerManagedLocation(string? path)
     return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsLikelyLauncherPathArgument(string? arg)
+{
+    if (string.IsNullOrWhiteSpace(arg))
+    {
+        return false;
+    }
+
+    var trimmed = arg.Trim().Trim('"');
+    if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
+    {
+        return false;
+    }
+
+    if (!trimmed.Contains('\\') &&
+        !trimmed.Contains('/') &&
+        !trimmed.Contains(':'))
+    {
+        return false;
+    }
+
+    return PathLooksLikeModOrganizerManagedLocation(trimmed);
 }
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
