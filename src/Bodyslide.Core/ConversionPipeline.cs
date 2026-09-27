@@ -25389,11 +25389,7 @@ internal sealed class LocalExportService(
                     }
                 }
 
-                if (!File.Exists(sliderGroupsPath))
-                {
-                    problems.Add("SliderGroups XML is missing for generated BodySlide project.");
-                }
-                else
+                if (File.Exists(sliderGroupsPath))
                 {
                     var sliderGroupsDocument = System.Xml.Linq.XDocument.Load(sliderGroupsPath);
                     var sliderGroupMembers = sliderGroupsDocument.Descendants()

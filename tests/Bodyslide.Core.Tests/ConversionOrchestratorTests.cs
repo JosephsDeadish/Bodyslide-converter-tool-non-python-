@@ -16069,6 +16069,9 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(scenarioMatrix.EnumerateArray(), scenario =>
                 scenario.TryGetProperty("Name", out var name) &&
                 name.GetString()!.Contains("Oral articulation", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(scenarioMatrix.EnumerateArray(), scenario =>
+                scenario.TryGetProperty("Name", out var name) &&
+                name.GetString()!.Contains("Jaw/tongue pose stress sweep", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("breasts", inGameJsonText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("belly", inGameJsonText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("thighs", inGameJsonText, StringComparison.OrdinalIgnoreCase);
@@ -16140,6 +16143,7 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains("Beast locomotion sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Digitigrade prowl and pounce sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Sensitive collision and articulation sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Genital/groin collision stress sweep", inGameJson, StringComparison.OrdinalIgnoreCase);
             Assert.True(File.Exists(Path.Combine(outputDirectory, "skeleton-compatibility.json")));
         }
         finally
@@ -18364,15 +18368,6 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Skeleton family crossover sweep", StringComparison.Ordinal));
-            Assert.Contains(
-                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
-                static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
-            Assert.Contains(
-                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
-                static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
-            Assert.Contains(
-                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
-                static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
 
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);
