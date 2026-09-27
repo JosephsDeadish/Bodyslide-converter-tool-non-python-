@@ -9,6 +9,7 @@ public sealed class DesktopWorkflowSupportTests
         var outputDirectory = Path.Combine(workingDirectory, "output");
         var fomodDirectory = Path.Combine(outputDirectory, "fomod");
         Directory.CreateDirectory(fomodDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
         var moduleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
         File.WriteAllText(moduleConfigPath, "<config />");
 
@@ -18,6 +19,27 @@ public sealed class DesktopWorkflowSupportTests
 
             Assert.Equal(outputDirectory, resolved);
             Assert.True(DesktopWorkflowSupport.LooksLikeSlideSmithOutputDirectory(resolved));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryResolveResultOutputDirectory_DoesNotTreatPlainFomodModAsSlideSmithOutput()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var modDirectory = Path.Combine(workingDirectory, "mod");
+        var fomodDirectory = Path.Combine(modDirectory, "fomod");
+        Directory.CreateDirectory(fomodDirectory);
+        var moduleConfigPath = Path.Combine(fomodDirectory, "ModuleConfig.xml");
+        File.WriteAllText(moduleConfigPath, "<config />");
+
+        try
+        {
+            var resolved = DesktopWorkflowSupport.TryResolveResultOutputDirectory(moduleConfigPath);
+            Assert.Null(resolved);
         }
         finally
         {

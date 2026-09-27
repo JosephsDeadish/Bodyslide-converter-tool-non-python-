@@ -263,19 +263,7 @@ internal static class DesktopWorkflowSupport
             return false;
         }
 
-        if (DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName))))
-        {
-            return true;
-        }
-
-        var fomodDirectory = Path.Combine(directory, "fomod");
-        if (Directory.Exists(fomodDirectory))
-        {
-            return File.Exists(Path.Combine(fomodDirectory, "ModuleConfig.xml")) ||
-                   File.Exists(Path.Combine(fomodDirectory, "info.xml"));
-        }
-
-        return false;
+        return DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName)));
     }
 
     public static string? TryResolveExistingInputPath(string? candidatePath)
