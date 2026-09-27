@@ -424,6 +424,7 @@ public sealed class MainForm : Form
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.Controls.Add(new Label
         {
             AutoSize = true,
@@ -493,13 +494,41 @@ public sealed class MainForm : Form
         themePanel.Controls.Add(themeLabel);
         themePanel.Controls.Add(_themeComboBox);
         modeRow.Controls.Add(themePanel, 1, 1);
+        var modeQuickActionsPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        var useRecommendedSetupButton = new Button
+        {
+            Name = "useRecommendedSetupButton",
+            Text = "Use recommended setup",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        useRecommendedSetupButton.Click += (_, _) => ApplyRecommendedUiSetup();
+        var autoMapTargetButton = new Button
+        {
+            Name = "autoMapTargetButton",
+            Text = "Auto-map TO body from FROM body",
+            AutoSize = true,
+            Margin = new Padding(0),
+        };
+        autoMapTargetButton.Click += (_, _) => ApplyAutoMappedTargetFromSource();
+        modeQuickActionsPanel.Controls.Add(useRecommendedSetupButton);
+        modeQuickActionsPanel.Controls.Add(autoMapTargetButton);
+        modeRow.Controls.Add(modeQuickActionsPanel, 0, 2);
+        modeRow.SetColumnSpan(modeQuickActionsPanel, 2);
         _modeStatusLabel = new Label
         {
             AutoSize = true,
             Margin = new Padding(0, 6, 0, 0),
             Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
         };
-        modeRow.Controls.Add(_modeStatusLabel, 0, 2);
+        modeRow.Controls.Add(_modeStatusLabel, 0, 3);
         modeRow.SetColumnSpan(_modeStatusLabel, 2);
         _topLayoutPanel.Controls.Add(modeRow, 0, 2);
 
@@ -2306,6 +2335,83 @@ public sealed class MainForm : Form
         }
 
         AppendLog($"Manual mixed female/male targets selected: {string.Join(", ", suggestedTargets)}.");
+    }
+
+    private void ApplyRecommendedUiSetup()
+    {
+        _usePresetRadio.Checked = true;
+        if (_presetComboBox.Items.Count > 0 && _presetComboBox.SelectedIndex < 0)
+        {
+            _presetComboBox.SelectedIndex = 0;
+        }
+
+        _presetBatchTextBox.Text = string.Empty;
+        _targetBatchTextBox.Text = string.Empty;
+        _sourceComboBox.Text = "(auto)";
+        _profileComboBox.SelectedIndex = 0;
+        _physicsComboBox.SelectedIndex = 0;
+        _worldModeComboBox.SelectedIndex = 0;
+        _skeletonNifTextBox.Text = string.Empty;
+        _cachePathTextBox.Text = string.Empty;
+
+        RefreshModeState();
+        UpdateSourceDetails();
+        AppendLog("Recommended setup applied: preset mode with auto source, shape, physics, and world settings.");
+    }
+
+    private void ApplyAutoMappedTargetFromSource()
+    {
+        var sourceHint = string.Equals(_sourceComboBox.Text?.Trim(), "(auto)", StringComparison.OrdinalIgnoreCase)
+            ? _autoDetectedSourceBody
+            : _sourceComboBox.Text?.Trim();
+        var mappedTarget = ResolveAutoMappedTargetFromSource(sourceHint);
+        if (string.IsNullOrWhiteSpace(mappedTarget))
+        {
+            MessageBox.Show(
+                this,
+                "Could not auto-map a TO body from the current FROM body hint yet. Pick a target manually or inspect input first for better source detection.",
+                "Auto-map destination body",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        _useCustomTargetRadio.Checked = true;
+        _targetBatchTextBox.Text = string.Empty;
+        var index = _targetComboBox.FindStringExact(mappedTarget);
+        if (index >= 0)
+        {
+            _targetComboBox.SelectedIndex = index;
+        }
+        else
+        {
+            _targetComboBox.Text = mappedTarget;
+        }
+
+        UpdateTargetDetails();
+        UpdatePhysicsDetails();
+        UpdateOutputHint();
+        AppendLog($"Auto-mapped TO body '{mappedTarget}' from FROM body hint '{sourceHint ?? "(auto)"}'.");
+    }
+
+    private static string? ResolveAutoMappedTargetFromSource(string? sourceHint)
+    {
+        var canonicalSource = BodyTypeCatalog.ResolveName(sourceHint);
+        if (!string.IsNullOrWhiteSpace(canonicalSource) &&
+            BodyTypeCatalog.All.Any(body => body.Name.Equals(canonicalSource, StringComparison.OrdinalIgnoreCase)))
+        {
+            return canonicalSource;
+        }
+
+        if (!string.IsNullOrWhiteSpace(canonicalSource) &&
+            BodyTypeCatalog.TryGetGender(canonicalSource, out var sourceGender))
+        {
+            return string.Equals(sourceGender, "female", StringComparison.OrdinalIgnoreCase)
+                ? ResolveSuggestedTargetForGender(null, sourceGender, "3BA", "CBBE", "UUNP", "BHUNP", "UNP")
+                : ResolveSuggestedTargetForGender(null, sourceGender, "HIMBO", "SAM Light", "SAM", "SOS", "TNG");
+        }
+
+        return null;
     }
 
     private IReadOnlyList<string> GetSuggestedMixedGenderTargets()
@@ -5547,6 +5653,23 @@ public sealed class MainForm : Form
             if (failedCount > 0)
             {
                 add(
+                    "Action card",
+                    "Warning",
+                    $"Failed conversions detected ({failedCount}). Recommended flow: 1) open batch-report.json, 2) re-run failed items only, 3) validate conversion-quality.json before packaging.",
+                    reportPath);
+            }
+            else if (needsReviewCount > 0 || highRiskCount > 0)
+            {
+                add(
+                    "Action card",
+                    "Action",
+                    $"Partial conversion state: {needsReviewCount} need review and {highRiskCount} are high risk. Review preview-workbench + conversion-quality before treating this pack as release-ready.",
+                    reportPath);
+            }
+
+            if (failedCount > 0)
+            {
+                add(
                     "Batch follow-up",
                     "Action",
                     $"Open batch-report.json and re-run or isolate the {failedCount} failed item(s) before publishing the pack.",
@@ -5606,6 +5729,17 @@ public sealed class MainForm : Form
                 validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase) ? "Info" : "Warning",
                 $"{ConversionValidationPresentation.GetGateLabel(validationSummary.Status)}: {ConversionValidationPresentation.GetDispositionMessage(validationSummary.Status)} Score {validationSummary.Score}. Open conversion-quality.json for the full breakdown.",
                 qualityPath);
+
+            if (!validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+            {
+                add(
+                    "Action card",
+                    ConversionValidationPresentation.GetGateRank(validationSummary.Status) >= ConversionValidationPresentation.GetGateRank("high-risk")
+                        ? "Warning"
+                        : "Action",
+                    $"Validation is {ConversionValidationPresentation.GetGateLabel(validationSummary.Status)} for {targetBody}. Use preview-workbench and top listed issues to resolve blockers, then re-run conversion before publishing.",
+                    qualityPath);
+            }
 
             var prioritizedIssues = ConversionValidationGuidance.PrioritizeIssues(validationSummary, maxIssues: 4).ToArray();
 
