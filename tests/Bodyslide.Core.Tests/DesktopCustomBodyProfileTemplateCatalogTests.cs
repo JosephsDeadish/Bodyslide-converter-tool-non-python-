@@ -47,10 +47,10 @@ public sealed class DesktopCustomBodyProfileTemplateCatalogTests
     [Fact]
     public void Resolve_PreservesOriginalTargetBodyTokenWhenAliasResolves()
     {
-        var template = DesktopCustomBodyProfileTemplateCatalog.Resolve("3BA");
+        var template = DesktopCustomBodyProfileTemplateCatalog.Resolve("3BBB");
 
-        Assert.Equal("CBBE 3BA", template.Name);
+        Assert.Equal("3BA", template.Name);
+        Assert.Contains("3BBB", template.DetectionTokens, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("3BA", template.DetectionTokens, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("CBBE 3BA", template.DetectionTokens, StringComparer.OrdinalIgnoreCase);
     }
 }

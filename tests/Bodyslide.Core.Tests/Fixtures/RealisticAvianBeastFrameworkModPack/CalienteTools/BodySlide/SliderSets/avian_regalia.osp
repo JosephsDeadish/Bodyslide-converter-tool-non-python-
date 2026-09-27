@@ -1,5 +1,5 @@
 <SliderSetInfo version="1">
-  <SliderSet name="Avian Beast Framework" set="Avian Humanoid">
+  <SliderSet name="AvianFramework" set="Avian Humanoid">
     <OutputPath>meshes\beast\avian\</OutputPath>
     <OutputFile gender="f" use="true">avian_regalia_0.nif</OutputFile>
     <OutputFile gender="f" use="true" morphfile="1">avian_regalia_1.nif</OutputFile>
