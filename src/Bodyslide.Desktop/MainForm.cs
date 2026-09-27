@@ -2122,6 +2122,7 @@ public sealed class MainForm : Form
     {
         var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath).ToList();
         AppendModOrganizerHealthChecks(checks);
+        AppendLatestOutputVerificationChecks(checks);
 
         try
         {
@@ -2139,6 +2140,100 @@ public sealed class MainForm : Form
 
         return checks;
     }
+
+    private void AppendLatestOutputVerificationChecks(List<RuntimeReadinessCheck> checks)
+    {
+        if (string.IsNullOrWhiteSpace(_lastOutputDirectory) || !Directory.Exists(_lastOutputDirectory))
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "Latest output verification",
+                "Info",
+                "Run a conversion or load an output folder to verify Skyrim packaging, BodySlide assets, and remaining proof blockers."));
+            return;
+        }
+
+        var outputDirectory = _lastOutputDirectory;
+        var stagedMeshDirectory = Path.Combine(outputDirectory, "meshes", "slidesmith");
+        var stagedMeshCount = Directory.Exists(stagedMeshDirectory)
+            ? Directory.EnumerateFiles(stagedMeshDirectory, "*.nif", SearchOption.AllDirectories).Count()
+            : 0;
+        var hasModuleConfig = File.Exists(Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml"));
+        var hasInfoXml = File.Exists(Path.Combine(outputDirectory, "fomod", "info.xml"));
+        var hasMetaIni = File.Exists(Path.Combine(outputDirectory, "meta.ini"));
+        var hasPackageScaffold = stagedMeshCount > 0 && hasModuleConfig && hasInfoXml && hasMetaIni;
+
+        checks.Add(new RuntimeReadinessCheck(
+            "Skyrim package recognition",
+            hasPackageScaffold ? "OK" : "Warning",
+            hasPackageScaffold
+                ? $"Packaged output looks installable: {stagedMeshCount} staged mesh(es), FOMOD ModuleConfig/info.xml, and meta.ini found."
+                : $"Latest output is missing required package pieces. Staged meshes={stagedMeshCount}, ModuleConfig={FormatYesNo(hasModuleConfig)}, info.xml={FormatYesNo(hasInfoXml)}, meta.ini={FormatYesNo(hasMetaIni)}."));
+
+        var sliderSetsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderSets");
+        var sliderGroupsDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "SliderGroups");
+        var shapeDataDirectory = Path.Combine(outputDirectory, "CalienteTools", "BodySlide", "ShapeData");
+        var ospCount = Directory.Exists(sliderSetsDirectory)
+            ? Directory.EnumerateFiles(sliderSetsDirectory, "*.osp", SearchOption.TopDirectoryOnly).Count()
+            : 0;
+        var sliderGroupCount = Directory.Exists(sliderGroupsDirectory)
+            ? Directory.EnumerateFiles(sliderGroupsDirectory, "*.xml", SearchOption.TopDirectoryOnly).Count()
+            : 0;
+        var shapeDataNifCount = Directory.Exists(shapeDataDirectory)
+            ? Directory.EnumerateFiles(shapeDataDirectory, "*.nif", SearchOption.AllDirectories).Count()
+            : 0;
+        var shapeDataPayloadCount = Directory.Exists(shapeDataDirectory)
+            ? Directory.EnumerateFiles(shapeDataDirectory, "*.tri", SearchOption.AllDirectories).Count() +
+              Directory.EnumerateFiles(shapeDataDirectory, "*.bsd", SearchOption.AllDirectories).Count()
+            : 0;
+        var hasBodySlideScaffold = ospCount > 0 && sliderGroupCount > 0 && shapeDataNifCount > 0 && shapeDataPayloadCount > 0;
+
+        checks.Add(new RuntimeReadinessCheck(
+            "BodySlide recognizability",
+            hasBodySlideScaffold ? "OK" : "Warning",
+            hasBodySlideScaffold
+                ? $"BodySlide scaffold detected: {ospCount} SliderSets project(s), {sliderGroupCount} SliderGroups file(s), {shapeDataNifCount} ShapeData NIF(s), {shapeDataPayloadCount} TRI/BSD payload(s)."
+                : $"BodySlide scaffold is incomplete. SliderSets(.osp)={ospCount}, SliderGroups(.xml)={sliderGroupCount}, ShapeData NIFs={shapeDataNifCount}, TRI/BSD payloads={shapeDataPayloadCount}."));
+
+        var checklistPath = File.Exists(Path.Combine(outputDirectory, "remaining-gaps-checklist.json"))
+            ? Path.Combine(outputDirectory, "remaining-gaps-checklist.json")
+            : File.Exists(Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.json"))
+                ? Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.json")
+                : null;
+        if (string.IsNullOrWhiteSpace(checklistPath))
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "Proof blockers",
+                "Info",
+                "No remaining-gaps checklist report found in the loaded output. Re-run conversion to generate strict/universal blocker tracking."));
+            return;
+        }
+
+        try
+        {
+            using var document = OpenJsonDocument(checklistPath);
+            var root = document.RootElement;
+            var strictProofReady = TryReadBoolValue(root, "StrictProofReady") == true;
+            var proofCoverage = TryReadString(root, "ProofCoverage") ?? "unknown";
+            var sourceReport = TryReadString(root, "SourceReport") ?? Path.GetFileName(checklistPath);
+            var remainingGapCount = TryReadArrayCount(root, "RemainingGaps");
+
+            checks.Add(new RuntimeReadinessCheck(
+                "Proof blockers",
+                strictProofReady || remainingGapCount == 0 ? "OK" : "Warning",
+                strictProofReady || remainingGapCount == 0
+                    ? $"Strict/universal blocker checklist is clear for the loaded output ({sourceReport}; coverage={proofCoverage})."
+                    : $"Loaded output still has {remainingGapCount} strict/universal blocker(s) ({sourceReport}; coverage={proofCoverage}). Use Next actions and the checklist report to close them."));
+        }
+        catch (Exception ex)
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "Proof blockers",
+                "Warning",
+                $"Could not read blocker checklist report '{Path.GetFileName(checklistPath)}': {ex.Message}"));
+        }
+    }
+
+    private static string FormatYesNo(bool value) => value ? "Yes" : "No";
 
     private void AppendModOrganizerHealthChecks(List<RuntimeReadinessCheck> checks)
     {
