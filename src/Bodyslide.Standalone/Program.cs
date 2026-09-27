@@ -357,7 +357,7 @@ static bool ShouldPauseOnExit(string[] args)
 
 static bool TryLaunchDesktopGuiOnWindows(string[] args)
 {
-    if (args.Length != 0 || !OperatingSystem.IsWindows())
+    if (!OperatingSystem.IsWindows())
     {
         return false;
     }
@@ -377,7 +377,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         }
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
-        var launchedFromModOrganizer = IsLikelyModOrganizerEnvironment();
+        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args);
+        if (args.Length != 0 && !launchedFromModOrganizer)
+        {
+            return false;
+        }
+
         var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
         foreach (var desktopExePath in new[]
                  {
@@ -397,7 +402,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                 continue;
             }
 
-            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, out var launched))
+            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, out var launched))
             {
                 if (launchedFromModOrganizer && launched is not null)
                 {
@@ -425,7 +430,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
     return false;
 }
 
-static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, out Process? launchedProcess)
+static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, out Process? launchedProcess)
 {
     launchedProcess = null;
     var workingDirectory = Path.GetDirectoryName(desktopExePath) ?? fallbackWorkingDirectory;
@@ -436,10 +441,7 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
         WorkingDirectory = workingDirectory,
         UseShellExecute = true
     };
-    if (launchedFromModOrganizer)
-    {
-        startInfo.ArgumentList.Add("--mo2-launcher");
-    }
+    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer);
 
     try
     {
@@ -454,32 +456,88 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
             WorkingDirectory = workingDirectory,
             UseShellExecute = false
         };
-        fallback.ArgumentList.Add("--mo2-launcher");
+        ForwardDesktopLaunchArgs(fallback, forwardedArgs, launchedFromModOrganizer);
 
         launchedProcess = Process.Start(fallback);
         return launchedProcess is not null;
     }
 }
 
-static bool IsLikelyModOrganizerEnvironment()
+static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<string> forwardedArgs, bool launchedFromModOrganizer)
 {
-    foreach (var key in Environment.GetEnvironmentVariables().Keys)
+    if (forwardedArgs.Count > 0)
     {
-        if (key is not string name)
+        foreach (var arg in forwardedArgs)
         {
-            continue;
-        }
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                continue;
+            }
 
-        if (name.Contains("USVFS", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("MODORGANIZER", StringComparison.OrdinalIgnoreCase) ||
-            name.Equals("MO2_INSTANCE", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
+            startInfo.ArgumentList.Add(arg);
         }
     }
 
-    return false;
+    if (!launchedFromModOrganizer)
+    {
+        return;
+    }
+
+    var alreadyTagged = forwardedArgs.Any(IsMo2LauncherArg);
+    if (!alreadyTagged)
+    {
+        startInfo.ArgumentList.Add("--mo2-launcher");
+    }
 }
+
+static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args) =>
+    IsLikelyModOrganizerEnvironment() || args.Any(IsMo2LauncherArg);
+
+static bool IsMo2LauncherArg(string? arg)
+{
+    if (string.IsNullOrWhiteSpace(arg))
+    {
+        return false;
+    }
+
+    var trimmed = arg.Trim();
+    if (trimmed.StartsWith("--", StringComparison.Ordinal))
+    {
+        trimmed = trimmed[2..];
+    }
+    else if (trimmed.StartsWith("-", StringComparison.Ordinal) || trimmed.StartsWith("/", StringComparison.Ordinal))
+    {
+        trimmed = trimmed[1..];
+    }
+
+    if (trimmed.Length == 0)
+    {
+        return false;
+    }
+
+    var separatorIndex = trimmed.IndexOf('=');
+    if (separatorIndex >= 0)
+    {
+        trimmed = trimmed[..separatorIndex];
+    }
+
+    return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+           trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsLikelyModOrganizerEnvironment()
+{
+    return HasEnvironmentVariable("MO2_INSTANCE") ||
+           HasEnvironmentVariable("USVFS_PARAMETERS") ||
+           HasEnvironmentVariable("USVFS_PROCESS") ||
+           HasEnvironmentVariable("USVFS_PROXY") ||
+           HasEnvironmentVariable("MODORGANIZER_INSTANCE") ||
+           HasEnvironmentVariable("MODORGANIZER_PATH") ||
+           HasEnvironmentVariable("MODORGANIZER_ROOT");
+}
+
+static bool HasEnvironmentVariable(string name) =>
+    !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
     string.IsNullOrWhiteSpace(value)
