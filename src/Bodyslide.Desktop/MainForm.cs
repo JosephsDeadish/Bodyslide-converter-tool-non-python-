@@ -2482,7 +2482,9 @@ public sealed class MainForm : Form
             var lastProgressUiUpdateUtc = DateTime.MinValue;
             var conversionStartedUtc = DateTime.UtcNow;
             string? activeStageKey = null;
+            string? activeStageName = null;
             DateTime? activeStageStartedUtc = null;
+            var completedStageDurationSamples = new Dictionary<string, (double TotalSeconds, int Count)>(StringComparer.OrdinalIgnoreCase);
             ResetPipelineTimeline();
             var progress = new CoalescingBatchProgress(this, update =>
             {
@@ -2524,15 +2526,37 @@ public sealed class MainForm : Form
                 var stageKey = $"{activeItem}|{update.CurrentFile}|{update.Stage}";
                 if (!string.Equals(stageKey, activeStageKey, StringComparison.Ordinal))
                 {
+                    if (activeStageStartedUtc is { } previousStageStartedUtc &&
+                        !string.IsNullOrWhiteSpace(activeStageName))
+                    {
+                        var previousStageElapsed = now - previousStageStartedUtc;
+                        if (previousStageElapsed > TimeSpan.Zero)
+                        {
+                            if (completedStageDurationSamples.TryGetValue(activeStageName, out var existingSample))
+                            {
+                                completedStageDurationSamples[activeStageName] = (
+                                    existingSample.TotalSeconds + previousStageElapsed.TotalSeconds,
+                                    existingSample.Count + 1);
+                            }
+                            else
+                            {
+                                completedStageDurationSamples[activeStageName] = (previousStageElapsed.TotalSeconds, 1);
+                            }
+                        }
+                    }
+
                     activeStageKey = stageKey;
                     activeStageStartedUtc = now;
+                    activeStageName = NormalizeProgressStageName(update.Stage);
                 }
 
+                var overallElapsed = now - conversionStartedUtc;
                 var overallEta = EstimateRemainingDuration(conversionStartedUtc, now, progressUnits, total);
-                var stageEta = EstimateStageRemainingDuration(activeStageStartedUtc, now, update.StageIndex, update.StageCount);
+                var stageElapsed = activeStageStartedUtc is { } startedUtc ? now - startedUtc : (TimeSpan?)null;
+                var stageEta = EstimateStageRemainingDuration(activeStageName, stageElapsed, completedStageDurationSamples, update.IsItemCompleted);
                 _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}";
-                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • ETA {FormatDuration(overallEta)} • {statusSuffix}";
-                UpdatePipelineTimeline(update, stageEta, overallEta);
+                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • Elapsed {FormatDuration(overallElapsed)} • Remaining {FormatDuration(overallEta)} • {statusSuffix}";
+                UpdatePipelineTimeline(update, stageElapsed, stageEta, overallElapsed, overallEta);
 
                 if (update.IsItemCompleted)
                 {
@@ -2803,7 +2827,12 @@ public sealed class MainForm : Form
         }
     }
 
-    private void UpdatePipelineTimeline(BatchProgressUpdate update, TimeSpan? stageEta, TimeSpan? overallEta)
+    private void UpdatePipelineTimeline(
+        BatchProgressUpdate update,
+        TimeSpan? stageElapsed,
+        TimeSpan? stageEta,
+        TimeSpan overallElapsed,
+        TimeSpan? overallEta)
     {
         if (_pipelineListView.Items.Count == 0)
         {
@@ -2840,7 +2869,7 @@ public sealed class MainForm : Form
                 item.SubItems[3].Text = $"{Math.Clamp(stagePercent, 0, 100)}%";
                 var note = update.IsItemCompleted
                     ? "Done"
-                    : $"Stage ETA {FormatDuration(stageEta)} • Overall ETA {FormatDuration(overallEta)}";
+                    : $"Stage elapsed {FormatDuration(stageElapsed)} • Stage remaining {FormatDuration(stageEta)} • Overall elapsed {FormatDuration(overallElapsed)} • Overall remaining {FormatDuration(overallEta)}";
                 item.SubItems[4].Text = note;
             }
             else if (index == stageIndex)
@@ -2883,34 +2912,40 @@ public sealed class MainForm : Form
         return TimeSpan.FromSeconds(remainingSeconds);
     }
 
-    private static TimeSpan? EstimateStageRemainingDuration(DateTime? stageStartedUtc, DateTime nowUtc, int stageIndex, int stageCount)
+    private static TimeSpan? EstimateStageRemainingDuration(
+        string? stageName,
+        TimeSpan? stageElapsed,
+        IReadOnlyDictionary<string, (double TotalSeconds, int Count)> completedStageDurationSamples,
+        bool stageCompleted)
     {
-        if (stageStartedUtc is null || stageCount <= 0 || stageIndex <= 0)
-        {
-            return null;
-        }
-
-        var progress = Math.Clamp((double)stageIndex / stageCount, 0d, 1d);
-        if (progress <= 0d)
-        {
-            return null;
-        }
-
-        var elapsed = nowUtc - stageStartedUtc.Value;
-        if (elapsed <= TimeSpan.Zero)
-        {
-            return null;
-        }
-
-        if (progress >= 1d)
+        if (stageCompleted)
         {
             return TimeSpan.Zero;
         }
 
-        var projectedTotalSeconds = elapsed.TotalSeconds / progress;
-        var remainingSeconds = Math.Max(0d, projectedTotalSeconds - elapsed.TotalSeconds);
+        if (string.IsNullOrWhiteSpace(stageName) ||
+            stageElapsed is null ||
+            stageElapsed.Value <= TimeSpan.Zero ||
+            !completedStageDurationSamples.TryGetValue(stageName, out var stageSample) ||
+            stageSample.Count <= 0)
+        {
+            return null;
+        }
+
+        var averageStageSeconds = stageSample.TotalSeconds / stageSample.Count;
+        if (averageStageSeconds <= 0d)
+        {
+            return null;
+        }
+
+        var remainingSeconds = Math.Max(0d, averageStageSeconds - stageElapsed.Value.TotalSeconds);
         return TimeSpan.FromSeconds(remainingSeconds);
     }
+
+    private static string NormalizeProgressStageName(string? stage) =>
+        string.IsNullOrWhiteSpace(stage)
+            ? "Processing"
+            : stage.Trim();
 
     private static string FormatDuration(TimeSpan? duration)
     {
