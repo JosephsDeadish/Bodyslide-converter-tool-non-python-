@@ -439,11 +439,19 @@ internal static class DesktopWorkflowSupport
         if (separatorIndex >= 0)
         {
             key = trimmed[..separatorIndex];
+            if (key.Contains(Path.DirectorySeparatorChar) || key.Contains(Path.AltDirectorySeparatorChar))
+            {
+                return false;
+            }
             inlineValue = trimmed[(separatorIndex + 1)..];
             return key.Length > 0;
         }
 
         key = trimmed;
+        if (key.Contains(Path.DirectorySeparatorChar) || key.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return false;
+        }
         return key.Length > 0;
     }
 

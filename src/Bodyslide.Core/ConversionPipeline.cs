@@ -30991,14 +30991,6 @@ internal sealed class LocalExportService(
         IReadOnlyList<string> rootFileNames)
     {
         var safePackage = XmlEscape(packageName);
-        var safeTargetBody = XmlEscape(targetBody);
-        var safeProjectName = XmlEscape(bodySlideProjectName);
-        var patchPluginName = rootFileNames
-            .Select(static name => Path.GetFileName(name) ?? name)
-            .FirstOrDefault(static name => name.Contains("SlidesmithPatch", StringComparison.OrdinalIgnoreCase));
-        var installDescription = patchPluginName is null
-            ? $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod so converted files win conflicts cleanly, and keep README.txt for follow-up guidance."
-            : $"Generated conversion output for {safeTargetBody} with BodySlide project {safeProjectName}. Install this as a separate mod in Mod Organizer 2 or Vortex, keep it below the original armor/body mod, load {XmlEscape(patchPluginName)} after its source plugin, and keep README.txt for follow-up guidance.";
 
         // Build <files> content: one <folder> per Data subfolder + one <file> per root install file.
         var filesContent = new System.Text.StringBuilder();
@@ -31021,24 +31013,10 @@ internal sealed class LocalExportService(
             <?xml version="1.0" encoding="utf-8"?>
             <config installerVersion="5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
               <moduleName>{{safePackage}} - SlideSmith Conversion</moduleName>
-              <installSteps order="Explicit">
-                <installStep name="Target Body">
-                  <optionalFileGroups order="Explicit">
-                    <group name="Body" type="SelectAny">
-                      <plugins order="Explicit">
-                        <plugin name="{{safeTargetBody}}">
-                          <description>{{installDescription}}</description>
-            {{filesBlock}}
-                          <conditionFlags />
-                          <typeDescriptor>
-                            <type name="Required" />
-                          </typeDescriptor>
-                        </plugin>
-                      </plugins>
-                    </group>
-                  </optionalFileGroups>
-                </installStep>
-              </installSteps>
+              <requiredInstallFiles>
+                <!-- Always install generated conversion output so MO2/Vortex detect valid Skyrim game data. -->
+            {{filesContent.ToString().TrimEnd()}}
+              </requiredInstallFiles>
             </config>
             """;
     }
