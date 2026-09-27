@@ -183,6 +183,7 @@ internal static class ExternalProofHarnessSupport
         long ProcessStartTimeUtcTicks,
         string MachineName,
         long CreatedUtcTicks);
+    private readonly record struct LockFileFingerprint(long LastWriteTimeUtcTicks, long Length, string MetadataSnapshot);
 
     private sealed class WriteLockHandle(string lockPath, FileStream stream) : IDisposable
     {
@@ -1241,9 +1242,25 @@ internal static class ExternalProofHarnessSupport
                 return false;
             }
 
-            using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
+            LockFileFingerprint fingerprint;
+            using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
                 if (!IsStaleLockFile(stream, staleCutoffUtc))
+                {
+                    return false;
+                }
+                fingerprint = CaptureLockFileFingerprint(stream);
+            }
+
+            using (var deleteStream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
+            {
+                if (!IsStaleLockFile(deleteStream, staleCutoffUtc))
+                {
+                    return false;
+                }
+
+                var deleteFingerprint = CaptureLockFileFingerprint(deleteStream);
+                if (!deleteFingerprint.Equals(fingerprint))
                 {
                     return false;
                 }
@@ -1256,6 +1273,16 @@ internal static class ExternalProofHarnessSupport
         {
             return false;
         }
+    }
+
+    private static LockFileFingerprint CaptureLockFileFingerprint(FileStream stream)
+    {
+        stream.Flush(flushToDisk: false);
+        var fileInfo = new FileInfo(stream.Name);
+        stream.Position = 0;
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+        var metadataSnapshot = reader.ReadToEnd();
+        return new LockFileFingerprint(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length, metadataSnapshot);
     }
 
     private static bool IsStaleLockFile(FileStream stream, DateTime staleCutoffUtc)

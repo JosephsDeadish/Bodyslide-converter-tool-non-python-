@@ -146,6 +146,27 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        return false;
+        if (trimmedOriginal.IndexOf(Path.DirectorySeparatorChar) < 0 &&
+            trimmedOriginal.IndexOf(Path.AltDirectorySeparatorChar) < 0)
+        {
+            return false;
+        }
+
+        return IsLikelyDirectoryName(leafName);
+    }
+
+    private static bool IsLikelyDirectoryName(string leafName)
+    {
+        if (string.IsNullOrWhiteSpace(leafName))
+        {
+            return false;
+        }
+
+        var normalizedLeafName = leafName.Trim().ToLowerInvariant();
+        return normalizedLeafName.Contains("pack", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("folder", StringComparison.Ordinal) ||
+               normalizedLeafName.EndsWith("mods", StringComparison.Ordinal) ||
+               normalizedLeafName.Equals("mods", StringComparison.Ordinal) ||
+               normalizedLeafName.Equals("modslist", StringComparison.Ordinal);
     }
 }
