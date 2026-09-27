@@ -160,6 +160,26 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolveSkeletonNifPath_DoesNotTreatFemaleTokenAsMaleSubstring()
+    {
+        var modRoot = Path.Combine(_root, "FemaleTokenBoundaryPack");
+        var femaleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets female");
+        var maleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets male");
+        Directory.CreateDirectory(femaleDirectory);
+        Directory.CreateDirectory(maleDirectory);
+
+        var femaleRigPath = Path.Combine(femaleDirectory, "follower_female_rig.nif");
+        var maleRigPath = Path.Combine(maleDirectory, "follower_male_rig.nif");
+        File.WriteAllText(femaleRigPath, "female");
+        File.WriteAllText(maleRigPath, "male");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(femaleRigPath), result);
+    }
+
+    [Fact]
     public void TryResolveSkeletonNifPath_DirectBodyMeshFallsBackToContainingSkeletonDirectory()
     {
         var modRoot = Path.Combine(_root, "BodyMeshInputPack");

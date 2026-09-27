@@ -268,9 +268,11 @@ public static class SkeletonSupportPathResolver
                 ? 1
                 : 2;
 
-        var genderHintPenalty = fileStem.Contains("female", StringComparison.OrdinalIgnoreCase)
+        var containsFemaleToken = ContainsPathToken(fileStem, "female");
+        var containsMaleToken = ContainsPathToken(fileStem, "male");
+        var genderHintPenalty = containsFemaleToken
             ? 0
-            : fileStem.Contains("male", StringComparison.OrdinalIgnoreCase)
+            : containsMaleToken
                 ? 2
                 : 1;
 
@@ -340,6 +342,36 @@ public static class SkeletonSupportPathResolver
         return fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase) ||
                fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase) ||
                IsHeuristicSkeletonCandidate(path);
+    }
+
+    private static bool ContainsPathToken(string value, string token)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(token))
+        {
+            return false;
+        }
+
+        var searchStart = 0;
+        while (searchStart < value.Length)
+        {
+            var index = value.IndexOf(token, searchStart, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var startsAtBoundary = index == 0 || !char.IsLetter(value[index - 1]);
+            var endIndex = index + token.Length;
+            var endsAtBoundary = endIndex >= value.Length || !char.IsLetter(value[endIndex]);
+            if (startsAtBoundary && endsAtBoundary)
+            {
+                return true;
+            }
+
+            searchStart = index + 1;
+        }
+
+        return false;
     }
 
     private readonly record struct SkeletonCandidateRank(

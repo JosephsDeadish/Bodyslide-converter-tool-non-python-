@@ -146,21 +146,9 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        if (trimmedOriginal.IndexOf(Path.DirectorySeparatorChar) < 0 &&
-            trimmedOriginal.IndexOf(Path.AltDirectorySeparatorChar) < 0)
-        {
-            return false;
-        }
-
         if (IsLikelyFileName(leafName))
         {
             return false;
-        }
-
-        var parentDirectory = Path.GetDirectoryName(normalizedInputPath);
-        if (!string.IsNullOrWhiteSpace(parentDirectory) && Directory.Exists(parentDirectory))
-        {
-            return true;
         }
 
         return IsLikelyDirectoryName(leafName);

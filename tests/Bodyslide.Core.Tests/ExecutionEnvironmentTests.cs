@@ -118,9 +118,42 @@ public sealed class ExecutionEnvironmentTests
     }
 
     [Fact]
+    public void GetDefaultOutputRootForInput_TreatsExtensionlessNestedPathUnderExistingParentAsFile()
+    {
+        var parentDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads");
+        Directory.CreateDirectory(parentDirectory);
+        var inputFile = Path.Combine(parentDirectory, "modarchive");
+
+        try
+        {
+            var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+            Assert.Equal(
+                Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+                outputRoot);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(parentDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessPackPathAsDirectory()
     {
         var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "mods", "custom-pack");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsSingleSegmentExtensionlessPackPathAsDirectory()
+    {
+        var inputDirectory = $"custom-pack-{Guid.NewGuid():N}";
 
         var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
 
