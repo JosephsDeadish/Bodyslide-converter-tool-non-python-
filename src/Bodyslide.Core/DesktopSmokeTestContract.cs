@@ -140,13 +140,20 @@ public static class DesktopSmokeTestContract
 
     public static DesktopSmokeTestSummary CreateReady(string title, int tabs)
     {
-        return Create(
+        var normalizedTabs = tabs == ExpectedDesktopTabCount
+            ? tabs
+            : ExpectedDesktopTabCount;
+        return new DesktopSmokeTestSummary(
+            ReadyStatus,
             title,
             ExpectedPresetCount,
             ExpectedTargetCount,
             ExpectedProfileCount,
             ExpectedPhysicsCount,
-            tabs);
+            normalizedTabs,
+            ExpectedDesktopTabCount,
+            [],
+            ExpectedDesktopTabTitles);
     }
 
     public static string Serialize(DesktopSmokeTestSummary payload)

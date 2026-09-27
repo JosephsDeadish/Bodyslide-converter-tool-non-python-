@@ -1198,7 +1198,8 @@ internal static class ExternalProofHarnessSupport
 
         const int maxAttempts = 200;
         var staleCutoffUtc = DateTime.UtcNow.AddMinutes(-2);
-        for (var attempt = 0; ; attempt++)
+        Exception? lastError = null;
+        for (var attempt = 0; attempt <= maxAttempts; attempt++)
         {
             try
             {
@@ -1206,20 +1207,29 @@ internal static class ExternalProofHarnessSupport
                 WriteLockMetadataToStream(stream);
                 return new WriteLockHandle(lockPath, stream);
             }
-            catch (IOException) when (attempt < maxAttempts)
+            catch (IOException ex)
             {
                 if (TryDeleteStaleLockFile(lockPath, staleCutoffUtc))
                 {
                     continue;
                 }
 
-                Thread.Sleep(20);
+                lastError = ex;
             }
-            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            catch (UnauthorizedAccessException ex)
+            {
+                lastError = ex;
+            }
+
+            if (attempt < maxAttempts)
             {
                 Thread.Sleep(20);
             }
         }
+
+        throw new IOException(
+            $"Could not acquire proof write lock '{lockPath}' after {maxAttempts + 1} attempts.",
+            lastError);
     }
 
     private static bool TryDeleteStaleLockFile(string lockPath, DateTime staleCutoffUtc)
@@ -1251,10 +1261,7 @@ internal static class ExternalProofHarnessSupport
     private static bool IsStaleLockFile(FileStream stream, DateTime staleCutoffUtc)
     {
         var fileInfo = new FileInfo(stream.Name);
-        if (fileInfo.LastWriteTimeUtc > staleCutoffUtc)
-        {
-            return false;
-        }
+        var lockAgeExpired = fileInfo.LastWriteTimeUtc <= staleCutoffUtc;
 
         try
         {
@@ -1263,18 +1270,18 @@ internal static class ExternalProofHarnessSupport
             var json = reader.ReadToEnd();
             if (string.IsNullOrWhiteSpace(json))
             {
-                return true;
+                return lockAgeExpired;
             }
 
             var metadata = JsonSerializer.Deserialize<WriteLockMetadata>(json);
             if (metadata is null || metadata.ProcessId <= 0)
             {
-                return true;
+                return lockAgeExpired;
             }
 
             if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                return lockAgeExpired;
             }
 
             var activeProcess = Process.GetProcessById(metadata.ProcessId);
@@ -1283,7 +1290,7 @@ internal static class ExternalProofHarnessSupport
         }
         catch
         {
-            return true;
+            return lockAgeExpired;
         }
     }
 
