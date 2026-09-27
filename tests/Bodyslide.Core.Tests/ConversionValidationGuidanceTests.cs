@@ -5,9 +5,9 @@ namespace Bodyslide.Core.Tests;
 public sealed class ConversionValidationGuidanceTests
 {
     [Theory]
-    [InlineData("ready", "PASS", "Install-ready")]
-    [InlineData("needs-review", "REVIEW REQUIRED", "Review required before install/share")]
-    [InlineData("high-risk", "FAIL", "Do not install/share yet")]
+    [InlineData("ready", "PASS", "Checks passed for this loaded conversion output")]
+    [InlineData("needs-review", "REVIEW REQUIRED", "loaded conversion output still needs review")]
+    [InlineData("high-risk", "FAIL", "loaded conversion output is blocked")]
     public void ConversionValidationPresentation_UsesClearGateMessaging(string status, string expectedGate, string expectedMessageFragment)
     {
         Assert.Equal(expectedGate, ConversionValidationPresentation.GetGateLabel(status));
@@ -672,15 +672,15 @@ public sealed class ConversionValidationGuidanceTests
 
         var readyHtml = Render(method!, "ready");
         Assert.Contains("PASS", readyHtml, StringComparison.Ordinal);
-        Assert.Contains("Install-ready after one final preview pass", readyHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Checks passed for this loaded conversion output", readyHtml, StringComparison.OrdinalIgnoreCase);
 
         var reviewHtml = Render(method, "needs-review");
         Assert.Contains("REVIEW REQUIRED", reviewHtml, StringComparison.Ordinal);
-        Assert.Contains("Review required before install/share", reviewHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loaded conversion output still needs review", reviewHtml, StringComparison.OrdinalIgnoreCase);
 
         var failHtml = Render(method, "high-risk");
         Assert.Contains("FAIL", failHtml, StringComparison.Ordinal);
-        Assert.Contains("Do not install/share yet", failHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loaded conversion output is blocked", failHtml, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
