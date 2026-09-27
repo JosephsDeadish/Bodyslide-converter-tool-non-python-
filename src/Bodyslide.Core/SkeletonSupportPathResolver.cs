@@ -39,6 +39,13 @@ public static class SkeletonSupportPathResolver
         Path.Combine("meshes", "actors", "character", "character assets male"),
     ];
 
+    private static readonly string[] FallbackSearchRoots =
+    [
+        Path.Combine("meshes", "actors", "character"),
+        Path.Combine("meshes", "actors"),
+        "meshes",
+    ];
+
     public static bool TryResolveSkeletonNifPath(string? supportPath, out string? skeletonNifPath)
     {
         skeletonNifPath = null;
@@ -127,6 +134,24 @@ public static class SkeletonSupportPathResolver
     private static bool TryResolveFallbackWithinRoot(string rootDirectory, out string? skeletonNifPath)
     {
         skeletonNifPath = null;
+
+        foreach (var fallbackRelativeRoot in FallbackSearchRoots)
+        {
+            var scopedRoot = Path.Combine(rootDirectory, fallbackRelativeRoot);
+            if (!Directory.Exists(scopedRoot))
+            {
+                continue;
+            }
+
+            var scopedFallback = SelectBestCandidate(
+                EnumerateFilesDepthFirst(scopedRoot, maxDepth: 5, "*.nif")
+                    .Where(IsHeuristicSkeletonCandidate));
+            if (scopedFallback is not null)
+            {
+                skeletonNifPath = Path.GetFullPath(scopedFallback);
+                return true;
+            }
+        }
 
         var bestFallback = SelectBestCandidate(
             EnumerateFilesDepthFirst(rootDirectory, maxDepth: 5, "*.nif")

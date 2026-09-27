@@ -152,7 +152,9 @@ public static class DesktopUiSettingsStore
             {
                 try
                 {
-                    using var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                    using (var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                    {
+                    }
                     File.Delete(lockPath);
                     continue;
                 }
