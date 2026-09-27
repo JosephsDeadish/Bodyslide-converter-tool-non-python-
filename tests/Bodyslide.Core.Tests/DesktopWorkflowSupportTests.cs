@@ -93,6 +93,59 @@ public sealed class DesktopWorkflowSupportTests
             Assert.Equal(outputDirectory, options.StartupOutputDirectory);
             Assert.True(options.FromModOrganizerLauncher);
         }
+
+        [Fact]
+        public void ParseLaunchOptions_RecognizesSingleDashMo2Arguments()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var outputDirectory = Path.Combine(workingDirectory, "output");
+            Directory.CreateDirectory(outputDirectory);
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+            try
+            {
+                var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                    [
+                        "-mo2-output",
+                        outputDirectory,
+                        "-mo2-launcher"
+                    ]);
+
+                Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+                Assert.Null(options.StartupInputPath);
+                Assert.True(options.FromModOrganizerLauncher);
+            }
+            finally
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void ParseLaunchOptions_RecognizesSlashPrefixedMo2Arguments()
+        {
+            var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            var outputDirectory = Path.Combine(workingDirectory, "output");
+            Directory.CreateDirectory(outputDirectory);
+            File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+            try
+            {
+                var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                    [
+                        $"/mo2-output={outputDirectory}",
+                        "/mo2-launcher"
+                    ]);
+
+                Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+                Assert.Null(options.StartupInputPath);
+                Assert.True(options.FromModOrganizerLauncher);
+            }
+            finally
+            {
+                Directory.Delete(workingDirectory, recursive: true);
+            }
+        }
         finally
         {
             Directory.Delete(workingDirectory, recursive: true);

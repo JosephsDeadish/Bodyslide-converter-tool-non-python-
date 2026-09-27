@@ -4435,26 +4435,46 @@ public sealed class MainForm : Form
             return sameDirectory;
         }
 
+        var sameDirectoryStandaloneName = Path.Combine(desktopDirectory, "SlideSmith.exe");
+        if (File.Exists(sameDirectoryStandaloneName))
+        {
+            return sameDirectoryStandaloneName;
+        }
+
         var siblingCliDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "cli"));
-        var siblingCliPath = Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe");
-        return File.Exists(siblingCliPath)
-            ? siblingCliPath
-            : null;
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe"),
+                     Path.Combine(siblingCliDirectory, "SlideSmith.exe")
+                 })
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static string? FindSiblingDesktopExecutable(string executableDirectory)
     {
-        var sameDirectory = Path.Combine(executableDirectory, "SlideSmith.exe");
-        if (File.Exists(sameDirectory))
+        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(executableDirectory, "SlideSmith.exe"),
+                     Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
+                 })
         {
-            return sameDirectory;
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
         }
 
-        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
-        var siblingDesktopPath = Path.Combine(siblingDesktopDirectory, "SlideSmith.exe");
-        return File.Exists(siblingDesktopPath)
-            ? siblingDesktopPath
-            : null;
+        return null;
     }
 
     private bool TryResolveSkeletonSupportPath(string? inputPath, out string? skeletonNifPath)

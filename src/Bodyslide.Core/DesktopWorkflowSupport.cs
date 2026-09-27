@@ -211,7 +211,7 @@ internal static class DesktopWorkflowSupport
                 continue;
             }
 
-            if (arg.StartsWith('-'))
+            if (IsOptionToken(arg))
             {
                 continue;
             }
@@ -317,22 +317,20 @@ internal static class DesktopWorkflowSupport
         fromResultArgument = false;
 
         var arg = args[index];
-        if (!arg.StartsWith("--", StringComparison.Ordinal))
+        if (!TryExtractOptionToken(arg, out var key, out var inlineValue))
         {
             return false;
         }
 
-        var separatorIndex = arg.IndexOf('=');
-        var key = separatorIndex >= 0 ? arg[2..separatorIndex] : arg[2..];
         if (!DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase))
         {
             return false;
         }
         fromResultArgument = true;
 
-        if (separatorIndex >= 0)
+        if (inlineValue is not null)
         {
-            value = arg[(separatorIndex + 1)..];
+            value = inlineValue;
             return true;
         }
 
@@ -386,21 +384,10 @@ internal static class DesktopWorkflowSupport
 
     private static bool IsMo2LauncherArgument(string? argument)
     {
-        if (string.IsNullOrWhiteSpace(argument) || !argument.StartsWith('-'))
+        if (!TryExtractOptionToken(argument, out var key, out _))
         {
             return false;
         }
-
-        var trimmed = argument.TrimStart('-');
-        if (trimmed.Length == 0)
-        {
-            return false;
-        }
-
-        var separatorIndex = trimmed.IndexOf('=');
-        var key = separatorIndex >= 0
-            ? trimmed[..separatorIndex]
-            : trimmed;
 
         return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
@@ -408,16 +395,56 @@ internal static class DesktopWorkflowSupport
 
     private static bool LooksLikeRecognizedOptionToken(string arg)
     {
-        if (string.IsNullOrWhiteSpace(arg) || !arg.StartsWith("--", StringComparison.Ordinal))
+        if (!TryExtractOptionToken(arg, out var key, out _))
+        {
+            return false;
+        }
+        return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOptionToken(string? arg) =>
+        TryExtractOptionToken(arg, out _, out _);
+
+    private static bool TryExtractOptionToken(string? arg, out string key, out string? inlineValue)
+    {
+        key = string.Empty;
+        inlineValue = null;
+        if (string.IsNullOrWhiteSpace(arg))
         {
             return false;
         }
 
-        var separatorIndex = arg.IndexOf('=');
-        var key = separatorIndex >= 0 ? arg[2..separatorIndex] : arg[2..];
-        return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
-               key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
+        string trimmed;
+        if (arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            trimmed = arg[2..];
+        }
+        else if (arg.StartsWith("-", StringComparison.Ordinal) || arg.StartsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = arg[1..];
+        }
+        else
+        {
+            return false;
+        }
+
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex >= 0)
+        {
+            key = trimmed[..separatorIndex];
+            inlineValue = trimmed[(separatorIndex + 1)..];
+            return key.Length > 0;
+        }
+
+        key = trimmed;
+        return key.Length > 0;
     }
 
     private static string? NormalizeCandidatePath(string? path)
