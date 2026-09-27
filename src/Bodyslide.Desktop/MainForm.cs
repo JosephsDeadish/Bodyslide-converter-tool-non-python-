@@ -58,6 +58,7 @@ public sealed class MainForm : Form
     private readonly Button _convertButton;
     private readonly Button _cancelButton;
     private readonly Button _clearLogButton;
+    private readonly Button _copyCurrentViewButton;
     private readonly Button _inspectInputButton;
     private readonly Button _openInputButton;
     private readonly Button _openOutputButton;
@@ -857,7 +858,10 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             PlaceholderText = "Optional: skeleton .nif, XP32/XPMSSE folder, or related .pex file",
+            AllowDrop = true,
         };
+        _skeletonNifTextBox.DragEnter += OnDragEnter;
+        _skeletonNifTextBox.DragDrop += OnDragDrop;
         var browseSkeletonNifButton = new Button { Text = "File...", AutoSize = true };
         browseSkeletonNifButton.Click += (_, _) => BrowseSkeletonSupportFile();
         var browseSkeletonFolderButton = new Button { Text = "Folder...", AutoSize = true, Margin = new Padding(4, 0, 0, 0) };
@@ -881,6 +885,9 @@ public sealed class MainForm : Form
 
         var outputRow = CreateThreeColumnRow("Output (optional)", out _outputTextBox);
         _outputTextBox.Name = "outputPathTextBox";
+        _outputTextBox.AllowDrop = true;
+        _outputTextBox.DragEnter += OnDragEnter;
+        _outputTextBox.DragDrop += OnDragDrop;
         _outputTextBox.TextChanged += (_, _) =>
         {
             UpdatePathActionStates();
@@ -911,6 +918,9 @@ public sealed class MainForm : Form
 
         var cacheRow = CreateThreeColumnRow("Learning cache (optional)", out _cachePathTextBox);
         _cachePathTextBox.PlaceholderText = "Custom path for .conversion-learning-cache.json";
+        _cachePathTextBox.AllowDrop = true;
+        _cachePathTextBox.DragEnter += OnDragEnter;
+        _cachePathTextBox.DragDrop += OnDragDrop;
         var browseCacheButton = new Button { Text = "Browse...", AutoSize = true };
         browseCacheButton.Click += (_, _) => BrowseCachePath();
         cacheRow.Controls.Add(browseCacheButton, 2, 0);
@@ -1025,6 +1035,15 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 0, 8, 0),
         };
         _clearLogButton.Click += (_, _) => ClearLog();
+        _copyCurrentViewButton = new Button
+        {
+            Name = "copyCurrentViewButton",
+            Text = "Copy view",
+            Width = 100,
+            Height = 34,
+            Margin = new Padding(0, 0, 8, 0),
+        };
+        _copyCurrentViewButton.Click += (_, _) => CopyCurrentViewToClipboard();
         _openOutputButton = new Button
         {
             Name = "openOutputButton",
@@ -1150,6 +1169,7 @@ public sealed class MainForm : Form
         primaryActionRow.Controls.Add(_outputZipCheckBox);
         primaryActionRow.Controls.Add(_buildSlidersCheckBox);
         secondaryActionRow.Controls.Add(_clearLogButton);
+        secondaryActionRow.Controls.Add(_copyCurrentViewButton);
         secondaryActionRow.Controls.Add(_openOutputButton);
         secondaryActionRow.Controls.Add(_openPreviewButton);
         secondaryActionRow.Controls.Add(_loadResultButton);
@@ -1388,6 +1408,16 @@ public sealed class MainForm : Form
         _cacheListView.Columns.Add("Regions", -2);
         _cacheTabPage.Controls.Add(_cacheListView);
         _resultsTabControl.TabPages.Add(_cacheTabPage);
+        AttachCopyHotkeys(_inspectListView);
+        AttachCopyHotkeys(_summaryListView);
+        AttachCopyHotkeys(_pipelineListView);
+        AttachCopyHotkeys(_guidanceListView);
+        AttachCopyHotkeys(_reportsListView);
+        AttachCopyHotkeys(_catalogListView);
+        AttachCopyHotkeys(_readinessListView);
+        AttachCopyHotkeys(_artifactsListView);
+        AttachCopyHotkeys(_cacheListView);
+        _logTextBox.KeyDown += OnCopyKeyDown;
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
         bottomPanel.Controls.Add(_progressDetailsLabel, 0, 2);
@@ -2301,9 +2331,64 @@ public sealed class MainForm : Form
             return;
         }
 
-        _inputTextBox.Text = dropped[0];
+        if (sender == _skeletonNifTextBox)
+        {
+            var chosen = dropped.FirstOrDefault(static path => File.Exists(path) || Directory.Exists(path));
+            if (string.IsNullOrWhiteSpace(chosen))
+            {
+                return;
+            }
+
+            _skeletonNifTextBox.Text = chosen;
+            AppendLog($"Skeleton support path selected: {chosen}");
+            return;
+        }
+
+        if (sender == _outputTextBox)
+        {
+            var chosen = dropped
+                .Select(static path => Directory.Exists(path)
+                    ? path
+                    : File.Exists(path)
+                        ? Path.GetDirectoryName(path)
+                        : null)
+                .FirstOrDefault(static path => !string.IsNullOrWhiteSpace(path));
+            if (string.IsNullOrWhiteSpace(chosen))
+            {
+                return;
+            }
+
+            _outputTextBox.Text = chosen;
+            UpdatePathActionStates();
+            UpdateOutputHint();
+            AppendLog($"Output folder selected: {chosen}");
+            return;
+        }
+
+        if (sender == _cachePathTextBox)
+        {
+            var chosen = dropped.FirstOrDefault(static path => File.Exists(path) || Directory.Exists(path));
+            if (string.IsNullOrWhiteSpace(chosen))
+            {
+                return;
+            }
+
+            _cachePathTextBox.Text = Directory.Exists(chosen)
+                ? Path.Combine(chosen, ".conversion-learning-cache.json")
+                : chosen;
+            AppendLog($"Learning cache path selected: {_cachePathTextBox.Text}");
+            return;
+        }
+
+        var inputCandidate = dropped.FirstOrDefault(static path => File.Exists(path) || Directory.Exists(path));
+        if (string.IsNullOrWhiteSpace(inputCandidate))
+        {
+            return;
+        }
+
+        _inputTextBox.Text = inputCandidate;
         UpdatePathActionStates();
-        AppendLog($"Input selected: {dropped[0]}");
+        AppendLog($"Input selected: {inputCandidate}");
     }
 
     private void ApplySuggestedMixedGenderTargets()
@@ -3097,6 +3182,7 @@ public sealed class MainForm : Form
         _convertButton.Text = isBusy ? "Converting..." : "Start conversion";
         _cancelButton.Enabled = isBusy && _activeConversion is not null;
         _clearLogButton.Enabled = !isBusy;
+        _copyCurrentViewButton.Enabled = !isBusy;
         _inspectInputButton.Enabled = !isBusy && InputPathExists();
         _loadResultButton.Enabled = !isBusy;
         _inspectCacheButton.Enabled = !isBusy;
@@ -3841,6 +3927,70 @@ public sealed class MainForm : Form
         _logTextBox.Clear();
     }
 
+    private static void AttachCopyHotkeys(ListView listView)
+    {
+        listView.KeyDown += OnCopyKeyDown;
+    }
+
+    private static void OnCopyKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Control && e.KeyCode == Keys.C)
+        {
+            switch (sender)
+            {
+                case TextBox textBox when !string.IsNullOrWhiteSpace(textBox.SelectedText):
+                    Clipboard.SetText(textBox.SelectedText);
+                    break;
+                case TextBox textBox:
+                    Clipboard.SetText(textBox.Text);
+                    break;
+                case ListView listView when listView.SelectedItems.Count > 0:
+                    Clipboard.SetText(BuildListViewClipboardText(listView));
+                    break;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+    }
+
+    private void CopyCurrentViewToClipboard()
+    {
+        if (_resultsTabControl.SelectedTab?.Controls.Count > 0 &&
+            _resultsTabControl.SelectedTab.Controls[0] is ListView listView &&
+            listView.SelectedItems.Count > 0)
+        {
+            Clipboard.SetText(BuildListViewClipboardText(listView));
+            AppendLog($"Copied {listView.SelectedItems.Count} selected row(s) from {_resultsTabControl.SelectedTab.Text}.");
+            return;
+        }
+
+        Clipboard.SetText(_logTextBox.Text);
+        AppendLog("Copied full log to clipboard.");
+    }
+
+    private static string BuildListViewClipboardText(ListView listView)
+    {
+        var headers = listView.Columns.Cast<ColumnHeader>().Select(static header => header.Text).ToArray();
+        var selectedRows = listView.SelectedItems.Count > 0
+            ? listView.SelectedItems.Cast<ListViewItem>()
+            : listView.Items.Cast<ListViewItem>();
+
+        var lines = new List<string>();
+        if (headers.Length > 0)
+        {
+            lines.Add(string.Join('\t', headers));
+        }
+
+        foreach (var item in selectedRows)
+        {
+            var values = item.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(static subItem => subItem.Text).ToArray();
+            lines.Add(string.Join('\t', values));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     private static string? ReadOptionalComboValue(ComboBox? comboBox)
     {
         if (comboBox is null || comboBox.IsDisposed)
@@ -4191,6 +4341,9 @@ public sealed class MainForm : Form
             "The raw output folder always includes README.txt plus fomod/ installer metadata.");
         _optionToolTip.SetToolTip(_buildSlidersCheckBox,
             "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+        _optionToolTip.SetToolTip(_copyCurrentViewButton,
+            "Copies the selected rows from the active diagnostics tab.\n" +
+            "If nothing is selected, copies the full log text.");
         _optionToolTip.SetToolTip(_copyMo2SetupButton,
             "Copies recommended Mod Organizer setup values (binary, start-in, and optional launcher argument) for this SlideSmith build.");
     }
@@ -4208,17 +4361,31 @@ public sealed class MainForm : Form
 
     private void CopyMo2SetupGuidance()
     {
-        var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
-        var workingDirectory = Path.GetDirectoryName(executablePath) ?? Environment.CurrentDirectory;
+        var processPath = Environment.ProcessPath ?? Application.ExecutablePath;
+        var processDirectory = Path.GetDirectoryName(processPath) ?? Environment.CurrentDirectory;
+        var executableName = Path.GetFileName(processPath);
+        var normalizedExecutable = processPath.Replace('\\', '/');
+        var looksLikeCliTarget =
+            executableName.Equals("SlideSmith-CLI.exe", StringComparison.OrdinalIgnoreCase) ||
+            normalizedExecutable.Contains("/cli/", StringComparison.OrdinalIgnoreCase);
+        var desktopPath = looksLikeCliTarget
+            ? FindSiblingDesktopExecutable(processDirectory) ?? processPath
+            : processPath;
+        var workingDirectory = Path.GetDirectoryName(desktopPath) ?? processDirectory;
         var cliPath = FindSiblingCliExecutable(workingDirectory);
 
         var guidance = new StringBuilder()
             .AppendLine("Recommended Mod Organizer setup for SlideSmith")
             .AppendLine($"Title: SlideSmith (Desktop)")
-            .AppendLine($"Binary: {executablePath}")
+            .AppendLine($"Binary: {desktopPath}")
             .AppendLine($"Start in: {workingDirectory}")
             .AppendLine("Arguments: --mo2-launcher")
             .AppendLine();
+        if (looksLikeCliTarget && !desktopPath.Equals(processPath, StringComparison.OrdinalIgnoreCase))
+        {
+            guidance.AppendLine($"Detected current process as CLI ({processPath}) and switched suggested MO2 binary to desktop executable ({desktopPath}).")
+                .AppendLine();
+        }
         if (!string.IsNullOrWhiteSpace(cliPath))
         {
             guidance.AppendLine("Optional CLI entry:")
@@ -6305,6 +6472,11 @@ public sealed class MainForm : Form
                 area,
                 "Warning",
                 $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}; proof execution: {proofExecutionStatus}).{axisSummary}{dimensionSummary}{combinationSummary}",
+                guidanceTarget);
+            add(
+                "Action card",
+                "Action",
+                $"Universal coverage + strict matrix proof are still incomplete for {targetBody}. Open {Path.GetFileName(reportPath)}, close missing proof axes/dimensions first, then re-run conversion proof until strict-proof-ready is true.",
                 guidanceTarget);
 
             if (!string.Equals(proofExecutionStatus, "executed-pass", StringComparison.OrdinalIgnoreCase))
