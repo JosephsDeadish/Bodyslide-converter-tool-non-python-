@@ -63,6 +63,7 @@ public static class DesktopUiSettingsStore
 
         string? tempPath = null;
         var settingsLock = AcquireExclusiveSettingsLock(settingsPath);
+        var lockPath = settingsLock.Name;
         try
         {
             using (settingsLock)
@@ -86,6 +87,7 @@ public static class DesktopUiSettingsStore
                 }
             }
 
+            TryDeleteLockFile(lockPath);
         }
     }
 
@@ -150,7 +152,7 @@ public static class DesktopUiSettingsStore
                     FileAccess.ReadWrite,
                     FileShare.None,
                     bufferSize: 4096,
-                    FileOptions.DeleteOnClose);
+                    FileOptions.None);
                 WriteLockMetadata(lockStream);
                 return lockStream;
             }
@@ -177,6 +179,25 @@ public static class DesktopUiSettingsStore
             if (!File.Exists(lockPath))
             {
                 return false;
+            }
+
+            private static void TryDeleteLockFile(string? lockPath)
+            {
+                if (string.IsNullOrWhiteSpace(lockPath))
+                {
+                    return;
+                }
+
+                try
+                {
+                    if (File.Exists(lockPath))
+                    {
+                        File.Delete(lockPath);
+                    }
+                }
+                catch
+                {
+                }
             }
 
             using (var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))

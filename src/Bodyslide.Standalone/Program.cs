@@ -388,8 +388,10 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         foreach (var desktopExePath in new[]
                  {
                      Path.Combine(executableDirectory, "SlideSmith.exe"),
+                    Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
+                    Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
                  })
         {
@@ -449,7 +451,7 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
         launchedProcess = Process.Start(startInfo);
         return launchedProcess is not null;
     }
-    catch (Exception) when (launchedFromModOrganizer)
+    catch (Exception)
     {
         var fallback = new ProcessStartInfo
         {
@@ -458,9 +460,16 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
             UseShellExecute = false
         };
         ForwardDesktopLaunchArgs(fallback, forwardedArgs, launchedFromModOrganizer);
-
-        launchedProcess = Process.Start(fallback);
-        return launchedProcess is not null;
+        try
+        {
+            launchedProcess = Process.Start(fallback);
+            return launchedProcess is not null;
+        }
+        catch
+        {
+            launchedProcess = null;
+            return false;
+        }
     }
 }
 

@@ -1504,7 +1504,15 @@ public sealed class MainForm : Form
                 AppendLog(_launchOptions.FromModOrganizerLauncher
                     ? $"Startup input loaded from MO2 launcher: {_launchOptions.StartupInputPath}"
                     : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
-                await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
+                if (ShouldAutoInspectInputPath(_launchOptions.StartupInputPath))
+                {
+                    await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
+                }
+                else
+                {
+                    _statusLabel.Text = "Ready — startup input loaded. Click Inspect Input to run analysis.";
+                    AppendLog("Auto-inspection skipped for startup input to keep startup responsive.");
+                }
             }
         };
     }
@@ -3024,10 +3032,10 @@ public sealed class MainForm : Form
             }
 
             var input = _inputTextBox.Text.Trim();
-            if (IsArchiveInputPath(input))
+            if (!ShouldAutoInspectInputPath(input))
             {
-                _statusLabel.Text = "Archive input selected. Click Inspect Input to run full archive analysis.";
-                AppendLog("Auto-inspection skipped for archive input to keep the UI responsive. Click Inspect Input when ready.");
+                _statusLabel.Text = "Input selected. Click Inspect Input to run full analysis.";
+                AppendLog("Auto-inspection skipped for heavy input to keep the UI responsive. Click Inspect Input when ready.");
                 return;
             }
 
@@ -3131,19 +3139,28 @@ public sealed class MainForm : Form
         }
     }
 
-    private static bool IsArchiveInputPath(string? path)
+    private static bool ShouldAutoInspectInputPath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
         {
             return false;
         }
 
         var normalized = path.Trim();
-        return normalized.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
-               normalized.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ||
-               normalized.EndsWith(".tar", StringComparison.OrdinalIgnoreCase) ||
-               normalized.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
-               normalized.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
+        if (Directory.Exists(normalized))
+        {
+            return false;
+        }
+
+        if (!File.Exists(normalized))
+        {
+            return false;
+        }
+
+        return normalized.EndsWith(".nif", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) ||
+               normalized.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
     }
 
     private string? ResolveInspectionTargetBody()

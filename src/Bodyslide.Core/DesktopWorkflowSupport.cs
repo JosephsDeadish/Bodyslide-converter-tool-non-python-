@@ -396,9 +396,7 @@ internal static class DesktopWorkflowSupport
             return false;
         }
 
-        return DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName))) ||
-               File.Exists(Path.Combine(directory, "ModuleConfig.xml")) ||
-               File.Exists(Path.Combine(directory, "info.xml"));
+        return DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName)));
     }
 
     private static bool IsMo2LauncherArgument(string? argument)
