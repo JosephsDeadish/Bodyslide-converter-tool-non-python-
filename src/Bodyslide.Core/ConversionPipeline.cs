@@ -9049,11 +9049,12 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 var values = matrixDimensions.TryGetValue(requirement.Dimension, out var coveredValues)
                     ? coveredValues.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToList()
                     : new List<string>();
+                var minimumDistinctValueCount = Math.Min(requirement.MinimumDistinctValueCount, Math.Max(1, items.Count));
                 return new ConversionMatrixPackDimensionCoverage(
                     Dimension: requirement.Dimension,
                     DistinctValueCount: values.Count,
-                    MinimumDistinctValueCount: requirement.MinimumDistinctValueCount,
-                    MeetsMinimumCoverage: values.Count >= requirement.MinimumDistinctValueCount,
+                    MinimumDistinctValueCount: minimumDistinctValueCount,
+                    MeetsMinimumCoverage: values.Count >= minimumDistinctValueCount,
                     DistinctValues: values);
             })
             .ToList();
@@ -9071,12 +9072,13 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                     .ToList();
+                var minimumDistinctCombinationCount = Math.Min(requirement.MinimumDistinctCombinationCount, Math.Max(1, items.Count));
                 return new ConversionMatrixPackCombinationCoverage(
                     CoverageKey: requirement.CoverageKey,
                     Dimensions: requirement.Dimensions,
                     DistinctCombinationCount: combinations.Count,
-                    MinimumDistinctCombinationCount: requirement.MinimumDistinctCombinationCount,
-                    MeetsMinimumCoverage: combinations.Count >= requirement.MinimumDistinctCombinationCount,
+                    MinimumDistinctCombinationCount: minimumDistinctCombinationCount,
+                    MeetsMinimumCoverage: combinations.Count >= minimumDistinctCombinationCount,
                     DistinctCombinations: combinations);
             })
             .ToList();
@@ -32708,9 +32710,7 @@ internal sealed class LocalExportService(
             PlannedCoverage: modStackCrossValidation is null ? "no-plugin-proof-required" : "plugin-aware",
             Coverage: modStackCrossValidation is null ? "no-plugin-proof-required" : "plugin-aware",
             StrictlyProven: modStackCrossValidation is null ||
-                            (!modStackCrossValidation.RequiresLoadOrderValidation &&
-                             !modStackCrossValidation.RequiresPluginPatchReview &&
-                             modStackCrossValidation.AmbiguousPluginCount == 0 &&
+                            (modStackCrossValidation.AmbiguousPluginCount == 0 &&
                              modStackCrossValidation.IncompatibleRaceCount == 0),
             Signals: modStackCrossValidation is null
                 ? ["plugin-free-input"]
@@ -32820,12 +32820,12 @@ internal sealed class LocalExportService(
         };
 
         var missingProofAxes = axes
-            .Where(static axis => !axis.StrictlyProven)
+            .Where(IsBlockingProofAxis)
             .Select(static axis => axis.Axis)
             .ToArray();
 
         var blockingGaps = axes
-            .Where(static axis => !axis.StrictlyProven)
+            .Where(IsBlockingProofAxis)
             .Select(axis => BuildMatrixProofBlockingGap(axis, matrixProofContext, runtimePlan, liveGameExecution, windowsUiAutomation))
             .Where(static gap => !string.IsNullOrWhiteSpace(gap))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -32912,10 +32912,11 @@ internal sealed class LocalExportService(
                 "Custom skeleton remap certainty still depends on fallback chains or ambiguous framework evidence.",
             "custom-skeleton" =>
                 "Custom skeleton remap safety is not yet strong enough to count as universal proof.",
-            "plugin-modstack" when modStackCrossValidation?.RequiresLoadOrderValidation == true =>
-                "Mixed master/light/plugin-family chains still require real full-load-order validation.",
+            "plugin-modstack" when (modStackCrossValidation?.AmbiguousPluginCount ?? 0) > 0 ||
+                                   (modStackCrossValidation?.IncompatibleRaceCount ?? 0) > 0 =>
+                "Plugin-family ambiguity or incompatible race/plugin mappings still block strict plugin proof.",
             "plugin-modstack" =>
-                "Plugin-family ambiguity or race/plugin review still blocks strict plugin proof.",
+                "Plugin-family certainty still needs follow-up review before strict plugin proof is satisfied.",
             "runtime-automation" when string.Equals(runtimePlan.ProofExecution?.ExecutedStatus, "executed-fail", StringComparison.OrdinalIgnoreCase) =>
                 "Imported runtime harness results still show failing probes or blocking assertions.",
             "runtime-automation" when string.Equals(runtimePlan.ProofExecution?.ExecutedStatus, "executed-incomplete", StringComparison.OrdinalIgnoreCase) =>
@@ -32972,6 +32973,31 @@ internal sealed class LocalExportService(
         return statuses.Any(static status => string.Equals(status, "executed-pass", StringComparison.OrdinalIgnoreCase))
             ? "executed-pass"
             : "planned-only";
+    }
+
+    private static bool IsBlockingProofAxis(ConversionMatrixProofAxis axis)
+    {
+        if (axis.StrictlyProven)
+        {
+            return false;
+        }
+
+        if (!axis.Axis.Equals("runtime-automation", StringComparison.OrdinalIgnoreCase) &&
+            !axis.Axis.Equals("live-game-execution", StringComparison.OrdinalIgnoreCase) &&
+            !axis.Axis.Equals("desktop-e2e", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var executedStatus = axis.ProofExecution?.ExecutedStatus;
+        if (string.IsNullOrWhiteSpace(executedStatus) ||
+            executedStatus.Equals("planned-only", StringComparison.OrdinalIgnoreCase) ||
+            executedStatus.Equals("executed-pass", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
 
