@@ -1336,8 +1336,8 @@ public sealed class MainForm : Form
             ShowItemToolTips = true,
         };
         _guidanceListView.Columns.Add("Area", 150);
-        _guidanceListView.Columns.Add("Priority", 90);
-        _guidanceListView.Columns.Add("Guidance", -2);
+        _guidanceListView.Columns.Add("Status", 90);
+        _guidanceListView.Columns.Add("Details / next step", -2);
         _guidanceListView.SelectedIndexChanged += (_, _) => UpdatePathActionStates();
         _guidanceListView.DoubleClick += async (_, _) => await OpenSelectedGuidanceTargetAsync();
         _guidanceTabPage.Controls.Add(_guidanceListView);
@@ -3687,6 +3687,16 @@ public sealed class MainForm : Form
                 "Warning",
                 "No preview-workbench.html or preview.html was found. Open the output folder and inspect conversion-quality.json and batch-report.json manually.",
                 outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory)));
+        }
+
+        if (outputDirectories.Count > 0 || (!string.IsNullOrWhiteSpace(previewPath) && File.Exists(previewPath)))
+        {
+            var firstOutput = outputDirectories.FirstOrDefault(static directory => !string.IsNullOrWhiteSpace(directory));
+            Add(
+                "How to use this tab",
+                "Info",
+                "Purpose: this tab is your prioritized checklist. Work from High/Warning rows first, then Action rows, and double-click a row to open the linked report/artifact.",
+                firstOutput);
         }
 
         foreach (var outputDirectory in outputDirectories)
@@ -6565,7 +6575,7 @@ public sealed class MainForm : Form
             add(
                 "Action card",
                 "Action",
-                $"Universal coverage + strict matrix proof are still incomplete for {targetBody}. Open {Path.GetFileName(reportPath)}, close missing proof axes/dimensions first, then re-run conversion proof until strict-proof-ready is true.",
+                $"Release-level universal proof is still incomplete for {targetBody}. This does not invalidate a single successful conversion; it means broader matrix evidence is still missing. Open {Path.GetFileName(reportPath)} and close missing proof axes/dimensions first.",
                 guidanceTarget);
 
             if (!string.Equals(proofExecutionStatus, "executed-pass", StringComparison.OrdinalIgnoreCase))
@@ -7348,20 +7358,20 @@ public sealed class MainForm : Form
                     : "informational";
         if (string.Equals(effectiveGate, "high-risk", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open the linked reports below.";
+            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — this tab explains why and what to do next. Do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open linked reports.";
         }
 
         if (string.Equals(effectiveGate, "needs-review", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — inspect Preview and linked reports before install/share: {warningCount} warning and {actionCount} action item(s).";
+            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — this tab is a review checklist before install/share: {warningCount} warning and {actionCount} action item(s).";
         }
 
         if (!string.Equals(effectiveGate, "ready", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Guidance loaded — {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Review the linked reports as needed.";
+            return $"Checklist loaded — {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Work top-down and open linked reports only for rows that apply.";
         }
 
-        return $"{ConversionValidationPresentation.GetGateLabel("ready")} — install-ready after one final Preview pass and normal smoke testing.";
+        return $"{ConversionValidationPresentation.GetGateLabel("ready")} — keep this tab as the final verification checklist, then complete one final Preview pass and normal smoke testing.";
     }
 
     private static string FormatGuidanceAreaLabel(string area, string priority)

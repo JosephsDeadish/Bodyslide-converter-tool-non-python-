@@ -410,26 +410,26 @@ public static class RuntimeReadinessReporter
     private static RuntimeReadinessCheck CreateUniversalCoverageCheck() =>
         new(
             "Universal coverage",
-            "Warning",
-            "SlideSmith can convert many real-world armors, but a true 'any armor to any body' claim still needs deeper proof for the hardest topology-correspondence cases.");
+            "Info",
+            "Progress checkpoint: SlideSmith can already convert many real-world armors, but a strict 'any armor to any body' release claim still needs broader proof on the hardest topology-correspondence cases. Use remaining-gaps checklist reports to track concrete blockers.");
 
     private static RuntimeReadinessCheck CreateDesktopAutomationCoverageCheck() =>
         new(
             "Desktop automation proof",
             "Info",
-            "Real Windows click-path validation is still external and should be completed on a Windows host with WebView2 plus an external UI automation harness.");
+            "Progress checkpoint: real Windows click-path proof is still an external validation step. Complete it on a Windows host with WebView2 and an external UI automation harness.");
 
     private static RuntimeReadinessCheck CreateLiveGameAutomationCoverageCheck() =>
         new(
             "Live-game automation proof",
             "Info",
-            "In-game/runtime verification is still exported as an external harness contract and must be finished against the target Windows mod stack outside this desktop app.");
+            "Progress checkpoint: in-game/runtime verification is exported as an external harness contract and should be finished against the target Windows mod stack outside this desktop app.");
 
     private static RuntimeReadinessCheck CreateStrictMatrixCoverageCheck() =>
         new(
             "Strict matrix proof",
-            "Warning",
-            "Universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations, even when a single conversion looks healthy.");
+            "Info",
+            "Progress checkpoint: universal-ready claims still need broader proof across body × skeleton × plugin-family × runtime combinations, even when one conversion looks healthy. Use conversion-matrix-proof + remaining-gaps checklist reports for exact next blockers.");
 
     private static RuntimeReadinessCheck CreateDesktopProbeCheck(string? currentExePath)
     {
@@ -480,7 +480,7 @@ public static class RuntimeReadinessReporter
 
         if (string.IsNullOrWhiteSpace(currentExePath))
         {
-            return new("CLI companion", "Warning", "Could not inspect sibling CLI EXE because the desktop path is unavailable.");
+            return new("CLI companion", "Info", "Optional CLI companion check skipped because the desktop path is unavailable in this context.");
         }
 
         try
@@ -488,7 +488,7 @@ public static class RuntimeReadinessReporter
             var executableDirectory = Path.GetDirectoryName(Path.GetFullPath(currentExePath));
             if (string.IsNullOrWhiteSpace(executableDirectory))
             {
-                return new("CLI companion", "Warning", "Could not resolve the executable directory.");
+                return new("CLI companion", "Info", "Optional CLI companion check skipped because the executable directory could not be resolved.");
             }
 
             var currentFullPath = Path.GetFullPath(currentExePath);
@@ -503,11 +503,11 @@ public static class RuntimeReadinessReporter
                 return new("CLI companion", "OK", $"Sibling CLI EXE detected: {candidate}");
             }
 
-            return new("CLI companion", "Warning", "No sibling CLI EXE was found beside the desktop binary.");
+            return new("CLI companion", "Info", "No sibling CLI EXE was found beside the desktop binary. This is optional unless you plan to run CLI workflows from the same install folder.");
         }
         catch (Exception ex)
         {
-            return new("CLI companion", "Warning", $"Could not inspect sibling CLI EXE: {ex.Message}");
+            return new("CLI companion", "Info", $"Optional CLI companion check failed: {ex.Message}");
         }
     }
 }

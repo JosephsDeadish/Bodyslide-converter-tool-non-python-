@@ -15043,9 +15043,10 @@ public sealed class RuntimeReadinessReporterTests
         var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath);
 
         var universalCoverage = Assert.Single(checks, check => check.Area == "Universal coverage");
-        Assert.Equal("Warning", universalCoverage.Status);
+        Assert.Equal("Info", universalCoverage.Status);
         Assert.Contains("any armor to any body", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("topology-correspondence", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("remaining-gaps checklist", universalCoverage.Details, StringComparison.OrdinalIgnoreCase);
 
         var desktopAutomation = Assert.Single(checks, check => check.Area == "Desktop automation proof");
         Assert.Equal("Info", desktopAutomation.Status);
@@ -15058,8 +15059,9 @@ public sealed class RuntimeReadinessReporterTests
         Assert.Contains("Windows mod stack", liveGameAutomation.Details, StringComparison.OrdinalIgnoreCase);
 
         var matrixProof = Assert.Single(checks, check => check.Area == "Strict matrix proof");
-        Assert.Equal("Warning", matrixProof.Status);
+        Assert.Equal("Info", matrixProof.Status);
         Assert.Contains("body × skeleton × plugin-family × runtime combinations", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("remaining-gaps checklist", matrixProof.Details, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
