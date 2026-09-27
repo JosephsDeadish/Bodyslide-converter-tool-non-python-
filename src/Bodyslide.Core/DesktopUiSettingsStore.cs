@@ -136,25 +136,101 @@ public static class DesktopUiSettingsStore
     private static FileStream AcquireExclusiveSettingsLock(string settingsPath)
     {
         var lockPath = $"{settingsPath}.lock";
-        const int maxAttempts = 20;
+        const int maxAttempts = 200;
         const int retryDelayMilliseconds = 50;
+        var staleCutoffUtc = DateTime.UtcNow.AddMinutes(-2);
 
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                var lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var lockStream = new FileStream(
+                    lockPath,
+                    FileMode.CreateNew,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.DeleteOnClose);
                 WriteLockMetadata(lockStream);
                 return lockStream;
             }
             catch (IOException) when (attempt < maxAttempts)
             {
+                if (TryDeleteStaleLockFile(lockPath, staleCutoffUtc))
+                {
+                    continue;
+                }
+
                 Thread.Sleep(retryDelayMilliseconds);
             }
             catch (UnauthorizedAccessException) when (attempt < maxAttempts)
             {
                 Thread.Sleep(retryDelayMilliseconds);
             }
+        }
+    }
+
+    private static bool TryDeleteStaleLockFile(string lockPath, DateTime staleCutoffUtc)
+    {
+        try
+        {
+            if (!File.Exists(lockPath))
+            {
+                return false;
+            }
+
+            using var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            if (!IsLockFileStale(lockProbe, staleCutoffUtc))
+            {
+                return false;
+            }
+
+            lockProbe.Dispose();
+            File.Delete(lockPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsLockFileStale(FileStream lockStream, DateTime staleCutoffUtc)
+    {
+        var fileInfo = new FileInfo(lockStream.Name);
+        if (fileInfo.LastWriteTimeUtc > staleCutoffUtc)
+        {
+            return false;
+        }
+
+        try
+        {
+            lockStream.Position = 0;
+            using var reader = new StreamReader(lockStream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            var metadataJson = reader.ReadToEnd();
+            if (string.IsNullOrWhiteSpace(metadataJson))
+            {
+                return true;
+            }
+
+            var metadata = JsonSerializer.Deserialize<SettingsLockMetadata>(metadataJson, ReadOptions);
+            if (metadata is null || metadata.ProcessId <= 0)
+            {
+                return true;
+            }
+
+            if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var activeProcess = Process.GetProcessById(metadata.ProcessId);
+            var activeStartTime = activeProcess.StartTime.ToUniversalTime().Ticks;
+            return metadata.ProcessStartTimeUtcTicks <= 0 || metadata.ProcessStartTimeUtcTicks != activeStartTime;
+        }
+        catch
+        {
+            return true;
         }
     }
 

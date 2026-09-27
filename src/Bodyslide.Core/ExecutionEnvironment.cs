@@ -112,12 +112,34 @@ public static class ExecutionEnvironment
 
         var fullInputPath = Path.GetFullPath(inputPath);
         var normalizedInputPath = fullInputPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var parentDirectory = Directory.Exists(normalizedInputPath)
+        var parentDirectory = IsLikelyDirectoryInputPath(inputPath, normalizedInputPath)
             ? normalizedInputPath
             : Path.GetDirectoryName(fullInputPath);
 
         return string.IsNullOrWhiteSpace(parentDirectory)
             ? null
             : Path.Combine(parentDirectory, "SlideSmith-output");
+    }
+
+    private static bool IsLikelyDirectoryInputPath(string originalInputPath, string normalizedInputPath)
+    {
+        if (Directory.Exists(normalizedInputPath))
+        {
+            return true;
+        }
+
+        if (File.Exists(normalizedInputPath))
+        {
+            return false;
+        }
+
+        var trimmedOriginal = originalInputPath.Trim();
+        if (trimmedOriginal.EndsWith(Path.DirectorySeparatorChar) ||
+            trimmedOriginal.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            return true;
+        }
+
+        return !Path.HasExtension(trimmedOriginal);
     }
 }

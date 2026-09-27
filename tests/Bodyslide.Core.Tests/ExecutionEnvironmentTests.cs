@@ -70,6 +70,30 @@ public sealed class ExecutionEnvironmentTests
     }
 
     [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentDirectoryPathAsDirectory()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "pack");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentFilePathAsFile()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "armor.nif");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
     public void TryNormalizeCurrentDirectoryToExecutionRoot_TreatsCaseVariantPathsAsDistinctOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())
