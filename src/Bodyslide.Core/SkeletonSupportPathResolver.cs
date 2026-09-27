@@ -290,11 +290,12 @@ public static class SkeletonSupportPathResolver
 
         var genderedVariantPenalty =
             normalized.Contains("/character assets female/", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("/character assets male/", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase)
-                ? 1
-                : 0;
+            normalized.Contains("/character assets male/", StringComparison.OrdinalIgnoreCase)
+                ? 0
+                : normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
+                  normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase)
+                    ? 1
+                    : 0;
 
         return new SkeletonCandidateRank(
             exactSkeletonPenalty,

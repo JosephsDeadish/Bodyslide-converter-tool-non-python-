@@ -120,6 +120,26 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolveSkeletonNifPath_DoesNotDownrankCanonicalGenderedCharacterAssetsDirectories()
+    {
+        var modRoot = Path.Combine(_root, "GenderedSkeletonPack");
+        var canonicalFemaleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets female");
+        var genericFemaleDirectory = Path.Combine(modRoot, "meshes", "followers", "female");
+        Directory.CreateDirectory(canonicalFemaleDirectory);
+        Directory.CreateDirectory(genericFemaleDirectory);
+
+        var canonicalSkeletonPath = Path.Combine(canonicalFemaleDirectory, "skeleton_female.nif");
+        var genericSkeletonPath = Path.Combine(genericFemaleDirectory, "follower_skeleton.nif");
+        File.WriteAllText(canonicalSkeletonPath, "canonical");
+        File.WriteAllText(genericSkeletonPath, "generic");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(canonicalSkeletonPath), result);
+    }
+
+    [Fact]
     public void TryResolveSkeletonNifPath_DirectBodyMeshFallsBackToContainingSkeletonDirectory()
     {
         var modRoot = Path.Combine(_root, "BodyMeshInputPack");

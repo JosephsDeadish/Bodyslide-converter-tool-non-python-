@@ -95,7 +95,13 @@
     "Hock.L": ["NPC L Calf", "NPC L Foot"],
     "Hock.R": ["NPC R Calf", "NPC R Foot"],
     "Hoof.L": ["NPC L Foot", "NPC L Calf"],
-    "Hoof.R": ["NPC R Foot", "NPC R Calf"]
+    "Hoof.R": ["NPC R Foot", "NPC R Calf"],
+    "JawSeam.L": ["HDT JawLower", "HDT Jaw", "NPC Head"],
+    "JawSeam.R": ["HDT JawLower", "HDT Jaw", "NPC Head"],
+    "HeelIK.L": ["NPC L Foot", "NPC L Calf", "Hoof.L"],
+    "HeelIK.R": ["NPC R Foot", "NPC R Calf", "Hoof.R"],
+    "GroundContact.L": ["NPC L Foot", "HeelIK.L", "Hoof.L"],
+    "GroundContact.R": ["NPC R Foot", "HeelIK.R", "Hoof.R"]
   },
   "frameworks": [
     {
@@ -156,6 +162,25 @@
         "NPC Belly02": ["NPC Belly01", "NPC Belly"],
         "NPC L Breast03": ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
         "NPC R Breast03": ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"]
+      }
+    },
+    {
+      "id": "xpmsse-female-heelik-extended",
+      "bones": [
+        "NPC L Thigh",
+        "NPC R Thigh",
+        "NPC L Calf",
+        "NPC R Calf",
+        "NPC L Foot",
+        "NPC R Foot",
+        "HeelIK.L",
+        "HeelIK.R"
+      ],
+      "fallbackMappings": {
+        "HeelIK.L": ["NPC L Foot", "NPC L Calf", "Hoof.L"],
+        "HeelIK.R": ["NPC R Foot", "NPC R Calf", "Hoof.R"],
+        "GroundContact.L": ["NPC L Foot", "HeelIK.L", "Hoof.L"],
+        "GroundContact.R": ["NPC R Foot", "HeelIK.R", "Hoof.R"]
       }
     },
     {

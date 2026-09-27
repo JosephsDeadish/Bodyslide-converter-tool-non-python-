@@ -14045,6 +14045,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("NPC L Pec", pecFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC Belly02", "xpmsse-female-bhunp-advanced", out var bellyFallbacks));
         Assert.Contains("NPC Belly01", bellyFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HeelIK.L", "xpmsse-female-heelik-extended", out var heelIkFallbacks));
+        Assert.Contains("NPC L Foot", heelIkFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("JawSeam.L", "xpmsse-female-heelik-extended", out var jawSeamFallbacks));
+        Assert.Contains("HDT JawLower", jawSeamFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BeastForeskin", "beast-humanoid", out var beastForeskinFallbacks));
         Assert.Contains("NPC Pelvis", beastForeskinFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("TongueTip", "beast-humanoid", out var beastTongueFallbacks));
@@ -14756,6 +14760,9 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Schlongs-of-Skyrim", "SOS")]
     [InlineData("Sam-Light", "SAM Light")]
     [InlineData("SAM Lite", "SAM Light")]
+    [InlineData("CBBE 3BA (3BBB)", "3BA")]
+    [InlineData("BHUNP Next", "BHUNP")]
+    [InlineData("HIMBO Redux", "HIMBO")]
     public void BodyTypeCatalog_ResolveName_MapsCommonAliases(string requested, string expected)
     {
         Assert.Equal(expected, BodyTypeCatalog.ResolveName(requested));
@@ -14789,6 +14796,8 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Lamia", "Serpentine Humanoid")]
     [InlineData("Naga", "Serpentine Humanoid")]
     [InlineData("SAM Lite", "SAM Light")]
+    [InlineData("BHUNP V4", "BHUNP")]
+    [InlineData("HIMBO 5.0", "HIMBO")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
     {
         Assert.True(BodyTechnicalProfileCatalog.TryGet(requested, out var profile));
@@ -17475,6 +17484,45 @@ public sealed class RealisticModPackFixtureTests
                 .ToArray();
             Assert.Contains(triPayloads.SelectMany(static payload => payload.Morphs).Select(static morph => morph.Name), sliderName =>
                 sliderNames.Contains(sliderName, StringComparer.OrdinalIgnoreCase));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticMessyMixedPluginChainBodySlideLayoutModPackDirectory_ExpandsHardCaseScenarioProofAndArtifactChecks()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMessyMixedPluginChainBodySlideLayoutModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousMaster.esp", patchJson, StringComparison.Ordinal);
+
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+            var scenarioNames = inGameReport.RootElement
+                .GetProperty("ScenarioMatrix")
+                .EnumerateArray()
+                .Select(static entry => entry.GetProperty("Name").GetString())
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .ToArray();
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
