@@ -7438,6 +7438,9 @@ internal static class SyntheticNifTestData
     public static async Task WriteBsSegmentedTriShapeStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
         => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSSegmentedTriShape", stride);
 
+    public static async Task WriteBsGeometryStyleAsync(string path, IReadOnlyList<(float X, float Y, float Z)> vertices, int stride = 20)
+        => await WriteBsHalfFloatTriShapeStyleAsync(path, vertices, "BSGeometry", stride);
+
     private static async Task WriteBsHalfFloatTriShapeStyleAsync(
         string path,
         IReadOnlyList<(float X, float Y, float Z)> vertices,
@@ -7511,6 +7514,9 @@ internal static class SyntheticNifTestData
 
     public static IReadOnlyList<(float X, float Y, float Z)> ReadBsSegmentedTriShapeVertices(byte[] bytes)
         => ReadBsHalfFloatTriShapeVertices(bytes, "BSSegmentedTriShape");
+
+    public static IReadOnlyList<(float X, float Y, float Z)> ReadBsGeometryVertices(byte[] bytes)
+        => ReadBsHalfFloatTriShapeVertices(bytes, "BSGeometry");
 
     private static IReadOnlyList<(float X, float Y, float Z)> ReadBsHalfFloatTriShapeVertices(byte[] bytes, string blockTypeName)
     {
@@ -9882,6 +9888,51 @@ public sealed class NifOutputAndSourceOverrideTests
                         MathF.Abs(src.Z - dst.Z) > 0.001f)
                     .Any(static changed => changed),
                 "Expected at least one BSMeshLODTriShape half-float vertex to be transformed.");
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithBsGeometryStyleNif_ParsesAsSupportedAndTransformsVertices()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(workingDirectory);
+        var inputFile = Path.Combine(workingDirectory, "sse_bsgeometry_armor.nif");
+        var sourceVertices = SyntheticNifTestData.CreateBodyVertices(96);
+        await SyntheticNifTestData.WriteBsGeometryStyleAsync(inputFile, sourceVertices);
+
+        try
+        {
+            var inspection = await StandaloneConversionModules.CreateInspector()
+                .InspectAsync(inputFile, "3BA");
+            var nifSupport = Assert.Single(inspection.NifSupport ?? []);
+            Assert.Equal("supported", nifSupport.Status);
+            Assert.Equal("bstri-half-float", nifSupport.ParseMode);
+            Assert.Equal(96, nifSupport.VertexCount);
+
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(inputFile, "3BA", outputDirectory));
+
+            Assert.True(result.Success);
+            var writtenPath = Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "sse_bsgeometry_armor.nif");
+            Assert.True(File.Exists(writtenPath), "Converted BSGeometry NIF was not written.");
+
+            var sourceBytes = await File.ReadAllBytesAsync(inputFile);
+            var writtenBytes = await File.ReadAllBytesAsync(writtenPath);
+            var sourceRead = SyntheticNifTestData.ReadBsGeometryVertices(sourceBytes);
+            var transformedRead = SyntheticNifTestData.ReadBsGeometryVertices(writtenBytes);
+            Assert.Equal(sourceRead.Count, transformedRead.Count);
+            Assert.True(
+                sourceRead.Zip(transformedRead, (src, dst) =>
+                        MathF.Abs(src.X - dst.X) > 0.001f ||
+                        MathF.Abs(src.Y - dst.Y) > 0.001f ||
+                        MathF.Abs(src.Z - dst.Z) > 0.001f)
+                    .Any(static changed => changed),
+                "Expected at least one BSGeometry half-float vertex to be transformed.");
         }
         finally
         {

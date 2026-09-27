@@ -3408,6 +3408,7 @@ internal static class NifGeometrySignatureReader
         System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"),
         System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"),
         System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"),
+        System.Text.Encoding.ASCII.GetBytes("BSGeometry"),
     ];
     private static readonly (byte[] TokenBytes, string TypeName)[] KnownFloatGeometryTokens =
     [
@@ -3417,6 +3418,7 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"), "BSMeshLODTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSSubIndexTriShape"), "BSSubIndexTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSGeometry"), "BSGeometry"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShape"), "NiTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStrips"), "NiTriStrips"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
@@ -3435,6 +3437,7 @@ internal static class NifGeometrySignatureReader
         (System.Text.Encoding.ASCII.GetBytes("BSLODTriShape"), "BSLODTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSMeshLODTriShape"), "BSMeshLODTriShape"),
         (System.Text.Encoding.ASCII.GetBytes("BSSegmentedTriShape"), "BSSegmentedTriShape"),
+        (System.Text.Encoding.ASCII.GetBytes("BSGeometry"), "BSGeometry"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriShapeData"), "NiTriShapeData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriStripsData"), "NiTriStripsData"),
         (System.Text.Encoding.ASCII.GetBytes("NiTriBasedGeomData"), "NiTriBasedGeomData"),
@@ -4990,7 +4993,9 @@ internal static class NifGeometrySignatureReader
     private static bool LooksLikeSupportedSseHalfFloatShapeType(string typeName) =>
         !string.IsNullOrWhiteSpace(typeName) &&
         typeName.StartsWith("BS", StringComparison.Ordinal) &&
-        typeName.Contains("TriShape", StringComparison.Ordinal);
+        (typeName.Contains("TriShape", StringComparison.Ordinal) ||
+         typeName.Equals("BSGeometry", StringComparison.Ordinal) ||
+         typeName.EndsWith("Geometry", StringComparison.Ordinal));
 
     private static MeshGeometrySignature? TryReadEmbeddedVertexBlock(byte[] bytes, int markerOffset)
     {
