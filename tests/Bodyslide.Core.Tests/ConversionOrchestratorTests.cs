@@ -1852,7 +1852,7 @@ public sealed class ConversionOrchestratorTests
             Assert.Contains("Mod Organizer 2 or Vortex", infoXml, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("[General]", metaIni, StringComparison.Ordinal);
-            Assert.Contains("gameName=Skyrim Special Edition", metaIni, StringComparison.Ordinal);
+            Assert.Contains("gameName=SkyrimSE", metaIni, StringComparison.Ordinal);
             Assert.Contains("author=SlideSmith", metaIni, StringComparison.Ordinal);
             Assert.Contains("<Group name=\"CBBE\">", sliderGroupsXml, StringComparison.Ordinal);
             Assert.Contains("<Group name=\"SlideSmith - CBBE\">", sliderGroupsXml, StringComparison.Ordinal);

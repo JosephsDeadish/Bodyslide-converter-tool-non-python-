@@ -31229,7 +31229,7 @@ internal sealed class LocalExportService(
 
         return $$"""
             [General]
-            gameName=Skyrim Special Edition
+            gameName=SkyrimSE
             name={{safePackage}} - SlideSmith
             version=0.1
             author=SlideSmith
