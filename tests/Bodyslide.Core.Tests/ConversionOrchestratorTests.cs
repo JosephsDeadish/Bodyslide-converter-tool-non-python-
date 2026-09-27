@@ -19614,8 +19614,11 @@ public sealed class RealisticModPackFixtureTests
 
             var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
             Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            var packChecklistPath = Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.md");
+            Assert.True(File.Exists(packChecklistPath), "remaining-gaps-pack-checklist.md was not written.");
 
             using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+            var packChecklist = await File.ReadAllTextAsync(packChecklistPath);
             Assert.Equal("Alien Hybrid", packProof.RootElement.GetProperty("TargetBody").GetString());
             Assert.Equal(results.Count, packProof.RootElement.GetProperty("TotalCount").GetInt32());
             Assert.False(packProof.RootElement.GetProperty("StrictProofReady").GetBoolean());
@@ -19715,6 +19718,16 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
+            Assert.Contains("Missing proof axis: runtime-automation", packChecklist, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Missing matrix dimension coverage: target-body", packChecklist, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", packChecklist, StringComparison.OrdinalIgnoreCase);
+
+            var firstOutputDirectory = results[0].OutputDirectory;
+            var perOutputChecklistPath = Path.Combine(firstOutputDirectory, "remaining-gaps-checklist.md");
+            Assert.True(File.Exists(perOutputChecklistPath), "remaining-gaps-checklist.md was not written for converted output.");
+            var perOutputChecklist = await File.ReadAllTextAsync(perOutputChecklistPath);
+            Assert.Contains("Remaining strict/universal proof gaps checklist", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Missing proof axis:", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
 
             var desktopSnapshot = DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath: null);
             Assert.Contains(
