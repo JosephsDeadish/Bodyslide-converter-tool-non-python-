@@ -19614,10 +19614,13 @@ public sealed class RealisticModPackFixtureTests
 
             var packProofPath = Path.Combine(outputDirectory, "conversion-matrix-pack-proof.json");
             Assert.True(File.Exists(packProofPath), "conversion-matrix-pack-proof.json was not written.");
+            var packChecklistJsonPath = Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.json");
+            Assert.True(File.Exists(packChecklistJsonPath), "remaining-gaps-pack-checklist.json was not written.");
             var packChecklistPath = Path.Combine(outputDirectory, "remaining-gaps-pack-checklist.md");
             Assert.True(File.Exists(packChecklistPath), "remaining-gaps-pack-checklist.md was not written.");
 
             using var packProof = JsonDocument.Parse(await File.ReadAllTextAsync(packProofPath));
+            using var packChecklistJson = JsonDocument.Parse(await File.ReadAllTextAsync(packChecklistJsonPath));
             var packChecklist = await File.ReadAllTextAsync(packChecklistPath);
             Assert.Equal("Alien Hybrid", packProof.RootElement.GetProperty("TargetBody").GetString());
             Assert.Equal(results.Count, packProof.RootElement.GetProperty("TotalCount").GetInt32());
@@ -19718,14 +19721,30 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 packProof.RootElement.GetProperty("Items").EnumerateArray().Select(static item => item.GetProperty("MatrixCoordinateKey").GetString()),
                 static key => !string.IsNullOrWhiteSpace(key));
+            Assert.Equal("conversion-matrix-pack-proof.json", packChecklistJson.RootElement.GetProperty("SourceReport").GetString());
+            Assert.Equal("Alien Hybrid", packChecklistJson.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Contains(
+                packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "missing-matrix-dimension", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                packChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Description").GetString()),
+                static description => description is not null && description.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("Missing proof axis: runtime-automation", packChecklist, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Missing matrix dimension coverage: target-body", packChecklist, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Missing matrix combination coverage: body-skeleton-plugin-runtime", packChecklist, StringComparison.OrdinalIgnoreCase);
 
             var firstOutputDirectory = results[0].OutputDirectory;
+            var perOutputChecklistJsonPath = Path.Combine(firstOutputDirectory, "remaining-gaps-checklist.json");
+            Assert.True(File.Exists(perOutputChecklistJsonPath), "remaining-gaps-checklist.json was not written for converted output.");
             var perOutputChecklistPath = Path.Combine(firstOutputDirectory, "remaining-gaps-checklist.md");
             Assert.True(File.Exists(perOutputChecklistPath), "remaining-gaps-checklist.md was not written for converted output.");
+            using var perOutputChecklistJson = JsonDocument.Parse(await File.ReadAllTextAsync(perOutputChecklistJsonPath));
             var perOutputChecklist = await File.ReadAllTextAsync(perOutputChecklistPath);
+            Assert.Equal("conversion-matrix-proof.json", perOutputChecklistJson.RootElement.GetProperty("SourceReport").GetString());
+            Assert.Equal("Alien Hybrid", perOutputChecklistJson.RootElement.GetProperty("TargetBody").GetString());
+            Assert.Contains(
+                perOutputChecklistJson.RootElement.GetProperty("RemainingGaps").EnumerateArray().Select(static item => item.GetProperty("Category").GetString()),
+                static category => string.Equals(category, "missing-proof-axis", StringComparison.OrdinalIgnoreCase));
             Assert.Contains("Remaining strict/universal proof gaps checklist", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Missing proof axis:", perOutputChecklist, StringComparison.OrdinalIgnoreCase);
 

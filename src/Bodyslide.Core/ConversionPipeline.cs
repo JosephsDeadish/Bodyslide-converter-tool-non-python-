@@ -1822,26 +1822,48 @@ public sealed record ConversionMatrixPackProofReport(
     IReadOnlyList<string> ReviewArtifacts,
     IReadOnlyList<ConversionMatrixPackProofItem> Items,
     DateTimeOffset GeneratedAt);
+public sealed record RemainingGapsChecklistItem(
+    string Category,
+    string Description,
+    string Source);
+public sealed record RemainingGapsChecklistReport(
+    string Title,
+    string SourceReport,
+    string TargetBody,
+    string ProofCoverage,
+    bool StrictProofReady,
+    IReadOnlyList<RemainingGapsChecklistItem> RemainingGaps,
+    IReadOnlyList<string> ReviewArtifacts,
+    DateTimeOffset GeneratedAt);
 
 internal static class RemainingGapsChecklistSupport
 {
-    public static string BuildRemainingGapsChecklistMarkdown(ConversionMatrixProofReport report)
+    public static RemainingGapsChecklistReport BuildRemainingGapsChecklistReport(ConversionMatrixProofReport report)
     {
-        var checklistItems = new List<string>();
+        var checklistItems = new List<RemainingGapsChecklistItem>();
 
         if (!string.Equals(report.ProofExecutionStatus, "executed-complete", StringComparison.OrdinalIgnoreCase))
         {
-            checklistItems.Add($"Complete proof execution imports (current status: {report.ProofExecutionStatus}).");
+            checklistItems.Add(new RemainingGapsChecklistItem(
+                Category: "proof-execution",
+                Description: $"Complete proof execution imports (current status: {report.ProofExecutionStatus}).",
+                Source: "ProofExecutionStatus"));
         }
 
         checklistItems.AddRange(report.MissingProofAxes
             .Where(axis => !string.IsNullOrWhiteSpace(axis))
-            .Select(axis => $"Missing proof axis: {axis}"));
+            .Select(axis => new RemainingGapsChecklistItem(
+                Category: "missing-proof-axis",
+                Description: $"Missing proof axis: {axis}",
+                Source: "MissingProofAxes")));
         checklistItems.AddRange(report.BlockingGaps
             .Where(gap => !string.IsNullOrWhiteSpace(gap))
-            .Select(gap => $"Blocking gap: {gap}"));
+            .Select(gap => new RemainingGapsChecklistItem(
+                Category: "blocking-gap",
+                Description: $"Blocking gap: {gap}",
+                Source: "BlockingGaps")));
 
-        return BuildRemainingGapsChecklistDocument(
+        return BuildRemainingGapsChecklistReport(
             title: "Remaining strict/universal proof gaps checklist",
             sourceReport: "conversion-matrix-proof.json",
             targetBody: report.TargetBody,
@@ -1851,23 +1873,35 @@ internal static class RemainingGapsChecklistSupport
             reviewArtifacts: report.ReviewArtifacts);
     }
 
-    public static string BuildRemainingGapsChecklistMarkdown(ConversionMatrixPackProofReport report)
+    public static RemainingGapsChecklistReport BuildRemainingGapsChecklistReport(ConversionMatrixPackProofReport report)
     {
-        var checklistItems = new List<string>();
+        var checklistItems = new List<RemainingGapsChecklistItem>();
         checklistItems.AddRange(report.MissingProofAxes
             .Where(axis => !string.IsNullOrWhiteSpace(axis))
-            .Select(axis => $"Missing proof axis: {axis}"));
+            .Select(axis => new RemainingGapsChecklistItem(
+                Category: "missing-proof-axis",
+                Description: $"Missing proof axis: {axis}",
+                Source: "MissingProofAxes")));
         checklistItems.AddRange(report.MissingMatrixDimensions
             .Where(dimension => !string.IsNullOrWhiteSpace(dimension))
-            .Select(dimension => $"Missing matrix dimension coverage: {dimension}"));
+            .Select(dimension => new RemainingGapsChecklistItem(
+                Category: "missing-matrix-dimension",
+                Description: $"Missing matrix dimension coverage: {dimension}",
+                Source: "MissingMatrixDimensions")));
         checklistItems.AddRange(report.MissingMatrixCombinations
             .Where(combination => !string.IsNullOrWhiteSpace(combination))
-            .Select(combination => $"Missing matrix combination coverage: {combination}"));
+            .Select(combination => new RemainingGapsChecklistItem(
+                Category: "missing-matrix-combination",
+                Description: $"Missing matrix combination coverage: {combination}",
+                Source: "MissingMatrixCombinations")));
         checklistItems.AddRange(report.BlockingGaps
             .Where(gap => !string.IsNullOrWhiteSpace(gap))
-            .Select(gap => $"Blocking gap: {gap}"));
+            .Select(gap => new RemainingGapsChecklistItem(
+                Category: "blocking-gap",
+                Description: $"Blocking gap: {gap}",
+                Source: "BlockingGaps")));
 
-        return BuildRemainingGapsChecklistDocument(
+        return BuildRemainingGapsChecklistReport(
             title: "Remaining strict/universal proof gaps checklist (pack)",
             sourceReport: "conversion-matrix-pack-proof.json",
             targetBody: report.TargetBody,
@@ -1877,47 +1911,82 @@ internal static class RemainingGapsChecklistSupport
             reviewArtifacts: report.ReviewArtifacts);
     }
 
-    private static string BuildRemainingGapsChecklistDocument(
+    public static string BuildRemainingGapsChecklistMarkdown(ConversionMatrixProofReport report)
+    {
+        return BuildRemainingGapsChecklistMarkdown(BuildRemainingGapsChecklistReport(report));
+    }
+
+    public static string BuildRemainingGapsChecklistMarkdown(ConversionMatrixPackProofReport report)
+    {
+        return BuildRemainingGapsChecklistMarkdown(BuildRemainingGapsChecklistReport(report));
+    }
+
+    public static string BuildRemainingGapsChecklistMarkdown(RemainingGapsChecklistReport report)
+    {
+        return BuildRemainingGapsChecklistDocument(report);
+    }
+
+    private static RemainingGapsChecklistReport BuildRemainingGapsChecklistReport(
         string title,
         string sourceReport,
         string targetBody,
         string proofCoverage,
         bool strictProofReady,
-        IReadOnlyList<string> checklistItems,
+        IReadOnlyList<RemainingGapsChecklistItem> checklistItems,
         IReadOnlyList<string> reviewArtifacts)
     {
+        var normalizedChecklistItems = checklistItems
+            .Where(item => !string.IsNullOrWhiteSpace(item.Description))
+            .DistinctBy(item => item.Description, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.Description, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var normalizedReviewArtifacts = reviewArtifacts
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new RemainingGapsChecklistReport(
+            Title: title,
+            SourceReport: sourceReport,
+            TargetBody: targetBody,
+            ProofCoverage: proofCoverage,
+            StrictProofReady: strictProofReady,
+            RemainingGaps: normalizedChecklistItems,
+            ReviewArtifacts: normalizedReviewArtifacts,
+            GeneratedAt: DateTimeOffset.UtcNow);
+    }
+
+    private static string BuildRemainingGapsChecklistDocument(RemainingGapsChecklistReport report)
+    {
         var sb = new StringBuilder();
-        sb.AppendLine($"# {title}");
+        sb.AppendLine($"# {report.Title}");
         sb.AppendLine();
-        sb.AppendLine($"- Source report: `{sourceReport}`");
-        sb.AppendLine($"- Target body: `{targetBody}`");
-        sb.AppendLine($"- Proof coverage: `{proofCoverage}`");
-        sb.AppendLine($"- Strict proof ready: `{strictProofReady}`");
+        sb.AppendLine($"- Source report: `{report.SourceReport}`");
+        sb.AppendLine($"- Target body: `{report.TargetBody}`");
+        sb.AppendLine($"- Proof coverage: `{report.ProofCoverage}`");
+        sb.AppendLine($"- Strict proof ready: `{report.StrictProofReady}`");
+        sb.AppendLine($"- Generated at (UTC): `{report.GeneratedAt:O}`");
         sb.AppendLine();
         sb.AppendLine("## Remaining gaps");
 
-        if (strictProofReady || checklistItems.Count == 0)
+        if (report.StrictProofReady || report.RemainingGaps.Count == 0)
         {
             sb.AppendLine("- [x] No remaining strict/universal proof blockers were reported.");
         }
         else
         {
-            foreach (var item in checklistItems
-                         .Distinct(StringComparer.OrdinalIgnoreCase)
-                         .OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            foreach (var item in report.RemainingGaps)
             {
-                sb.AppendLine($"- [ ] {item}");
+                sb.AppendLine($"- [ ] {item.Description}");
             }
         }
 
-        if (reviewArtifacts.Count > 0)
+        if (report.ReviewArtifacts.Count > 0)
         {
             sb.AppendLine();
             sb.AppendLine("## Review artifacts");
-            foreach (var artifact in reviewArtifacts
-                         .Where(value => !string.IsNullOrWhiteSpace(value))
-                         .Distinct(StringComparer.OrdinalIgnoreCase)
-                         .OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            foreach (var artifact in report.ReviewArtifacts)
             {
                 sb.AppendLine($"- {artifact}");
             }
@@ -8341,7 +8410,8 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
             "patch-armor.pas",
             "armor-pack-validation.json",
             "batch-report.json",
-            "conversion-matrix-pack-proof.json"
+            "conversion-matrix-pack-proof.json",
+            "remaining-gaps-pack-checklist.json"
         ];
 
         public static IReadOnlyList<string> EnumerateFiles(
@@ -8568,9 +8638,14 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         var matrixPackProof = BuildConversionMatrixPackProofReport(resultsWithPaths, targetBody, conversionLabel);
         var matrixPackProofJson = JsonSerializer.Serialize(matrixPackProof, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(rootOutput, "conversion-matrix-pack-proof.json"), matrixPackProofJson, cancellationToken);
+        var remainingPackChecklist = RemainingGapsChecklistSupport.BuildRemainingGapsChecklistReport(matrixPackProof);
+        await File.WriteAllTextAsync(
+            Path.Combine(rootOutput, "remaining-gaps-pack-checklist.json"),
+            JsonSerializer.Serialize(remainingPackChecklist, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
         await File.WriteAllTextAsync(
             Path.Combine(rootOutput, "remaining-gaps-pack-checklist.md"),
-            RemainingGapsChecklistSupport.BuildRemainingGapsChecklistMarkdown(matrixPackProof),
+            RemainingGapsChecklistSupport.BuildRemainingGapsChecklistMarkdown(remainingPackChecklist),
             cancellationToken);
     }
 
@@ -20879,10 +20954,17 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(conversionMatrixProof, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(conversionMatrixProofPath);
+        var remainingGapsChecklist = RemainingGapsChecklistSupport.BuildRemainingGapsChecklistReport(conversionMatrixProof);
+        var remainingGapsChecklistJsonPath = Path.Combine(outputDirectory, "remaining-gaps-checklist.json");
+        await File.WriteAllTextAsync(
+            remainingGapsChecklistJsonPath,
+            JsonSerializer.Serialize(remainingGapsChecklist, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(remainingGapsChecklistJsonPath);
         var remainingGapsChecklistPath = Path.Combine(outputDirectory, "remaining-gaps-checklist.md");
         await File.WriteAllTextAsync(
             remainingGapsChecklistPath,
-            RemainingGapsChecklistSupport.BuildRemainingGapsChecklistMarkdown(conversionMatrixProof),
+            RemainingGapsChecklistSupport.BuildRemainingGapsChecklistMarkdown(remainingGapsChecklist),
             cancellationToken);
         outputFiles.Add(remainingGapsChecklistPath);
 
@@ -31189,6 +31271,7 @@ internal sealed class LocalExportService(
             "dependency-map.json",
             "conversion-quality.json",
             "conversion-matrix-proof.json",
+            "remaining-gaps-checklist.json",
             "remaining-gaps-checklist.md",
             "desktop-workflow-automation.json",
             "in-game-validation.json",
@@ -31230,6 +31313,7 @@ internal sealed class LocalExportService(
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||
+        fileName.Equals("remaining-gaps-checklist.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.md", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("desktop-workflow-automation.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("in-game-validation.json", StringComparison.OrdinalIgnoreCase) ||
