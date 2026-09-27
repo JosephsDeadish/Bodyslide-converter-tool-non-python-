@@ -1096,7 +1096,9 @@
     "aliases": [
       "SAMLight",
       "SAM Lite",
-      "Shape Atlas Light"
+      "Shape Atlas Light",
+      "SAM Light NG",
+      "Shape Atlas Men Light"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -1288,7 +1290,9 @@
       "Ultimate Body Enhancer",
       "UBE Body",
       "UBE 2",
-      "Ultimate Body Enhancer 2"
+      "Ultimate Body Enhancer 2",
+      "UBE Rebuild",
+      "UBE NG"
     ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
@@ -1449,7 +1453,9 @@
       "The New Gentleman 2",
       "TNG 2",
       "The New Gentlemen",
-      "TNG 2.0"
+      "TNG 2.0",
+      "TNG Reforged",
+      "TNG NG"
     ],
     "gender": "male",
     "defaultPhysics": "smp",

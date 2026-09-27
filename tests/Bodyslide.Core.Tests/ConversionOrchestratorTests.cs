@@ -14731,7 +14731,9 @@ public sealed class BodyTypeCatalogTests
     [InlineData("SAMLight", "SAM Light")]
     [InlineData("Schlongs of Skyrim", "SOS")]
     [InlineData("The New Gentleman", "TNG")]
+    [InlineData("TNG Reforged", "TNG")]
     [InlineData("Ultimate Body Enhancer", "UBE")]
+    [InlineData("UBE Rebuild", "UBE")]
     [InlineData("Ultimate Body Enhancer 2", "UBE")]
     [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
     [InlineData("Faun", "Goat Humanoid")]
@@ -14777,6 +14779,7 @@ public sealed class BodyTypeCatalogTests
     [InlineData("PB body", "UNPB")]
     [InlineData("7BO", "UUNP")]
     [InlineData("TNG Extended", "TNG")]
+    [InlineData("TNG Reforged", "TNG")]
     [InlineData("Vanilla Body", "Vanilla")]
     [InlineData("Goat Reborn", "Goat Humanoid")]
     [InlineData("Faun", "Goat Humanoid")]
@@ -14796,6 +14799,7 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Lamia", "Serpentine Humanoid")]
     [InlineData("Naga", "Serpentine Humanoid")]
     [InlineData("SAM Lite", "SAM Light")]
+    [InlineData("SAM Light NG", "SAM Light")]
     [InlineData("BHUNP V4", "BHUNP")]
     [InlineData("HIMBO 5.0", "HIMBO")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
@@ -17499,6 +17503,45 @@ public sealed class RealisticModPackFixtureTests
     public async Task BatchConvert_RealisticMessyMixedPluginChainBodySlideLayoutModPackDirectory_ExpandsHardCaseScenarioProofAndArtifactChecks()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMessyMixedPluginChainBodySlideLayoutModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(workingDirectory, "Alien Hybrid", outputDirectory));
+            Assert.True(result.Success);
+
+            var patchJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "plugin-patches.json"));
+            Assert.Contains("LinkedDeviousChild.esp", patchJson, StringComparison.Ordinal);
+            Assert.Contains("LinkedDeviousMaster.esp", patchJson, StringComparison.Ordinal);
+
+            var inGameJsonPath = Path.Combine(outputDirectory, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+            var scenarioNames = inGameReport.RootElement
+                .GetProperty("ScenarioMatrix")
+                .EnumerateArray()
+                .Select(static entry => entry.GetProperty("Name").GetString())
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .ToArray();
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
+            Assert.Contains(scenarioNames, static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
+            Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticMessyMixedTopologyEdgeCasesModPackDirectory_ExpandsHardCaseScenarioProofAndArtifactChecks()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticMessyMixedTopologyEdgeCasesModPack");
         var outputDirectory = Path.Combine(workingDirectory, "output");
 
         try
