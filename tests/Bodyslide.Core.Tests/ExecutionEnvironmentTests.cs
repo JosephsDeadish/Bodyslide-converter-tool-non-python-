@@ -96,7 +96,7 @@ public sealed class ExecutionEnvironmentTests
     [Fact]
     public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessFilePathAsFile()
     {
-        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "modarchive");
+        var inputFile = $"modarchive-{Guid.NewGuid():N}";
 
         var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
 

@@ -140,11 +140,13 @@ public static class ExecutionEnvironment
             return true;
         }
 
-        if (Path.HasExtension(trimmedOriginal))
+        var leafName = Path.GetFileName(trimmedOriginal.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (Path.HasExtension(leafName))
         {
             return false;
         }
 
-        return false;
+        return trimmedOriginal.IndexOf(Path.DirectorySeparatorChar) >= 0 ||
+               trimmedOriginal.IndexOf(Path.AltDirectorySeparatorChar) >= 0;
     }
 }
