@@ -28,8 +28,6 @@ public static class DesktopUiSettingsStore
         WriteIndented = true,
     };
 
-    private static readonly TimeSpan StaleLockMinimumAge = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan UnknownLockMaximumAge = TimeSpan.FromMinutes(2);
 
     public static string GetDefaultSettingsPath() =>
         Path.Combine(
@@ -65,7 +63,6 @@ public static class DesktopUiSettingsStore
 
         string? tempPath = null;
         var settingsLock = AcquireExclusiveSettingsLock(settingsPath);
-        var lockPath = settingsLock.Name;
         try
         {
             using (settingsLock)
@@ -89,16 +86,6 @@ public static class DesktopUiSettingsStore
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(lockPath))
-            {
-                try
-                {
-                    File.Delete(lockPath);
-                }
-                catch
-                {
-                }
-            }
         }
     }
 
@@ -156,32 +143,9 @@ public static class DesktopUiSettingsStore
         {
             try
             {
-                var lockStream = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                var lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 WriteLockMetadata(lockStream);
                 return lockStream;
-            }
-            catch (IOException) when (File.Exists(lockPath))
-            {
-                try
-                {
-                    using (var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                    {
-                        if (!ShouldReclaimStaleLock(lockPath, staleProbe))
-                        {
-                            throw;
-                        }
-                    }
-                    File.Delete(lockPath);
-                    continue;
-                }
-                catch (IOException) when (attempt < maxAttempts)
-                {
-                    Thread.Sleep(retryDelayMilliseconds);
-                }
-                catch (UnauthorizedAccessException) when (attempt < maxAttempts)
-                {
-                    Thread.Sleep(retryDelayMilliseconds);
-                }
             }
             catch (IOException) when (attempt < maxAttempts)
             {
@@ -214,76 +178,6 @@ public static class DesktopUiSettingsStore
         }
         catch
         {
-        }
-    }
-
-    private static bool ShouldReclaimStaleLock(string lockPath, FileStream staleProbe)
-    {
-        var fileAge = DateTime.UtcNow - File.GetLastWriteTimeUtc(lockPath);
-        if (fileAge < StaleLockMinimumAge)
-        {
-            return false;
-        }
-
-        var metadata = TryReadLockMetadata(staleProbe);
-        if (metadata is null)
-        {
-            return fileAge >= UnknownLockMaximumAge;
-        }
-
-        if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
-        {
-            return fileAge >= UnknownLockMaximumAge;
-        }
-
-        return !IsProcessStillRunning(metadata.ProcessId, metadata.ProcessStartTimeUtcTicks);
-    }
-
-    private static SettingsLockMetadata? TryReadLockMetadata(FileStream staleProbe)
-    {
-        try
-        {
-            staleProbe.Position = 0;
-            using var reader = new StreamReader(staleProbe, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
-            var json = reader.ReadToEnd();
-            staleProbe.Position = 0;
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize<SettingsLockMetadata>(json, ReadOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static bool IsProcessStillRunning(int processId, long expectedStartTimeUtcTicks)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            if (process.HasExited)
-            {
-                return false;
-            }
-
-            var startUtcTicks = process.StartTime.ToUniversalTime().Ticks;
-            return expectedStartTimeUtcTicks <= 0 || startUtcTicks == expectedStartTimeUtcTicks;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch
-        {
-            return true;
         }
     }
 

@@ -1171,10 +1171,18 @@ internal static class ExternalProofHarnessSupport
         {
             try
             {
-                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose);
             }
             catch (IOException) when (attempt < maxAttempts)
             {
+                try
+                {
+                    using var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                    File.Delete(lockPath);
+                }
+                catch
+                {
+                }
                 Thread.Sleep(20);
             }
             catch (UnauthorizedAccessException) when (attempt < maxAttempts)
