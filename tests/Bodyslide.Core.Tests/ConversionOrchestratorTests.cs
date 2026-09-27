@@ -19912,6 +19912,43 @@ public sealed class RealisticModPackFixtureTests
     }
 
     [Fact]
+    public async Task RefreshImportedProofState_WithStaleRuntimePlanLock_RecoversAndRewritesProofReports()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticFemaleOralExpressiveModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputPath = Path.Combine(workingDirectory, "meshes", "armor", "oracleexpressive", "oracle_expressive_0.nif");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var result = await orchestrator.ConvertAsync(new ConversionRequest(
+                inputPath,
+                "UBE",
+                outputDirectory,
+                PhysicsProfileOverride: "smp+cbpc"));
+            Assert.True(result.Success);
+
+            var runtimePlanPath = Path.Combine(outputDirectory, "runtime-validation-plan.json");
+            var staleLockPath = $"{runtimePlanPath}.write.lock";
+            Assert.True(File.Exists(runtimePlanPath));
+
+            await File.WriteAllTextAsync(staleLockPath, "{}");
+            File.SetLastWriteTimeUtc(staleLockPath, DateTime.UtcNow.AddMinutes(-10));
+
+            ExternalProofHarnessSupport.RefreshImportedProofState(outputDirectory);
+
+            Assert.False(File.Exists(staleLockPath));
+            Assert.True(File.Exists(runtimePlanPath));
+            using var runtimePlanJson = JsonDocument.Parse(await File.ReadAllTextAsync(runtimePlanPath));
+            Assert.True(runtimePlanJson.RootElement.TryGetProperty("ExecutionCoverage", out _));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task BatchConvert_RealisticHeadgearFullHelmetModPackDirectory_PreservesHeadgearPartitionsAndGroundMesh()
     {
         var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticHeadgearFullHelmetModPack");

@@ -146,7 +146,6 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        return trimmedOriginal.IndexOf(Path.DirectorySeparatorChar) >= 0 ||
-               trimmedOriginal.IndexOf(Path.AltDirectorySeparatorChar) >= 0;
+        return false;
     }
 }

@@ -106,6 +106,18 @@ public sealed class ExecutionEnvironmentTests
     }
 
     [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessNestedPathAsFile()
+    {
+        var inputFile = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads", "modarchive");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputFile);
+
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputFile))!, "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
     public void TryNormalizeCurrentDirectoryToExecutionRoot_TreatsCaseVariantPathsAsDistinctOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())

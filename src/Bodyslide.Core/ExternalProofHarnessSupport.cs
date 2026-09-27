@@ -1241,16 +1241,16 @@ internal static class ExternalProofHarnessSupport
                 return false;
             }
 
-            using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
             {
                 if (!IsStaleLockFile(stream, staleCutoffUtc))
                 {
                     return false;
                 }
-            }
 
-            File.Delete(lockPath);
-            return true;
+                File.Delete(lockPath);
+                return true;
+            }
         }
         catch
         {
