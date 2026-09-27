@@ -62,7 +62,9 @@ public static class ExecutionEnvironment
 
             var currentDirectory = Path.GetFullPath(Environment.CurrentDirectory)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (string.Equals(currentDirectory, executionRoot, FileSystemPathComparison))
+            var normalizedExecutionRoot = executionRoot
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(currentDirectory, normalizedExecutionRoot, FileSystemPathComparison))
             {
                 return false;
             }

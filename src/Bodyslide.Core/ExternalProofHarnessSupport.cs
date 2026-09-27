@@ -1175,14 +1175,6 @@ internal static class ExternalProofHarnessSupport
             }
             catch (IOException) when (attempt < maxAttempts)
             {
-                try
-                {
-                    using var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-                    File.Delete(lockPath);
-                }
-                catch
-                {
-                }
                 Thread.Sleep(20);
             }
             catch (UnauthorizedAccessException) when (attempt < maxAttempts)
