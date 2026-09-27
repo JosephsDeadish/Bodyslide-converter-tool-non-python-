@@ -179,13 +179,14 @@ public static class DesktopUiSettingsStore
                 return false;
             }
 
-            using var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            if (!IsLockFileStale(lockProbe, staleCutoffUtc))
+            using (var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                return false;
+                if (!IsLockFileStale(lockProbe, staleCutoffUtc))
+                {
+                    return false;
+                }
             }
 
-            lockProbe.Dispose();
             File.Delete(lockPath);
             return true;
         }
