@@ -10581,6 +10581,7 @@ internal static class ArchiveExtractionHelper
 
     private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
     private const long EntryProgressReportIntervalBytes = 8L * 1024 * 1024;
+    private const int ExtractionCopyBufferSizeBytes = 1024 * 1024;
 
     public static bool IsSupportedArchive(string path)
     {
@@ -10693,7 +10694,6 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            long lastReportedBytes = 0;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.FullName} (0/{FormatByteCount(entry.Length)})"));
             using var entryStream = entry.Open();
             using var outputStream = File.Create(destinationPath);
@@ -10708,19 +10708,12 @@ internal static class ArchiveExtractionHelper
                         return;
                     }
 
-                    if (copiedBytes > 0 &&
-                        copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes &&
-                        copiedBytes < entry.Length)
-                    {
-                        return;
-                    }
-
-                    lastReportedBytes = copiedBytes;
                     onProgress(new ArchiveExtractionProgress(
                         processedEntries,
                         totalEntries,
                         $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})"));
-                });
+                },
+                EntryProgressReportIntervalBytes);
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
         }
@@ -10764,7 +10757,6 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            long lastReportedBytes = 0;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.Key}"));
             using var entryStream = entry.OpenEntryStream();
             using var outputStream = File.Create(destinationPath);
@@ -10774,17 +10766,17 @@ internal static class ArchiveExtractionHelper
                 cancellationToken,
                 copiedBytes =>
                 {
-                    if (onProgress is null || copiedBytes <= 0 || copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes)
+                    if (onProgress is null || copiedBytes <= 0)
                     {
                         return;
                     }
 
-                    lastReportedBytes = copiedBytes;
                     onProgress(new ArchiveExtractionProgress(
                         processedEntries,
                         totalEntries,
                         $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})"));
-                });
+                },
+                EntryProgressReportIntervalBytes);
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.Key));
 
@@ -10846,7 +10838,6 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
-            long lastReportedBytes = 0;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, $"copying:{entry.Name}"));
             using var outputStream = File.Create(destinationPath);
             if (entry.DataStream is { } entryStream)
@@ -10857,17 +10848,17 @@ internal static class ArchiveExtractionHelper
                     cancellationToken,
                     copiedBytes =>
                     {
-                        if (onProgress is null || copiedBytes <= 0 || copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes)
+                        if (onProgress is null || copiedBytes <= 0)
                         {
                             return;
                         }
 
-                        lastReportedBytes = copiedBytes;
                         onProgress(new ArchiveExtractionProgress(
                             processedEntries,
                             null,
                             $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})"));
-                    });
+                    },
+                    EntryProgressReportIntervalBytes);
             }
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
@@ -10880,10 +10871,12 @@ internal static class ArchiveExtractionHelper
         Stream input,
         Stream output,
         CancellationToken cancellationToken,
-        Action<long>? onBytesCopied = null)
+        Action<long>? onBytesCopied = null,
+        long reportIntervalBytes = long.MaxValue)
     {
-        var buffer = new byte[81920];
+        var buffer = new byte[ExtractionCopyBufferSizeBytes];
         long copiedBytes = 0;
+        long lastReportedBytes = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10895,7 +10888,17 @@ internal static class ArchiveExtractionHelper
 
             output.Write(buffer, 0, read);
             copiedBytes += read;
-            onBytesCopied?.Invoke(copiedBytes);
+            if (onBytesCopied is not null &&
+                copiedBytes - lastReportedBytes >= reportIntervalBytes)
+            {
+                lastReportedBytes = copiedBytes;
+                onBytesCopied(copiedBytes);
+            }
+        }
+
+        if (onBytesCopied is not null && copiedBytes > 0 && copiedBytes != lastReportedBytes)
+        {
+            onBytesCopied(copiedBytes);
         }
     }
 
