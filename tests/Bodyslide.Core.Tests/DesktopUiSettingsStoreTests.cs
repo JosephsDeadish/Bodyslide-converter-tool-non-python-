@@ -166,6 +166,7 @@ public sealed class DesktopUiSettingsStoreTests
             var existingProfile = Path.Combine(workingDirectory, "custom-profile.json");
             File.WriteAllText(existingProfile, "{ }");
             File.WriteAllText($"{settingsPath}.lock", string.Empty);
+            File.SetLastWriteTimeUtc($"{settingsPath}.lock", DateTime.UtcNow.AddMinutes(-5));
 
             DesktopUiSettingsStore.Save(settingsPath, new DesktopUiSettings("Dark", [existingProfile]));
 

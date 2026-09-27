@@ -397,18 +397,24 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                 continue;
             }
 
-            using var launched = Process.Start(new ProcessStartInfo
+            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, out var launched))
             {
-                FileName = desktopExePath,
-                WorkingDirectory = Path.GetDirectoryName(desktopExePath) ?? executableDirectory,
-                UseShellExecute = !launchedFromModOrganizer
-            });
-            if (launchedFromModOrganizer)
-            {
-                launched?.WaitForExit();
-            }
+                if (launchedFromModOrganizer && launched is not null)
+                {
+                    try
+                    {
+                        if (launched.WaitForExit(1500) && launched.ExitCode != 0)
+                        {
+                            continue;
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
 
-            return true;
+                return true;
+            }
         }
     }
     catch (Exception ex)
@@ -417,6 +423,42 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
     }
 
     return false;
+}
+
+static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, out Process? launchedProcess)
+{
+    launchedProcess = null;
+    var workingDirectory = Path.GetDirectoryName(desktopExePath) ?? fallbackWorkingDirectory;
+
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = desktopExePath,
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = true
+    };
+    if (launchedFromModOrganizer)
+    {
+        startInfo.ArgumentList.Add("--mo2-launcher");
+    }
+
+    try
+    {
+        launchedProcess = Process.Start(startInfo);
+        return launchedProcess is not null;
+    }
+    catch (Exception) when (launchedFromModOrganizer)
+    {
+        var fallback = new ProcessStartInfo
+        {
+            FileName = desktopExePath,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false
+        };
+        fallback.ArgumentList.Add("--mo2-launcher");
+
+        launchedProcess = Process.Start(fallback);
+        return launchedProcess is not null;
+    }
 }
 
 static bool IsLikelyModOrganizerEnvironment()

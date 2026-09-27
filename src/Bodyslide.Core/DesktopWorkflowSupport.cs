@@ -191,6 +191,7 @@ internal static class DesktopWorkflowSupport
         }
 
         string? candidatePath = null;
+        var candidateFromResultArgument = false;
         var fromMo2 = args.Any(static arg => IsMo2LauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
@@ -201,10 +202,11 @@ internal static class DesktopWorkflowSupport
                 continue;
             }
 
-            if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value) &&
+            if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value, out var fromResultArgument) &&
                 !string.IsNullOrWhiteSpace(value))
             {
                 candidatePath ??= value;
+                candidateFromResultArgument |= fromResultArgument;
                 index = consumedIndex;
                 continue;
             }
@@ -220,14 +222,14 @@ internal static class DesktopWorkflowSupport
             }
         }
 
-        var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath);
+        var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath, allowAncestorWalk: candidateFromResultArgument);
         return new DesktopLaunchOptions(
             startupOutputDirectory,
             startupOutputDirectory is null ? TryResolveExistingInputPath(candidatePath) : null,
             fromMo2);
     }
 
-    public static string? TryResolveResultOutputDirectory(string? candidatePath)
+    public static string? TryResolveResultOutputDirectory(string? candidatePath, bool allowAncestorWalk = true)
     {
         var normalizedCandidate = NormalizeCandidatePath(candidatePath);
         if (string.IsNullOrWhiteSpace(normalizedCandidate))
@@ -240,20 +242,38 @@ internal static class DesktopWorkflowSupport
             return null;
         }
 
-        var currentDirectory = Directory.Exists(normalizedCandidate)
-            ? Path.GetFullPath(normalizedCandidate)
-            : Path.GetDirectoryName(Path.GetFullPath(normalizedCandidate));
-        while (!string.IsNullOrWhiteSpace(currentDirectory))
+        var fullCandidatePath = Path.GetFullPath(normalizedCandidate);
+        if (Directory.Exists(fullCandidatePath))
         {
-            if (LooksLikeSlideSmithOutputDirectory(currentDirectory))
+            if (LooksLikeSlideSmithOutputDirectory(fullCandidatePath))
             {
-                return currentDirectory;
+                return fullCandidatePath;
             }
 
-            currentDirectory = Path.GetDirectoryName(currentDirectory);
+            return allowAncestorWalk
+                ? TryWalkAncestorResultDirectory(Path.GetDirectoryName(fullCandidatePath))
+                : null;
         }
 
-        return null;
+        if (!File.Exists(fullCandidatePath))
+        {
+            return null;
+        }
+
+        var parentDirectory = Path.GetDirectoryName(fullCandidatePath);
+        if (string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            return null;
+        }
+
+        if (IsResultMarkerFile(fullCandidatePath) && LooksLikeSlideSmithOutputDirectory(parentDirectory))
+        {
+            return parentDirectory;
+        }
+
+        return allowAncestorWalk
+            ? TryWalkAncestorResultDirectory(parentDirectory)
+            : null;
     }
 
     public static bool LooksLikeSlideSmithOutputDirectory(string? directory)
@@ -288,10 +308,12 @@ internal static class DesktopWorkflowSupport
         IReadOnlyList<string> args,
         int index,
         out int consumedIndex,
-        out string? value)
+        out string? value,
+        out bool fromResultArgument)
     {
         consumedIndex = index;
         value = null;
+        fromResultArgument = false;
 
         var arg = args[index];
         if (!arg.StartsWith("--", StringComparison.Ordinal))
@@ -305,6 +327,7 @@ internal static class DesktopWorkflowSupport
         {
             return false;
         }
+        fromResultArgument = true;
 
         if (separatorIndex >= 0)
         {
@@ -324,6 +347,28 @@ internal static class DesktopWorkflowSupport
         }
 
         return true;
+    }
+
+    private static string? TryWalkAncestorResultDirectory(string? currentDirectory)
+    {
+        while (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            if (LooksLikeSlideSmithOutputDirectory(currentDirectory))
+            {
+                return currentDirectory;
+            }
+
+            currentDirectory = Path.GetDirectoryName(currentDirectory);
+        }
+
+        return null;
+    }
+
+    private static bool IsResultMarkerFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return !string.IsNullOrWhiteSpace(fileName) &&
+               DesktopResultMarkerFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsMo2LauncherArgument(string? argument)

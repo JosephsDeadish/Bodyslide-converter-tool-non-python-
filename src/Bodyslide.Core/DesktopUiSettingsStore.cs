@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Diagnostics;
 
 namespace Bodyslide.Core;
 
@@ -9,6 +10,12 @@ public sealed record DesktopUiSettings(
 
 public static class DesktopUiSettingsStore
 {
+    private sealed record SettingsLockMetadata(
+        [property: JsonPropertyName("processId")] int ProcessId,
+        [property: JsonPropertyName("processStartTimeUtcTicks")] long ProcessStartTimeUtcTicks,
+        [property: JsonPropertyName("machineName")] string MachineName,
+        [property: JsonPropertyName("createdUtcTicks")] long CreatedUtcTicks);
+
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -20,6 +27,9 @@ public static class DesktopUiSettingsStore
     {
         WriteIndented = true,
     };
+
+    private static readonly TimeSpan StaleLockMinimumAge = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan UnknownLockMaximumAge = TimeSpan.FromMinutes(2);
 
     public static string GetDefaultSettingsPath() =>
         Path.Combine(
@@ -146,7 +156,9 @@ public static class DesktopUiSettingsStore
         {
             try
             {
-                return new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                var lockStream = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                WriteLockMetadata(lockStream);
+                return lockStream;
             }
             catch (IOException) when (File.Exists(lockPath))
             {
@@ -154,6 +166,10 @@ public static class DesktopUiSettingsStore
                 {
                     using (var staleProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                     {
+                        if (!ShouldReclaimStaleLock(lockPath, staleProbe))
+                        {
+                            throw;
+                        }
                     }
                     File.Delete(lockPath);
                     continue;
@@ -175,6 +191,112 @@ public static class DesktopUiSettingsStore
             {
                 Thread.Sleep(retryDelayMilliseconds);
             }
+        }
+    }
+
+    private static void WriteLockMetadata(FileStream lockStream)
+    {
+        try
+        {
+            var metadata = new SettingsLockMetadata(
+                Environment.ProcessId,
+                GetCurrentProcessStartTimeUtcTicks(),
+                Environment.MachineName,
+                DateTime.UtcNow.Ticks);
+            var json = JsonSerializer.Serialize(metadata);
+            lockStream.SetLength(0);
+            lockStream.Position = 0;
+            using var writer = new StreamWriter(lockStream, System.Text.Encoding.UTF8, bufferSize: 1024, leaveOpen: true);
+            writer.Write(json);
+            writer.Flush();
+            lockStream.Flush(flushToDisk: true);
+            lockStream.Position = 0;
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool ShouldReclaimStaleLock(string lockPath, FileStream staleProbe)
+    {
+        var fileAge = DateTime.UtcNow - File.GetLastWriteTimeUtc(lockPath);
+        if (fileAge < StaleLockMinimumAge)
+        {
+            return false;
+        }
+
+        var metadata = TryReadLockMetadata(staleProbe);
+        if (metadata is null)
+        {
+            return fileAge >= UnknownLockMaximumAge;
+        }
+
+        if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+        {
+            return fileAge >= UnknownLockMaximumAge;
+        }
+
+        return !IsProcessStillRunning(metadata.ProcessId, metadata.ProcessStartTimeUtcTicks);
+    }
+
+    private static SettingsLockMetadata? TryReadLockMetadata(FileStream staleProbe)
+    {
+        try
+        {
+            staleProbe.Position = 0;
+            using var reader = new StreamReader(staleProbe, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            var json = reader.ReadToEnd();
+            staleProbe.Position = 0;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize<SettingsLockMetadata>(json, ReadOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsProcessStillRunning(int processId, long expectedStartTimeUtcTicks)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (process.HasExited)
+            {
+                return false;
+            }
+
+            var startUtcTicks = process.StartTime.ToUniversalTime().Ticks;
+            return expectedStartTimeUtcTicks <= 0 || startUtcTicks == expectedStartTimeUtcTicks;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static long GetCurrentProcessStartTimeUtcTicks()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch
+        {
+            return 0;
         }
     }
 }
