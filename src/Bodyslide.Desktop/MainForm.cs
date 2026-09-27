@@ -7453,12 +7453,12 @@ public sealed class MainForm : Form
                     : "informational";
         if (string.Equals(effectiveGate, "high-risk", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} — this tab explains why and what to do next. Do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open linked reports.";
+            return $"{ConversionValidationPresentation.GetGateLabel("high-risk")} (loaded output only) — this tab explains why and what to do next. Do not install/share yet: {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Start with Preview, then open linked reports.";
         }
 
         if (string.Equals(effectiveGate, "needs-review", StringComparison.OrdinalIgnoreCase))
         {
-            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} — this tab is a review checklist before install/share: {warningCount} warning and {actionCount} action item(s).";
+            return $"{ConversionValidationPresentation.GetGateLabel("needs-review")} (loaded output only) — this tab is a review checklist before install/share: {warningCount} warning and {actionCount} action item(s).";
         }
 
         if (!string.Equals(effectiveGate, "ready", StringComparison.OrdinalIgnoreCase))
@@ -7466,7 +7466,7 @@ public sealed class MainForm : Form
             return $"Checklist loaded — {highCount} high-priority, {warningCount} warning, and {actionCount} action item(s). Work top-down and open linked reports only for rows that apply.";
         }
 
-        return $"{ConversionValidationPresentation.GetGateLabel("ready")} — keep this tab as the final verification checklist, then complete one final Preview pass and normal smoke testing.";
+        return $"{ConversionValidationPresentation.GetGateLabel("ready")} (loaded output only) — keep this tab as the final verification checklist, then do one final Preview pass and smoke test before install/share.";
     }
 
     private static string FormatGuidanceAreaLabel(string area, string priority)

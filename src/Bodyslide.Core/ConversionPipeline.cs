@@ -955,13 +955,13 @@ public static class ConversionValidationPresentation
         status?.Trim() switch
         {
             var value when string.Equals(value, "ready", StringComparison.OrdinalIgnoreCase) =>
-                "Install-ready after one final preview pass and a normal in-game or mod-manager smoke test.",
+                "Checks passed for this loaded conversion output. Do one final preview + in-game/mod-manager smoke test before install/share.",
             var value when string.Equals(value, "needs-review", StringComparison.OrdinalIgnoreCase) =>
-                "Review required before install/share. Work through the flagged preview and report items, then validate again.",
+                "This loaded conversion output still needs review. Work through flagged preview/report items, then validate again.",
             var value when string.Equals(value, "high-risk", StringComparison.OrdinalIgnoreCase) =>
-                "Do not install/share yet. Fix the blocking conversion issues, re-run the conversion, and validate the regenerated output again.",
+                "This loaded conversion output is blocked. Fix conversion issues, re-run, and validate the regenerated output again.",
             _ =>
-                "Open the preview and generated validation reports before install/share."
+                "Open Preview and generated validation reports for this loaded output before install/share."
         };
 
     public static string BuildOutcomeSummary(
@@ -1017,8 +1017,8 @@ public static class ConversionValidationPresentation
         if (gate.Equals("PASS", StringComparison.OrdinalIgnoreCase))
         {
             return previewAvailable
-                ? "PASS — install-ready after one final Preview pass and smoke test."
-                : "PASS — install-ready, but preview files are missing so open the reports first.";
+                ? "PASS (loaded output only) — run one final Preview pass and smoke test before install/share."
+                : "PASS (loaded output only) — preview files are missing; open reports first.";
         }
 
         return previewAvailable
