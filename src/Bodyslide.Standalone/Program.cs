@@ -543,10 +543,8 @@ static bool HasExplicitStandaloneCliSwitch(IReadOnlyList<string> args) =>
                option.Equals("self-check", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("conversion-guide", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("export-cache", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("input", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("target", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("targets", StringComparison.OrdinalIgnoreCase) ||
-               option.Equals("output", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("preset", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("presets", StringComparison.OrdinalIgnoreCase) ||
                option.Equals("deformation-profile", StringComparison.OrdinalIgnoreCase) ||

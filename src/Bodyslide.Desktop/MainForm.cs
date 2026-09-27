@@ -3015,6 +3015,15 @@ public sealed class MainForm : Form
 
     private void ScheduleAutoInspectInput()
     {
+        var input = _inputTextBox.Text.Trim();
+        if (!ShouldAutoInspectInputPath(input))
+        {
+            _autoInspectDebounce?.Cancel();
+            _autoInspectDebounce?.Dispose();
+            _autoInspectDebounce = null;
+            return;
+        }
+
         _autoInspectDebounce?.Cancel();
         _autoInspectDebounce?.Dispose();
         _autoInspectDebounce = new CancellationTokenSource();
@@ -3034,8 +3043,6 @@ public sealed class MainForm : Form
             var input = _inputTextBox.Text.Trim();
             if (!ShouldAutoInspectInputPath(input))
             {
-                _statusLabel.Text = "Input selected. Click Inspect Input to run full analysis.";
-                AppendLog("Auto-inspection skipped for heavy input to keep the UI responsive. Click Inspect Input when ready.");
                 return;
             }
 
@@ -3088,12 +3095,14 @@ public sealed class MainForm : Form
             SetBusyState(isBusy: true);
             ShowBusyProgress(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
             ClearInspectionTab(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
+            var inspectionTargetBody = ResolveInspectionTargetBody();
+            var customProfilePaths = _customProfilePaths.Count > 0 ? _customProfilePaths.ToArray() : null;
 
             var inspection = await Task.Run(
                 async () => await _inspector.InspectAsync(
                     input,
-                    ResolveInspectionTargetBody(),
-                    _customProfilePaths.Count > 0 ? [.. _customProfilePaths] : null,
+                    inspectionTargetBody,
+                    customProfilePaths,
                     _activeConversion.Token,
                     skeletonNifPath: skeletonNifPath),
                 _activeConversion.Token);
