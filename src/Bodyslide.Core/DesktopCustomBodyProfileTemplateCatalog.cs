@@ -31,8 +31,27 @@ public static class DesktopCustomBodyProfileTemplateCatalog
 
         BodyTypeCatalog.TryResolve(canonicalName, out var bodyInfo);
         var hasMetadata = BuiltInBodyMetadataCatalog.TryGet(canonicalName, out var metadata);
-        var detectionTokens = bodyInfo?.DetectionTokens.Count > 0
-            ? bodyInfo.DetectionTokens
+        var detectionTokenSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (bodyInfo?.DetectionTokens is { Count: > 0 })
+        {
+            foreach (var token in bodyInfo.DetectionTokens)
+            {
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    detectionTokenSet.Add(token.Trim());
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetBody))
+        {
+            detectionTokenSet.Add(targetBody.Trim());
+        }
+
+        detectionTokenSet.Add(canonicalName);
+
+        var detectionTokens = detectionTokenSet.Count > 0
+            ? detectionTokenSet.ToArray()
             : [canonicalName];
         var transformationField = hasMetadata
             ? metadata.TransformationField

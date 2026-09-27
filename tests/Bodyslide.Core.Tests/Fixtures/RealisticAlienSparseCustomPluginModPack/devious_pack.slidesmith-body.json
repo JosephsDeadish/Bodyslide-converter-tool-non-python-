@@ -15,5 +15,6 @@
     "NPC Belly"
   ],
   "physicsProfile": "smp+cbpc",
-  "gender": "female"
+  "gender": "female",
+  "bodyOutputPath": "meshes\\devious\\"
 }

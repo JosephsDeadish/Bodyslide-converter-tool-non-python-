@@ -43,4 +43,14 @@ public sealed class DesktopCustomBodyProfileTemplateCatalogTests
         Assert.Contains("Belly", template.SliderNames, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("butt", template.TransformationField.Keys, StringComparer.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Resolve_PreservesOriginalTargetBodyTokenWhenAliasResolves()
+    {
+        var template = DesktopCustomBodyProfileTemplateCatalog.Resolve("3BA");
+
+        Assert.Equal("CBBE 3BA", template.Name);
+        Assert.Contains("3BA", template.DetectionTokens, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("CBBE 3BA", template.DetectionTokens, StringComparer.OrdinalIgnoreCase);
+    }
 }
