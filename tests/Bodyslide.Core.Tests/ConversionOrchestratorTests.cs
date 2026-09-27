@@ -1847,12 +1847,14 @@ public sealed class ConversionOrchestratorTests
             var sliderGroupsXml = await File.ReadAllTextAsync(sliderGroupsPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("installerVersion=\"5\"", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<moduleDependencies>", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<gameDependency version=\"1.5.97\">Skyrim Special Edition</gameDependency>", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<requiredInstallFiles>", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
             Assert.Contains("Mod Organizer 2 or Vortex", infoXml, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("[General]", metaIni, StringComparison.Ordinal);
-            Assert.Contains("gameName=SkyrimSE", metaIni, StringComparison.Ordinal);
+            Assert.Contains("gameName=Skyrim Special Edition", metaIni, StringComparison.Ordinal);
             Assert.Contains("author=SlideSmith", metaIni, StringComparison.Ordinal);
             Assert.Contains("<Group name=\"CBBE\">", sliderGroupsXml, StringComparison.Ordinal);
             Assert.Contains("<Group name=\"SlideSmith - CBBE\">", sliderGroupsXml, StringComparison.Ordinal);

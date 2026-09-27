@@ -31211,6 +31211,9 @@ internal sealed class LocalExportService(
             <?xml version="1.0" encoding="utf-8"?>
             <config installerVersion="5" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
               <moduleName>{{safePackage}} - SlideSmith Conversion</moduleName>
+              <moduleDependencies>
+                <gameDependency version="1.5.97">Skyrim Special Edition</gameDependency>
+              </moduleDependencies>
               <requiredInstallFiles>
                 <!-- Always install generated conversion output so MO2/Vortex detect valid Skyrim game data. -->
             {{filesContent.ToString().TrimEnd()}}
@@ -31229,7 +31232,7 @@ internal sealed class LocalExportService(
 
         return $$"""
             [General]
-            gameName=SkyrimSE
+            gameName=Skyrim Special Edition
             name={{safePackage}} - SlideSmith
             version=0.1
             author=SlideSmith

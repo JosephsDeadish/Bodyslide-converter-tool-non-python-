@@ -128,6 +128,8 @@ public sealed class MainForm : Form
     private readonly TextBox _presetTargetTextBox;
 
     private CancellationTokenSource? _activeConversion;
+    private CancellationTokenSource? _autoInspectDebounce;
+    private CancellationTokenSource? _autoCacheInspectDebounce;
     private string? _lastOutputDirectory;
     private string? _lastPreviewPath;
     private string? _lastBatchReportPath;
@@ -178,6 +180,8 @@ public sealed class MainForm : Form
     private const int MainSplitPanel2Minimum = 220;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
+    private const int AutoInspectDebounceMilliseconds = 700;
+    private const double AutoDetectedSourceConfidenceFloor = 0.75;
     private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
 
     private enum UiTheme
@@ -376,8 +380,9 @@ public sealed class MainForm : Form
         _inputTextBox.TextChanged += (_, _) =>
         {
             UpdatePathActionStates();
-            ClearInspectionTab("Input changed. Click Inspect Input to refresh detection and compatibility details.");
+            ClearInspectionTab("Input changed. Auto-inspecting detection and compatibility details...");
             UpdateOutputHint();
+            ScheduleAutoInspectInput();
         };
         var browseInputFileButton = new Button { Name = "browseInputFileButton", Text = "File...", AutoSize = true };
         browseInputFileButton.Click += (_, _) => BrowseInputFile();
@@ -391,7 +396,7 @@ public sealed class MainForm : Form
             Enabled = false,
             Margin = new Padding(6, 0, 0, 0),
         };
-        _inspectInputButton.Click += async (_, _) => await InspectInputAsync();
+        _inspectInputButton.Click += async (_, _) => await InspectInputAsync(showDialogs: true, switchToInspectTab: true, automaticTrigger: false);
         _openInputButton = new Button
         {
             Name = "openInputButton",
@@ -937,6 +942,7 @@ public sealed class MainForm : Form
         _cachePathTextBox.AllowDrop = true;
         _cachePathTextBox.DragEnter += OnDragEnter;
         _cachePathTextBox.DragDrop += OnDragDrop;
+        _cachePathTextBox.TextChanged += (_, _) => ScheduleAutoInspectLearningCache();
         var browseCacheButton = new Button { Text = "Browse...", AutoSize = true };
         browseCacheButton.Click += (_, _) => BrowseCachePath();
         cacheRow.Controls.Add(browseCacheButton, 2, 0);
@@ -1154,7 +1160,7 @@ public sealed class MainForm : Form
             Width = 110,
             Height = 34,
         };
-        _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync();
+        _inspectCacheButton.Click += async (_, _) => await InspectLearningCacheAsync(showDialogs: true, switchToTab: true);
         _runSelfCheckButton = new Button
         {
             Name = "runSelfCheckButton",
@@ -1477,6 +1483,7 @@ public sealed class MainForm : Form
         {
             _allowUserMainSplitOverride = true;
             ApplyLauncherContextGuidance();
+            await InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
             if (!_startupResultLoadHandled &&
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
@@ -1497,6 +1504,7 @@ public sealed class MainForm : Form
                 AppendLog(_launchOptions.FromModOrganizerLauncher
                     ? $"Startup input loaded from MO2 launcher: {_launchOptions.StartupInputPath}"
                     : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
+                await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
             }
         };
     }
@@ -1991,7 +1999,8 @@ public sealed class MainForm : Form
         _customProfilePaths.RemoveAll(path => missingPaths.Contains(path, StringComparer.OrdinalIgnoreCase));
         RefreshCustomProfilesList();
         SaveUiSettings();
-        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+        ClearInspectionTab("Custom body profiles changed. Auto-inspection will refresh detection and compatibility details.");
+        ScheduleAutoInspectInput();
 
         var missingNames = string.Join(", ", missingPaths.Select(Path.GetFileName));
         AppendLog($"Removed {missingPaths.Length} missing custom profile file(s) before {operation}: {missingNames}");
@@ -2983,18 +2992,54 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task InspectInputAsync()
+    private void ScheduleAutoInspectInput()
     {
+        _autoInspectDebounce?.Cancel();
+        _autoInspectDebounce?.Dispose();
+        _autoInspectDebounce = new CancellationTokenSource();
+        _ = RunAutoInspectInputAsync(_autoInspectDebounce.Token);
+    }
+
+    private async Task RunAutoInspectInputAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(AutoInspectDebounceMilliseconds, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task InspectInputAsync(bool showDialogs, bool switchToInspectTab, bool automaticTrigger)
+    {
+        if (_activeConversion is not null)
+        {
+            return;
+        }
+
         var input = _inputTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(input))
         {
-            MessageBox.Show(this, "Please select an input file/folder first.", "Missing input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (showDialogs)
+            {
+                MessageBox.Show(this, "Please select an input file/folder first.", "Missing input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
             return;
         }
 
         if (!File.Exists(input) && !Directory.Exists(input))
         {
-            MessageBox.Show(this, "Input path was not found.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (showDialogs)
+            {
+                MessageBox.Show(this, "Input path was not found.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             return;
         }
 
@@ -3012,8 +3057,8 @@ public sealed class MainForm : Form
             }
 
             SetBusyState(isBusy: true);
-            ShowBusyProgress("Inspecting input...");
-            ClearInspectionTab("Inspecting input...");
+            ShowBusyProgress(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
+            ClearInspectionTab(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
 
             var inspection = await _inspector.InspectAsync(
                 input,
@@ -3024,21 +3069,36 @@ public sealed class MainForm : Form
 
             PopulateInspectionTab(inspection);
             ApplyDetectedSourceBodySelection(inspection.Detection);
-            _resultsTabControl.SelectedTab = _inspectTabPage;
-            _statusLabel.Text = "Inspection complete.";
-            AppendLog($"Inspection complete: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}.");
+            if (switchToInspectTab)
+            {
+                _resultsTabControl.SelectedTab = _inspectTabPage;
+            }
+            _statusLabel.Text = automaticTrigger ? "Input auto-inspection complete." : "Inspection complete.";
+            AppendLog(automaticTrigger
+                ? $"Input auto-inspection updated: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}."
+                : $"Inspection complete: body={inspection.Detection.Body} ({inspection.Detection.Confidence:P0}), mesh={inspection.Analysis.MeshType}.");
         }
         catch (OperationCanceledException)
         {
             ClearInspectionTab("Inspection cancelled.");
             _statusLabel.Text = "Inspection cancelled.";
-            AppendLog("Inspection cancelled.");
+            if (!automaticTrigger)
+            {
+                AppendLog("Inspection cancelled.");
+            }
         }
         catch (Exception ex)
         {
             ClearInspectionTab($"Inspection failed: {ex.Message}");
             _statusLabel.Text = "Inspection failed.";
-            MessageBox.Show(this, $"Failed to inspect input:\n{ex.Message}", "Inspect input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (showDialogs)
+            {
+                MessageBox.Show(this, $"Failed to inspect input:\n{ex.Message}", "Inspect input", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            else
+            {
+                AppendLog($"Input auto-inspection failed: {ex.Message}");
+            }
         }
         finally
         {
@@ -3064,9 +3124,16 @@ public sealed class MainForm : Form
     {
         if (!IsSourceAutoSelection() ||
             string.IsNullOrWhiteSpace(detection.Body) ||
-            detection.Body.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase))
+            detection.Body.Equals("CUSTOM", StringComparison.OrdinalIgnoreCase) ||
+            detection.Confidence < AutoDetectedSourceConfidenceFloor)
         {
             ClearAutoDetectedSourceHint(refreshDetails: true);
+            if (IsSourceAutoSelection() &&
+                detection.Confidence < AutoDetectedSourceConfidenceFloor &&
+                !string.IsNullOrWhiteSpace(detection.Body))
+            {
+                AppendLog($"Auto-detect confidence too low ({detection.Confidence:P0}) to lock source body hint. Review Inspect details and set FROM body manually if needed.");
+            }
             return;
         }
 
@@ -4882,7 +4949,32 @@ public sealed class MainForm : Form
         string? previewPath) =>
         Task.Run(() => DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath));
 
-    private async Task InspectLearningCacheAsync()
+    private void ScheduleAutoInspectLearningCache()
+    {
+        _autoCacheInspectDebounce?.Cancel();
+        _autoCacheInspectDebounce?.Dispose();
+        _autoCacheInspectDebounce = new CancellationTokenSource();
+        _ = RunAutoInspectLearningCacheAsync(_autoCacheInspectDebounce.Token);
+    }
+
+    private async Task RunAutoInspectLearningCacheAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(AutoInspectDebounceMilliseconds, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await InspectLearningCacheAsync(showDialogs: false, switchToTab: false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task InspectLearningCacheAsync(bool showDialogs, bool switchToTab)
     {
         try
         {
@@ -4894,8 +4986,14 @@ public sealed class MainForm : Form
             {
                 AppendLog("Learning cache is empty.");
                 PopulateCacheTab([], cachePathOverride);
-                _resultsTabControl.SelectedTab = _cacheTabPage;
-                MessageBox.Show(this, "Learning cache is empty.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (switchToTab)
+                {
+                    _resultsTabControl.SelectedTab = _cacheTabPage;
+                }
+                if (showDialogs)
+                {
+                    MessageBox.Show(this, "Learning cache is empty.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
                 return;
             }
 
@@ -4905,13 +5003,26 @@ public sealed class MainForm : Form
                 AppendLog($"[{entry.Key}] target={entry.TargetBody}, mesh={entry.MeshType}, strategy={entry.Strategy}, cached={entry.LastSuccessfulConversion:u}");
             }
             PopulateCacheTab(entries, cachePathOverride);
-            _resultsTabControl.SelectedTab = _cacheTabPage;
+            if (switchToTab)
+            {
+                _resultsTabControl.SelectedTab = _cacheTabPage;
+            }
 
-            MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the Cache tab and log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (showDialogs)
+            {
+                MessageBox.Show(this, $"Loaded {entries.Count} learning-cache entr{(entries.Count == 1 ? "y" : "ies")}. Details were added to the Cache tab and log.", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Failed to inspect learning cache:\n{ex.Message}", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (showDialogs)
+            {
+                MessageBox.Show(this, $"Failed to inspect learning cache:\n{ex.Message}", "Inspect cache", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            else
+            {
+                AppendLog($"Automatic cache inspection failed: {ex.Message}");
+            }
         }
     }
 
@@ -5067,7 +5178,8 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         SaveUiSettings();
         AppendLog($"Removed {selectedPaths.Length} custom profile file(s).");
-        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+        ClearInspectionTab("Custom body profiles changed. Auto-inspection will refresh detection and compatibility details.");
+        ScheduleAutoInspectInput();
     }
 
     private void ClearCustomProfiles()
@@ -5081,7 +5193,8 @@ public sealed class MainForm : Form
         RefreshCustomProfilesList();
         SaveUiSettings();
         AppendLog("Cleared all loaded custom profile files.");
-        ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+        ClearInspectionTab("Custom body profiles changed. Auto-inspection will refresh detection and compatibility details.");
+        ScheduleAutoInspectInput();
     }
 
     private void LoadCustomProfileFile()
@@ -5110,7 +5223,8 @@ public sealed class MainForm : Form
             AppendLog($"Loaded {added} custom profile file(s): {string.Join(", ", dialog.FileNames.Select(Path.GetFileName))}");
             RefreshCustomProfilesList(dialog.FileNames[0]);
             SaveUiSettings();
-            ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+            ClearInspectionTab("Custom body profiles changed. Auto-inspection will refresh detection and compatibility details.");
+            ScheduleAutoInspectInput();
         }
     }
 
@@ -5164,7 +5278,8 @@ public sealed class MainForm : Form
 
             RefreshCustomProfilesList(dialog.FileName);
             SaveUiSettings();
-            ClearInspectionTab("Custom body profiles changed. Click Inspect Input to refresh detection and compatibility details.");
+            ClearInspectionTab("Custom body profiles changed. Auto-inspection will refresh detection and compatibility details.");
+            ScheduleAutoInspectInput();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {

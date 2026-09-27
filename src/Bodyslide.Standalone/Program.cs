@@ -377,7 +377,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         }
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
-        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args);
+        var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
         if (args.Length != 0 && !launchedFromModOrganizer)
         {
             return false;
@@ -490,8 +490,11 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
     }
 }
 
-static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args) =>
-    IsLikelyModOrganizerEnvironment() || args.Any(IsMo2LauncherArg);
+static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? executablePath, string? workingDirectory) =>
+    IsLikelyModOrganizerEnvironment() ||
+    args.Any(IsMo2LauncherArg) ||
+    (PathLooksLikeModOrganizerManagedLocation(executablePath) &&
+     PathLooksLikeModOrganizerManagedLocation(workingDirectory));
 
 static bool IsMo2LauncherArg(string? arg)
 {
@@ -538,6 +541,19 @@ static bool IsLikelyModOrganizerEnvironment()
 
 static bool HasEnvironmentVariable(string name) =>
     !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(name));
+
+static bool PathLooksLikeModOrganizerManagedLocation(string? path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return false;
+    }
+
+    var normalizedPath = path.Replace('\\', '/');
+    return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
+           normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
+           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase);
+}
 
 static IReadOnlyList<string> ParseDelimitedValues(string? value) =>
     string.IsNullOrWhiteSpace(value)
