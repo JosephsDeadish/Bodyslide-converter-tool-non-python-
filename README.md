@@ -158,12 +158,12 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 |---|---|---|
 | `SlideSmith.exe` | Windows | Desktop GUI — double-click to open, drag-and-drop armor |
 | `SlideSmith-CLI.exe` | Windows | Command-line tool — run from a terminal with `--help` |
-| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable bundle containing `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.md`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
+| `slidesmith-win-x64-bundle.zip` | Windows | MO2/Vortex-installable bundle containing root `SlideSmith.exe`/`SlideSmith-CLI.exe` launchers, `desktop/SlideSmith.exe`, `cli/SlideSmith-CLI.exe`, `README.txt`, `meta/slidesmith-bundle.json`, `meta.ini`, and `fomod/` installer metadata |
 | `slidesmith-linux-x64.zip` | Linux | Single CLI binary |
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
-If `SlideSmith-CLI.exe` is launched with **no arguments** and `SlideSmith.exe` is in the same folder, the CLI now auto-opens the desktop GUI instead of just printing usage and exiting.
+If `SlideSmith-CLI.exe` is launched with **no arguments**, the CLI now auto-opens the desktop GUI when `SlideSmith.exe` is available either in the same folder or in a sibling `desktop/` folder (bundle layout), instead of just printing usage and exiting.
 
 ## GitHub Actions (CI)
 

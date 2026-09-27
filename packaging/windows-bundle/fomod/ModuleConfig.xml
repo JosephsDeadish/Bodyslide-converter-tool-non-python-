@@ -7,11 +7,13 @@
         <group name="Bundle" type="SelectExactlyOne">
           <plugins order="Explicit">
             <plugin name="Desktop + CLI">
-              <description>Installs the SlideSmith desktop GUI and CLI into this managed mod folder for Mod Organizer 2 or Vortex. After installation, point your mod manager executable entry at desktop/SlideSmith.exe or cli/SlideSmith-CLI.exe inside the installed SlideSmith bundle.</description>
+              <description>Installs the SlideSmith desktop GUI and CLI into this managed mod folder for Mod Organizer 2 or Vortex. After installation, point your mod manager executable entry at SlideSmith.exe (recommended), desktop/SlideSmith.exe, or cli/SlideSmith-CLI.exe inside the installed SlideSmith bundle.</description>
               <files>
                 <folder source="desktop" destination="desktop" priority="0" />
                 <folder source="cli" destination="cli" priority="0" />
                 <folder source="meta" destination="meta" priority="0" />
+                <file source="desktop/SlideSmith.exe" destination="SlideSmith.exe" priority="0" />
+                <file source="cli/SlideSmith-CLI.exe" destination="SlideSmith-CLI.exe" priority="0" />
                 <file source="README.txt" destination="README.txt" priority="0" />
                 <file source="meta.ini" destination="meta.ini" priority="0" />
               </files>

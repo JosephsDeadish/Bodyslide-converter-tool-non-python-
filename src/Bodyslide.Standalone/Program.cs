@@ -377,10 +377,13 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         }
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
+        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
         foreach (var desktopExePath in new[]
                  {
                      Path.Combine(executableDirectory, "SlideSmith.exe"),
-                     Path.Combine(executableDirectory, "SlideSmith-Desktop.exe")
+                     Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
                  })
         {
             if (!File.Exists(desktopExePath))
@@ -396,7 +399,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
             Process.Start(new ProcessStartInfo
             {
                 FileName = desktopExePath,
-                WorkingDirectory = executableDirectory,
+                WorkingDirectory = Path.GetDirectoryName(desktopExePath) ?? executableDirectory,
                 UseShellExecute = true
             });
 

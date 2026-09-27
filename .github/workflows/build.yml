@@ -339,7 +339,7 @@ jobs:
           }
 
           $moduleConfig = Get-Content (Join-Path $extractPath "fomod/ModuleConfig.xml") -Raw
-          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="README.txt"', 'source="meta.ini"')) {
+          foreach ($requiredEntry in @('source="desktop"', 'source="cli"', 'source="meta"', 'source="desktop/SlideSmith.exe"', 'source="cli/SlideSmith-CLI.exe"', 'source="README.txt"', 'source="meta.ini"')) {
             if ($moduleConfig -notmatch [regex]::Escape($requiredEntry)) {
               throw "Bundle FOMOD metadata is missing installer entry $requiredEntry."
             }
