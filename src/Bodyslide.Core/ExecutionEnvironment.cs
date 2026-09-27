@@ -152,7 +152,18 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        return !IsLikelyFileName(leafName);
+        if (IsLikelyFileName(leafName))
+        {
+            return false;
+        }
+
+        var parentDirectory = Path.GetDirectoryName(normalizedInputPath);
+        if (!string.IsNullOrWhiteSpace(parentDirectory) && Directory.Exists(parentDirectory))
+        {
+            return true;
+        }
+
+        return IsLikelyDirectoryName(leafName);
     }
 
     private static bool IsLikelyFileName(string leafName)
@@ -168,5 +179,20 @@ public static class ExecutionEnvironment
                normalizedLeafName.Contains("binary", StringComparison.Ordinal) ||
                normalizedLeafName.Contains("executable", StringComparison.Ordinal) ||
                normalizedLeafName.Contains("program", StringComparison.Ordinal);
+    }
+
+    private static bool IsLikelyDirectoryName(string leafName)
+    {
+        if (string.IsNullOrWhiteSpace(leafName))
+        {
+            return false;
+        }
+
+        var normalizedLeafName = leafName.Trim().ToLowerInvariant();
+        return normalizedLeafName.Contains("pack", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("folder", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("input", StringComparison.Ordinal) ||
+               normalizedLeafName.Equals("mods", StringComparison.Ordinal) ||
+               normalizedLeafName.EndsWith("mods", StringComparison.Ordinal);
     }
 }

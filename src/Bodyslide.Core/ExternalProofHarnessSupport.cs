@@ -1308,7 +1308,7 @@ internal static class ExternalProofHarnessSupport
 
             if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
             {
-                return lockAgeExpired;
+                return false;
             }
 
             var activeProcess = Process.GetProcessById(metadata.ProcessId);
