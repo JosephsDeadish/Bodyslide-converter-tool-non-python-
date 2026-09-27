@@ -25259,7 +25259,7 @@ internal sealed class LocalExportService(
             return new string(trimmed.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
         }
 
-        IReadOnlyList<string> ValidateBodySlideSemanticConsistency(string ospPath, string shapeDataDirectory)
+        IReadOnlyList<string> ValidateBodySlideSemanticConsistency(string ospPath, string sliderGroupsPath, string shapeDataDirectory)
         {
             var problems = new List<string>();
             if (!File.Exists(ospPath) || !Directory.Exists(shapeDataDirectory))
@@ -25310,6 +25310,12 @@ internal sealed class LocalExportService(
                     : null;
                 var sliderSets = document.Descendants()
                     .Where(static element => string.Equals(element.Name.LocalName, "SliderSet", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                var sliderSetNames = sliderSets
+                    .Select(static sliderSet => ((string?)sliderSet.Attribute("name"))?.Trim())
+                    .Where(static name => !string.IsNullOrWhiteSpace(name))
+                    .Select(static name => name!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
                 if (sliderSets.Length == 0)
                 {
@@ -25380,6 +25386,31 @@ internal sealed class LocalExportService(
                     if (inconsistentSliderSets.Count > 0)
                     {
                         problems.Add($"OSP SliderSet entries do not declare identical slider coverage across meshes: {string.Join(", ", inconsistentSliderSets.Take(4))}");
+                    }
+                }
+
+                if (!File.Exists(sliderGroupsPath))
+                {
+                    problems.Add("SliderGroups XML is missing for generated BodySlide project.");
+                }
+                else
+                {
+                    var sliderGroupsDocument = System.Xml.Linq.XDocument.Load(sliderGroupsPath);
+                    var sliderGroupMembers = sliderGroupsDocument.Descendants()
+                        .Where(static element => string.Equals(element.Name.LocalName, "Member", StringComparison.OrdinalIgnoreCase))
+                        .Select(static element => (string?)element.Attribute("name"))
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .Select(static value => value!.Trim())
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    if (sliderSetNames.Length > 0)
+                    {
+                        var missingSliderGroupMembers = sliderSetNames
+                            .Where(name => !sliderGroupMembers.Contains(name))
+                            .ToArray();
+                        if (missingSliderGroupMembers.Length > 0)
+                        {
+                            problems.Add($"SliderGroups XML is missing SliderSet members declared by OSP: {string.Join(", ", missingSliderGroupMembers.Take(4))}");
+                        }
                     }
                 }
 
@@ -25585,6 +25616,19 @@ internal sealed class LocalExportService(
                     if (incompleteWeightCoverage.Length > 0)
                     {
                         problems.Add($"ShapeData payloads are missing low/high weight coverage for BodySlide sliders: {string.Join(", ", incompleteWeightCoverage.Take(4))}");
+                    }
+
+                    var ospNormalizedSliderNames = ospSliderNames
+                        .Select(NormalizeSliderToken)
+                        .Where(static token => !string.IsNullOrWhiteSpace(token))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var unexpectedPayloadCoverage = payloadSliderNames
+                        .Where(token => !ospNormalizedSliderNames.Contains(token))
+                        .Take(4)
+                        .ToArray();
+                    if (unexpectedPayloadCoverage.Length > 0)
+                    {
+                        problems.Add($"ShapeData payloads contain slider names not declared in OSP: {string.Join(", ", unexpectedPayloadCoverage)}");
                     }
                 }
 
@@ -25994,7 +26038,7 @@ internal sealed class LocalExportService(
                     $"BodySlide ShapeData for '{bodySlideProject.ProjectName}' is missing BSD/TRI slider payload files, so the generated project cannot rebuild slider morphs correctly."));
             }
 
-            var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, shapeDataDirectory);
+            var semanticProblems = ValidateBodySlideSemanticConsistency(ospPath, sliderGroupsPath, shapeDataDirectory);
             if (semanticProblems.Count > 0)
             {
                 issues.Add(new ConversionValidationIssue(
@@ -34851,6 +34895,14 @@ internal sealed class LocalExportService(
                ["talk / phoneme", "open mouth", "combat yell", "stagger"],
                oralRegions,
                ["skeleton-compatibility.json", "preview-workbench.html", "in-game-validation.json"]));
+
+            scenarios.Add(new InGameValidationScenario(
+               "Jaw/tongue pose stress sweep",
+               "High",
+               $"Validate jaw and tongue deformation continuity for oral regions on {targetBody}: {string.Join(", ", oralRegions)}",
+               ["phoneme set", "open mouth", "ragdoll / hit react", "camera close-up"],
+               oralRegions,
+               ["pose-simulation-report.json", "skeleton-compatibility.json", "in-game-validation.json"]));
         }
 
         if (topologyCorrespondence.HeuristicHeavy || !topologyCorrespondence.Classification.Equals("aligned", StringComparison.OrdinalIgnoreCase))
@@ -34989,6 +35041,17 @@ internal sealed class LocalExportService(
                ["idle", "walk", "sit", "stagger"],
                sensitiveRegions.Where(static region => region is "genitals" or "mouth").ToArray(),
                ["preview-workbench.html", "skeleton-compatibility.json", "world-physics.json"]));
+
+            if (sensitiveRegions.Contains("genitals", StringComparer.OrdinalIgnoreCase))
+            {
+               scenarios.Add(new InGameValidationScenario(
+                   "Genital/groin collision stress sweep",
+                   "High",
+                   $"Genital/groin-sensitive regions were detected for {targetBody}; verify collision ownership, clipping resistance, and load-order-safe plugin patch placement.",
+                   ["idle", "walk", "sit", "combat stagger", "save / reload"],
+                   sensitiveRegions.Where(static region => region is "genitals" or "groin" or "pelvis").DefaultIfEmpty("genitals").ToArray(),
+                   ["world-physics.json", "plugin-patches.json", "pose-simulation-report.json", "in-game-validation.json"]));
+            }
         }
 
         if (skeletonMapping.UnsupportedBones.Count > 0)
@@ -35095,6 +35158,14 @@ internal sealed class LocalExportService(
                ["drop to ground", "idle", "walk"],
                ["feet", "ground"],
                ["world-physics.json", "preview-workbench.html"]));
+
+            scenarios.Add(new InGameValidationScenario(
+               "Heel IK and ground-contact sweep",
+               worldPhysics.HeelAnalysis is null ? "Action" : "High",
+               $"Validate heel IK, toe angle continuity, and sole contact stability for profile '{worldPhysics.HeelAnalysis?.Profile ?? "flat"}' before release.",
+               ["idle", "walk", "sprint", "jump / landing"],
+               ["feet", "heels", "ankles", "ground"],
+               ["world-physics.json", "pose-simulation-report.json", "in-game-validation.json", "preview-workbench.html"]));
         }
 
         return scenarios;

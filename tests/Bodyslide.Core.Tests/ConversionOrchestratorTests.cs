@@ -13785,6 +13785,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("HIMBO", out var himbo));
         Assert.Contains("Belly", himbo.SliderNames);
         Assert.Contains("Thighs", himbo.SliderNames);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("HIMBO V5", out var himboAlias));
+        Assert.Equal("HIMBO", himboAlias.Name);
 
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("SAM Light", out var samLight));
         Assert.Contains("Belly", samLight.SliderNames);
@@ -13834,6 +13836,8 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.True(tng.MinimumPhysicsChainDepth >= 3);
         Assert.True(BuiltInBodyMetadataCatalog.TryGet("The New Gentleman 2", out var tngAlias));
         Assert.Equal("TNG", tngAlias.Name);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("The New Gentlemen", out var tngAliasPlural));
+        Assert.Equal("TNG", tngAliasPlural.Name);
 
         Assert.Contains("SAM Foreskin", samLight.AvailablePhysicsBones);
 
@@ -13927,6 +13931,12 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("SAM", MeshBehaviorCatalog.MaleBodyTargets);
         Assert.Contains("SAM Light", MeshBehaviorCatalog.MaleBodyTargets);
         Assert.Contains("TNG", MeshBehaviorCatalog.MaleBodyTargets);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("CBBE SSE", out var cbbeAlias));
+        Assert.Equal("CBBE", cbbeAlias.Name);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("3BA V2", out var threeBaAlias));
+        Assert.Equal("3BA", threeBaAlias.Name);
+        Assert.True(BuiltInBodyMetadataCatalog.TryGet("BHUNP SMP", out var bhunpAlias));
+        Assert.Equal("BHUNP", bhunpAlias.Name);
         Assert.Contains("NPC Pelvis", SkeletonMappingCatalog.CommonBones);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Breast03", "xpmsse-female-advanced", out var fallbacks));
         Assert.Contains("NPC L Breast02", fallbacks);
@@ -14031,6 +14041,10 @@ public sealed class PhysicsMeshTypeTuningTests
         Assert.Contains("HDT Mouth", throatFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("HDT TongueTip", "ube-extended", out var tongueTipFallbacks));
         Assert.Contains("HDT Tongue", tongueTipFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC L Pec01", "xpmsse-male-himbo-advanced", out var pecFallbacks));
+        Assert.Contains("NPC L Pec", pecFallbacks);
+        Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("NPC Belly02", "xpmsse-female-bhunp-advanced", out var bellyFallbacks));
+        Assert.Contains("NPC Belly01", bellyFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("BeastForeskin", "beast-humanoid", out var beastForeskinFallbacks));
         Assert.Contains("NPC Pelvis", beastForeskinFallbacks);
         Assert.True(SkeletonMappingCatalog.TryGetFallbackCandidates("TongueTip", "beast-humanoid", out var beastTongueFallbacks));
@@ -18350,6 +18364,15 @@ public sealed class RealisticModPackFixtureTests
             Assert.Contains(
                 inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
                 static name => string.Equals(name, "Skeleton family crossover sweep", StringComparison.Ordinal));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Jaw/tongue pose stress sweep", StringComparison.Ordinal));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Genital/groin collision stress sweep", StringComparison.Ordinal));
+            Assert.Contains(
+                inGameReport.RootElement.GetProperty("ScenarioMatrix").EnumerateArray().Select(static entry => entry.GetProperty("Name").GetString()),
+                static name => string.Equals(name, "Heel IK and ground-contact sweep", StringComparison.Ordinal));
 
             var topologyJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "topology-correspondence.json"));
             Assert.Contains("\"SemanticVertexMatchingStatus\"", topologyJson, StringComparison.Ordinal);

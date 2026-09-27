@@ -5,7 +5,9 @@
       "Caliente's Beautiful Bodies Enhancer",
       "CBBE Curvy",
       "CBBE Slim",
-      "Shiva CBBE"
+      "Shiva CBBE",
+      "CBBE SE",
+      "CBBE SSE"
     ],
     "gender": "female",
     "defaultPhysics": "none",
@@ -97,7 +99,11 @@
       "3BBB",
       "3BBB Amazing",
       "CBBE 3BA",
-      "CBBE 3BBB"
+      "CBBE 3BBB",
+      "3BBB Advanced",
+      "CBBE 3BBB Advanced",
+      "3BA V2",
+      "3BA 2.0"
     ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
@@ -207,7 +213,9 @@
     "aliases": [
       "BHUNP 3BBB",
       "UNP Special",
-      "UUNP Special"
+      "UUNP Special",
+      "BHUNP SMP",
+      "Baka Haeun UNP"
     ],
     "gender": "female",
     "defaultPhysics": "smp+cbpc",
@@ -908,7 +916,9 @@
     "name": "HIMBO",
     "aliases": [
       "Highly Improved Male Body Overhaul",
-      "HIMBO Body"
+      "HIMBO Body",
+      "HIMBO V5",
+      "HIMBO Next"
     ],
     "gender": "male",
     "defaultPhysics": "smp",
@@ -1431,7 +1441,9 @@
       "TNGExtended",
       "New Gentleman",
       "The New Gentleman 2",
-      "TNG 2"
+      "TNG 2",
+      "The New Gentlemen",
+      "TNG 2.0"
     ],
     "gender": "male",
     "defaultPhysics": "smp",

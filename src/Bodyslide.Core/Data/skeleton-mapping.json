@@ -39,6 +39,9 @@
     "NPC R Breast": ["NPC R Breast01"],
     "NPC L Lat": ["NPC L Pec"],
     "NPC R Lat": ["NPC R Pec"],
+    "NPC L Pec01": ["NPC L Pec", "NPC L Breast"],
+    "NPC R Pec01": ["NPC R Pec", "NPC R Breast"],
+    "NPC Belly02": ["NPC Belly01", "NPC Belly"],
     "BreastUpper": ["NPC L Breast02", "NPC R Breast02", "NPC L Breast01", "NPC R Breast01"],
     "BreastLower": ["NPC L Breast01", "NPC R Breast01", "NPC Belly"],
     "BreastOuter": ["NPC L Breast01", "NPC R Breast01", "NPC L Breast", "NPC R Breast"],
@@ -133,6 +136,29 @@
       ]
     },
     {
+      "id": "xpmsse-female-bhunp-advanced",
+      "bones": [
+        "NPC L Breast",
+        "NPC R Breast",
+        "NPC L Breast01",
+        "NPC R Breast01",
+        "NPC L Breast02",
+        "NPC R Breast02",
+        "NPC Belly",
+        "NPC Belly01",
+        "NPC Belly02",
+        "NPC L Butt",
+        "NPC R Butt",
+        "NPC L Thigh",
+        "NPC R Thigh"
+      ],
+      "fallbackMappings": {
+        "NPC Belly02": ["NPC Belly01", "NPC Belly"],
+        "NPC L Breast03": ["NPC L Breast02", "NPC L Breast01", "NPC L Breast"],
+        "NPC R Breast03": ["NPC R Breast02", "NPC R Breast01", "NPC R Breast"]
+      }
+    },
+    {
       "id": "xpmsse-male-smp",
       "bones": [
         "NPC L Pec",
@@ -153,6 +179,38 @@
         "SOS Scrotum"
       ],
       "fallbackMappings": {
+        "SAM Genitals": ["SOS GenitalsBase", "SOS Genitals01"],
+        "SAM Foreskin": ["SOS Foreskin", "SOS Genitals01"]
+      }
+    },
+    {
+      "id": "xpmsse-male-himbo-advanced",
+      "bones": [
+        "NPC L Pec",
+        "NPC R Pec",
+        "NPC L Pec01",
+        "NPC R Pec01",
+        "NPC L Lat",
+        "NPC R Lat",
+        "NPC Belly",
+        "NPC Belly01",
+        "NPC Belly02",
+        "NPC L Butt",
+        "NPC R Butt",
+        "SAM Genitals",
+        "SAM Foreskin",
+        "SOS GenitalsBase",
+        "SOS Genitals01",
+        "SOS Genitals02",
+        "SOS Foreskin",
+        "SOS Shaft",
+        "SOS Glans",
+        "SOS Scrotum"
+      ],
+      "fallbackMappings": {
+        "NPC L Pec01": ["NPC L Pec", "NPC L Breast"],
+        "NPC R Pec01": ["NPC R Pec", "NPC R Breast"],
+        "NPC Belly02": ["NPC Belly01", "NPC Belly"],
         "SAM Genitals": ["SOS GenitalsBase", "SOS Genitals01"],
         "SAM Foreskin": ["SOS Foreskin", "SOS Genitals01"]
       }
