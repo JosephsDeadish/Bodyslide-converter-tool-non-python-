@@ -163,6 +163,8 @@ dotnet run --project src/Bodyslide.Standalone -- --input "<armor path>" --target
 
 Every push to `main` automatically updates the **"SlideSmith — latest build"** pre-release entry on the Releases page. Versioned releases are published by pushing a `v*` tag.
 
+For Mod Organizer 2, set the executable to the bundle root `SlideSmith.exe` (GUI) for the most reliable launch behavior.
+
 If `SlideSmith-CLI.exe` is launched with **no arguments**, the CLI now auto-opens the desktop GUI when `SlideSmith.exe` is available either in the same folder or in a sibling `desktop/` folder (bundle layout), instead of just printing usage and exiting.
 
 ## GitHub Actions (CI)

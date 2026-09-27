@@ -377,6 +377,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         }
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
+        var launchedFromModOrganizer = IsLikelyModOrganizerEnvironment();
         var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
         foreach (var desktopExePath in new[]
                  {
@@ -396,12 +397,16 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                 continue;
             }
 
-            Process.Start(new ProcessStartInfo
+            using var launched = Process.Start(new ProcessStartInfo
             {
                 FileName = desktopExePath,
                 WorkingDirectory = Path.GetDirectoryName(desktopExePath) ?? executableDirectory,
-                UseShellExecute = true
+                UseShellExecute = !launchedFromModOrganizer
             });
+            if (launchedFromModOrganizer)
+            {
+                launched?.WaitForExit();
+            }
 
             return true;
         }
@@ -409,6 +414,26 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Could not auto-launch desktop GUI: {ex.Message}");
+    }
+
+    return false;
+}
+
+static bool IsLikelyModOrganizerEnvironment()
+{
+    foreach (var key in Environment.GetEnvironmentVariables().Keys)
+    {
+        if (key is not string name)
+        {
+            continue;
+        }
+
+        if (name.Contains("USVFS", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("MODORGANIZER", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("MO2_INSTANCE", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
     }
 
     return false;
