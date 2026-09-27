@@ -251,7 +251,7 @@ internal static class DesktopWorkflowSupport
             }
 
             return allowAncestorWalk
-                ? TryWalkAncestorResultDirectory(Path.GetDirectoryName(fullCandidatePath))
+                ? TryWalkAncestorResultDirectory(fullCandidatePath)
                 : null;
         }
 

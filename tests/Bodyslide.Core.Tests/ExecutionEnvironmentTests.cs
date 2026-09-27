@@ -100,4 +100,32 @@ public sealed class ExecutionEnvironmentTests
             Directory.Delete(workingDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryNormalizeCurrentDirectoryToExecutionRoot_UsesAppContextBaseDirectoryWhenProcessPathMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var currentDirectory = Path.Combine(workingDirectory, "current");
+        var appBaseDirectory = Path.Combine(workingDirectory, "app-base");
+        Directory.CreateDirectory(currentDirectory);
+        Directory.CreateDirectory(appBaseDirectory);
+        var originalCurrentDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            Environment.CurrentDirectory = currentDirectory;
+
+            var changed = ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
+                processPath: null,
+                appContextBaseDirectory: appBaseDirectory);
+
+            Assert.True(changed);
+            Assert.Equal(Path.GetFullPath(appBaseDirectory), Path.GetFullPath(Environment.CurrentDirectory));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalCurrentDirectory;
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
 }
