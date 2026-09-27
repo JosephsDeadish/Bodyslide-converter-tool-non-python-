@@ -181,25 +181,6 @@ public static class DesktopUiSettingsStore
                 return false;
             }
 
-            private static void TryDeleteLockFile(string? lockPath)
-            {
-                if (string.IsNullOrWhiteSpace(lockPath))
-                {
-                    return;
-                }
-
-                try
-                {
-                    if (File.Exists(lockPath))
-                    {
-                        File.Delete(lockPath);
-                    }
-                }
-                catch
-                {
-                }
-            }
-
             using (var lockProbe = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
                 if (!IsLockFileStale(lockProbe, staleCutoffUtc))
@@ -214,6 +195,25 @@ public static class DesktopUiSettingsStore
         catch
         {
             return false;
+        }
+    }
+
+    private static void TryDeleteLockFile(string? lockPath)
+    {
+        if (string.IsNullOrWhiteSpace(lockPath))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(lockPath))
+            {
+                File.Delete(lockPath);
+            }
+        }
+        catch
+        {
         }
     }
 
