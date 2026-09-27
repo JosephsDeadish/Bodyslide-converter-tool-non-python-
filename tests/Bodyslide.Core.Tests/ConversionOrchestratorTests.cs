@@ -1847,8 +1847,9 @@ public sealed class ConversionOrchestratorTests
             var sliderGroupsXml = await File.ReadAllTextAsync(sliderGroupsPath);
             Assert.Contains("SlideSmith Conversion", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("installerVersion=\"5\"", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<requiredInstallFiles>", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("<Version MachineVersion=\"0.1\">0.1</Version>", infoXml, StringComparison.Ordinal);
-            Assert.Contains("Mod Organizer 2 or Vortex", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("Mod Organizer 2 or Vortex", infoXml, StringComparison.Ordinal);
             Assert.Contains("keep the SlideSmith mod below the original armor/body mod", infoXml, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("[General]", metaIni, StringComparison.Ordinal);
             Assert.Contains("gameName=Skyrim Special Edition", metaIni, StringComparison.Ordinal);
@@ -1869,8 +1870,8 @@ public sealed class ConversionOrchestratorTests
     [Fact]
     public async Task ConvertAsync_WithDefaultModules_FomodModuleConfigHasFileEntries()
     {
-        // The FOMOD <files> block must not be empty — mod managers (MO2, Vortex) use it
-        // to determine what files to install.  An empty <files /> means nothing gets installed.
+        // The FOMOD requiredInstallFiles block must not be empty — mod managers (MO2, Vortex)
+        // use it to detect valid game data and what to install.
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var outputDirectory = Path.Combine(workingDirectory, "output");
         Directory.CreateDirectory(workingDirectory);
@@ -1886,9 +1887,7 @@ public sealed class ConversionOrchestratorTests
             var moduleConfigPath = Path.Combine(outputDirectory, "fomod", "ModuleConfig.xml");
             var moduleConfig = await File.ReadAllTextAsync(moduleConfigPath);
 
-            // Must have real file/folder entries — not an empty <files /> self-closer.
-            Assert.DoesNotContain("<files />", moduleConfig, StringComparison.Ordinal);
-            Assert.Contains("<files>", moduleConfig, StringComparison.Ordinal);
+            Assert.Contains("<requiredInstallFiles>", moduleConfig, StringComparison.Ordinal);
             // meshes/ and CalienteTools/ folders should both appear.
             Assert.Contains("meshes", moduleConfig, StringComparison.Ordinal);
             Assert.Contains("CalienteTools", moduleConfig, StringComparison.Ordinal);

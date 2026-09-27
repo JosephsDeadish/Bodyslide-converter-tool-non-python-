@@ -78,6 +78,7 @@ public sealed class MainForm : Form
     private readonly Button _clearCustomProfilesButton;
     private readonly RadioButton _usePresetRadio;
     private readonly RadioButton _useCustomTargetRadio;
+    private readonly CheckBox _showAdvancedOptionsCheckBox;
     private readonly CheckBox _outputZipCheckBox;
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _outputHintLabel;
@@ -123,6 +124,7 @@ public sealed class MainForm : Form
     private readonly TableLayoutPanel _conversionOptionsPanel;
     private readonly GroupBox _destinationSetupGroupBox;
     private readonly GroupBox _sourceHintsGroupBox;
+    private readonly GroupBox _customProfilesGroupBox;
     private readonly TextBox _presetTargetTextBox;
 
     private CancellationTokenSource? _activeConversion;
@@ -426,6 +428,7 @@ public sealed class MainForm : Form
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        modeRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         modeRow.Controls.Add(new Label
         {
             AutoSize = true,
@@ -523,13 +526,24 @@ public sealed class MainForm : Form
         modeQuickActionsPanel.Controls.Add(autoMapTargetButton);
         modeRow.Controls.Add(modeQuickActionsPanel, 0, 2);
         modeRow.SetColumnSpan(modeQuickActionsPanel, 2);
+        _showAdvancedOptionsCheckBox = new CheckBox
+        {
+            Name = "showAdvancedOptionsCheckBox",
+            Text = "Show advanced options (source overrides, custom profiles, support tuning)",
+            AutoSize = true,
+            Checked = false,
+            Margin = new Padding(0, 4, 0, 0),
+        };
+        _showAdvancedOptionsCheckBox.CheckedChanged += (_, _) => ApplyAdvancedOptionsVisibility();
+        modeRow.Controls.Add(_showAdvancedOptionsCheckBox, 0, 3);
+        modeRow.SetColumnSpan(_showAdvancedOptionsCheckBox, 2);
         _modeStatusLabel = new Label
         {
             AutoSize = true,
             Margin = new Padding(0, 6, 0, 0),
             Text = "FROM body = what the original armor was built for. TO body = what you want the converted output to fit.",
         };
-        modeRow.Controls.Add(_modeStatusLabel, 0, 3);
+        modeRow.Controls.Add(_modeStatusLabel, 0, 4);
         modeRow.SetColumnSpan(_modeStatusLabel, 2);
         _topLayoutPanel.Controls.Add(modeRow, 0, 2);
 
@@ -981,7 +995,8 @@ public sealed class MainForm : Form
         customProfileActions.Controls.Add(_removeCustomProfileButton);
         customProfileActions.Controls.Add(_clearCustomProfilesButton);
         customProfilesPanel.Controls.Add(customProfileActions, 1, 1);
-        _topLayoutPanel.Controls.Add(CreateAutoSizeSection("Custom profiles", customProfilesPanel), 0, 6);
+        _customProfilesGroupBox = CreateAutoSizeSection("Custom profiles", customProfilesPanel);
+        _topLayoutPanel.Controls.Add(_customProfilesGroupBox, 0, 6);
 
         var primaryActionRow = new FlowLayoutPanel
         {
@@ -1425,6 +1440,7 @@ public sealed class MainForm : Form
         _mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
 
         RefreshModeState();
+        ApplyAdvancedOptionsVisibility();
         UpdateResponsiveLayout();
         UpdateMainSplitLayout();
         UpdateSourceDetails();
@@ -1521,8 +1537,8 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(10),
-            Margin = new Padding(0, 8, 0, 0),
+            Padding = new Padding(12),
+            Margin = new Padding(0, 10, 0, 0),
             Controls = { content }
         };
     }
@@ -2589,6 +2605,26 @@ public sealed class MainForm : Form
         UpdateTargetDetails();
         UpdatePhysicsDetails();
         UpdateOutputHint();
+        ApplyAdvancedOptionsVisibility();
+    }
+
+    private void ApplyAdvancedOptionsVisibility()
+    {
+        var showAdvanced = _showAdvancedOptionsCheckBox?.Checked ?? false;
+        if (_sourceHintsGroupBox is not null && !_sourceHintsGroupBox.IsDisposed)
+        {
+            _sourceHintsGroupBox.Visible = showAdvanced;
+        }
+
+        if (_customProfilesGroupBox is not null && !_customProfilesGroupBox.IsDisposed)
+        {
+            _customProfilesGroupBox.Visible = showAdvanced;
+        }
+
+        _modeStatusLabel.Text = showAdvanced
+            ? "Advanced options are visible. Use source/override/custom-profile controls when you need manual tuning."
+            : "Quick layout is active. Core input + target controls are shown; enable advanced options only when needed.";
+        UpdateMainSplitLayout();
     }
 
     private async Task ConvertAsync()
@@ -4311,6 +4347,9 @@ public sealed class MainForm : Form
             "Recommended for most users. A preset picks the destination body, shape profile, and default output physics together.");
         _optionToolTip.SetToolTip(_useCustomTargetRadio,
             "Use this when you want to type or choose one or more TO bodies directly instead of letting a preset lock the destination body.");
+        _optionToolTip.SetToolTip(_showAdvancedOptionsCheckBox,
+            "Show or hide advanced/manual tuning controls.\n" +
+            "Keep this unchecked for a cleaner default layout.");
         _optionToolTip.SetToolTip(_presetComboBox,
             "Quick setup for the output you want. Presets do not describe the original source armor body.");
         _optionToolTip.SetToolTip(_presetBatchTextBox,
@@ -6492,6 +6531,11 @@ public sealed class MainForm : Form
                 area,
                 "Warning",
                 $"{targetBody} is not fully proven across the current conversion matrix yet ({proofCoverage}; proof execution: {proofExecutionStatus}).{axisSummary}{dimensionSummary}{combinationSummary}",
+                guidanceTarget);
+            add(
+                $"{area} current capability",
+                "Info",
+                $"Conversion output is still generated and usable now for {targetBody}; this warning means universal/strict proof coverage is incomplete, not that conversion is blocked.",
                 guidanceTarget);
             add(
                 "Action card",
