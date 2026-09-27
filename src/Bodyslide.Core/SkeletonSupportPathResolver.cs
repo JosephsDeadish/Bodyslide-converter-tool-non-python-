@@ -91,7 +91,7 @@ public static class SkeletonSupportPathResolver
         var originalRoot = Path.GetFullPath(directoryPath);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var current = originalRoot;
-        for (var depth = 0; depth < 6 && !string.IsNullOrWhiteSpace(current); depth++)
+        while (!string.IsNullOrWhiteSpace(current))
         {
             if (!visited.Add(current))
             {

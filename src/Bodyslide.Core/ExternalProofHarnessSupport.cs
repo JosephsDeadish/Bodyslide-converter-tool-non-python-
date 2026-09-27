@@ -184,6 +184,7 @@ internal static class ExternalProofHarnessSupport
         string MachineName,
         long CreatedUtcTicks);
     private readonly record struct LockFileFingerprint(long LastWriteTimeUtcTicks, long Length, string MetadataSnapshot);
+    private static readonly TimeSpan ForeignMachineLockMaxAge = TimeSpan.FromMinutes(30);
 
     private sealed class WriteLockHandle(string lockPath, FileStream stream) : IDisposable
     {
@@ -1304,7 +1305,7 @@ internal static class ExternalProofHarnessSupport
 
             if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                return IsForeignMachineLockExpired(metadata);
             }
 
             try
@@ -1321,6 +1322,24 @@ internal static class ExternalProofHarnessSupport
         catch
         {
             return false;
+        }
+    }
+
+    private static bool IsForeignMachineLockExpired(WriteLockMetadata metadata)
+    {
+        if (metadata.CreatedUtcTicks <= 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            var createdUtc = new DateTime(metadata.CreatedUtcTicks, DateTimeKind.Utc);
+            return DateTime.UtcNow - createdUtc >= ForeignMachineLockMaxAge;
+        }
+        catch
+        {
+            return true;
         }
     }
 
