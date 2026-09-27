@@ -191,12 +191,7 @@ internal static class DesktopWorkflowSupport
         }
 
         string? candidatePath = null;
-        var fromMo2 = args.Any(static arg =>
-            !string.IsNullOrWhiteSpace(arg) &&
-            (arg.Equals("--mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-             arg.Equals("--modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
-             arg.StartsWith("--mo2-launcher=", StringComparison.OrdinalIgnoreCase) ||
-             arg.StartsWith("--modorganizer-launcher=", StringComparison.OrdinalIgnoreCase)));
+        var fromMo2 = args.Any(static arg => IsMo2LauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -341,6 +336,28 @@ internal static class DesktopWorkflowSupport
         }
 
         return true;
+    }
+
+    private static bool IsMo2LauncherArgument(string? argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument) || !argument.StartsWith('-'))
+        {
+            return false;
+        }
+
+        var trimmed = argument.TrimStart('-');
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var separatorIndex = trimmed.IndexOf('=');
+        var key = separatorIndex >= 0
+            ? trimmed[..separatorIndex]
+            : trimmed;
+
+        return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
+               key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeRecognizedOptionToken(string arg)

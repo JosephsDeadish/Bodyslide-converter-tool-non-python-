@@ -53,6 +53,31 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_TreatsMo2OutputArgumentAsMo2Launch()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--mo2-output",
+                    outputDirectory
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_UsesExistingPathAsStartupInputWhenItIsNotASlideSmithResult()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
