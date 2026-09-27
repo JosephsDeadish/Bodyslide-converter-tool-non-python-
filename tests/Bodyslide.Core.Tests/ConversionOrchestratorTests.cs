@@ -10703,6 +10703,26 @@ public sealed class BsdSliderDataTests
     }
 
     [Fact]
+    public void OsdMorphReader_ReadsOutfitStudioPayloadWithInt32SparseIndexes()
+    {
+        var bytes = BuildOutfitStudioOsdPayload(
+            version: 4,
+            useInt32Indexes: true,
+            ("PayloadWaist", [(70000, 0.125f, -0.25f, 0.375f), (70002, 0.5f, 0.625f, -0.75f)]),
+            ("HideCape_1", [(70001, 0.25f, 0f, 0.5f)]));
+
+        var ok = OsdMorphReader.TryRead(bytes, out var payload);
+
+        Assert.True(ok);
+        Assert.NotNull(payload);
+        Assert.Equal(70003, payload!.InferredVertexCount);
+        Assert.Equal(2, payload.Morphs.Count);
+        Assert.Equal("PayloadWaist", payload.Morphs[0].Name);
+        Assert.Equal(70002, payload.Morphs[0].SparseDeltas[1].Index);
+        Assert.Equal(-0.75f, payload.Morphs[0].SparseDeltas[1].Z, 3);
+    }
+
+    [Fact]
     public void OsdMorphReader_ReadsFixtureBackedLegacyAndOutfitStudioPayloads()
     {
         var legacyPath = GetFixtureFilePath("SampledOsdPayloads", "traveler-legacy.osd");
@@ -11688,7 +11708,15 @@ public sealed class BsdSliderDataTests
         return ms.ToArray();
     }
 
-    private static byte[] BuildOutfitStudioOsdPayload(uint version, params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
+    private static byte[] BuildOutfitStudioOsdPayload(
+        uint version,
+        params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
+        => BuildOutfitStudioOsdPayload(version, useInt32Indexes: false, morphs);
+
+    private static byte[] BuildOutfitStudioOsdPayload(
+        uint version,
+        bool useInt32Indexes,
+        params (string Name, IReadOnlyList<(int Index, float X, float Y, float Z)> Deltas)[] morphs)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true);
@@ -11703,7 +11731,14 @@ public sealed class BsdSliderDataTests
             writer.Write((ushort)morph.Deltas.Count);
             foreach (var (index, x, y, z) in morph.Deltas)
             {
-                writer.Write((ushort)index);
+                if (useInt32Indexes)
+                {
+                    writer.Write(index);
+                }
+                else
+                {
+                    writer.Write((ushort)index);
+                }
                 writer.Write(x);
                 writer.Write(y);
                 writer.Write(z);

@@ -502,6 +502,22 @@ internal static class OsdMorphReader
         out OsdMorphPayload? payload)
     {
         payload = null;
+        if (TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 2, out payload))
+        {
+            return true;
+        }
+
+        return TryReadPayload(bytes, headerSize, morphCount, indexByteWidth: 4, out payload);
+    }
+
+    private static bool TryReadPayload(
+        ReadOnlySpan<byte> bytes,
+        int headerSize,
+        int morphCount,
+        int indexByteWidth,
+        out OsdMorphPayload? payload)
+    {
+        payload = null;
         if (bytes.Length < headerSize)
         {
             return false;
@@ -538,7 +554,7 @@ internal static class OsdMorphReader
                 continue;
             }
 
-            var expectedBytes = checked(deltaCount * 14);
+            var expectedBytes = checked(deltaCount * (indexByteWidth + 12));
             if (offset + expectedBytes > bytes.Length)
             {
                 return false;
@@ -547,8 +563,22 @@ internal static class OsdMorphReader
             var sparseDeltas = new List<(int Index, float X, float Y, float Z)>(deltaCount);
             for (var deltaIndex = 0; deltaIndex < deltaCount; deltaIndex++)
             {
-                var vertexIndex = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
-                offset += 2;
+                int vertexIndex;
+                if (indexByteWidth == 2)
+                {
+                    vertexIndex = BinaryPrimitives.ReadUInt16LittleEndian(bytes[offset..(offset + 2)]);
+                    offset += 2;
+                }
+                else
+                {
+                    vertexIndex = BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]);
+                    offset += 4;
+                    if (vertexIndex < 0)
+                    {
+                        return false;
+                    }
+                }
+
                 var x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
                 offset += 4;
                 var y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(bytes[offset..(offset + 4)]));
