@@ -243,6 +243,7 @@ public static class SkeletonSupportPathResolver
         return candidates
             .Select(static path => (Path: path, Rank: GetCandidateRank(path)))
             .OrderBy(static candidate => candidate.Rank.ExactSkeletonPenalty)
+            .ThenBy(static candidate => candidate.Rank.GenderHintPenalty)
             .ThenBy(static candidate => candidate.Rank.HeuristicNamePenalty)
             .ThenBy(static candidate => candidate.Rank.NegativeTokenPenalty)
             .ThenBy(static candidate => candidate.Rank.PreferredDirectoryPenalty)
@@ -260,10 +261,18 @@ public static class SkeletonSupportPathResolver
         var normalized = path.Replace('\\', '/');
 
         var exactSkeletonPenalty = fileName.Equals("skeleton.nif", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("skeleton_female.nif", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("skeleton_male.nif", StringComparison.OrdinalIgnoreCase)
             ? 0
             : fileStem.Contains("skeleton", StringComparison.OrdinalIgnoreCase)
                 ? 1
                 : 2;
+
+        var genderHintPenalty = fileStem.Contains("female", StringComparison.OrdinalIgnoreCase)
+            ? 0
+            : fileStem.Contains("male", StringComparison.OrdinalIgnoreCase)
+                ? 2
+                : 1;
 
         var heuristicNamePenalty =
             (fileStem.Contains("xpms", StringComparison.OrdinalIgnoreCase) ||
@@ -299,6 +308,7 @@ public static class SkeletonSupportPathResolver
 
         return new SkeletonCandidateRank(
             exactSkeletonPenalty,
+            genderHintPenalty,
             heuristicNamePenalty,
             negativeTokenPenalty,
             preferredDirectoryPenalty,
@@ -334,6 +344,7 @@ public static class SkeletonSupportPathResolver
 
     private readonly record struct SkeletonCandidateRank(
         int ExactSkeletonPenalty,
+        int GenderHintPenalty,
         int HeuristicNamePenalty,
         int NegativeTokenPenalty,
         int PreferredDirectoryPenalty,

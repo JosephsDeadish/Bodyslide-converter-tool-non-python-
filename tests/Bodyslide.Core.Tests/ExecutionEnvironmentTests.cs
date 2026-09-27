@@ -130,6 +130,18 @@ public sealed class ExecutionEnvironmentTests
     }
 
     [Fact]
+    public void GetDefaultOutputRootForInput_TreatsNonExistentExtensionlessNestedDirectoryAsDirectory()
+    {
+        var inputDirectory = Path.Combine(Path.GetTempPath(), "slidesmith-inputs", Guid.NewGuid().ToString("N"), "downloads", "input");
+
+        var outputRoot = ExecutionEnvironment.GetDefaultOutputRootForInput(inputDirectory);
+
+        Assert.Equal(
+            Path.Combine(Path.GetFullPath(inputDirectory), "SlideSmith-output"),
+            outputRoot);
+    }
+
+    [Fact]
     public void TryNormalizeCurrentDirectoryToExecutionRoot_TreatsCaseVariantPathsAsDistinctOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())

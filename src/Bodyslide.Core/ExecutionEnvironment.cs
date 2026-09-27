@@ -152,10 +152,10 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        return IsLikelyDirectoryName(leafName);
+        return !IsLikelyFileName(leafName);
     }
 
-    private static bool IsLikelyDirectoryName(string leafName)
+    private static bool IsLikelyFileName(string leafName)
     {
         if (string.IsNullOrWhiteSpace(leafName))
         {
@@ -163,10 +163,10 @@ public static class ExecutionEnvironment
         }
 
         var normalizedLeafName = leafName.Trim().ToLowerInvariant();
-        return normalizedLeafName.Contains("pack", StringComparison.Ordinal) ||
-               normalizedLeafName.Contains("folder", StringComparison.Ordinal) ||
-               normalizedLeafName.EndsWith("mods", StringComparison.Ordinal) ||
-               normalizedLeafName.Equals("mods", StringComparison.Ordinal) ||
-               normalizedLeafName.Equals("modslist", StringComparison.Ordinal);
+        return normalizedLeafName.Contains("archive", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("launcher", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("binary", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("executable", StringComparison.Ordinal) ||
+               normalizedLeafName.Contains("program", StringComparison.Ordinal);
     }
 }

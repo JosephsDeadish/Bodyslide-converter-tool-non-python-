@@ -140,6 +140,26 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
+    public void TryResolveSkeletonNifPath_PrefersFemaleSkeletonVariantOverGenericAndMaleCandidates()
+    {
+        var modRoot = Path.Combine(_root, "FemaleVariantPreferencePack");
+        var femaleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets female");
+        var maleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets male");
+        Directory.CreateDirectory(femaleDirectory);
+        Directory.CreateDirectory(maleDirectory);
+
+        var femaleSkeletonPath = Path.Combine(femaleDirectory, "skeleton_female.nif");
+        var maleSkeletonPath = Path.Combine(maleDirectory, "skeleton.nif");
+        File.WriteAllText(femaleSkeletonPath, "female");
+        File.WriteAllText(maleSkeletonPath, "male");
+
+        var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(femaleSkeletonPath), result);
+    }
+
+    [Fact]
     public void TryResolveSkeletonNifPath_DirectBodyMeshFallsBackToContainingSkeletonDirectory()
     {
         var modRoot = Path.Combine(_root, "BodyMeshInputPack");
