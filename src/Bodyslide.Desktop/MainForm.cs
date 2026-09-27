@@ -59,6 +59,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _buildSlidersCheckBox;
     private readonly Label _outputHintLabel;
     private readonly Label _statusLabel;
+    private readonly Label _progressDetailsLabel;
     private readonly Label _modeStatusLabel;
     private readonly Label _targetSelectionLabel;
     private readonly Label _targetModeHintLabel;
@@ -1123,8 +1124,9 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
         };
+        bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         bottomPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -1134,10 +1136,16 @@ public sealed class MainForm : Form
             Text = "Ready.",
             Margin = new Padding(0, 4, 0, 2),
         };
+        _progressDetailsLabel = new Label
+        {
+            AutoSize = true,
+            Text = "Progress details: idle",
+            Margin = new Padding(0, 0, 0, 4),
+        };
         _progressBar = new ProgressBar
         {
             Dock = DockStyle.Top,
-            Height = 14,
+            Height = 18,
             Style = ProgressBarStyle.Continuous,
             Value = 0,
         };
@@ -1302,7 +1310,8 @@ public sealed class MainForm : Form
         _resultsTabControl.TabPages.Add(_cacheTabPage);
         bottomPanel.Controls.Add(_statusLabel, 0, 0);
         bottomPanel.Controls.Add(_progressBar, 0, 1);
-        bottomPanel.Controls.Add(_resultsTabControl, 0, 2);
+        bottomPanel.Controls.Add(_progressDetailsLabel, 0, 2);
+        bottomPanel.Controls.Add(_resultsTabControl, 0, 3);
         _mainSplitContainer.Panel2.Controls.Add(CreateSection("Results and diagnostics", bottomPanel));
 
         RefreshModeState();
@@ -1635,6 +1644,7 @@ public sealed class MainForm : Form
             case Label label:
                 label.BackColor = Color.Transparent;
                 label.ForeColor = ReferenceEquals(label, _statusLabel) ||
+                    ReferenceEquals(label, _progressDetailsLabel) ||
                     ReferenceEquals(label, _presetDetailsLabel) ||
                     ReferenceEquals(label, _targetDetailsLabel) ||
                     ReferenceEquals(label, _sourceDetailsLabel) ||
@@ -2463,7 +2473,9 @@ public sealed class MainForm : Form
                 }
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
-                _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {statusSuffix}";
+                var stageDisplay = BuildProgressStageDisplay(update);
+                _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}";
+                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • {statusSuffix}";
 
                 if (update.IsItemCompleted)
                 {
@@ -2682,6 +2694,7 @@ public sealed class MainForm : Form
         _progressBar.Maximum = 100;
         _progressBar.Value = 0;
         _statusLabel.Text = statusText;
+        _progressDetailsLabel.Text = "Overall progress: starting…";
     }
 
     private void ShowProgressValue(int percent, string statusText)
@@ -2692,6 +2705,21 @@ public sealed class MainForm : Form
         _progressBar.Maximum = 100;
         _progressBar.Value = Math.Clamp(percent, 0, 100);
         _statusLabel.Text = statusText;
+        _progressDetailsLabel.Text = $"Overall progress: {_progressBar.Value}%";
+    }
+
+    private static string BuildProgressStageDisplay(BatchProgressUpdate update)
+    {
+        var stageName = string.IsNullOrWhiteSpace(update.Stage) ? "Processing" : update.Stage.Trim();
+        if (update.StageCount <= 0)
+        {
+            return stageName;
+        }
+
+        var stageIndex = update.IsItemCompleted
+            ? update.StageCount
+            : Math.Clamp(update.StageIndex, 1, update.StageCount);
+        return $"{stageName} (stage {stageIndex}/{update.StageCount})";
     }
 
     private void SetBusyState(bool isBusy)
@@ -2720,6 +2748,10 @@ public sealed class MainForm : Form
         }
         _progressBar.MarqueeAnimationSpeed = _progressBar.Style == ProgressBarStyle.Marquee ? 30 : 0;
         _progressBar.Value = 0;
+        if (!isBusy)
+        {
+            _progressDetailsLabel.Text = "Progress details: idle";
+        }
         if (!isBusy)
         {
             UpdateReportActionButtonState();
