@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Text;
@@ -12,6 +13,27 @@ namespace Bodyslide.Desktop;
 public sealed class MainForm : Form
 {
     private static readonly string[] PreviewFileCandidates = ["preview-workbench.html", "preview.html"];
+    private static readonly string[] ConversionPipelineStages =
+    [
+        "Importing input",
+        "Analyzing textures",
+        "Scanning plugins",
+        "Checking plugin race compatibility",
+        "Detecting source body",
+        "Analyzing mesh",
+        "Binding armor regions",
+        "Building deformation cage",
+        "Converting mesh",
+        "Transferring weights",
+        "Mapping skeleton",
+        "Generating morphs",
+        "Rebuilding partitions",
+        "Detecting clipping",
+        "Correcting mesh fit",
+        "Running collision and pose checks",
+        "Building physics and BodySlide data",
+        "Exporting outputs"
+    ];
     private static readonly JsonSerializerOptions ReportJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -78,6 +100,8 @@ public sealed class MainForm : Form
     private readonly ListView _inspectListView;
     private readonly TabPage _summaryTabPage;
     private readonly ListView _summaryListView;
+    private readonly TabPage _pipelineTabPage;
+    private readonly ListView _pipelineListView;
     private readonly TabPage _guidanceTabPage;
     private readonly ListView _guidanceListView;
     private readonly TabPage _reportsTabPage;
@@ -1207,6 +1231,23 @@ public sealed class MainForm : Form
         _summaryListView.Columns.Add("Value", -2);
         _summaryTabPage.Controls.Add(_summaryListView);
         _resultsTabControl.TabPages.Add(_summaryTabPage);
+        _pipelineTabPage = new TabPage(DesktopSmokeTestContract.PipelineTabTitle) { Name = "pipelineTabPage" };
+        _pipelineListView = new ListView
+        {
+            Name = "pipelineListView",
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            GridLines = true,
+            HeaderStyle = ColumnHeaderStyle.Nonclickable,
+        };
+        _pipelineListView.Columns.Add("Step", 60);
+        _pipelineListView.Columns.Add("Stage", 260);
+        _pipelineListView.Columns.Add("Status", 120);
+        _pipelineListView.Columns.Add("Progress", 120);
+        _pipelineListView.Columns.Add("ETA / note", -2);
+        _pipelineTabPage.Controls.Add(_pipelineListView);
+        _resultsTabControl.TabPages.Add(_pipelineTabPage);
         _guidanceTabPage = new TabPage(DesktopSmokeTestContract.NextActionsTabTitle) { Name = "guidanceTabPage" };
         _guidanceListView = new ListView
         {
@@ -1320,6 +1361,7 @@ public sealed class MainForm : Form
         UpdateSourceDetails();
         PopulateCatalogTab();
         PopulateReadinessTab(CreateDesktopReadinessReport());
+        ResetPipelineTimeline();
         PopulateGuidanceTab(Array.Empty<string>(), null);
         LoadUiSettings();
         RefreshCustomProfilesList();
@@ -1512,6 +1554,7 @@ public sealed class MainForm : Form
     {
         AutoSizeListViewColumns(_inspectListView, 240, 520);
         AutoSizeListViewColumns(_summaryListView, 220, 420);
+        AutoSizeListViewColumns(_pipelineListView, 70, 260, 120, 120, 320);
         AutoSizeListViewColumns(_guidanceListView, 180, 100, 460);
         AutoSizeListViewColumns(_reportsListView, 260, 180, 420);
         AutoSizeListViewColumns(_catalogListView, 170, 180, 480);
@@ -2437,6 +2480,10 @@ public sealed class MainForm : Form
             // during batch runs instead of showing a marquee spinner throughout.
             string? lastProgressStatus = null;
             var lastProgressUiUpdateUtc = DateTime.MinValue;
+            var conversionStartedUtc = DateTime.UtcNow;
+            string? activeStageKey = null;
+            DateTime? activeStageStartedUtc = null;
+            ResetPipelineTimeline();
             var progress = new CoalescingBatchProgress(this, update =>
             {
                 var total = Math.Max(1, update.Total);
@@ -2474,8 +2521,18 @@ public sealed class MainForm : Form
                 _progressBar.Maximum = 100;
                 _progressBar.Value = Math.Clamp(percent, 0, 100);
                 var stageDisplay = BuildProgressStageDisplay(update);
+                var stageKey = $"{activeItem}|{update.CurrentFile}|{update.Stage}";
+                if (!string.Equals(stageKey, activeStageKey, StringComparison.Ordinal))
+                {
+                    activeStageKey = stageKey;
+                    activeStageStartedUtc = now;
+                }
+
+                var overallEta = EstimateRemainingDuration(conversionStartedUtc, now, progressUnits, total);
+                var stageEta = EstimateStageRemainingDuration(activeStageStartedUtc, now, update.StageIndex, update.StageCount);
                 _statusLabel.Text = $"Converting {activeItem}/{total} ({percent}%): {stageDisplay}";
-                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • {statusSuffix}";
+                _progressDetailsLabel.Text = $"Overall {percent}% • Item {activeItem}/{total} • ETA {FormatDuration(overallEta)} • {statusSuffix}";
+                UpdatePipelineTimeline(update, stageEta, overallEta);
 
                 if (update.IsItemCompleted)
                 {
@@ -2720,6 +2777,162 @@ public sealed class MainForm : Form
             ? update.StageCount
             : Math.Clamp(update.StageIndex, 1, update.StageCount);
         return $"{stageName} (stage {stageIndex}/{update.StageCount})";
+    }
+
+    private void ResetPipelineTimeline()
+    {
+        _pipelineListView.BeginUpdate();
+        try
+        {
+            _pipelineListView.Items.Clear();
+            for (var index = 0; index < ConversionPipelineStages.Length; index++)
+            {
+                _pipelineListView.Items.Add(new ListViewItem(
+                [
+                    (index + 1).ToString(CultureInfo.InvariantCulture),
+                    ConversionPipelineStages[index],
+                    "Pending",
+                    "0%",
+                    "Waiting to start"
+                ]));
+            }
+        }
+        finally
+        {
+            _pipelineListView.EndUpdate();
+        }
+    }
+
+    private void UpdatePipelineTimeline(BatchProgressUpdate update, TimeSpan? stageEta, TimeSpan? overallEta)
+    {
+        if (_pipelineListView.Items.Count == 0)
+        {
+            ResetPipelineTimeline();
+        }
+
+        var stageCount = Math.Min(ConversionPipelineStages.Length, Math.Max(update.StageCount, 0));
+        if (stageCount == 0)
+        {
+            return;
+        }
+
+        var stageIndex = update.IsItemCompleted
+            ? stageCount
+            : Math.Clamp(update.StageIndex, 1, stageCount);
+        for (var index = 0; index < _pipelineListView.Items.Count; index++)
+        {
+            var item = _pipelineListView.Items[index];
+            if (index < stageIndex - 1)
+            {
+                item.SubItems[2].Text = "Completed";
+                item.SubItems[3].Text = "100%";
+                if (string.IsNullOrWhiteSpace(item.SubItems[4].Text) || item.SubItems[4].Text.Equals("Waiting to start", StringComparison.Ordinal))
+                {
+                    item.SubItems[4].Text = "Done";
+                }
+            }
+            else if (index == stageIndex - 1)
+            {
+                var stagePercent = stageCount > 0
+                    ? (int)Math.Round(Math.Clamp((double)stageIndex / stageCount, 0d, 1d) * 100d, MidpointRounding.AwayFromZero)
+                    : 0;
+                item.SubItems[2].Text = update.IsItemCompleted ? "Completed" : "In progress";
+                item.SubItems[3].Text = $"{Math.Clamp(stagePercent, 0, 100)}%";
+                var note = update.IsItemCompleted
+                    ? "Done"
+                    : $"Stage ETA {FormatDuration(stageEta)} • Overall ETA {FormatDuration(overallEta)}";
+                item.SubItems[4].Text = note;
+            }
+            else if (index == stageIndex)
+            {
+                item.SubItems[2].Text = "Next";
+                item.SubItems[3].Text = "—";
+                item.SubItems[4].Text = "Queued";
+            }
+            else
+            {
+                item.SubItems[2].Text = "Pending";
+                item.SubItems[3].Text = "0%";
+                item.SubItems[4].Text = "Waiting to start";
+            }
+        }
+    }
+
+    private static TimeSpan? EstimateRemainingDuration(DateTime startedUtc, DateTime nowUtc, double completedUnits, int totalUnits)
+    {
+        if (totalUnits <= 0 || completedUnits <= 0d)
+        {
+            return null;
+        }
+
+        var elapsed = nowUtc - startedUtc;
+        if (elapsed <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        var clampedCompleted = Math.Clamp(completedUnits, 0d, totalUnits);
+        if (clampedCompleted <= 0d || clampedCompleted >= totalUnits)
+        {
+            return clampedCompleted >= totalUnits ? TimeSpan.Zero : null;
+        }
+
+        var remainingUnits = totalUnits - clampedCompleted;
+        var secondsPerUnit = elapsed.TotalSeconds / clampedCompleted;
+        var remainingSeconds = Math.Max(0d, remainingUnits * secondsPerUnit);
+        return TimeSpan.FromSeconds(remainingSeconds);
+    }
+
+    private static TimeSpan? EstimateStageRemainingDuration(DateTime? stageStartedUtc, DateTime nowUtc, int stageIndex, int stageCount)
+    {
+        if (stageStartedUtc is null || stageCount <= 0 || stageIndex <= 0)
+        {
+            return null;
+        }
+
+        var progress = Math.Clamp((double)stageIndex / stageCount, 0d, 1d);
+        if (progress <= 0d)
+        {
+            return null;
+        }
+
+        var elapsed = nowUtc - stageStartedUtc.Value;
+        if (elapsed <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        if (progress >= 1d)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var projectedTotalSeconds = elapsed.TotalSeconds / progress;
+        var remainingSeconds = Math.Max(0d, projectedTotalSeconds - elapsed.TotalSeconds);
+        return TimeSpan.FromSeconds(remainingSeconds);
+    }
+
+    private static string FormatDuration(TimeSpan? duration)
+    {
+        if (duration is null)
+        {
+            return "calculating…";
+        }
+
+        var value = duration.Value;
+        if (value <= TimeSpan.Zero)
+        {
+            return "0s";
+        }
+
+        if (value.TotalHours >= 1d)
+        {
+            return $"{(int)value.TotalHours}h {value.Minutes}m";
+        }
+
+        return value.TotalMinutes >= 1d
+            ? $"{(int)value.TotalMinutes}m {value.Seconds}s"
+            : $"{Math.Max(1, value.Seconds)}s";
     }
 
     private void SetBusyState(bool isBusy)

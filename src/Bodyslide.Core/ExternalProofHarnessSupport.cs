@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Bodyslide.Core;
 
@@ -176,6 +177,35 @@ internal static class ExternalProofHarnessSupport
     {
         WriteIndented = true
     };
+
+    private sealed record WriteLockMetadata(
+        int ProcessId,
+        long ProcessStartTimeUtcTicks,
+        string MachineName,
+        long CreatedUtcTicks);
+
+    private sealed class WriteLockHandle(string lockPath, FileStream stream) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            stream.Dispose();
+            try
+            {
+                File.Delete(lockPath);
+            }
+            catch
+            {
+            }
+        }
+    }
 
     public static string GetBundleManifestPath(string outputDirectory) =>
         Path.Combine(outputDirectory, BundleManifestFileName);
@@ -1157,7 +1187,7 @@ internal static class ExternalProofHarnessSupport
         }
     }
 
-    private static FileStream AcquireWriteLock(string path)
+    private static IDisposable AcquireWriteLock(string path)
     {
         var lockPath = $"{path}.write.lock";
         var directory = Path.GetDirectoryName(lockPath);
@@ -1166,21 +1196,130 @@ internal static class ExternalProofHarnessSupport
             Directory.CreateDirectory(directory);
         }
 
-        const int maxAttempts = 50;
+        const int maxAttempts = 200;
+        var staleCutoffUtc = DateTime.UtcNow.AddMinutes(-2);
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                return new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.DeleteOnClose);
+                var stream = new FileStream(lockPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                WriteLockMetadataToStream(stream);
+                return new WriteLockHandle(lockPath, stream);
             }
             catch (IOException) when (attempt < maxAttempts)
             {
+                if (TryDeleteStaleLockFile(lockPath, staleCutoffUtc))
+                {
+                    continue;
+                }
+
                 Thread.Sleep(20);
             }
             catch (UnauthorizedAccessException) when (attempt < maxAttempts)
             {
                 Thread.Sleep(20);
             }
+        }
+    }
+
+    private static bool TryDeleteStaleLockFile(string lockPath, DateTime staleCutoffUtc)
+    {
+        try
+        {
+            if (!File.Exists(lockPath))
+            {
+                return false;
+            }
+
+            using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                if (!IsStaleLockFile(stream, staleCutoffUtc))
+                {
+                    return false;
+                }
+            }
+
+            File.Delete(lockPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsStaleLockFile(FileStream stream, DateTime staleCutoffUtc)
+    {
+        var fileInfo = new FileInfo(stream.Name);
+        if (fileInfo.LastWriteTimeUtc > staleCutoffUtc)
+        {
+            return false;
+        }
+
+        try
+        {
+            stream.Position = 0;
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+            var json = reader.ReadToEnd();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return true;
+            }
+
+            var metadata = JsonSerializer.Deserialize<WriteLockMetadata>(json);
+            if (metadata is null || metadata.ProcessId <= 0)
+            {
+                return true;
+            }
+
+            if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var activeProcess = Process.GetProcessById(metadata.ProcessId);
+            var activeStartTicks = activeProcess.StartTime.ToUniversalTime().Ticks;
+            return metadata.ProcessStartTimeUtcTicks <= 0 || metadata.ProcessStartTimeUtcTicks != activeStartTicks;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static void WriteLockMetadataToStream(FileStream stream)
+    {
+        try
+        {
+            var metadata = new WriteLockMetadata(
+                Environment.ProcessId,
+                GetCurrentProcessStartTimeUtcTicks(),
+                Environment.MachineName,
+                DateTime.UtcNow.Ticks);
+            var json = JsonSerializer.Serialize(metadata, JsonOptions);
+            stream.SetLength(0);
+            stream.Position = 0;
+            using var writer = new StreamWriter(stream, Encoding.UTF8, bufferSize: 1024, leaveOpen: true);
+            writer.Write(json);
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+            stream.Position = 0;
+        }
+        catch
+        {
+        }
+    }
+
+    private static long GetCurrentProcessStartTimeUtcTicks()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            return process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch
+        {
+            return 0;
         }
     }
 }

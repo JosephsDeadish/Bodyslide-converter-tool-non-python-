@@ -23,6 +23,7 @@ public static class DesktopSmokeTestContract
     public const string PreviewTabTitle = "Preview";
     public const string InspectTabTitle = "Inspect";
     public const string SummaryTabTitle = "Summary";
+    public const string PipelineTabTitle = "Pipeline";
     public const string NextActionsTabTitle = "Next actions";
     public const string ReportsTabTitle = "Reports";
     public const string CatalogTabTitle = "Catalog";
@@ -36,6 +37,7 @@ public static class DesktopSmokeTestContract
         PreviewTabTitle,
         InspectTabTitle,
         SummaryTabTitle,
+        PipelineTabTitle,
         NextActionsTabTitle,
         ReportsTabTitle,
         CatalogTabTitle,

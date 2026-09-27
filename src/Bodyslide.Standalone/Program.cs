@@ -699,7 +699,8 @@ static void WritePostConversionGuidance(ConversionResult result)
             Console.WriteLine($" ! [{issue.Severity.ToUpperInvariant()}] {issue.Message}");
         }
     }
-    else if (validationSummary.Status.Equals("READY", StringComparison.OrdinalIgnoreCase))
+    else if (ConversionValidationPresentation.GetGateRank(validationSummary.Status) ==
+             ConversionValidationPresentation.GetGateRank("ready"))
     {
         Console.WriteLine("No immediate follow-up actions detected.");
     }
