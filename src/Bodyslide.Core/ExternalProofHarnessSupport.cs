@@ -1122,11 +1122,65 @@ internal static class ExternalProofHarnessSupport
 
     private static void WriteJsonIfChanged<T>(string path, T value)
     {
+        using var writeLock = AcquireWriteLock(path);
         var serialized = JsonSerializer.Serialize(value, JsonOptions);
         var existing = File.Exists(path) ? File.ReadAllText(path) : null;
-        if (!string.Equals(existing, serialized, StringComparison.Ordinal))
+        if (string.Equals(existing, serialized, StringComparison.Ordinal))
         {
-            File.WriteAllText(path, serialized);
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, serialized);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+
+    private static FileStream AcquireWriteLock(string path)
+    {
+        var lockPath = $"{path}.write.lock";
+        var directory = Path.GetDirectoryName(lockPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        const int maxAttempts = 50;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(20);
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(20);
+            }
         }
     }
 }

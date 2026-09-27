@@ -49,6 +49,7 @@ public sealed class MainForm : Form
     private readonly Button _saveProfileButton;
     private readonly Button _inspectCacheButton;
     private readonly Button _runSelfCheckButton;
+    private readonly Button _copyMo2SetupButton;
     private readonly Button _openCustomProfileButton;
     private readonly Button _removeCustomProfileButton;
     private readonly Button _clearCustomProfilesButton;
@@ -1063,6 +1064,15 @@ public sealed class MainForm : Form
             Margin = new Padding(8, 0, 0, 0),
         };
         _runSelfCheckButton.Click += (_, _) => RunSelfCheck();
+        _copyMo2SetupButton = new Button
+        {
+            Name = "copyMo2SetupButton",
+            Text = "Copy MO2 setup",
+            Width = 130,
+            Height = 34,
+            Margin = new Padding(8, 0, 0, 0),
+        };
+        _copyMo2SetupButton.Click += (_, _) => CopyMo2SetupGuidance();
         var secondaryActionRow = new FlowLayoutPanel
         {
             AutoSize = true,
@@ -1087,6 +1097,7 @@ public sealed class MainForm : Form
         secondaryActionRow.Controls.Add(_saveProfileButton);
         secondaryActionRow.Controls.Add(_inspectCacheButton);
         secondaryActionRow.Controls.Add(_runSelfCheckButton);
+        secondaryActionRow.Controls.Add(_copyMo2SetupButton);
         var actionLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -1327,6 +1338,7 @@ public sealed class MainForm : Form
         Shown += async (_, _) =>
         {
             _allowUserMainSplitOverride = true;
+            ApplyLauncherContextGuidance();
             if (!_startupResultLoadHandled &&
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
@@ -3726,6 +3738,88 @@ public sealed class MainForm : Form
             "The raw output folder always includes README.txt plus fomod/ installer metadata.");
         _optionToolTip.SetToolTip(_buildSlidersCheckBox,
             "Generate BodySlide project files for the converted result so it can be rebuilt or adjusted later.");
+        _optionToolTip.SetToolTip(_copyMo2SetupButton,
+            "Copies recommended Mod Organizer setup values (binary, start-in, and optional launcher argument) for this SlideSmith build.");
+    }
+
+    private void ApplyLauncherContextGuidance()
+    {
+        if (!_launchOptions.FromModOrganizerLauncher && !IsLikelyModOrganizerEnvironment())
+        {
+            return;
+        }
+
+        _statusLabel.Text = "Ready — launched from Mod Organizer context.";
+        AppendLog("Mod Organizer context detected. Use 'Copy MO2 setup' for recommended executable/profile values.");
+    }
+
+    private void CopyMo2SetupGuidance()
+    {
+        var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
+        var workingDirectory = Path.GetDirectoryName(executablePath) ?? Environment.CurrentDirectory;
+        var cliPath = FindSiblingCliExecutable(workingDirectory);
+
+        var guidance = new StringBuilder()
+            .AppendLine("Recommended Mod Organizer setup for SlideSmith")
+            .AppendLine($"Title: SlideSmith (Desktop)")
+            .AppendLine($"Binary: {executablePath}")
+            .AppendLine($"Start in: {workingDirectory}")
+            .AppendLine("Arguments: --mo2-launcher")
+            .AppendLine();
+        if (!string.IsNullOrWhiteSpace(cliPath))
+        {
+            guidance.AppendLine("Optional CLI entry:")
+                .AppendLine("Title: SlideSmith CLI")
+                .AppendLine($"Binary: {cliPath}")
+                .AppendLine($"Start in: {Path.GetDirectoryName(cliPath)}")
+                .AppendLine("Arguments: --mo2-launcher");
+        }
+
+        try
+        {
+            Clipboard.SetText(guidance.ToString());
+            AppendLog("Copied recommended Mod Organizer setup to clipboard.");
+            _statusLabel.Text = "Copied Mod Organizer setup guidance to clipboard.";
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Could not copy Mod Organizer setup guidance: {ex.Message}");
+        }
+    }
+
+    private static bool IsLikelyModOrganizerEnvironment()
+    {
+        foreach (var key in Environment.GetEnvironmentVariables().Keys)
+        {
+            if (key is not string name)
+            {
+                continue;
+            }
+
+            if (name.Contains("USVFS", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("MODORGANIZER", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("MO2_INSTANCE", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? FindSiblingCliExecutable(string desktopDirectory)
+    {
+        var sameDirectory = Path.Combine(desktopDirectory, "SlideSmith-CLI.exe");
+        if (File.Exists(sameDirectory))
+        {
+            return sameDirectory;
+        }
+
+        var siblingCliDirectory = Path.GetFullPath(Path.Combine(desktopDirectory, "..", "cli"));
+        var siblingCliPath = Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe");
+        return File.Exists(siblingCliPath)
+            ? siblingCliPath
+            : null;
     }
 
     private bool TryResolveSkeletonSupportPath(string? inputPath, out string? skeletonNifPath)
