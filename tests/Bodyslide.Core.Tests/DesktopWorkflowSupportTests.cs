@@ -151,6 +151,28 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_DoesNotTreatPositionalInputDirectoryInsideOutputTreeAsResult()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var inputDirectory = Path.Combine(outputDirectory, "meshes", "custom-pack");
+        Directory.CreateDirectory(inputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions([inputDirectory]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputDirectory, options.StartupInputPath);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void FindCommonDirectory_DoesNotCollapseCaseDistinctDirectoriesOnCaseSensitivePlatforms()
     {
         if (OperatingSystem.IsWindows())

@@ -251,6 +251,7 @@ internal static class DesktopWorkflowSupport
             }
 
             return allowAncestorWalk
+                && IsLikelyResultSubdirectory(fullCandidatePath)
                 ? TryWalkAncestorResultDirectory(fullCandidatePath)
                 : null;
         }
@@ -369,6 +370,18 @@ internal static class DesktopWorkflowSupport
         var fileName = Path.GetFileName(path);
         return !string.IsNullOrWhiteSpace(fileName) &&
                DesktopResultMarkerFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsLikelyResultSubdirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        return DesktopResultMarkerFiles.Any(fileName => File.Exists(Path.Combine(directory, fileName))) ||
+               File.Exists(Path.Combine(directory, "ModuleConfig.xml")) ||
+               File.Exists(Path.Combine(directory, "info.xml"));
     }
 
     private static bool IsMo2LauncherArgument(string? argument)
