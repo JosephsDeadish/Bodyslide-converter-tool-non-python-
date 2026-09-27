@@ -8,6 +8,7 @@ internal sealed record BodyDetectionTuning(
     double TextureTokenWeight,
     double PhysicsTokenWeight,
     double PhysicsExpectationBoostValue,
+    double LinkedModStructureReferenceBoostValue,
     double BoneSignatureWeight,
     double VertexCountWeight,
     double BoundingRatioWeight,
@@ -37,6 +38,7 @@ internal static class BodyDetectionTuningCatalog
         TextureTokenWeight: 0.20,
         PhysicsTokenWeight: 0.10,
         PhysicsExpectationBoostValue: 0.10,
+        LinkedModStructureReferenceBoostValue: 0.08,
         BoneSignatureWeight: 0.10,
         VertexCountWeight: 0.15,
         BoundingRatioWeight: 0.05,
@@ -68,6 +70,7 @@ internal static class BodyDetectionTuningCatalog
             Normalize(dto.TextureTokenWeight, Fallback.TextureTokenWeight),
             Normalize(dto.PhysicsTokenWeight, Fallback.PhysicsTokenWeight),
             Normalize(dto.PhysicsExpectationBoostValue, Fallback.PhysicsExpectationBoostValue),
+            Normalize(dto.LinkedModStructureReferenceBoostValue, Fallback.LinkedModStructureReferenceBoostValue),
             Normalize(dto.BoneSignatureWeight, Fallback.BoneSignatureWeight),
             Normalize(dto.VertexCountWeight, Fallback.VertexCountWeight),
             Normalize(dto.BoundingRatioWeight, Fallback.BoundingRatioWeight),
@@ -93,6 +96,7 @@ internal static class BodyDetectionTuningCatalog
         public double TextureTokenWeight { get; init; }
         public double PhysicsTokenWeight { get; init; }
         public double PhysicsExpectationBoostValue { get; init; }
+        public double LinkedModStructureReferenceBoostValue { get; init; }
         public double BoneSignatureWeight { get; init; }
         public double VertexCountWeight { get; init; }
         public double BoundingRatioWeight { get; init; }

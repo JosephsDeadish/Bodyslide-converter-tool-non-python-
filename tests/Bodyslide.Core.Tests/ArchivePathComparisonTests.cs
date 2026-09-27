@@ -176,6 +176,8 @@ namespace Bodyslide.Core.Tests
                 try
                 {
                     Assert.NotEmpty(updates);
+                    Assert.Contains(updates, static update =>
+                        update.CurrentEntry.Contains("copying:", StringComparison.OrdinalIgnoreCase));
                     var last = updates[^1];
                     Assert.Equal(2, last.ProcessedEntries);
                     Assert.Equal(2, last.TotalEntries);

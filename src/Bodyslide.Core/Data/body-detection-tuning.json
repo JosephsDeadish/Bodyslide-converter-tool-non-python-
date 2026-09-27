@@ -3,6 +3,7 @@
   "textureTokenWeight": 0.20,
   "physicsTokenWeight": 0.10,
   "physicsExpectationBoostValue": 0.10,
+  "linkedModStructureReferenceBoostValue": 0.08,
   "boneSignatureWeight": 0.10,
   "vertexCountWeight": 0.15,
   "boundingRatioWeight": 0.05,

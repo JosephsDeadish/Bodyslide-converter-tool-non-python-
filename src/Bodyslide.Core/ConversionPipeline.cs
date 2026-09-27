@@ -8080,20 +8080,33 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
                 cancellationToken,
                 extractionProgress =>
                 {
-                    if (extractionProgress.ProcessedEntries % 25 != 0 && extractionProgress.TotalEntries is not null)
+                    if (extractionProgress.TotalEntries is int totalEntries &&
+                        extractionProgress.ProcessedEntries > 0 &&
+                        extractionProgress.ProcessedEntries != totalEntries &&
+                        extractionProgress.ProcessedEntries % 5 != 0 &&
+                        !extractionProgress.CurrentEntry.Contains("copying", StringComparison.OrdinalIgnoreCase))
                     {
                         return;
                     }
 
-                    var progressSuffix = extractionProgress.TotalEntries is int totalEntries
-                        ? $"{extractionProgress.ProcessedEntries}/{Math.Max(1, totalEntries)}"
+                    var progressSuffix = extractionProgress.TotalEntries is int entriesTotal
+                        ? $"{extractionProgress.ProcessedEntries}/{Math.Max(1, entriesTotal)}"
                         : extractionProgress.ProcessedEntries.ToString(CultureInfo.InvariantCulture);
+                    var currentEntry = Path.GetFileName(extractionProgress.CurrentEntry.Replace('\\', '/').Trim()) switch
+                    {
+                        null or "" => extractionProgress.CurrentEntry,
+                        var fileName => fileName
+                    };
+                    if (currentEntry.Length > 72)
+                    {
+                        currentEntry = currentEntry[..72] + "…";
+                    }
                     progress?.Report(new BatchProgressUpdate(
                         Completed: 0,
                         Total: 1,
                         CurrentFile: archiveLabel,
                         Success: false,
-                        Stage: $"Extracting archive ({progressSuffix} entries)",
+                        Stage: $"Extracting archive ({progressSuffix} entries) — {currentEntry}",
                         StageIndex: 1,
                         StageCount: 3,
                         IsItemCompleted: false));
@@ -10567,6 +10580,7 @@ internal static class ArchiveExtractionHelper
     public sealed record ArchiveExtractionProgress(int ProcessedEntries, int? TotalEntries, string CurrentEntry);
 
     private static readonly string[] SupportedArchiveSuffixes = [".zip", ".7z", ".tar", ".tgz", ".tar.gz"];
+    private const long EntryProgressReportIntervalBytes = 8L * 1024 * 1024;
 
     public static bool IsSupportedArchive(string path)
     {
@@ -10679,9 +10693,34 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
+            long lastReportedBytes = 0;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.FullName} (0/{FormatByteCount(entry.Length)})"));
             using var entryStream = entry.Open();
             using var outputStream = File.Create(destinationPath);
-            CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
+            CopyStreamWithCancellation(
+                entryStream,
+                outputStream,
+                cancellationToken,
+                copiedBytes =>
+                {
+                    if (onProgress is null)
+                    {
+                        return;
+                    }
+
+                    if (copiedBytes > 0 &&
+                        copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes &&
+                        copiedBytes < entry.Length)
+                    {
+                        return;
+                    }
+
+                    lastReportedBytes = copiedBytes;
+                    onProgress(new ArchiveExtractionProgress(
+                        processedEntries,
+                        totalEntries,
+                        $"copying:{entry.FullName} ({FormatByteCount(copiedBytes)}/{FormatByteCount(entry.Length)})"));
+                });
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.FullName));
         }
@@ -10725,9 +10764,27 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
+            long lastReportedBytes = 0;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, $"copying:{entry.Key}"));
             using var entryStream = entry.OpenEntryStream();
             using var outputStream = File.Create(destinationPath);
-            CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
+            CopyStreamWithCancellation(
+                entryStream,
+                outputStream,
+                cancellationToken,
+                copiedBytes =>
+                {
+                    if (onProgress is null || copiedBytes <= 0 || copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes)
+                    {
+                        return;
+                    }
+
+                    lastReportedBytes = copiedBytes;
+                    onProgress(new ArchiveExtractionProgress(
+                        processedEntries,
+                        totalEntries,
+                        $"copying:{entry.Key} ({FormatByteCount(copiedBytes)})"));
+                });
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, totalEntries, entry.Key));
 
@@ -10789,10 +10846,28 @@ internal static class ArchiveExtractionHelper
                 Directory.CreateDirectory(destinationParent);
             }
 
+            long lastReportedBytes = 0;
+            onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, $"copying:{entry.Name}"));
             using var outputStream = File.Create(destinationPath);
             if (entry.DataStream is { } entryStream)
             {
-                CopyStreamWithCancellation(entryStream, outputStream, cancellationToken);
+                CopyStreamWithCancellation(
+                    entryStream,
+                    outputStream,
+                    cancellationToken,
+                    copiedBytes =>
+                    {
+                        if (onProgress is null || copiedBytes <= 0 || copiedBytes - lastReportedBytes < EntryProgressReportIntervalBytes)
+                        {
+                            return;
+                        }
+
+                        lastReportedBytes = copiedBytes;
+                        onProgress(new ArchiveExtractionProgress(
+                            processedEntries,
+                            null,
+                            $"copying:{entry.Name} ({FormatByteCount(copiedBytes)})"));
+                    });
             }
             processedEntries++;
             onProgress?.Invoke(new ArchiveExtractionProgress(processedEntries, null, entry.Name));
@@ -10801,9 +10876,14 @@ internal static class ArchiveExtractionHelper
         }
     }
 
-    private static void CopyStreamWithCancellation(Stream input, Stream output, CancellationToken cancellationToken)
+    private static void CopyStreamWithCancellation(
+        Stream input,
+        Stream output,
+        CancellationToken cancellationToken,
+        Action<long>? onBytesCopied = null)
     {
         var buffer = new byte[81920];
+        long copiedBytes = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -10814,7 +10894,34 @@ internal static class ArchiveExtractionHelper
             }
 
             output.Write(buffer, 0, read);
+            copiedBytes += read;
+            onBytesCopied?.Invoke(copiedBytes);
         }
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        var normalized = Math.Max(0, bytes);
+        if (normalized < 1024)
+        {
+            return $"{normalized} B";
+        }
+
+        var units = new[] { "KB", "MB", "GB", "TB" };
+        double value = normalized;
+        var unitIndex = -1;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        if (unitIndex < 0)
+        {
+            return $"{normalized} B";
+        }
+
+        return $"{value:0.##} {units[unitIndex]}";
     }
 }
 
@@ -11169,6 +11276,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     {
         var tuning = BodyDetectionTuningCatalog.Current;
         var evidence = new List<string>();
+        var hasLinkedModStructureCue = HasLinkedModStructureCue(meshNames);
 
         var meshHitRatio = MatchRatio(meshNames, template.MeshTokens);
         if (meshHitRatio > 0)
@@ -11257,6 +11365,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var physicsExpectationSignal = template.PhysicsTokens.Count == 0 || physicsHitRatio > 0 ? 1d : 0d;
         var referenceBoostSignal = referenceHitRatio >= 0.5 ? 1d : 0d;
+        var linkedModReferenceBoostSignal = hasLinkedModStructureCue ? referenceHitRatio : 0d;
         var score = Math.Clamp(
             (meshHitRatio * tuning.MeshTokenWeight) +
             (textureHitRatio * tuning.TextureTokenWeight) +
@@ -11267,9 +11376,19 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             (boundingRatioScore * tuning.BoundingRatioWeight) +
             (uvSignatureScore * tuning.UvSignatureWeight) +
             (physicsExpectationSignal * tuning.PhysicsExpectationBoostValue) +
-            (referenceBoostSignal * tuning.BodyReferenceBoostValue),
+            (referenceBoostSignal * tuning.BodyReferenceBoostValue) +
+            (linkedModReferenceBoostSignal * tuning.LinkedModStructureReferenceBoostValue),
             0,
             1);
+
+        if (hasLinkedModStructureCue)
+        {
+            evidence.Add("linked-structure:modular");
+            if (linkedModReferenceBoostSignal > 0)
+            {
+                evidence.Add($"linked-structure-reference:{linkedModReferenceBoostSignal:P0}");
+            }
+        }
 
         if (template.Body.Equals("UBE", StringComparison.OrdinalIgnoreCase) &&
             meshHitRatio <= 0 &&
@@ -11407,6 +11526,40 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             }
 
             startIndex = index + 1;
+        }
+
+        return false;
+    }
+
+    private static bool HasLinkedModStructureCue(IReadOnlyList<string> meshNames)
+    {
+        if (meshNames.Count == 0)
+        {
+            return false;
+        }
+
+        var structureTokenHits = 0;
+        foreach (var meshName in meshNames)
+        {
+            if (string.IsNullOrWhiteSpace(meshName))
+            {
+                continue;
+            }
+
+            if (meshName.Contains("devious", StringComparison.OrdinalIgnoreCase) ||
+                meshName.Contains("devices", StringComparison.OrdinalIgnoreCase) ||
+                meshName.Contains("armbinder", StringComparison.OrdinalIgnoreCase) ||
+                meshName.Contains("restraint", StringComparison.OrdinalIgnoreCase) ||
+                meshName.Contains("harness", StringComparison.OrdinalIgnoreCase) ||
+                meshName.Contains("gag", StringComparison.OrdinalIgnoreCase))
+            {
+                structureTokenHits++;
+            }
+
+            if (structureTokenHits >= 2)
+            {
+                return true;
+            }
         }
 
         return false;

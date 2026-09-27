@@ -14011,6 +14011,7 @@ public sealed class PhysicsMeshTypeTuningTests
     {
         Assert.Equal(0.35d, BodyDetectionTuningCatalog.Current.MeshTokenWeight);
         Assert.Equal(0.12d, BodyDetectionTuningCatalog.Current.AmbiguityMargin);
+        Assert.Equal(0.08d, BodyDetectionTuningCatalog.Current.LinkedModStructureReferenceBoostValue);
 
         var plate = MeshBehaviorCatalog.Get("plate");
         Assert.Equal(1.12d, plate.ClippingThreshold);
@@ -18693,6 +18694,8 @@ public sealed class RealisticModPackFixtureTests
 
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.DoesNotContain("plugin-rewrite-ambiguous-filename", qualityJson, StringComparison.Ordinal);
+            Assert.Contains("linked-structure:modular", qualityJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("linked-structure-reference:", qualityJson, StringComparison.OrdinalIgnoreCase);
 
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "devious_panel_0.nif")));
             Assert.True(File.Exists(Path.Combine(outputDirectory, "meshes", "slidesmith", "3ba", "devious", "devices", "restraint_0.nif")));

@@ -2828,6 +2828,8 @@ public sealed class MainForm : Form
             // during batch runs instead of showing a marquee spinner throughout.
             string? lastProgressStatus = null;
             var lastProgressUiUpdateUtc = DateTime.MinValue;
+            var lastProgressLogUtc = DateTime.MinValue;
+            string? lastProgressLogSignature = null;
             var conversionStartedUtc = DateTime.UtcNow;
             string? activeStageKey = null;
             string? activeStageName = null;
@@ -2896,6 +2898,16 @@ public sealed class MainForm : Form
                     activeStageKey = stageKey;
                     activeStageStartedUtc = now;
                     activeStageName = NormalizeProgressStageName(update.Stage);
+                }
+
+                var logStage = BuildProgressLogStage(update.Stage);
+                var logSignature = $"{activeItem}/{total}|{logStage}";
+                if (!string.Equals(logSignature, lastProgressLogSignature, StringComparison.Ordinal) ||
+                    now - lastProgressLogUtc >= TimeSpan.FromSeconds(5))
+                {
+                    AppendLog($"Progress {percent}% ({activeItem}/{total}): {logStage}");
+                    lastProgressLogUtc = now;
+                    lastProgressLogSignature = logSignature;
                 }
 
                 var overallElapsed = now - conversionStartedUtc;
@@ -3352,6 +3364,47 @@ public sealed class MainForm : Form
         string.IsNullOrWhiteSpace(stage)
             ? "Processing"
             : stage.Trim();
+
+    private static string BuildProgressLogStage(string? stage)
+    {
+        if (string.IsNullOrWhiteSpace(stage))
+        {
+            return "Processing";
+        }
+
+        var value = stage.Trim();
+        var copyingPrefixIndex = value.IndexOf("copying:", StringComparison.OrdinalIgnoreCase);
+        if (copyingPrefixIndex >= 0)
+        {
+            var copiedTarget = value[(copyingPrefixIndex + "copying:".Length)..].Trim();
+            var sizeSeparator = copiedTarget.IndexOf(" (", StringComparison.Ordinal);
+            if (sizeSeparator > 0)
+            {
+                copiedTarget = copiedTarget[..sizeSeparator].Trim();
+            }
+
+            var fileName = Path.GetFileName(copiedTarget.Replace('\\', '/').Trim());
+            if (!string.IsNullOrWhiteSpace(fileName))
+            {
+                copiedTarget = fileName;
+            }
+
+            return string.IsNullOrWhiteSpace(copiedTarget)
+                ? "Extracting archive — copying entry data"
+                : $"Extracting archive — copying {copiedTarget}";
+        }
+
+        if (value.StartsWith("Extracting archive", StringComparison.OrdinalIgnoreCase))
+        {
+            var entrySeparator = value.IndexOf('—');
+            if (entrySeparator > 0)
+            {
+                value = value[..entrySeparator].Trim();
+            }
+        }
+
+        return value;
+    }
 
     private static string FormatDuration(TimeSpan? duration)
     {
