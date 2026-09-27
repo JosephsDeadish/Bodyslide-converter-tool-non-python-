@@ -14821,6 +14821,10 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Ultimate Body Enhancer", "UBE")]
     [InlineData("UBE Rebuild", "UBE")]
     [InlineData("Ultimate Body Enhancer 2", "UBE")]
+    [InlineData("CBBE NextGen", "CBBE")]
+    [InlineData("3BA NextGen", "3BA")]
+    [InlineData("BHUNP NextGen", "BHUNP")]
+    [InlineData("HIMBO NextGen", "HIMBO")]
     [InlineData("Namira's Goat Reborn", "Goat Humanoid")]
     [InlineData("Faun", "Goat Humanoid")]
     [InlineData("Hag Raven", "Hagraven")]
@@ -14886,6 +14890,10 @@ public sealed class BodyTypeCatalogTests
     [InlineData("Naga", "Serpentine Humanoid")]
     [InlineData("SAM Lite", "SAM Light")]
     [InlineData("SAM Light NG", "SAM Light")]
+    [InlineData("CBBE NextGen", "CBBE")]
+    [InlineData("3BA NextGen", "3BA")]
+    [InlineData("BHUNP NextGen", "BHUNP")]
+    [InlineData("HIMBO NextGen", "HIMBO")]
     [InlineData("BHUNP V4", "BHUNP")]
     [InlineData("HIMBO 5.0", "HIMBO")]
     public void BodyTechnicalProfileCatalog_TryGet_AcceptsAliases(string requested, string expected)
@@ -17656,6 +17664,50 @@ public sealed class RealisticModPackFixtureTests
             var qualityJson = await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-quality.json"));
             Assert.Contains("\"Code\": \"bodyslide-semantic-mismatch\"", qualityJson, StringComparison.Ordinal);
             Assert.Contains("OSP/ShapeData content", qualityJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchConvert_RealisticRareBsGeometryLayoutModPackDirectory_ConvertsWithoutUnsupportedNifLayoutAndPreservesHardCaseScenarios()
+    {
+        var workingDirectory = CopyFixtureToTemporaryWorkspace("RealisticRareBsGeometryLayoutModPack");
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+
+        try
+        {
+            var orchestrator = StandaloneConversionModules.CreateDefault();
+            var runner = new BatchConversionRunner(orchestrator);
+            var results = await runner.ConvertAsync(new ConversionRequest(workingDirectory, "3BA", outputDirectory));
+            Assert.Single(results);
+            Assert.All(results, result => Assert.True(result.Success));
+
+            var output = results[0].OutputDirectory;
+            var convertedMeshes = Directory.GetFiles(Path.Combine(output, "meshes", "slidesmith", "3ba"), "*.nif", SearchOption.TopDirectoryOnly);
+            Assert.NotEmpty(convertedMeshes);
+
+            var qualityJson = await File.ReadAllTextAsync(Path.Combine(output, "conversion-quality.json"));
+            Assert.DoesNotContain("\"Code\": \"unsupported-nif-layout\"", qualityJson, StringComparison.Ordinal);
+
+            var inGameJsonPath = Path.Combine(output, "in-game-validation.json");
+            Assert.True(File.Exists(inGameJsonPath));
+            using var inGameReport = JsonDocument.Parse(await File.ReadAllTextAsync(inGameJsonPath));
+            var scenarioNames = inGameReport.RootElement
+                .GetProperty("ScenarioMatrix")
+                .EnumerateArray()
+                .Select(static entry => entry.GetProperty("Name").GetString())
+                .Where(static name => !string.IsNullOrWhiteSpace(name))
+                .ToArray();
+            Assert.Contains(scenarioNames, static name => name!.Contains("seam", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(scenarioNames, static name =>
+                name!.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("compression", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(scenarioNames, static name =>
+                name!.Contains("heel", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("ground-contact", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

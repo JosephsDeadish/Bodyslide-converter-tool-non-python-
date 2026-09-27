@@ -140,7 +140,7 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
     }
 
     [Fact]
-    public void TryResolveSkeletonNifPath_PrefersFemaleSkeletonVariantOverGenericAndMaleCandidates()
+    public void TryResolveSkeletonNifPath_PrefersNeutralSkeletonVariantWhenGenderContextIsUnavailable()
     {
         var modRoot = Path.Combine(_root, "FemaleVariantPreferencePack");
         var femaleDirectory = Path.Combine(modRoot, "meshes", "actors", "character", "character assets female");
@@ -156,7 +156,7 @@ public sealed class SkeletonSupportPathResolverTests : IDisposable
         var resolved = SkeletonSupportPathResolver.TryResolveSkeletonNifPath(modRoot, out var result);
 
         Assert.True(resolved);
-        Assert.Equal(Path.GetFullPath(femaleSkeletonPath), result);
+        Assert.Equal(Path.GetFullPath(maleSkeletonPath), result);
     }
 
     [Fact]

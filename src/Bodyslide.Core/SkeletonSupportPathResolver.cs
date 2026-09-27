@@ -112,6 +112,7 @@ public static class SkeletonSupportPathResolver
     private static bool TryResolvePreferredDirectories(string rootDirectory, out string? skeletonNifPath)
     {
         skeletonNifPath = null;
+        var preferredCandidates = new List<string>();
         foreach (var relativeDirectory in PreferredRelativeDirectories)
         {
             var candidateDirectory = Path.Combine(rootDirectory, relativeDirectory);
@@ -120,12 +121,14 @@ public static class SkeletonSupportPathResolver
                 continue;
             }
 
-            var candidate = SelectBestCandidate(EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly));
-            if (candidate is not null)
-            {
-                skeletonNifPath = Path.GetFullPath(candidate);
-                return true;
-            }
+            preferredCandidates.AddRange(EnumerateSkeletonCandidates(candidateDirectory, SearchOption.TopDirectoryOnly));
+        }
+
+        var candidate = SelectBestCandidate(preferredCandidates);
+        if (candidate is not null)
+        {
+            skeletonNifPath = Path.GetFullPath(candidate);
+            return true;
         }
 
         return false;
@@ -270,11 +273,9 @@ public static class SkeletonSupportPathResolver
 
         var containsFemaleToken = ContainsPathToken(fileStem, "female");
         var containsMaleToken = ContainsPathToken(fileStem, "male");
-        var genderHintPenalty = containsFemaleToken
-            ? 0
-            : containsMaleToken
-                ? 2
-                : 1;
+        var genderHintPenalty = containsFemaleToken || containsMaleToken
+            ? 1
+            : 0;
 
         var heuristicNamePenalty =
             (fileStem.Contains("xpms", StringComparison.OrdinalIgnoreCase) ||
@@ -302,10 +303,12 @@ public static class SkeletonSupportPathResolver
         var genderedVariantPenalty =
             normalized.Contains("/character assets female/", StringComparison.OrdinalIgnoreCase) ||
             normalized.Contains("/character assets male/", StringComparison.OrdinalIgnoreCase)
-                ? 0
+                    ? 1
+                : normalized.Contains("/character assets/", StringComparison.OrdinalIgnoreCase)
+                    ? 0
                 : normalized.Contains("/female/", StringComparison.OrdinalIgnoreCase) ||
                   normalized.Contains("/male/", StringComparison.OrdinalIgnoreCase)
-                    ? 1
+                    ? 2
                     : 0;
 
         return new SkeletonCandidateRank(

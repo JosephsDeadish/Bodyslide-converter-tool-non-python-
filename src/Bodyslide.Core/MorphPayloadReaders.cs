@@ -484,7 +484,14 @@ internal static class OsdMorphReader
         payload = null;
         if (bytes.Length >= 12 && bytes[..OutfitStudioMagic.Length].SequenceEqual(OutfitStudioMagic))
         {
-            return TryReadPayload(bytes, headerSize: 12, morphCount: BinaryPrimitives.ReadInt32LittleEndian(bytes[8..12]), out payload);
+            var version = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..8]);
+            var morphCount = BinaryPrimitives.ReadInt32LittleEndian(bytes[8..12]);
+            if (version <= 0)
+            {
+                return false;
+            }
+
+            return TryReadPayload(bytes, headerSize: 12, morphCount: morphCount, out payload);
         }
 
         if (bytes.Length >= 8 && bytes[..LegacyMagic.Length].SequenceEqual(LegacyMagic))

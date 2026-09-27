@@ -2445,6 +2445,11 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (!usingPreset && !ConfirmManualTargetBodies(selectedTargets))
+        {
+            return;
+        }
+
         if (PruneMissingCustomProfiles("conversion"))
         {
             return;
@@ -4232,6 +4237,52 @@ public sealed class MainForm : Form
     private static bool HasKnownBodyMetadata(string bodyName) =>
         BuiltInBodyMetadataCatalog.TryGet(bodyName, out _) &&
         BodyTechnicalProfileCatalog.TryGet(bodyName, out _);
+
+    private bool ConfirmManualTargetBodies(IReadOnlyList<string> selectedTargets)
+    {
+        if (selectedTargets.Count == 0)
+        {
+            return true;
+        }
+
+        var unresolved = selectedTargets
+            .Select(BodyTypeCatalog.ResolveName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(targetBody => !HasKnownBodyMetadata(targetBody))
+            .ToArray();
+        if (unresolved.Length == 0)
+        {
+            return true;
+        }
+
+        var suggestions = unresolved
+            .Select(targetBody =>
+            {
+                var hint = BodyTypeCatalog.All
+                    .Select(static body => body.Name)
+                    .Where(name => name.Contains(targetBody, StringComparison.OrdinalIgnoreCase) ||
+                                   targetBody.Contains(name, StringComparison.OrdinalIgnoreCase))
+                    .Take(3)
+                    .ToArray();
+                return hint.Length == 0
+                    ? $"{targetBody}: no close catalog match"
+                    : $"{targetBody}: did you mean {string.Join(", ", hint)}?";
+            })
+            .ToArray();
+
+        var message =
+            "One or more destination bodies are not recognized by the built-in catalogs.\n\n" +
+            $"{string.Join("\n", suggestions)}\n\n" +
+            "You can continue with custom bodies, but conversion confidence may drop unless matching custom profiles are loaded.\n\n" +
+            "Continue anyway?";
+        return MessageBox.Show(
+                   this,
+                   message,
+                   "Unrecognized destination body",
+                   MessageBoxButtons.YesNo,
+                   MessageBoxIcon.Warning,
+                   MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+    }
 
     private static string BuildPhysicsHelpSuffix(string physicsProfile, string targetBody)
     {

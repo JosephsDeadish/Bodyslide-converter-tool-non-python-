@@ -1198,7 +1198,6 @@ internal static class ExternalProofHarnessSupport
         }
 
         const int maxAttempts = 200;
-        var staleCutoffUtc = DateTime.UtcNow.AddMinutes(-2);
         Exception? lastError = null;
         for (var attempt = 0; attempt <= maxAttempts; attempt++)
         {
@@ -1210,7 +1209,7 @@ internal static class ExternalProofHarnessSupport
             }
             catch (IOException ex)
             {
-                if (TryDeleteStaleLockFile(lockPath, staleCutoffUtc))
+                if (TryDeleteStaleLockFile(lockPath))
                 {
                     continue;
                 }
@@ -1233,7 +1232,7 @@ internal static class ExternalProofHarnessSupport
             lastError);
     }
 
-    private static bool TryDeleteStaleLockFile(string lockPath, DateTime staleCutoffUtc)
+    private static bool TryDeleteStaleLockFile(string lockPath)
     {
         try
         {
@@ -1245,7 +1244,7 @@ internal static class ExternalProofHarnessSupport
             LockFileFingerprint fingerprint;
             using (var stream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
-                if (!IsStaleLockFile(stream, staleCutoffUtc))
+                if (!IsStaleLockFile(stream))
                 {
                     return false;
                 }
@@ -1254,7 +1253,7 @@ internal static class ExternalProofHarnessSupport
 
             using (var deleteStream = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
             {
-                if (!IsStaleLockFile(deleteStream, staleCutoffUtc))
+                if (!IsStaleLockFile(deleteStream))
                 {
                     return false;
                 }
@@ -1285,11 +1284,8 @@ internal static class ExternalProofHarnessSupport
         return new LockFileFingerprint(fileInfo.LastWriteTimeUtc.Ticks, fileInfo.Length, metadataSnapshot);
     }
 
-    private static bool IsStaleLockFile(FileStream stream, DateTime staleCutoffUtc)
+    private static bool IsStaleLockFile(FileStream stream)
     {
-        var fileInfo = new FileInfo(stream.Name);
-        var lockAgeExpired = fileInfo.LastWriteTimeUtc <= staleCutoffUtc;
-
         try
         {
             stream.Position = 0;
@@ -1297,13 +1293,13 @@ internal static class ExternalProofHarnessSupport
             var json = reader.ReadToEnd();
             if (string.IsNullOrWhiteSpace(json))
             {
-                return lockAgeExpired;
+                return true;
             }
 
             var metadata = JsonSerializer.Deserialize<WriteLockMetadata>(json);
             if (metadata is null || metadata.ProcessId <= 0)
             {
-                return lockAgeExpired;
+                return true;
             }
 
             if (!string.Equals(metadata.MachineName, Environment.MachineName, StringComparison.OrdinalIgnoreCase))
@@ -1311,13 +1307,20 @@ internal static class ExternalProofHarnessSupport
                 return false;
             }
 
-            var activeProcess = Process.GetProcessById(metadata.ProcessId);
-            var activeStartTicks = activeProcess.StartTime.ToUniversalTime().Ticks;
-            return metadata.ProcessStartTimeUtcTicks <= 0 || metadata.ProcessStartTimeUtcTicks != activeStartTicks;
+            try
+            {
+                var activeProcess = Process.GetProcessById(metadata.ProcessId);
+                var activeStartTicks = activeProcess.StartTime.ToUniversalTime().Ticks;
+                return metadata.ProcessStartTimeUtcTicks <= 0 || metadata.ProcessStartTimeUtcTicks != activeStartTicks;
+            }
+            catch
+            {
+                return true;
+            }
         }
         catch
         {
-            return lockAgeExpired;
+            return false;
         }
     }
 
