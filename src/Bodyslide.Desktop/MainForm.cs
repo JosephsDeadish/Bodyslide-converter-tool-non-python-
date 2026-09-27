@@ -655,6 +655,15 @@ public sealed class MainForm : Form
             Margin = new Padding(0, 2, 8, 4),
         };
         mixedTargetsButton.Click += (_, _) => ApplySuggestedMixedGenderTargets();
+        var chooseTargetsButton = new Button
+        {
+            Name = "chooseTargetsButton",
+            Text = "Choose TO bodies...",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 2, 8, 4),
+        };
+        chooseTargetsButton.Click += (_, _) => OpenTargetBodySelectionDialog();
         var allBodiesButton = new Button
         {
             Name = "allBodiesButton",
@@ -678,6 +687,7 @@ public sealed class MainForm : Form
             Padding = new Padding(0),
             Dock = DockStyle.Fill,
         };
+        targetBatchActions.Controls.Add(chooseTargetsButton);
         targetBatchActions.Controls.Add(mixedTargetsButton);
         targetBatchActions.Controls.Add(allBodiesButton);
         leftOptions.Controls.Add(targetBatchActions, 1, 6);
@@ -4048,7 +4058,7 @@ public sealed class MainForm : Form
             "The body you want the converted armor to fit. This is the TO/output body and is only editable in Manual mode.");
         _optionToolTip.SetToolTip(_targetBatchTextBox,
             "Optional comma-separated destination body list for batch conversion. Use all to build every supported body.\n" +
-            "For mixed male/female packs you can enter targets like 3BA, HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
+            "For mixed male/female packs you can use 'Choose TO bodies...' to select targets like 3BA and HIMBO so female body assets stay on the female target and male body assets stay on the male target.");
         _optionToolTip.SetToolTip(_profileComboBox,
             "Optional shape override for the converted output. Leave Auto unless you specifically want a different slider/deformation profile.");
         _optionToolTip.SetToolTip(_sourceComboBox,
@@ -4730,6 +4740,108 @@ public sealed class MainForm : Form
 
     private static IReadOnlyList<string> CombineSelections(string? selectedValue, IReadOnlyList<string> enteredValues)
         => DesktopWorkflowSupport.CombineSelections(selectedValue, enteredValues);
+
+    private void OpenTargetBodySelectionDialog()
+    {
+        using var dialog = new Form
+        {
+            Text = "Choose destination TO bodies",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(10)
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        dialog.Controls.Add(layout);
+
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "Select one or more destination bodies for this conversion run:"
+        }, 0, 0);
+
+        var checkedBodies = new CheckedListBox
+        {
+            CheckOnClick = true,
+            IntegralHeight = false,
+            Height = 260,
+            Width = 360
+        };
+        var bodyNames = BodyTypeCatalog.All
+            .Select(static body => body.Name)
+            .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        checkedBodies.Items.AddRange(bodyNames);
+
+        var currentSelection = CombineSelections(
+            string.IsNullOrWhiteSpace(_targetComboBox.Text) ? _targetComboBox.SelectedItem?.ToString() : _targetComboBox.Text.Trim(),
+            ParseDelimitedValues(_targetBatchTextBox.Text));
+        for (var index = 0; index < checkedBodies.Items.Count; index++)
+        {
+            var candidate = checkedBodies.Items[index]?.ToString();
+            if (!string.IsNullOrWhiteSpace(candidate) &&
+                currentSelection.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                checkedBodies.SetItemChecked(index, true);
+            }
+        }
+
+        layout.Controls.Add(checkedBodies, 0, 1);
+
+        var buttons = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 8, 0, 0)
+        };
+        var okButton = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true };
+        var cancelButton = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
+        buttons.Controls.Add(okButton);
+        buttons.Controls.Add(cancelButton);
+        layout.Controls.Add(buttons, 0, 2);
+
+        dialog.AcceptButton = okButton;
+        dialog.CancelButton = cancelButton;
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var selectedBodies = checkedBodies.CheckedItems
+            .Cast<object>()
+            .Select(static entry => entry.ToString())
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry))
+            .Select(static entry => entry!)
+            .ToArray();
+
+        _useCustomTargetRadio.Checked = true;
+        if (selectedBodies.Length == 0)
+        {
+            _targetBatchTextBox.Text = string.Empty;
+            return;
+        }
+
+        _targetComboBox.Text = selectedBodies[0];
+        _targetBatchTextBox.Text = selectedBodies.Length > 1
+            ? string.Join(", ", selectedBodies.Skip(1))
+            : string.Empty;
+        AppendLog($"Selected destination bodies: {string.Join(", ", selectedBodies)}");
+    }
 
     private void PopulateArtifactsTab(IReadOnlyList<ConversionResult> results)
     {
