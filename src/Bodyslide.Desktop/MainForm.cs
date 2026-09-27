@@ -1981,6 +1981,7 @@ public sealed class MainForm : Form
     private IReadOnlyList<RuntimeReadinessCheck> CreateDesktopReadinessReport()
     {
         var checks = RuntimeReadinessReporter.CreateDesktopReport(Environment.ProcessPath).ToList();
+        AppendModOrganizerHealthChecks(checks);
 
         try
         {
@@ -1997,6 +1998,57 @@ public sealed class MainForm : Form
         }
 
         return checks;
+    }
+
+    private void AppendModOrganizerHealthChecks(List<RuntimeReadinessCheck> checks)
+    {
+        var mo2EnvironmentDetected = IsLikelyModOrganizerEnvironment();
+        var mo2ContextDetected = _launchOptions.FromModOrganizerLauncher || mo2EnvironmentDetected;
+        if (!mo2ContextDetected)
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "MO2 health check",
+                "Info",
+                "MO2 context was not detected in this session. If launching from Mod Organizer, use 'Copy MO2 setup' and ensure arguments include --mo2-launcher."));
+            return;
+        }
+
+        checks.Add(new RuntimeReadinessCheck(
+            "MO2 health check",
+            "OK",
+            "MO2 context detected. Verify the launcher uses the desktop executable with --mo2-launcher."));
+
+        var executablePath = Environment.ProcessPath ?? Application.ExecutablePath;
+        var executableName = Path.GetFileName(executablePath);
+        var executableDirectory = Path.GetDirectoryName(executablePath) ?? Environment.CurrentDirectory;
+        var normalizedExecutable = executablePath.Replace('\\', '/');
+        var looksLikeCliTarget =
+            executableName.Equals("SlideSmith-CLI.exe", StringComparison.OrdinalIgnoreCase) ||
+            normalizedExecutable.Contains("/cli/", StringComparison.OrdinalIgnoreCase);
+
+        if (looksLikeCliTarget)
+        {
+            var suggestedDesktopPath = FindSiblingDesktopExecutable(executableDirectory) ?? "SlideSmith.exe";
+            checks.Add(new RuntimeReadinessCheck(
+                "MO2 executable target",
+                "Warning",
+                $"Current launch path looks like CLI ({executableName}). Set MO2 Binary to {suggestedDesktopPath}, Start In to {Path.GetDirectoryName(suggestedDesktopPath) ?? "desktop folder"}, and keep --mo2-launcher. Use 'Copy MO2 setup' for a ready-to-paste fix."));
+        }
+        else
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "MO2 executable target",
+                "OK",
+                $"Desktop executable target looks valid ({executableName})."));
+        }
+
+        if (!_launchOptions.FromModOrganizerLauncher && mo2EnvironmentDetected)
+        {
+            checks.Add(new RuntimeReadinessCheck(
+                "MO2 launcher arguments",
+                "Warning",
+                "MO2 environment variables were detected but --mo2-launcher was not present. Add --mo2-launcher in MO2 executable arguments for deterministic startup routing."));
+        }
     }
 
     private void PopulateReadinessTab(IReadOnlyList<RuntimeReadinessCheck> checks)
@@ -3819,6 +3871,21 @@ public sealed class MainForm : Form
         var siblingCliPath = Path.Combine(siblingCliDirectory, "SlideSmith-CLI.exe");
         return File.Exists(siblingCliPath)
             ? siblingCliPath
+            : null;
+    }
+
+    private static string? FindSiblingDesktopExecutable(string executableDirectory)
+    {
+        var sameDirectory = Path.Combine(executableDirectory, "SlideSmith.exe");
+        if (File.Exists(sameDirectory))
+        {
+            return sameDirectory;
+        }
+
+        var siblingDesktopDirectory = Path.GetFullPath(Path.Combine(executableDirectory, "..", "desktop"));
+        var siblingDesktopPath = Path.Combine(siblingDesktopDirectory, "SlideSmith.exe");
+        return File.Exists(siblingDesktopPath)
+            ? siblingDesktopPath
             : null;
     }
 
@@ -5870,11 +5937,113 @@ public sealed class MainForm : Form
                     entry.Details,
                     ResolveInGameGuidanceTargetPath(outputDirectory, previewPath, entry.ArtifactPath, reportPath));
             }
+
+            AppendHardCaseRegionGuidance(report, outputDirectory, previewPath, reportPath, add, ref requiresReview);
         }
         catch (Exception ex)
         {
             requiresReview = true;
             add("In-game validation", "Warning", $"Could not read in-game-validation.json: {ex.Message}", reportPath);
+        }
+    }
+
+    private static void AppendHardCaseRegionGuidance(
+        InGameValidationReport report,
+        string outputDirectory,
+        string? previewPath,
+        string reportPath,
+        Action<string, string, string, string?> add,
+        ref bool requiresReview)
+    {
+        var regions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var region in report.CoreBodyRegions)
+        {
+            if (!string.IsNullOrWhiteSpace(region))
+            {
+                regions.Add(region);
+            }
+        }
+
+        foreach (var region in report.SensitiveRegions)
+        {
+            if (!string.IsNullOrWhiteSpace(region))
+            {
+                regions.Add(region);
+            }
+        }
+
+        if (report.TopologyCorrespondence?.FocusRegions is { Count: > 0 } topologyRegions)
+        {
+            foreach (var region in topologyRegions)
+            {
+                if (!string.IsNullOrWhiteSpace(region))
+                {
+                    regions.Add(region);
+                }
+            }
+        }
+
+        static bool MatchesRegion(IReadOnlyCollection<string> focusRegions, params string[] tokens) =>
+            focusRegions.Any(region => tokens.Any(token => region.Contains(token, StringComparison.OrdinalIgnoreCase)));
+
+        if (report.TopologyCorrespondence?.StrictTransferBlockers is { Count: > 0 } strictTransferBlockers)
+        {
+            requiresReview = true;
+            add(
+                "Topology transfer",
+                "High",
+                $"Strict topology transfer blockers were reported ({BuildListPreview(strictTransferBlockers)}). Keep conversion-quality.json and in-game-validation.json with the output and resolve these blockers before release.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "topology-partition-review", reportPath));
+        }
+
+        if (MatchesRegion(regions, "heel", "foot", "toe", "ankle", "calf"))
+        {
+            requiresReview = true;
+            add(
+                "Footwear",
+                "Action",
+                "Hard-case footwear regions were flagged. Validate heel height, toe roll, floor contact, and weight-0/1 transitions in preview-workbench.html and world-physics.json before release.",
+                ResolveGuidanceTargetPath(outputDirectory, previewPath, "heel-offset-review", reportPath));
+        }
+
+        if (MatchesRegion(regions, "head", "face", "jaw", "mouth", "oral", "tongue", "teeth"))
+        {
+            requiresReview = true;
+            add(
+                "Head / oral fit",
+                "Action",
+                "Head/oral regions were flagged for runtime checks. Verify jaw and mouth animation poses plus neck seam behavior using in-game-validation.json before publishing.",
+                ResolveInGameGuidanceTargetPath(outputDirectory, previewPath, "in-game-validation.json", reportPath));
+        }
+
+        if (MatchesRegion(regions, "genital", "groin", "vagina", "penis", "anus", "schlong", "pelvis"))
+        {
+            requiresReview = true;
+            add(
+                "Genital fit",
+                "Action",
+                "Genital/groin regions were flagged. Run collision-heavy animation checks, verify partition assignments, and confirm no clipping/penetration regressions before release.",
+                ResolveInGameGuidanceTargetPath(outputDirectory, previewPath, "in-game-validation.json", reportPath));
+        }
+
+        if (MatchesRegion(regions, "head", "oral", "mouth", "genital", "groin", "heel", "foot", "toe"))
+        {
+            var bodySlideTarget = ResolveBodySlideGuidanceTargetPath(outputDirectory) ?? reportPath;
+            var hasSliderSets = ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderSets")) is not null;
+            var hasSliderGroups = ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "SliderGroups")) is not null;
+            var hasShapeData = ResolveExistingGuidancePath(outputDirectory, Path.Combine("CalienteTools", "BodySlide", "ShapeData")) is not null;
+            if (!hasSliderSets || !hasSliderGroups || !hasShapeData)
+            {
+                requiresReview = true;
+            }
+
+            add(
+                "BodySlide placement",
+                !hasSliderSets || !hasSliderGroups || !hasShapeData ? "Warning" : "Info",
+                !hasSliderSets || !hasSliderGroups || !hasShapeData
+                    ? "Hard-case regions were detected and one or more BodySlide artifacts are missing (SliderSets, SliderGroups, or ShapeData). Regenerate and verify OSP/XML/ShapeData placement before packaging."
+                    : "Hard-case regions were detected. Verify generated OSP/XML/ShapeData placements and slider payload links so BodySlide shows and rebuilds the converted set correctly.",
+                bodySlideTarget);
         }
     }
 
