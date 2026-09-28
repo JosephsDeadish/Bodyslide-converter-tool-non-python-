@@ -11005,6 +11005,11 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     {
         var tuning = BodyDetectionTuningCatalog.Current;
         var sourceContextNames = BuildDetectionSignalNames([armor.SourcePath]);
+        var bodySlideSupportSignals = await ReadBodySlideSupportSignalsAsync(armor.BodyReferenceFiles, cancellationToken);
+        sourceContextNames = sourceContextNames
+            .Concat(bodySlideSupportSignals)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var meshNames = BuildDetectionSignalNames(armor.MeshFiles)
             .Concat(sourceContextNames)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -11105,6 +11110,133 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
             catch (IOException) { /* skip unreadable files */ }
         }
         return sb.ToString();
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadBodySlideSupportSignalsAsync(
+        IReadOnlyList<string> bodyReferenceFiles,
+        CancellationToken cancellationToken)
+    {
+        if (bodyReferenceFiles.Count == 0)
+        {
+            return [];
+        }
+
+        var supportedFiles = bodyReferenceFiles
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Where(path =>
+            {
+                var extension = Path.GetExtension(path);
+                return extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                       extension.Equals(".xml", StringComparison.OrdinalIgnoreCase);
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(24)
+            .ToArray();
+        if (supportedFiles.Length == 0)
+        {
+            return [];
+        }
+
+        var hintTokens = BuildBodySlideHintTokens();
+        var discoveredSignals = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in supportedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!File.Exists(file))
+            {
+                continue;
+            }
+
+            try
+            {
+                await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream);
+                var snippetLength = (int)Math.Min(192_000, stream.Length);
+                var buffer = new char[snippetLength];
+                var charsRead = await reader.ReadAsync(buffer.AsMemory(0, snippetLength), cancellationToken);
+                if (charsRead <= 0)
+                {
+                    continue;
+                }
+
+                var content = new string(buffer, 0, charsRead);
+                foreach (var token in hintTokens)
+                {
+                    if (content.Contains(token, StringComparison.OrdinalIgnoreCase))
+                    {
+                        discoveredSignals.Add(token);
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (DecoderFallbackException)
+            {
+            }
+        }
+
+        return discoveredSignals.ToArray();
+    }
+
+    private static IReadOnlySet<string> BuildBodySlideHintTokens()
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in VanillaBodySignatureDatabase.Templates)
+        {
+            foreach (var token in ExpandBodyHintToken(template.Body))
+            {
+                tokens.Add(token);
+            }
+
+            if (BuiltInBodyMetadataCatalog.TryGet(template.Body, out var metadata))
+            {
+                foreach (var alias in metadata.Aliases)
+                {
+                    foreach (var token in ExpandBodyHintToken(alias))
+                    {
+                        tokens.Add(token);
+                    }
+                }
+            }
+        }
+
+        return tokens;
+    }
+
+    private static IReadOnlyList<string> ExpandBodyHintToken(string rawToken)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return [];
+        }
+
+        var normalized = rawToken.Trim();
+        var condensed = normalized
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal);
+        var dashed = normalized
+            .Replace('_', '-')
+            .Replace(' ', '-')
+            .ToLowerInvariant();
+
+        return new[]
+        {
+            normalized,
+            normalized.ToLowerInvariant(),
+            condensed,
+            dashed
+        }
+        .Where(static token => !string.IsNullOrWhiteSpace(token))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
     }
 
     private static IReadOnlySet<string> ExtractPhysicsBoneNames(string physicsContents)

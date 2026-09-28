@@ -2574,9 +2574,17 @@ public sealed class MainForm : Form
             return;
         }
 
-        _inputTextBox.Text = inputCandidate;
+        if (TryResolveSupportOnlyInputScanRoot(inputCandidate, out var scanRoot, out var supportFileName))
+        {
+            _inputTextBox.Text = scanRoot;
+            AppendLog($"Support file '{supportFileName}' selected. Using containing folder as input scan root: {scanRoot}");
+        }
+        else
+        {
+            _inputTextBox.Text = inputCandidate;
+        }
         UpdatePathActionStates();
-        AppendLog($"Input selected: {inputCandidate}");
+        AppendLog($"Input selected: {_inputTextBox.Text}");
     }
 
     private void ApplySuggestedMixedGenderTargets()
@@ -2832,6 +2840,12 @@ public sealed class MainForm : Form
         {
             MessageBox.Show(this, "Input path was not found.", "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
+        }
+
+        if (TryResolveSupportOnlyInputScanRoot(input, out var supportScanRoot, out var supportFileName))
+        {
+            input = supportScanRoot;
+            AppendLog($"Conversion input resolved support file '{supportFileName}' to scan root: {supportScanRoot}");
         }
 
         if (usingPreset && selectedPresets.Count == 0)
@@ -3170,6 +3184,15 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (TryResolveSupportOnlyInputScanRoot(input, out var supportScanRoot, out var supportFileName))
+        {
+            input = supportScanRoot;
+            if (!automaticTrigger)
+            {
+                AppendLog($"Inspect input resolved support file '{supportFileName}' to scan root: {supportScanRoot}");
+            }
+        }
+
         _activeConversion = CancellationTokenSource.CreateLinkedTokenSource(externalCancellationToken);
         try
         {
@@ -3267,6 +3290,37 @@ public sealed class MainForm : Form
                normalized.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ||
                normalized.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) ||
                normalized.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryResolveSupportOnlyInputScanRoot(string inputPath, out string scanRoot, out string supportFileName)
+    {
+        scanRoot = inputPath;
+        supportFileName = string.Empty;
+        if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(inputPath);
+        var isSupportOnly = extension.Equals(".xml", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".osp", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".osd", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".bsd", StringComparison.OrdinalIgnoreCase) ||
+                            extension.Equals(".tri", StringComparison.OrdinalIgnoreCase);
+        if (!isSupportOnly)
+        {
+            return false;
+        }
+
+        var directory = Path.GetDirectoryName(inputPath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        scanRoot = directory;
+        supportFileName = Path.GetFileName(inputPath);
+        return true;
     }
 
     private string? ResolveInspectionTargetBody()

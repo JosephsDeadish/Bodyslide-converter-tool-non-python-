@@ -12424,6 +12424,72 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_UsesBodySlideOspContentSignalsForBodyInference()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "outfit_0.nif");
+        var ospPath = Path.Combine(workingDirectory, "sliderset.osp");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(
+                ospPath,
+                """
+                <SliderSetInfo>
+                  <SliderSet name="CBBE Curvy Outfit" set="CBBE" />
+                </SliderSetInfo>
+                """);
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [ospPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Equal("CBBE", result.Body);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("mesh:", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SignatureBodyDetectionService_UsesBodySlideXmlSignalsForBodyInference()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(workingDirectory);
+        var meshPath = Path.Combine(workingDirectory, "outfit_0.nif");
+        var xmlPath = Path.Combine(workingDirectory, "group.xml");
+
+        try
+        {
+            await File.WriteAllTextAsync(meshPath, "mesh");
+            await File.WriteAllTextAsync(
+                xmlPath,
+                """
+                <SliderGroup name="UUNP Outfits">
+                  <Member name="UUNP Slim Variant" />
+                </SliderGroup>
+                """);
+
+            var service = new SignatureBodyDetectionService();
+            var armor = new ImportedArmor(meshPath, [meshPath], [], [], [xmlPath]);
+
+            var result = await service.DetectAsync(armor, CancellationToken.None);
+
+            Assert.Contains(result.Body, ["UUNP", "UNP"], StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(result.Evidence, evidence => evidence.StartsWith("mesh:", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
     {
         var service = new SignatureBodyDetectionService();
