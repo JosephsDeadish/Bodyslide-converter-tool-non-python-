@@ -2779,8 +2779,8 @@ public sealed class MainForm : Form
         }
 
         _modeStatusLabel.Text = showAdvanced
-            ? "Advanced options are visible. Use source/override/custom-profile controls when you need manual tuning."
-            : "Quick layout is active. Core input + target controls are shown; enable advanced options only when needed.";
+            ? "Advanced options are visible. FROM body = original armor body hint, TO body = converted output body target."
+            : "Quick layout is active. FROM body is your source hint and TO body is your output target.";
         UpdateMainSplitLayout();
     }
 

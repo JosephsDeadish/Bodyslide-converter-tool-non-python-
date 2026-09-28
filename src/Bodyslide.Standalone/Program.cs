@@ -8,9 +8,14 @@ ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
     AppContext.BaseDirectory);
 
 var shouldPauseOnExit = ShouldPauseOnExit(args);
+var startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
+WriteStartupDiagnostics(
+    startupDiagnosticsPath,
+    $"startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
 
-if (TryLaunchDesktopGuiOnWindows(args))
+if (TryLaunchDesktopGuiOnWindows(args, startupDiagnosticsPath))
 {
+    WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: handoff complete");
     return;
 }
 
@@ -355,7 +360,7 @@ static bool ShouldPauseOnExit(string[] args)
     return args.Length == 1 && !args[0].StartsWith("--", StringComparison.Ordinal);
 }
 
-static bool TryLaunchDesktopGuiOnWindows(string[] args)
+static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosticsPath)
 {
     if (!OperatingSystem.IsWindows())
     {
@@ -379,8 +384,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
         var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
+        WriteStartupDiagnostics(
+            startupDiagnosticsPath,
+            $"desktop-launch: mo2={launchedFromModOrganizer}, explicit-cli={explicitCliLaunch}, exe={currentExeFullPath}");
         if (args.Length != 0 && !launchedFromModOrganizer && explicitCliLaunch)
         {
+            WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (explicit CLI invocation)");
             return false;
         }
 
@@ -407,7 +416,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                 continue;
             }
 
-            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, out var launched))
+            if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
                 if (launchedFromModOrganizer && launched is not null)
                 {
@@ -415,6 +424,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                     {
                         if (launched.WaitForExit(1500) && launched.ExitCode != 0)
                         {
+                            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: candidate exited early with code {launched.ExitCode}: {desktopExePath}");
                             continue;
                         }
                     }
@@ -440,7 +450,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                 continue;
             }
 
-            if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, out var launched))
+            if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, startupDiagnosticsPath, out var launched))
             {
                 if (launchedFromModOrganizer && launched is not null)
                 {
@@ -448,6 +458,7 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
                     {
                         if (launched.WaitForExit(1500) && launched.ExitCode != 0)
                         {
+                            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: dll candidate exited early with code {launched.ExitCode}: {desktopDllPath}");
                             continue;
                         }
                     }
@@ -463,12 +474,14 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Could not auto-launch desktop GUI: {ex.Message}");
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: exception {ex.GetType().Name}: {ex.Message}");
     }
 
+    WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: no candidate succeeded");
     return false;
 }
 
-static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, out Process? launchedProcess)
+static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
 {
     launchedProcess = null;
     var workingDirectory = Path.GetDirectoryName(desktopExePath) ?? fallbackWorkingDirectory;
@@ -479,36 +492,40 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
         WorkingDirectory = workingDirectory,
         UseShellExecute = true
     };
-    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer);
+    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer, startupDiagnosticsPath);
 
     try
     {
         launchedProcess = Process.Start(startInfo);
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started exe candidate {desktopExePath}");
         return launchedProcess is not null;
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: shell start failed for {desktopExePath} ({ex.GetType().Name}: {ex.Message})");
         var fallback = new ProcessStartInfo
         {
             FileName = desktopExePath,
             WorkingDirectory = workingDirectory,
             UseShellExecute = false
         };
-        ForwardDesktopLaunchArgs(fallback, forwardedArgs, launchedFromModOrganizer);
+        ForwardDesktopLaunchArgs(fallback, forwardedArgs, launchedFromModOrganizer, startupDiagnosticsPath);
         try
         {
             launchedProcess = Process.Start(fallback);
+            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started exe candidate (fallback) {desktopExePath}");
             return launchedProcess is not null;
         }
-        catch
+        catch (Exception fallbackEx)
         {
+            WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: fallback failed for {desktopExePath} ({fallbackEx.GetType().Name}: {fallbackEx.Message})");
             launchedProcess = null;
             return false;
         }
     }
 }
 
-static bool TryStartDesktopDllProcess(string desktopDllPath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, out Process? launchedProcess)
+static bool TryStartDesktopDllProcess(string desktopDllPath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, string? startupDiagnosticsPath, out Process? launchedProcess)
 {
     launchedProcess = null;
     var workingDirectory = Path.GetDirectoryName(desktopDllPath) ?? fallbackWorkingDirectory;
@@ -520,15 +537,17 @@ static bool TryStartDesktopDllProcess(string desktopDllPath, string fallbackWork
         UseShellExecute = false
     };
     startInfo.ArgumentList.Add(desktopDllPath);
-    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer);
+    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer, startupDiagnosticsPath);
 
     try
     {
         launchedProcess = Process.Start(startInfo);
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: started dll candidate {desktopDllPath}");
         return launchedProcess is not null;
     }
-    catch
+    catch (Exception ex)
     {
+        WriteStartupDiagnostics(startupDiagnosticsPath, $"desktop-launch: dll candidate failed {desktopDllPath} ({ex.GetType().Name}: {ex.Message})");
         launchedProcess = null;
         return false;
     }
@@ -565,7 +584,7 @@ static string ResolveDotnetHostPath()
     return "dotnet";
 }
 
-static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<string> forwardedArgs, bool launchedFromModOrganizer)
+static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<string> forwardedArgs, bool launchedFromModOrganizer, string? startupDiagnosticsPath)
 {
     if (forwardedArgs.Count > 0)
     {
@@ -578,6 +597,13 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
 
             startInfo.ArgumentList.Add(arg);
         }
+    }
+
+    if (!string.IsNullOrWhiteSpace(startupDiagnosticsPath) &&
+        !forwardedArgs.Any(arg => IsStandaloneOptionMatch(arg, "startup-diagnostics")))
+    {
+        startInfo.ArgumentList.Add("--startup-diagnostics");
+        startInfo.ArgumentList.Add(startupDiagnosticsPath);
     }
 
     if (!launchedFromModOrganizer)
@@ -611,7 +637,6 @@ static bool HasStandaloneCommandSwitch(IReadOnlyList<string> args) =>
         }
 
         if (option.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-            option.StartsWith("mo3-", StringComparison.OrdinalIgnoreCase) ||
             option.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -699,6 +724,89 @@ static bool TryReadLongOptionName(string? arg, out string option)
     return option.Length > 0;
 }
 
+static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
+{
+    for (var index = 0; index < args.Count; index++)
+    {
+        var arg = args[index];
+        if (!TryReadLongOptionName(arg, out var option) ||
+            !option.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+
+        var inlineSeparator = arg.IndexOf('=', StringComparison.Ordinal);
+        if (inlineSeparator < 0)
+        {
+            inlineSeparator = arg.IndexOf(':', StringComparison.Ordinal);
+        }
+
+        if (inlineSeparator >= 0 && inlineSeparator + 1 < arg.Length)
+        {
+            return NormalizeDiagnosticsPath(arg[(inlineSeparator + 1)..]);
+        }
+
+        if (index + 1 < args.Count)
+        {
+            return NormalizeDiagnosticsPath(args[index + 1]);
+        }
+    }
+
+    var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    if (!string.IsNullOrWhiteSpace(localAppData))
+    {
+        return Path.Combine(localAppData, "SlideSmith", "startup-launch-diagnostics.log");
+    }
+
+    return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
+}
+
+static string? NormalizeDiagnosticsPath(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return null;
+    }
+
+    var trimmed = value.Trim().Trim('"');
+    return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+}
+
+static void WriteStartupDiagnostics(string? diagnosticsPath, string message)
+{
+    if (string.IsNullOrWhiteSpace(diagnosticsPath))
+    {
+        return;
+    }
+
+    try
+    {
+        var path = Path.GetFullPath(diagnosticsPath);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.AppendAllText(
+            path,
+            $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+    }
+    catch
+    {
+    }
+}
+
+static bool IsStandaloneOptionMatch(string? arg, string optionName)
+{
+    if (!TryReadLongOptionName(arg, out var option))
+    {
+        return false;
+    }
+
+    return option.Equals(optionName, StringComparison.OrdinalIgnoreCase);
+}
+
 static bool IsMo2LauncherArg(string? arg)
 {
     if (string.IsNullOrWhiteSpace(arg))
@@ -728,14 +836,12 @@ static bool IsMo2LauncherArg(string? arg)
     }
 
     return trimmed.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-           trimmed.StartsWith("mo3-", StringComparison.OrdinalIgnoreCase) ||
            trimmed.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyModOrganizerEnvironment()
 {
     return HasEnvironmentVariable("MO2_INSTANCE") ||
-           HasEnvironmentVariable("MO3_INSTANCE") ||
            HasEnvironmentVariable("USVFS_PARAMETERS") ||
            HasEnvironmentVariable("USVFS_PROCESS") ||
            HasEnvironmentVariable("USVFS_PROXY") ||
@@ -757,8 +863,7 @@ static bool PathLooksLikeModOrganizerManagedLocation(string? path)
     var normalizedPath = path.Replace('\\', '/');
     return normalizedPath.Contains("mod organizer", StringComparison.OrdinalIgnoreCase) ||
            normalizedPath.Contains("modorganizer", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase) ||
-           normalizedPath.Contains("/mo3/", StringComparison.OrdinalIgnoreCase);
+           normalizedPath.Contains("/mo2/", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsLikelyLauncherPathArgument(string? arg)

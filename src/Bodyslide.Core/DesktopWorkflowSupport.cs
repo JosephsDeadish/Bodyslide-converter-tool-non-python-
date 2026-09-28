@@ -17,10 +17,7 @@ internal static class DesktopWorkflowSupport
         "output",
         "mo2-output",
         "mo2-result",
-        "mo2-mod",
-        "mo3-output",
-        "mo3-result",
-        "mo3-mod"
+        "mo2-mod"
     ];
 
     private static readonly string[] DesktopResultMarkerFiles =
@@ -399,7 +396,6 @@ internal static class DesktopWorkflowSupport
         }
 
         return key.StartsWith("mo2-", StringComparison.OrdinalIgnoreCase) ||
-               key.StartsWith("mo3-", StringComparison.OrdinalIgnoreCase) ||
                key.StartsWith("modorganizer-", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -411,7 +407,6 @@ internal static class DesktopWorkflowSupport
         }
         return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-               key.Equals("mo3-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -456,7 +451,6 @@ internal static class DesktopWorkflowSupport
                 var recognizesColonSeparatedValue =
                     DesktopResultArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     potentialKey.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
-                    potentialKey.Equals("mo3-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase);
                 if (recognizesColonSeparatedValue)
                 {

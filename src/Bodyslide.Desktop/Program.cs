@@ -5,12 +5,18 @@ namespace Bodyslide.Desktop;
 
 internal static class Program
 {
+    private static string? _startupDiagnosticsPath;
+
     [STAThread]
     private static int Main(string[] args)
     {
         ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
             Environment.ProcessPath,
             AppContext.BaseDirectory);
+        _startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
+        WriteStartupDiagnostics(
+            _startupDiagnosticsPath,
+            $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
         RegisterGlobalExceptionHandlers();
 
         if (args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
@@ -20,13 +26,18 @@ internal static class Program
 
         try
         {
+            var launchOptions = DesktopWorkflowSupport.ParseLaunchOptions(args);
+            WriteStartupDiagnostics(
+                _startupDiagnosticsPath,
+                $"desktop-startup: launcher={launchOptions.FromModOrganizerLauncher}, startup-output={launchOptions.StartupOutputDirectory ?? "(none)"}, startup-input={launchOptions.StartupInputPath ?? "(none)"}");
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm(DesktopWorkflowSupport.ParseLaunchOptions(args)));
+            Application.Run(new MainForm(launchOptions));
+            WriteStartupDiagnostics(_startupDiagnosticsPath, "desktop-startup: ui exited normally");
             return 0;
         }
         catch (Exception ex)
         {
-            ShowFatalError(ex);
+            ShowFatalError(ex, _startupDiagnosticsPath);
             return 1;
         }
     }
@@ -57,19 +68,22 @@ internal static class Program
     }
 
     private static void OnThreadException(object sender, System.Threading.ThreadExceptionEventArgs e) =>
-        ShowFatalError(e.Exception);
+        ShowFatalError(e.Exception, _startupDiagnosticsPath);
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         if (e.ExceptionObject is Exception ex)
         {
-            ShowFatalError(ex);
+            ShowFatalError(ex, _startupDiagnosticsPath);
         }
     }
 
-    private static void ShowFatalError(Exception ex)
+    private static void ShowFatalError(Exception ex, string? startupDiagnosticsPath)
     {
         var crashLogPath = TryWriteCrashLog(ex);
+        WriteStartupDiagnostics(
+            startupDiagnosticsPath,
+            $"desktop-startup: fatal {ex.GetType().FullName}: {ex.Message}; crash-log={crashLogPath ?? "(not written)"}");
         var crashDetails = BuildCrashDetails(ex, crashLogPath);
         using var dialog = new Form
         {
@@ -202,5 +216,119 @@ internal static class Program
         }
 
         yield return Path.Combine(Path.GetTempPath(), "SlideSmith");
+    }
+
+    private static string? ResolveStartupDiagnosticsPath(IReadOnlyList<string> args)
+    {
+        for (var index = 0; index < args.Count; index++)
+        {
+            if (!TryReadOptionToken(args[index], out var optionName, out var inlineValue) ||
+                !optionName.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(inlineValue))
+            {
+                return NormalizeDiagnosticsPath(inlineValue);
+            }
+
+            if (index + 1 < args.Count)
+            {
+                return NormalizeDiagnosticsPath(args[index + 1]);
+            }
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            return Path.Combine(localAppData, "SlideSmith", "startup-launch-diagnostics.log");
+        }
+
+        return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
+    }
+
+    private static string? NormalizeDiagnosticsPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim().Trim('"');
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static bool TryReadOptionToken(string? arg, out string optionName, out string? inlineValue)
+    {
+        optionName = string.Empty;
+        inlineValue = null;
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            return false;
+        }
+
+        string trimmed;
+        if (arg.StartsWith("--", StringComparison.Ordinal))
+        {
+            trimmed = arg[2..];
+        }
+        else if (arg.StartsWith("-", StringComparison.Ordinal) || arg.StartsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = arg[1..];
+        }
+        else
+        {
+            return false;
+        }
+
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex >= 0)
+        {
+            optionName = trimmed[..separatorIndex].Trim();
+            inlineValue = separatorIndex + 1 < trimmed.Length ? trimmed[(separatorIndex + 1)..] : string.Empty;
+            return optionName.Length > 0;
+        }
+
+        var colonIndex = trimmed.IndexOf(':');
+        if (colonIndex > 1)
+        {
+            optionName = trimmed[..colonIndex].Trim();
+            inlineValue = colonIndex + 1 < trimmed.Length ? trimmed[(colonIndex + 1)..] : string.Empty;
+            return optionName.Length > 0;
+        }
+
+        optionName = trimmed.Trim();
+        return optionName.Length > 0;
+    }
+
+    private static void WriteStartupDiagnostics(string? diagnosticsPath, string message)
+    {
+        if (string.IsNullOrWhiteSpace(diagnosticsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = Path.GetFullPath(diagnosticsPath);
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.AppendAllText(
+                path,
+                $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
     }
 }
