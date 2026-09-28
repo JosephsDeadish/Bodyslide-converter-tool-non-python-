@@ -1,6 +1,7 @@
 using Bodyslide.Core;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.Versioning;
@@ -13,6 +14,19 @@ namespace Bodyslide.Desktop;
 public sealed class MainForm : Form
 {
     private static readonly string[] PreviewFileCandidates = ["preview-workbench.html", "preview.html"];
+    private const string CreatorSupportLink = "https://www.patreon.com/cw/DeadOnTheInside";
+    private static readonly string[] CreatorSupportTooltips =
+    [
+        "Click to fund the sacred coffee ritual that keeps conversions alive.",
+        "Support the creator: every click adds +1 morale and +3 bug-fixing stamina.",
+        "Press the heart to cast 'Sustain Development' (duration: one billing cycle).",
+        "This button converts spare change into fewer headaches. Allegedly.",
+        "Feed the dev goblin so it patches bugs instead of eating keyboards.",
+        "Click here to upgrade from 'works on my machine' to 'works for everyone.'",
+        "Support button: because GPU fans run on love and monthly pledges.",
+        "Tap the heart if you want more fixes and fewer cursed edge cases.",
+        "Open Patreon and become an official sponsor of late-night debugging."
+    ];
     private static readonly string[] ConversionPipelineStages =
     [
         "Importing input",
@@ -149,6 +163,7 @@ public sealed class MainForm : Form
     private bool _userAdjustedMainSplit;
     private bool? _usesSingleColumnConversionLayout;
     private int? _userPreferredMainSplitDistance;
+    private int _lastCreatorTooltipIndex = -1;
     private readonly object _uiSettingsSaveSync = new();
     private DesktopUiSettings? _pendingUiSettingsSave;
     private Task? _uiSettingsSaveTask;
@@ -466,12 +481,13 @@ public sealed class MainForm : Form
         {
             Text = "Quick preset mode (recommended)",
             AutoSize = true,
-            Checked = true,
+            Checked = false,
         };
         _useCustomTargetRadio = new RadioButton
         {
             Text = "Manual mode (I will choose the TO body)",
             AutoSize = true,
+            Checked = true,
         };
         _usePresetRadio.CheckedChanged += (_, _) =>
         {
@@ -540,8 +556,19 @@ public sealed class MainForm : Form
             Margin = new Padding(0),
         };
         autoMapTargetButton.Click += (_, _) => ApplyAutoMappedTargetFromSource();
+        var creatorSupportButton = new Button
+        {
+            Name = "creatorSupportButton",
+            Text = "❤ Support creator",
+            AutoSize = true,
+            Margin = new Padding(8, 0, 0, 0),
+        };
+        creatorSupportButton.Click += (_, _) => OpenCreatorSupportLink();
+        creatorSupportButton.MouseEnter += (_, _) =>
+            _optionToolTip.SetToolTip(creatorSupportButton, GetRandomCreatorSupportTooltip());
         modeQuickActionsPanel.Controls.Add(useRecommendedSetupButton);
         modeQuickActionsPanel.Controls.Add(autoMapTargetButton);
+        modeQuickActionsPanel.Controls.Add(creatorSupportButton);
         modeRow.Controls.Add(modeQuickActionsPanel, 0, 2);
         modeRow.SetColumnSpan(modeQuickActionsPanel, 2);
         _showAdvancedOptionsCheckBox = new CheckBox
@@ -2794,7 +2821,7 @@ public sealed class MainForm : Form
         var showAdvanced = _showAdvancedOptionsCheckBox?.Checked ?? false;
         if (_sourceHintsGroupBox is not null && !_sourceHintsGroupBox.IsDisposed)
         {
-            _sourceHintsGroupBox.Visible = showAdvanced;
+            _sourceHintsGroupBox.Visible = true;
         }
 
         if (_customProfilesGroupBox is not null && !_customProfilesGroupBox.IsDisposed)
@@ -2804,8 +2831,53 @@ public sealed class MainForm : Form
 
         _modeStatusLabel.Text = showAdvanced
             ? "Advanced options are visible. FROM body = original armor body hint, TO body = converted output body target."
-            : "Quick layout is active. FROM body is your source hint and TO body is your output target.";
+            : "Quick layout is active. FROM body stays visible so you can always verify source hints while choosing TO targets.";
         UpdateMainSplitLayout();
+    }
+
+    private void OpenCreatorSupportLink()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = CreatorSupportLink,
+                UseShellExecute = true
+            });
+            AppendLog($"Opened creator support link: {CreatorSupportLink}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Could not open creator support link: {ex.Message}");
+            MessageBox.Show(
+                this,
+                $"Could not open link automatically.\n{CreatorSupportLink}",
+                "Open support link",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    private string GetRandomCreatorSupportTooltip()
+    {
+        if (CreatorSupportTooltips.Length == 0)
+        {
+            return "Support the creator";
+        }
+
+        if (CreatorSupportTooltips.Length == 1)
+        {
+            return CreatorSupportTooltips[0];
+        }
+
+        var index = _lastCreatorTooltipIndex;
+        while (index == _lastCreatorTooltipIndex)
+        {
+            index = Random.Shared.Next(CreatorSupportTooltips.Length);
+        }
+
+        _lastCreatorTooltipIndex = index;
+        return CreatorSupportTooltips[index];
     }
 
     private async Task ConvertAsync()

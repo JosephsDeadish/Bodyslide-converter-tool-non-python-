@@ -383,10 +383,11 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
+        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
-            $"desktop-launch: mo2={launchedFromModOrganizer}, exe={currentExeFullPath}");
-        if (args.Length != 0 && !launchedFromModOrganizer)
+            $"desktop-launch: mo2={launchedFromModOrganizer}, cli={explicitCliLaunch}, exe={currentExeFullPath}");
+        if (args.Length != 0 && (!launchedFromModOrganizer || explicitCliLaunch))
         {
             WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher arguments)");
             return false;
@@ -599,7 +600,7 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
     }
 
     if (!string.IsNullOrWhiteSpace(startupDiagnosticsPath) &&
-        !forwardedArgs.Any(arg => IsStandaloneOptionMatch(arg, "startup-diagnostics")))
+        !HasStartupDiagnosticsArgumentWithValue(forwardedArgs))
     {
         startInfo.ArgumentList.Add("--startup-diagnostics");
         startInfo.ArgumentList.Add(startupDiagnosticsPath);
@@ -615,6 +616,53 @@ static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<s
     {
         startInfo.ArgumentList.Add("--mo2-launcher");
     }
+}
+
+static bool HasStartupDiagnosticsArgumentWithValue(IReadOnlyList<string> args)
+{
+    for (var index = 0; index < args.Count; index++)
+    {
+        var arg = args[index];
+        if (string.IsNullOrWhiteSpace(arg))
+        {
+            continue;
+        }
+
+        if (arg.StartsWith("--startup-diagnostics=", StringComparison.OrdinalIgnoreCase) ||
+            arg.StartsWith("--startup-diagnostics:", StringComparison.OrdinalIgnoreCase))
+        {
+            var separatorIndex = arg.IndexOfAny(['=', ':']);
+            if (separatorIndex >= 0 && separatorIndex < arg.Length - 1)
+            {
+                var inlineValue = arg[(separatorIndex + 1)..];
+                if (!string.IsNullOrWhiteSpace(NormalizeDiagnosticsPath(inlineValue)))
+                {
+                    return true;
+                }
+            }
+            continue;
+        }
+
+        if (!IsStandaloneOptionMatch(arg, "startup-diagnostics"))
+        {
+            continue;
+        }
+
+        if (index + 1 >= args.Count)
+        {
+            continue;
+        }
+
+        var next = args[index + 1];
+        if (!string.IsNullOrWhiteSpace(next) &&
+            !TryReadLongOptionName(next, out _) &&
+            !string.IsNullOrWhiteSpace(NormalizeDiagnosticsPath(next)))
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static bool IsLikelyModOrganizerLaunch(IReadOnlyList<string> args, string? executablePath, string? workingDirectory) =>
