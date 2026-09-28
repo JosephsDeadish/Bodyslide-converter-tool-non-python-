@@ -151,7 +151,14 @@ public static class ExecutionEnvironment
             return false;
         }
 
-        return IsLikelyDirectoryName(leafName);
+        if (IsLikelyDirectoryName(leafName))
+        {
+            return true;
+        }
+
+        // For non-existent extensionless paths, prefer directory semantics by default.
+        // This keeps default output placement intuitive for common launcher/mod folder inputs.
+        return true;
     }
 
     private static bool IsLikelyFileName(string leafName)

@@ -232,6 +232,59 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesVortexOutputWithQuotedInlineValue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var outputDirectory = Path.Combine(workingDirectory, "output with spaces");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"--vortex-output=\"{outputDirectory}\"",
+                    "--vortex-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesGenericOutputArgumentWithVortexLauncherFlag()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--output",
+                    outputDirectory,
+                    "--vortex"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_UsesExistingPathAsStartupInputWhenItIsNotASlideSmithResult()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

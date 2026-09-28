@@ -730,6 +730,14 @@ static bool TryReadLongOptionName(string? arg, out string option)
     {
         option = option[..separatorIndex];
     }
+    else
+    {
+        var colonIndex = option.IndexOf(':');
+        if (colonIndex > 1)
+        {
+            option = option[..colonIndex];
+        }
+    }
 
     if (option.Contains(Path.DirectorySeparatorChar) || option.Contains(Path.AltDirectorySeparatorChar))
     {
@@ -931,7 +939,10 @@ static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
             !option.Equals("load-result", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("mo2-output", StringComparison.OrdinalIgnoreCase) &&
             !option.Equals("mo2-result", StringComparison.OrdinalIgnoreCase) &&
-            !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase))
+            !option.Equals("mo2-mod", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-output", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-result", StringComparison.OrdinalIgnoreCase) &&
+            !option.Equals("vortex-mod", StringComparison.OrdinalIgnoreCase))
         {
             continue;
         }
