@@ -33,6 +33,11 @@ internal static class DesktopWorkflowSupport
     ];
     private static readonly string[] DesktopInputFallbackArgumentNames =
     [
+        "output",
+        "result",
+        "load-result",
+        "mo2-output",
+        "mo2-result",
         "mo2-mod",
         "mo2-path",
         "modorganizer-path",
