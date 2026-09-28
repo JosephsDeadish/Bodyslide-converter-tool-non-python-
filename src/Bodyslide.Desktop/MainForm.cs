@@ -186,6 +186,7 @@ public sealed class MainForm : Form
     private const int MaxAutoCacheLogEntries = 20;
     private const int AutoInspectDebounceMilliseconds = 700;
     private const double AutoDetectedSourceConfidenceFloor = 0.75;
+    private static readonly TimeSpan AutoInspectTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan StartupOperationTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(700);
@@ -3115,10 +3116,22 @@ public sealed class MainForm : Form
                 return;
             }
 
-            await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(AutoInspectTimeout);
+            await InspectInputAsync(
+                showDialogs: false,
+                switchToInspectTab: false,
+                automaticTrigger: true,
+                externalCancellationToken: timeoutCts.Token);
         }
         catch (OperationCanceledException)
         {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _statusLabel.Text = "Auto-inspection timed out. Click Inspect Input to run full analysis.";
+                ClearInspectionTab("Auto-inspection timed out. Click Inspect Input for a full pass.");
+                AppendLog("Auto-inspection timed out to keep the UI responsive.");
+            }
         }
     }
 
@@ -3165,7 +3178,10 @@ public sealed class MainForm : Form
                 return;
             }
 
-            SetBusyState(isBusy: true);
+            if (!automaticTrigger)
+            {
+                SetBusyState(isBusy: true);
+            }
             ShowBusyProgress(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
             ClearInspectionTab(automaticTrigger ? "Auto-inspecting input..." : "Inspecting input...");
             var inspectionTargetBody = ResolveInspectionTargetBody();
@@ -3217,7 +3233,15 @@ public sealed class MainForm : Form
         {
             _activeConversion?.Dispose();
             _activeConversion = null;
-            SetBusyState(isBusy: false);
+            if (!automaticTrigger)
+            {
+                SetBusyState(isBusy: false);
+            }
+            else
+            {
+                _inspectInputButton.Enabled = InputPathExists();
+                _convertButton.Enabled = CanStartConversion();
+            }
         }
     }
 
