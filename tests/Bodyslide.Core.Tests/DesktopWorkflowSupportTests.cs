@@ -232,6 +232,88 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesMo2OutputWithQuotedInlineValue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var outputDirectory = Path.Combine(workingDirectory, "output with spaces");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"--mo2-output=\"{outputDirectory}\"",
+                    "--modorganizer-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesModOrganizerPathWithColonSeparatedValue()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");
+        var outputDirectory = Path.Combine(workingDirectory, "output with spaces");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/modorganizer-path:\"{outputDirectory}\"",
+                    "/mo2-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(workingDirectory)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_IgnoresStartupDiagnosticsArgumentAndPrefersMo2ResultPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var outputDirectory = Path.Combine(workingDirectory, "output");
+        var diagnosticsPath = Path.Combine(workingDirectory, "startup.log");
+        Directory.CreateDirectory(outputDirectory);
+        File.WriteAllText(Path.Combine(outputDirectory, "preview-workbench.html"), "<html></html>");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--startup-diagnostics",
+                    diagnosticsPath,
+                    "--mo2-output",
+                    outputDirectory,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Equal(outputDirectory, options.StartupOutputDirectory);
+            Assert.Null(options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_RecognizesVortexOutputWithQuotedInlineValue()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "mods root");

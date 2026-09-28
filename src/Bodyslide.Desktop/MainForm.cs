@@ -187,6 +187,9 @@ public sealed class MainForm : Form
     private const int AutoInspectDebounceMilliseconds = 700;
     private const double AutoDetectedSourceConfidenceFloor = 0.75;
     private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan StartupOperationTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan ArchiveProgressUiRefreshInterval = TimeSpan.FromMilliseconds(700);
+    private static readonly TimeSpan ArchiveProgressLogInterval = TimeSpan.FromSeconds(12);
 
     private enum UiTheme
     {
@@ -1524,9 +1527,12 @@ public sealed class MainForm : Form
                 !string.IsNullOrWhiteSpace(_launchOptions.StartupOutputDirectory))
             {
                 _startupResultLoadHandled = true;
-                await LoadResultDirectoryAsync(
-                    _launchOptions.StartupOutputDirectory,
-                    _launchOptions.FromModOrganizerLauncher ? "mod manager launcher argument" : "launcher argument");
+                await RunStartupOperationWithTimeoutAsync(
+                    "loading startup result",
+                    cancellationToken => LoadResultDirectoryAsync(
+                        _launchOptions.StartupOutputDirectory,
+                        _launchOptions.FromModOrganizerLauncher ? "mod manager launcher argument" : "launcher argument",
+                        cancellationToken));
                 return;
             }
 
@@ -1542,7 +1548,13 @@ public sealed class MainForm : Form
                     : $"Startup input loaded from launcher: {_launchOptions.StartupInputPath}");
                 if (ShouldAutoInspectInputPath(_launchOptions.StartupInputPath))
                 {
-                    await InspectInputAsync(showDialogs: false, switchToInspectTab: false, automaticTrigger: true);
+                    await RunStartupOperationWithTimeoutAsync(
+                        "auto-inspecting startup input",
+                        cancellationToken => InspectInputAsync(
+                            showDialogs: false,
+                            switchToInspectTab: false,
+                            automaticTrigger: true,
+                            externalCancellationToken: cancellationToken));
                 }
                 else
                 {
@@ -2905,11 +2917,15 @@ public sealed class MainForm : Form
                     : Math.Min(total, Math.Max(1, completed + 1));
                 var statusSuffix = string.IsNullOrWhiteSpace(update.Stage)
                     ? update.CurrentFile
-                    : $"{update.CurrentFile} — {update.Stage}";
+                    : $"{update.CurrentFile} — {BuildProgressLogStage(update.Stage)}";
                 var now = DateTime.UtcNow;
+                var isArchiveExtractionStage = IsArchiveExtractionStage(update.Stage);
+                var uiRefreshInterval = isArchiveExtractionStage
+                    ? ArchiveProgressUiRefreshInterval
+                    : TimeSpan.FromMilliseconds(250);
                 var shouldRefreshUi = update.IsItemCompleted ||
                     !string.Equals(statusSuffix, lastProgressStatus, StringComparison.Ordinal) ||
-                    now - lastProgressUiUpdateUtc >= TimeSpan.FromMilliseconds(250);
+                    now - lastProgressUiUpdateUtc >= uiRefreshInterval;
                 if (!shouldRefreshUi)
                 {
                     return;
@@ -2953,9 +2969,12 @@ public sealed class MainForm : Form
                 }
 
                 var logStage = BuildProgressLogStage(update.Stage);
-                var logSignature = $"{activeItem}/{total}|{logStage}";
+                var logSignature = isArchiveExtractionStage
+                    ? $"{activeItem}/{total}|Extracting archive"
+                    : $"{activeItem}/{total}|{logStage}";
+                var logInterval = isArchiveExtractionStage ? ArchiveProgressLogInterval : TimeSpan.FromSeconds(5);
                 if (!string.Equals(logSignature, lastProgressLogSignature, StringComparison.Ordinal) ||
-                    now - lastProgressLogUtc >= TimeSpan.FromSeconds(5))
+                    now - lastProgressLogUtc >= logInterval)
                 {
                     AppendLog($"Progress {percent}% ({activeItem}/{total}): {logStage}");
                     lastProgressLogUtc = now;
@@ -3096,7 +3115,11 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task InspectInputAsync(bool showDialogs, bool switchToInspectTab, bool automaticTrigger)
+    private async Task InspectInputAsync(
+        bool showDialogs,
+        bool switchToInspectTab,
+        bool automaticTrigger,
+        CancellationToken externalCancellationToken = default)
     {
         if (_activeConversion is not null)
         {
@@ -3127,7 +3150,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        _activeConversion = new CancellationTokenSource();
+        _activeConversion = CancellationTokenSource.CreateLinkedTokenSource(externalCancellationToken);
         try
         {
             if (!TryResolveSkeletonSupportPath(ReadOptionalPathValue(_skeletonNifTextBox.Text), out var skeletonNifPath))
@@ -3304,7 +3327,7 @@ public sealed class MainForm : Form
 
     private static string BuildProgressStageDisplay(BatchProgressUpdate update)
     {
-        var stageName = string.IsNullOrWhiteSpace(update.Stage) ? "Processing" : update.Stage.Trim();
+        var stageName = BuildProgressLogStage(update.Stage);
         if (update.StageCount <= 0)
         {
             return stageName;
@@ -3501,6 +3524,18 @@ public sealed class MainForm : Form
         return value;
     }
 
+    private static bool IsArchiveExtractionStage(string? stage)
+    {
+        if (string.IsNullOrWhiteSpace(stage))
+        {
+            return false;
+        }
+
+        var value = stage.Trim();
+        return value.StartsWith("Extracting archive", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("copying:", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FormatDuration(TimeSpan? duration)
     {
         if (duration is null)
@@ -3655,7 +3690,10 @@ public sealed class MainForm : Form
         await LoadResultDirectoryAsync(selectedFolder, "manual selection");
     }
 
-    private async Task LoadResultDirectoryAsync(string selectedFolder, string sourceLabel)
+    private async Task LoadResultDirectoryAsync(
+        string selectedFolder,
+        string sourceLabel,
+        CancellationToken cancellationToken = default)
     {
         var resetProgressWhenDone = _activeConversion is null;
         if (resetProgressWhenDone)
@@ -3664,6 +3702,7 @@ public sealed class MainForm : Form
         }
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var previewPath = ResolvePreviewPath(selectedFolder);
             _lastPreviewPath = previewPath;
             _lastOutputDirectory = selectedFolder;
@@ -3674,12 +3713,16 @@ public sealed class MainForm : Form
                 : null;
 
             UpdatePathActionStates();
+            cancellationToken.ThrowIfCancellationRequested();
             _ = await LoadPreviewInAppWithTimeoutAsync(previewPath);
-            var snapshot = await BuildWorkflowSnapshotAsync(selectedFolder, previewPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = await BuildWorkflowSnapshotAsync(selectedFolder, previewPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             PopulateSummaryTab(snapshot.SummaryRows);
             PopulateReportsTab(snapshot.ReportMetrics);
             PopulateArtifactsTab(snapshot.Artifacts);
-            var guidanceNeedsReview = await PopulateGuidanceTabAsync(selectedFolder, previewPath);
+            var guidanceNeedsReview = await PopulateGuidanceTabAsync([selectedFolder], previewPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             ApplyValidationGatePresentation(snapshot.ValidationState, guidanceNeedsReview);
             _resultsTabControl.SelectedTab = guidanceNeedsReview
                 ? _guidanceTabPage
@@ -5090,7 +5133,8 @@ public sealed class MainForm : Form
         {
             "preview-workbench.html" or "preview.html" => "Open preview",
             "conversion-matrix-proof.json" or "conversion-matrix-pack-proof.json" => "Open matrix proof",
-            "remaining-gaps-checklist.json" or "remaining-gaps-pack-checklist.json" => "Open gaps checklist",
+            "remaining-gaps-checklist.json" or "remaining-gaps-pack-checklist.json" or
+            "remaining-gaps-checklist.md" or "remaining-gaps-pack-checklist.md" => "Open gaps checklist",
             "windows-ui-e2e-automation.json" => "Open UI harness plan",
             "desktop-workflow-automation.json" => "Open desktop flow",
             "live-game-execution.json" => "Open live-game plan",
@@ -5116,6 +5160,33 @@ public sealed class MainForm : Form
         string outputDirectory,
         string? previewPath) =>
         Task.Run(() => DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath));
+
+    private static Task<DesktopWorkflowAutomationSnapshot> BuildWorkflowSnapshotAsync(
+        string outputDirectory,
+        string? previewPath,
+        CancellationToken cancellationToken) =>
+        Task.Run(() => DesktopWorkflowAutomation.BuildFromOutputDirectory(outputDirectory, previewPath), cancellationToken);
+
+    private async Task RunStartupOperationWithTimeoutAsync(
+        string operationLabel,
+        Func<CancellationToken, Task> operation)
+    {
+        using var timeoutSource = new CancellationTokenSource(StartupOperationTimeout);
+        try
+        {
+            await operation(timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
+        {
+            _statusLabel.Text = "Startup work timed out. Continue manually from the buttons above.";
+            AppendLog($"Startup {operationLabel} timed out after {StartupOperationTimeout.TotalSeconds:0} seconds.");
+        }
+        catch (Exception ex)
+        {
+            _statusLabel.Text = "Startup work failed. Continue manually from the buttons above.";
+            AppendLog($"Startup {operationLabel} failed: {ex.Message}");
+        }
+    }
 
     private void ScheduleAutoInspectLearningCache()
     {
