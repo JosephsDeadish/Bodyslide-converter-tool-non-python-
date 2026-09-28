@@ -31,6 +31,20 @@ internal static class DesktopWorkflowSupport
         "mod-path",
         "staging-path"
     ];
+    private static readonly string[] DesktopInputFallbackArgumentNames =
+    [
+        "mo2-mod",
+        "mo2-path",
+        "modorganizer-path",
+        "vortex-mod",
+        "vortex-path",
+        "vortex-staging",
+        "vortex-stage",
+        "vortex-deployment",
+        "mods-path",
+        "mod-path",
+        "staging-path"
+    ];
 
     private static readonly string[] DesktopResultMarkerFiles =
     [
@@ -223,6 +237,7 @@ internal static class DesktopWorkflowSupport
 
         string? candidatePath = null;
         var candidateFromResultArgument = false;
+        var candidateAllowsInputFallback = false;
         var fromModManagerLauncher = args.Any(static arg => IsModManagerLauncherArgument(arg));
 
         for (var index = 0; index < args.Count; index++)
@@ -233,12 +248,13 @@ internal static class DesktopWorkflowSupport
                 continue;
             }
 
-            if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value, out var fromResultArgument) &&
+            if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value, out var fromResultArgument, out var allowsInputFallback) &&
                 !string.IsNullOrWhiteSpace(value))
             {
                 if (candidatePath is null || fromResultArgument)
                 {
                     candidatePath = value;
+                    candidateAllowsInputFallback = allowsInputFallback;
                 }
                 candidateFromResultArgument |= fromResultArgument;
                 index = consumedIndex;
@@ -257,7 +273,7 @@ internal static class DesktopWorkflowSupport
         }
 
         var startupOutputDirectory = TryResolveResultOutputDirectory(candidatePath, allowAncestorWalk: candidateFromResultArgument);
-        var startupInputPath = startupOutputDirectory is null && !candidateFromResultArgument
+        var startupInputPath = startupOutputDirectory is null && (!candidateFromResultArgument || candidateAllowsInputFallback)
             ? TryResolveExistingInputPath(candidatePath)
             : null;
         return new DesktopLaunchOptions(
@@ -346,11 +362,13 @@ internal static class DesktopWorkflowSupport
         int index,
         out int consumedIndex,
         out string? value,
-        out bool fromResultArgument)
+        out bool fromResultArgument,
+        out bool allowsInputFallback)
     {
         consumedIndex = index;
         value = null;
         fromResultArgument = false;
+        allowsInputFallback = false;
 
         var arg = args[index];
         if (!TryExtractOptionToken(arg, out var key, out var inlineValue))
@@ -363,6 +381,7 @@ internal static class DesktopWorkflowSupport
             return false;
         }
         fromResultArgument = true;
+        allowsInputFallback = DesktopInputFallbackArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase);
 
         if (inlineValue is not null)
         {

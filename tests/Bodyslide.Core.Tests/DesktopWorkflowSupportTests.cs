@@ -448,6 +448,58 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_UsesMo2ModArgumentAsStartupInputWhenResultMarkersAreMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var modDirectory = Path.Combine(workingDirectory, "mo2-mod");
+        Directory.CreateDirectory(modDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--mo2-mod",
+                    modDirectory,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(modDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_UsesVortexModArgumentAsStartupInputWhenResultMarkersAreMissing()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var modDirectory = Path.Combine(workingDirectory, "vortex-mod");
+        Directory.CreateDirectory(modDirectory);
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--vortex-mod",
+                    modDirectory,
+                    "--vortex-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(modDirectory, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_DoesNotTreatPositionalInputInsideOutputTreeAsResult()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
