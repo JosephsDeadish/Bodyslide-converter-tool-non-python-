@@ -1534,6 +1534,7 @@ public sealed class ConversionOrchestratorTests
             var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             Assert.True(File.Exists(zipPath), $"Expected ZIP at {zipPath}");
             Assert.Contains(result.OutputFiles, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(result.OutputFiles, path => path.EndsWith("conversion-quality.json", StringComparison.OrdinalIgnoreCase));
         }
         finally
@@ -1575,6 +1576,18 @@ public sealed class ConversionOrchestratorTests
             var zipPath = outputDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + ".zip";
             using var archive = ZipFile.OpenRead(zipPath);
             Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "conversion-quality.json", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(archive.Entries, entry => string.Equals(entry.FullName, "conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase));
+
+            using var pipelineProfile = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outputDirectory, "conversion-pipeline-profile.json")));
+            Assert.True(pipelineProfile.RootElement.GetProperty("TotalDurationMs").GetInt64() >= 0);
+            Assert.True(pipelineProfile.RootElement.GetProperty("ExportDurationMs").GetInt64() >= 0);
+            Assert.True(pipelineProfile.RootElement.GetProperty("StageCount").GetInt32() > 0);
+            Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("HighestCostStages").EnumerateArray().Select(static item => item.GetString()),
+                static stage => string.Equals(stage, "export", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                pipelineProfile.RootElement.GetProperty("Stages").EnumerateArray(),
+                stage => string.Equals(stage.GetProperty("Stage").GetString(), "mesh-conversion", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

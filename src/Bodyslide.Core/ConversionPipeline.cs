@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Formats.Tar;
 using System.Globalization;
 using System.IO.Compression;
@@ -7250,6 +7251,41 @@ public sealed class ConversionOrchestrator(
             const int totalStages = 18;
             void ReportStage(string stage, int stepIndex) =>
                 progress?.Report(new ConversionStageProgressUpdate(stage, stepIndex, totalStages));
+            var totalStopwatch = Stopwatch.StartNew();
+            var stageDurationsMs = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            async Task<T> ProfileStageAsync<T>(string stageKey, Func<Task<T>> action)
+            {
+                var stopwatch = Stopwatch.StartNew();
+                var value = await action();
+                stopwatch.Stop();
+                stageDurationsMs[stageKey] = stageDurationsMs.TryGetValue(stageKey, out var existing)
+                    ? existing + stopwatch.ElapsedMilliseconds
+                    : stopwatch.ElapsedMilliseconds;
+                return value;
+            }
+            void AppendPipelineTimingSteps(long totalDurationMs)
+            {
+                foreach (var stage in stageDurationsMs
+                             .Where(static pair => pair.Value >= 0)
+                             .OrderByDescending(static pair => pair.Value)
+                             .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    steps.Add($"stage-ms:{stage.Key}={stage.Value}");
+                }
+
+                var topCostStages = stageDurationsMs
+                    .OrderByDescending(static pair => pair.Value)
+                    .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .Select(pair => $"{pair.Key}:{pair.Value}ms")
+                    .ToList();
+                if (topCostStages.Count > 0)
+                {
+                    steps.Add($"stage-top:{string.Join(',', topCostStages)}");
+                }
+
+                steps.Add($"pipeline-total-ms:{Math.Max(0, totalDurationMs)}");
+            }
 
             var deformationProfile = normalized.Preset?.DeformationProfile ?? normalized.Request.DeformationProfile;
             if (!string.IsNullOrWhiteSpace(deformationProfile))
@@ -7259,7 +7295,7 @@ public sealed class ConversionOrchestrator(
 
             var excludedScanDirectories = BuildExcludedScanDirectories(normalized.Request);
             ReportStage("Importing input", 1);
-            armor = await importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories);
+            armor = await ProfileStageAsync("import", () => importer.ImportAsync(normalized.Request.InputPath, cancellationToken, excludedScanDirectories));
 
             // Merge any explicitly-provided custom profile paths from the request with the
             // auto-scanned profiles that the importer found inside the input directory.
@@ -7307,7 +7343,7 @@ public sealed class ConversionOrchestrator(
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]));
             var outputDirectory = Path.GetFullPath(normalized.Request.OutputDirectory ?? defaultOutput);
             var cachePath = Path.Combine(outputDirectory, ".conversion-learning-cache.json");
-            var cacheEntries = await ConversionLearningCache.LoadMergedEntriesAsync(cachePath, cancellationToken);
+            var cacheEntries = await ProfileStageAsync("learning-cache-load", () => ConversionLearningCache.LoadMergedEntriesAsync(cachePath, cancellationToken));
             var cacheKey = ConversionLearningCache.BuildCacheKey(
                 Path.GetFileNameWithoutExtension(armor.MeshFiles[0]) ?? "unknown",
                 normalized.Request.TargetBody);
@@ -7351,7 +7387,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Analyzing textures", 2);
-            var textureSummary = await textureAnalysisService.AnalyzeAsync(armor, cancellationToken);
+            var textureSummary = await ProfileStageAsync("texture-analysis", () => textureAnalysisService.AnalyzeAsync(armor, cancellationToken));
             if (textureSummary.MissingNormals.Count > 0)
             {
                 steps.Add($"textures:missing-normals={textureSummary.MissingNormals.Count}");
@@ -7363,7 +7399,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Scanning plugins", 3);
-            var pluginAnalysis = await pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken);
+            var pluginAnalysis = await ProfileStageAsync("plugin-analysis", () => pluginAnalysisService.AnalyzeAsync(armor, normalized.Request.TargetBody, cancellationToken));
             if (pluginAnalysis.ScannedPlugins.Count > 0)
             {
                 steps.Add($"plugins:scanned={pluginAnalysis.ScannedPlugins.Count},addons={pluginAnalysis.ArmorAddons.Count}");
@@ -7382,12 +7418,12 @@ public sealed class ConversionOrchestrator(
             if ((pluginAnalysis.ScannedPlugins.Count > 0 || pluginAnalysis.ArmorAddons.Count > 0) && raceCompatService is not null)
             {
                 ReportStage("Checking plugin race compatibility", 4);
-                raceCompatibility = await raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken);
+                raceCompatibility = await ProfileStageAsync("race-compatibility", () => raceCompatService.CheckAsync(pluginAnalysis, normalized.Request.TargetBody, cancellationToken));
                 steps.Add(LocalExportService.BuildRaceCompatibilityStep(raceCompatibility));
             }
 
             ReportStage("Detecting source body", 5);
-            var detectedBody = await bodyDetector.DetectAsync(armor, cancellationToken);
+            var detectedBody = await ProfileStageAsync("body-detection", () => bodyDetector.DetectAsync(armor, cancellationToken));
             var evidenceSummary = string.Join(',', detectedBody.Evidence.Take(3));
             steps.Add($"detected-body:{detectedBody.Body}@{detectedBody.Confidence:P0}");
             if (!string.IsNullOrWhiteSpace(evidenceSummary))
@@ -7402,7 +7438,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Analyzing mesh", 6);
-            var analysis = await meshAnalyzer.AnalyzeAsync(armor, cancellationToken);
+            var analysis = await ProfileStageAsync("mesh-analysis", () => meshAnalyzer.AnalyzeAsync(armor, cancellationToken));
             steps.Add($"mesh-type:{analysis.MeshType}");
             var meshFeatures = new List<string>();
             if (analysis.HasSplitMeshes)
@@ -7474,11 +7510,11 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Binding armor regions", 7);
-            var regionBinding = await armorRegionBinder.BindAsync(armor, analysis, cancellationToken);
+            var regionBinding = await ProfileStageAsync("region-binding", () => armorRegionBinder.BindAsync(armor, analysis, cancellationToken));
             steps.Add($"regions:{string.Join('+', regionBinding.CoveredRegions)},method={regionBinding.DetectionMethod}");
 
             ReportStage("Building deformation cage", 8);
-            var cage = await cageGenerator.BuildAsync(armor, analysis, normalized.Request.TargetBody, cancellationToken);
+            var cage = await ProfileStageAsync("deformation-cage", () => cageGenerator.BuildAsync(armor, analysis, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"cage:{cage.Mode}");
 
             var sourceBodyForDelta = detectedBody.Body;
@@ -7495,7 +7531,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Converting mesh", 9);
-            var converted = await meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, sourceBodyForDelta, cancellationToken);
+            var converted = await ProfileStageAsync("mesh-conversion", () => meshConverter.ConvertAsync(armor, analysis, cage, normalized.Request.TargetBody, deformationProfile, sourceBodyForDelta, cancellationToken));
             if (cachedEntry is not null && cachedEntry.RegionalMorphing.Count > 0)
             {
                 var mergedMorphing = converted.RegionalMorphing.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -7529,14 +7565,14 @@ public sealed class ConversionOrchestrator(
             // Only runs for non-headgear meshes; headgear has its own rigid handling.
             if (rigidIslandService is not null && analysis.HeadgearSubType is null)
             {
-                var islandResult = await rigidIslandService.DetectAsync(converted, analysis, cancellationToken);
+                var islandResult = await ProfileStageAsync("rigid-island-detection", () => rigidIslandService.DetectAsync(converted, analysis, cancellationToken));
                 steps.Add(islandResult.IslandCount > 0
                     ? $"rigid-islands:count={islandResult.IslandCount},coverage={islandResult.PlateCoverage:P0},method={islandResult.DetectionMethod}"
                     : "rigid-islands:none");
             }
 
             ReportStage("Transferring weights", 10);
-            var weighted = await weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken);
+            var weighted = await ProfileStageAsync("weight-transfer", () => weightTransfer.TransferAsync(converted, analysis, normalized.Request.TargetBody, armor, cancellationToken));
             steps.Add($"weights:{weighted.WeightProfile}");
             if (weighted.SourceSmpBones is { Count: > 0 } smpBones)
                 steps.Add($"smp-bones:{string.Join('+', smpBones)}");
@@ -7556,7 +7592,7 @@ public sealed class ConversionOrchestrator(
             // vertices produced by the weight-transfer pass.
             if (weightSolverService is not null)
             {
-                var weightSolverReport = await weightSolverService.SolveAsync(weighted, cancellationToken);
+                var weightSolverReport = await ProfileStageAsync("weight-solver", () => weightSolverService.SolveAsync(weighted, cancellationToken));
                 if (weightSolverReport.WasRepaired)
                 {
                     steps.Add($"weight-solver:fixed-over={weightSolverReport.FixedOverweightCount}," +
@@ -7573,12 +7609,12 @@ public sealed class ConversionOrchestrator(
             // changed vertex positions, using angle-weighted averaging per smoothing group.
             if (normalRecalcService is not null)
             {
-                var normalRecalc = await normalRecalcService.RecalculateAsync(converted, cancellationToken);
+                var normalRecalc = await ProfileStageAsync("normal-recalculation", () => normalRecalcService.RecalculateAsync(converted, cancellationToken));
                 steps.Add($"normals:{normalRecalc.SmoothingMethod},recalculated={normalRecalc.RecalculatedCount},groups={normalRecalc.SmoothingGroupCount}");
             }
 
             ReportStage("Mapping skeleton", 11);
-            var skeletonMapping = await skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken);
+            var skeletonMapping = await ProfileStageAsync("skeleton-mapping", () => skeletonMapper.MapAsync(armor, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"skeleton:{skeletonMapping.BoneMappings.Count}-mapped,{skeletonMapping.UnsupportedBones.Count}-unsupported");
             if (skeletonMapping.UnsupportedBones.Count > 0)
             {
@@ -7586,11 +7622,11 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Generating morphs", 12);
-            var morphs = await morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken);
+            var morphs = await ProfileStageAsync("morph-generation", () => morphGenerator.GenerateAsync(weighted, armor, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"morphs:{morphs.LowMorph}/{morphs.HighMorph},sliders={morphs.SliderCount},match={morphs.SourceBodyMatchRatio:P0}");
 
             ReportStage("Rebuilding partitions", 13);
-            var partitions = await partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken);
+            var partitions = await ProfileStageAsync("partition-rebuild", () => partitionRebuilder.RebuildAsync(weighted, analysis, normalized.Request.TargetBody, cancellationToken));
 
             var nifPartitionSlots = armor.MeshFiles
                 .Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))
@@ -7651,11 +7687,11 @@ public sealed class ConversionOrchestrator(
             steps.Add($"partitions:{(partitions.Rebuilt ? string.Join(',', partitions.Partitions) : "unchanged")}");
 
             ReportStage("Detecting clipping", 14);
-            var clipping = await clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken);
+            var clipping = await ProfileStageAsync("clipping-detection", () => clippingDetector.DetectAsync(converted, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"clipping:{(clipping.HasClipping ? "detected" : "none")}");
 
             ReportStage("Correcting mesh fit", 15);
-            var correction = await autoCorrection.CorrectAsync(converted, clipping, cancellationToken);
+            var correction = await ProfileStageAsync("mesh-correction", () => autoCorrection.CorrectAsync(converted, clipping, cancellationToken));
             steps.Add($"correction:{(correction.Applied ? correction.Method : "not-required")}");
 
             // Apply auto-correction feedback: if the correction produced updated regional
@@ -7680,7 +7716,7 @@ public sealed class ConversionOrchestrator(
             // Voxel collision offset pass — detects body/armor penetrations using a
             // simplified voxel grid and computes per-region push-out magnitudes.
             ReportStage("Running collision and pose checks", 16);
-            var voxelResult = await voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
+            var voxelResult = await ProfileStageAsync("voxel-collision", () => voxelCollision.ComputeAsync(armor, converted, normalized.Request.TargetBody, cancellationToken));
             steps.Add(voxelResult.HasPenetrations
                 ? $"voxel-collision:penetrations={voxelResult.AffectedRegions.Count},grid={voxelResult.GridResolution}"
                 : "voxel-collision:none");
@@ -7715,8 +7751,10 @@ public sealed class ConversionOrchestrator(
             // Pose simulation — tests the converted mesh against 8 animation poses using the
             // animation-driven geometry solver when NIF vertex data is available, falling back
             // to the heuristic amplifier approach otherwise.
-            var poseSimulation = await poseSimulator.SimulateWithMeshDataAsync(
-                converted, normalized.Request.TargetBody, armor.MeshFiles, cancellationToken);
+            var poseSimulation = await ProfileStageAsync(
+                "pose-simulation",
+                () => poseSimulator.SimulateWithMeshDataAsync(
+                    converted, normalized.Request.TargetBody, armor.MeshFiles, cancellationToken));
             steps.Add(poseSimulation.TotalPosesAtRisk > 0
                 ? $"pose-simulation:tested={poseSimulation.TestedPoses.Count},at-risk-poses={poseSimulation.TotalPosesAtRisk},high-risk={string.Join('+', poseSimulation.HighRiskRegions)}"
                 : $"pose-simulation:tested={poseSimulation.TestedPoses.Count},no-clipping-risk");
@@ -7731,10 +7769,10 @@ public sealed class ConversionOrchestrator(
             {
                 steps.Add($"world-mode-override:{worldModeOverride}");
             }
-            var physics = await physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken);
+            var physics = await ProfileStageAsync("physics-build", () => physicsSupport.BuildAsync(weighted, normalized.Request.TargetBody, physicsProfile, cancellationToken));
             steps.Add($"physics:{physics.Profile}");
 
-            var bodySlideProject = await bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken);
+            var bodySlideProject = await ProfileStageAsync("bodyslide-project", () => bodySlideProjectService.GenerateAsync(armor, converted, normalized.Request.TargetBody, cancellationToken));
             steps.Add($"bodyslide:{bodySlideProject.ProjectName},{bodySlideProject.Sliders.Count}-sliders");
             if (!normalized.Request.GenerateBodySlideFiles)
             {
@@ -7742,6 +7780,7 @@ public sealed class ConversionOrchestrator(
             }
 
             ReportStage("Exporting outputs", 18);
+            AppendPipelineTimingSteps(totalStopwatch.ElapsedMilliseconds);
             var export = await exporter.ExportAsync(normalized.Request, armor, analysis, converted, morphs, physics, clipping, correction, bodySlideProject, pluginAnalysis, textureSummary, poseSimulation, steps, detectedBody, skeletonMapping, raceCompatibility, voxelResult, cancellationToken);
             steps.Add($"exported:{export.OutputDirectory}");
 
@@ -8414,6 +8453,7 @@ public sealed class BatchConversionRunner(ConversionOrchestrator orchestrator)
         private static readonly string[] ConverterMarkerFiles =
         [
             "conversion-manifest.json",
+            "conversion-pipeline-profile.json",
             "conversion-quality.json",
             "dependency-map.json",
             "morphs.json",
@@ -20203,6 +20243,7 @@ internal sealed class LocalExportService(
         VoxelCollisionResult voxelResult,
         CancellationToken cancellationToken)
     {
+        var exportStopwatch = Stopwatch.StartNew();
         var defaultOutput = Path.Combine(
             ExecutionEnvironment.GetDefaultOutputRootForInput(request.InputPath),
             request.TargetBody,
@@ -21349,6 +21390,14 @@ internal sealed class LocalExportService(
             JsonSerializer.Serialize(desktopWorkflowSnapshot, new JsonSerializerOptions { WriteIndented = true }),
             cancellationToken);
         outputFiles.Add(desktopWorkflowAutomationPath);
+
+        var conversionPipelineProfilePath = Path.Combine(outputDirectory, "conversion-pipeline-profile.json");
+        var conversionPipelineProfile = BuildConversionPipelineProfileReport(steps, exportStopwatch.ElapsedMilliseconds);
+        await File.WriteAllTextAsync(
+            conversionPipelineProfilePath,
+            JsonSerializer.Serialize(conversionPipelineProfile, new JsonSerializerOptions { WriteIndented = true }),
+            cancellationToken);
+        outputFiles.Add(conversionPipelineProfilePath);
 
         if (!string.IsNullOrWhiteSpace(zipPath))
         {
@@ -31551,6 +31600,111 @@ internal sealed class LocalExportService(
         return SecurityElement.Escape(value) ?? string.Empty;
     }
 
+    private static object BuildConversionPipelineProfileReport(IReadOnlyList<string> steps, long exportDurationMs)
+    {
+        var stageDurations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        long? reportedPipelineTotalMs = null;
+
+        foreach (var step in steps)
+        {
+            if (string.IsNullOrWhiteSpace(step))
+            {
+                continue;
+            }
+
+            if (step.StartsWith("stage-ms:", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = step["stage-ms:".Length..];
+                var separatorIndex = payload.IndexOf('=');
+                if (separatorIndex <= 0 || separatorIndex >= payload.Length - 1)
+                {
+                    continue;
+                }
+
+                var stage = payload[..separatorIndex].Trim();
+                if (stage.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!long.TryParse(payload[(separatorIndex + 1)..].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var durationMs))
+                {
+                    continue;
+                }
+
+                stageDurations[stage] = stageDurations.TryGetValue(stage, out var existing)
+                    ? Math.Max(0, existing + durationMs)
+                    : Math.Max(0, durationMs);
+                continue;
+            }
+
+            if (step.StartsWith("pipeline-total-ms:", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = step["pipeline-total-ms:".Length..].Trim();
+                if (long.TryParse(payload, NumberStyles.Integer, CultureInfo.InvariantCulture, out var totalMs))
+                {
+                    reportedPipelineTotalMs = Math.Max(0, totalMs);
+                }
+            }
+        }
+
+        stageDurations["export"] = Math.Max(0, exportDurationMs);
+
+        var totalDurationMs = Math.Max(
+            reportedPipelineTotalMs.GetValueOrDefault(0) + Math.Max(0, exportDurationMs),
+            stageDurations.Values.Sum());
+        var orderedStages = stageDurations
+            .OrderByDescending(static pair => pair.Value)
+            .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var highestCostStages = orderedStages
+            .Take(5)
+            .Select(static pair => pair.Key)
+            .ToList();
+        var stageEntries = orderedStages
+            .Select(pair =>
+            {
+                var share = totalDurationMs > 0 ? (pair.Value / (double)totalDurationMs) * 100d : 0d;
+                var costTier = pair.Value >= 2_000 || share >= 30d
+                    ? "high"
+                    : pair.Value >= 800 || share >= 12d
+                        ? "medium"
+                        : "low";
+                return new
+                {
+                    Stage = pair.Key,
+                    DurationMs = pair.Value,
+                    SharePercent = Math.Round(share, 2),
+                    CostTier = costTier
+                };
+            })
+            .ToList();
+        var recommendations = highestCostStages
+            .Select(static stage => stage switch
+            {
+                "mesh-conversion" => "Profile mesh conversion internals and cache reusable cage/island data between sibling armor pieces.",
+                "morph-generation" => "Reuse payload-backed morph deltas when topology permits and avoid rebuilding unchanged slider payloads.",
+                "weight-transfer" => "Reduce weight-transfer passes for rigid islands and skip optional repair passes when inputs already satisfy constraints.",
+                "voxel-collision" => "Lower voxel grid density for low-risk meshes and skip voxel push-out when clipping checks already pass.",
+                "pose-simulation" => "Trim pose simulation depth for low-risk meshes and reserve full pose sweeps for high-risk topology.",
+                "export" => "Stream export writes and avoid duplicate file rewrites before final zip packaging.",
+                _ => $"Review {stage} for repeated scans or data copies and cache intermediate results."
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new
+        {
+            TotalDurationMs = totalDurationMs,
+            ExportDurationMs = Math.Max(0, exportDurationMs),
+            StageCount = stageEntries.Count,
+            HighestCostStages = highestCostStages,
+            Stages = stageEntries,
+            Recommendations = recommendations,
+            GeneratedAt = DateTimeOffset.UtcNow
+        };
+    }
+
     private static IReadOnlyList<string> BuildExpectedGeneratedRootSupportFiles(bool hasPluginArtifacts)
     {
         var files = new List<string>
@@ -31558,6 +31712,7 @@ internal sealed class LocalExportService(
             "README.txt",
             "meta.ini",
             "dependency-map.json",
+            "conversion-pipeline-profile.json",
             "conversion-quality.json",
             "conversion-matrix-proof.json",
             "remaining-gaps-checklist.json",
@@ -31600,6 +31755,7 @@ internal sealed class LocalExportService(
         fileName.Equals("meta.ini", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("patch-armor.pas", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("dependency-map.json", StringComparison.OrdinalIgnoreCase) ||
+         fileName.Equals("conversion-pipeline-profile.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-quality.json", StringComparison.OrdinalIgnoreCase) ||
          fileName.Equals("conversion-matrix-proof.json", StringComparison.OrdinalIgnoreCase) ||
         fileName.Equals("remaining-gaps-checklist.json", StringComparison.OrdinalIgnoreCase) ||
