@@ -11002,11 +11002,15 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
     public async Task<BodyDetectionReport> DetectAsync(ImportedArmor armor, CancellationToken cancellationToken)
     {
         var tuning = BodyDetectionTuningCatalog.Current;
-        var meshNames = BuildDetectionSignalNames(armor.MeshFiles);
+        var sourceContextNames = BuildDetectionSignalNames([armor.SourcePath]);
+        var meshNames = BuildDetectionSignalNames(armor.MeshFiles)
+            .Concat(sourceContextNames)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var textureNames = BuildDetectionSignalNames(armor.TextureFiles);
         var physicsNames = BuildDetectionSignalNames(armor.PhysicsFiles);
         var bodyReferenceNames = BuildDetectionSignalNames(armor.BodyReferenceFiles);
-        var sourceGenderCue = InferSourceGenderCue(meshNames, textureNames, bodyReferenceNames, physicsNames);
+        var sourceGenderCue = InferSourceGenderCue(meshNames, textureNames, bodyReferenceNames, physicsNames, sourceContextNames);
         var geometrySignature = NifGeometrySignatureReader.TryReadBest(
             armor.MeshFiles.Concat(armor.BodyReferenceFiles.Where(path => Path.GetExtension(path).Equals(".nif", StringComparison.OrdinalIgnoreCase))));
 
@@ -11016,7 +11020,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
 
         var scoredCandidates = VanillaBodySignatureDatabase.Templates
             .Concat(CustomBodyProfileSupport.GetSignatureTemplates(armor))
-            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceGenderCue, physicsContents, physicsBoneNames, geometrySignature))
+            .Select(template => Score(template, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceContextNames, sourceGenderCue, physicsContents, physicsBoneNames, geometrySignature))
             .OrderByDescending(result => result.Score)
             .ThenByDescending(result => result.ReferenceHitRatio)
             .ThenBy(result => result.Template.Body, StringComparer.OrdinalIgnoreCase)
@@ -11343,6 +11347,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         IReadOnlyList<string> textureNames,
         IReadOnlyList<string> physicsNames,
         IReadOnlyList<string> bodyReferenceNames,
+        IReadOnlyList<string> sourceContextNames,
         string? sourceGenderCue,
         string physicsContents,
         IReadOnlySet<string> physicsBoneNames,
@@ -11357,7 +11362,7 @@ internal sealed class SignatureBodyDetectionService : IBodyDetectionService
         {
             var aliasTokens = BuildAliasDetectionTokens(templateMetadata.Aliases);
             if (aliasTokens.Count > 0 &&
-                HasAnyTokenMatch(aliasTokens, meshNames, textureNames, physicsNames, bodyReferenceNames))
+                HasAnyTokenMatch(aliasTokens, meshNames, textureNames, physicsNames, bodyReferenceNames, sourceContextNames))
             {
                 aliasSignal = 1d;
                 evidence.Add("alias-match");

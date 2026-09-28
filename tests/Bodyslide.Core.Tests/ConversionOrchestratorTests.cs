@@ -12397,6 +12397,24 @@ public sealed class BodySignatureVertexCountTests
     }
 
     [Fact]
+    public async Task SignatureBodyDetectionService_UsesSourcePathAliasContextWhenExtractedMeshPathIsGeneric()
+    {
+        var service = new SignatureBodyDetectionService();
+        var armor = new ImportedArmor(
+            SourcePath: "/tmp/mods/collections/skyrim/bhunp-wardrobe-pack.7z",
+            MeshFiles: ["/tmp/extracted/tmp123/outfit_0.nif"],
+            TextureFiles: [],
+            PhysicsFiles: [],
+            BodyReferenceFiles: []);
+
+        var result = await service.DetectAsync(armor, CancellationToken.None);
+
+        Assert.Equal("BHUNP", result.Body);
+        Assert.Contains(result.Evidence, evidence => evidence.StartsWith("mesh:", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Evidence, evidence => evidence.Equals("gender-cue:female", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task SignatureBodyDetectionService_DoesNotMisclassifyUunpReferenceAs3Ba()
     {
         var service = new SignatureBodyDetectionService();
