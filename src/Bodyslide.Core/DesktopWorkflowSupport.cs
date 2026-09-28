@@ -45,6 +45,14 @@ internal static class DesktopWorkflowSupport
         "mod-path",
         "staging-path"
     ];
+    private static readonly string[] DesktopInputArgumentNames =
+    [
+        "input",
+        "path",
+        "source",
+        "file",
+        "folder"
+    ];
 
     private static readonly string[] DesktopResultMarkerFiles =
     [
@@ -376,12 +384,15 @@ internal static class DesktopWorkflowSupport
             return false;
         }
 
-        if (!DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase))
+        var isResultArgument = DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase);
+        var isInputArgument = DesktopInputArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase);
+        if (!isResultArgument && !isInputArgument)
         {
             return false;
         }
-        fromResultArgument = true;
-        allowsInputFallback = DesktopInputFallbackArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase);
+        fromResultArgument = isResultArgument;
+        allowsInputFallback = isResultArgument &&
+                              DesktopInputFallbackArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase);
 
         if (inlineValue is not null)
         {
@@ -448,6 +459,7 @@ internal static class DesktopWorkflowSupport
             return false;
         }
         return DesktopResultArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               DesktopInputArgumentNames.Contains(key, StringComparer.OrdinalIgnoreCase) ||
                key.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||
@@ -496,6 +508,7 @@ internal static class DesktopWorkflowSupport
                 var potentialKey = trimmed[..colonIndex];
                 var recognizesColonSeparatedValue =
                     DesktopResultArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
+                    DesktopInputArgumentNames.Contains(potentialKey, StringComparer.OrdinalIgnoreCase) ||
                     potentialKey.Equals("mo2-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("modorganizer-launcher", StringComparison.OrdinalIgnoreCase) ||
                     potentialKey.Equals("vortex-launcher", StringComparison.OrdinalIgnoreCase) ||

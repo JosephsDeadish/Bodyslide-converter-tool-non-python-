@@ -395,6 +395,61 @@ public sealed class DesktopWorkflowSupportTests
     }
 
     [Fact]
+    public void ParseLaunchOptions_RecognizesInputArgumentAsStartupInputPath()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "mods");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    "--input",
+                    inputFile,
+                    "--mo2-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseLaunchOptions_RecognizesColonSeparatedInputArgument()
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var inputDirectory = Path.Combine(workingDirectory, "mods");
+        Directory.CreateDirectory(inputDirectory);
+        var inputFile = Path.Combine(inputDirectory, "armor.nif");
+        File.WriteAllText(inputFile, "mesh");
+
+        try
+        {
+            var options = DesktopWorkflowSupport.ParseLaunchOptions(
+                [
+                    $"/input:{inputFile}",
+                    "/modorganizer-launcher"
+                ]);
+
+            Assert.Null(options.StartupOutputDirectory);
+            Assert.Equal(inputFile, options.StartupInputPath);
+            Assert.True(options.FromModOrganizerLauncher);
+        }
+        finally
+        {
+            Directory.Delete(workingDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ParseLaunchOptions_UsesExistingPathAsStartupInputWhenItIsNotASlideSmithResult()
     {
         var workingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

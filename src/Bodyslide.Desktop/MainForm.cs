@@ -387,7 +387,10 @@ public sealed class MainForm : Form
         _inputTextBox.TextChanged += (_, _) =>
         {
             UpdatePathActionStates();
-            ClearInspectionTab("Input changed. Auto-inspecting detection and compatibility details...");
+            var inputPath = _inputTextBox.Text.Trim();
+            ClearInspectionTab(ShouldAutoInspectInputPath(inputPath)
+                ? "Input changed. Auto-inspecting detection and compatibility details..."
+                : "Input changed. Auto-inspection is limited to local .nif/.esp/.esm/.esl files; click Inspect Input for folders or archives.");
             UpdateOutputHint();
             ScheduleAutoInspectInput();
         };
@@ -3083,6 +3086,10 @@ public sealed class MainForm : Form
             _autoInspectDebounce?.Cancel();
             _autoInspectDebounce?.Dispose();
             _autoInspectDebounce = null;
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                _statusLabel.Text = "Ready — click Inspect Input for archive or folder analysis.";
+            }
             return;
         }
 
