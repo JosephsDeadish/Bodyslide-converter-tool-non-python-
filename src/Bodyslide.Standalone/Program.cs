@@ -388,10 +388,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
         foreach (var desktopExePath in new[]
                  {
                      Path.Combine(executableDirectory, "SlideSmith.exe"),
-                    Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
+                     Path.Combine(executableDirectory, "SlideSmith.Desktop.exe"),
+                     Path.Combine(executableDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(executableDirectory, "SlideSmith-Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith.exe"),
-                    Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith.Desktop.exe"),
+                     Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.exe"),
                      Path.Combine(siblingDesktopDirectory, "SlideSmith-Desktop.exe")
                  })
         {
@@ -406,6 +408,39 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args)
             }
 
             if (TryStartDesktopProcess(desktopExePath, executableDirectory, launchedFromModOrganizer, args, out var launched))
+            {
+                if (launchedFromModOrganizer && launched is not null)
+                {
+                    try
+                    {
+                        if (launched.WaitForExit(1500) && launched.ExitCode != 0)
+                        {
+                            continue;
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        foreach (var desktopDllPath in new[]
+                 {
+                     Path.Combine(executableDirectory, "SlideSmith.Desktop.dll"),
+                     Path.Combine(executableDirectory, "Bodyslide.Desktop.dll"),
+                     Path.Combine(siblingDesktopDirectory, "SlideSmith.Desktop.dll"),
+                     Path.Combine(siblingDesktopDirectory, "Bodyslide.Desktop.dll")
+                 })
+        {
+            if (!File.Exists(desktopDllPath))
+            {
+                continue;
+            }
+
+            if (TryStartDesktopDllProcess(desktopDllPath, executableDirectory, launchedFromModOrganizer, args, out var launched))
             {
                 if (launchedFromModOrganizer && launched is not null)
                 {
@@ -471,6 +506,63 @@ static bool TryStartDesktopProcess(string desktopExePath, string fallbackWorking
             return false;
         }
     }
+}
+
+static bool TryStartDesktopDllProcess(string desktopDllPath, string fallbackWorkingDirectory, bool launchedFromModOrganizer, IReadOnlyList<string> forwardedArgs, out Process? launchedProcess)
+{
+    launchedProcess = null;
+    var workingDirectory = Path.GetDirectoryName(desktopDllPath) ?? fallbackWorkingDirectory;
+    var dotnetHost = ResolveDotnetHostPath();
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = dotnetHost,
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = false
+    };
+    startInfo.ArgumentList.Add(desktopDllPath);
+    ForwardDesktopLaunchArgs(startInfo, forwardedArgs, launchedFromModOrganizer);
+
+    try
+    {
+        launchedProcess = Process.Start(startInfo);
+        return launchedProcess is not null;
+    }
+    catch
+    {
+        launchedProcess = null;
+        return false;
+    }
+}
+
+static string ResolveDotnetHostPath()
+{
+    var envHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+    if (!string.IsNullOrWhiteSpace(envHost) && File.Exists(envHost))
+    {
+        return envHost;
+    }
+
+    var currentHost = Environment.ProcessPath;
+    if (!string.IsNullOrWhiteSpace(currentHost))
+    {
+        var hostFileName = Path.GetFileNameWithoutExtension(currentHost);
+        if (hostFileName.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return currentHost;
+        }
+
+        var currentDirectory = Path.GetDirectoryName(currentHost);
+        if (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            var siblingHost = Path.Combine(currentDirectory, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+            if (File.Exists(siblingHost))
+            {
+                return siblingHost;
+            }
+        }
+    }
+
+    return "dotnet";
 }
 
 static void ForwardDesktopLaunchArgs(ProcessStartInfo startInfo, IReadOnlyList<string> forwardedArgs, bool launchedFromModOrganizer)

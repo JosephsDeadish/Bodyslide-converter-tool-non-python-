@@ -180,6 +180,7 @@ public sealed class MainForm : Form
     private const int MainSplitPanel2Minimum = 220;
     private const int MaxLogCharacters = 120000;
     private const int TrimmedLogCharacters = 90000;
+    private const int MaxAutoCacheLogEntries = 20;
     private const int AutoInspectDebounceMilliseconds = 700;
     private const double AutoDetectedSourceConfidenceFloor = 0.75;
     private static readonly TimeSpan PreviewLoadTimeout = TimeSpan.FromSeconds(8);
@@ -5103,11 +5104,18 @@ public sealed class MainForm : Form
             }
 
             AppendLog($"Learning cache: {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")}.");
-            foreach (var entry in entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase))
+            var orderedEntries = entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var entry in orderedEntries.Take(MaxAutoCacheLogEntries))
             {
                 AppendLog($"[{entry.Key}] target={entry.TargetBody}, mesh={entry.MeshType}, strategy={entry.Strategy}, cached={entry.LastSuccessfulConversion:u}");
             }
-            PopulateCacheTab(entries, cachePathOverride);
+
+            if (orderedEntries.Count > MaxAutoCacheLogEntries)
+            {
+                AppendLog($"Cache log output truncated to {MaxAutoCacheLogEntries} entries for responsiveness.");
+            }
+
+            PopulateCacheTab(orderedEntries, cachePathOverride);
             if (switchToTab)
             {
                 _resultsTabControl.SelectedTab = _cacheTabPage;
