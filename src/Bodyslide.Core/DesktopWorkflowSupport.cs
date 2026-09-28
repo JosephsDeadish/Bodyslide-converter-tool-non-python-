@@ -236,7 +236,10 @@ internal static class DesktopWorkflowSupport
             if (TryReadNamedArgumentValue(args, index, out var consumedIndex, out var value, out var fromResultArgument) &&
                 !string.IsNullOrWhiteSpace(value))
             {
-                candidatePath ??= value;
+                if (candidatePath is null || fromResultArgument)
+                {
+                    candidatePath = value;
+                }
                 candidateFromResultArgument |= fromResultArgument;
                 index = consumedIndex;
                 continue;

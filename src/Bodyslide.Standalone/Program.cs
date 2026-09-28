@@ -383,13 +383,12 @@ static bool TryLaunchDesktopGuiOnWindows(string[] args, string? startupDiagnosti
 
         var currentExeFullPath = Path.GetFullPath(currentExePath);
         var launchedFromModOrganizer = IsLikelyModOrganizerLaunch(args, currentExeFullPath, Environment.CurrentDirectory);
-        var explicitCliLaunch = HasExplicitStandaloneCliSwitch(args);
         WriteStartupDiagnostics(
             startupDiagnosticsPath,
-            $"desktop-launch: mo2={launchedFromModOrganizer}, explicit-cli={explicitCliLaunch}, exe={currentExeFullPath}");
-        if (args.Length != 0 && !launchedFromModOrganizer && explicitCliLaunch)
+            $"desktop-launch: mo2={launchedFromModOrganizer}, exe={currentExeFullPath}");
+        if (args.Length != 0 && !launchedFromModOrganizer)
         {
-            WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (explicit CLI invocation)");
+            WriteStartupDiagnostics(startupDiagnosticsPath, "desktop-launch: skipped (non-launcher arguments)");
             return false;
         }
 
@@ -973,12 +972,21 @@ static bool HasLauncherPathOptionArgument(IReadOnlyList<string> args)
         }
 
         string? value = null;
-        if (arg.Contains('='))
+        var inlineSeparatorIndex = arg.IndexOf('=');
+        if (inlineSeparatorIndex < 0)
         {
-            var separatorIndex = arg.IndexOf('=');
-            if (separatorIndex >= 0 && separatorIndex < arg.Length - 1)
+            var colonIndex = arg.IndexOf(':');
+            if (colonIndex > 1)
             {
-                value = arg[(separatorIndex + 1)..];
+                inlineSeparatorIndex = colonIndex;
+            }
+        }
+
+        if (inlineSeparatorIndex >= 0)
+        {
+            if (inlineSeparatorIndex < arg.Length - 1)
+            {
+                value = arg[(inlineSeparatorIndex + 1)..];
             }
         }
         else if (index + 1 < args.Count && !TryReadLongOptionName(args[index + 1], out _))

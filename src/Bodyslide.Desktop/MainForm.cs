@@ -174,8 +174,8 @@ public sealed class MainForm : Form
         "pose-simulation-report.json",
         "world-physics.json",
         "plugin-patches.json",
-        "remaining-gaps-checklist.json",
-        "remaining-gaps-pack-checklist.json",
+        "remaining-gaps-checklist.md",
+        "remaining-gaps-pack-checklist.md",
     ];
 
     private const int MainSplitPreferredDistance = 560;

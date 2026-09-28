@@ -13,7 +13,9 @@ internal static class Program
         ExecutionEnvironment.TryNormalizeCurrentDirectoryToExecutionRoot(
             Environment.ProcessPath,
             AppContext.BaseDirectory);
-        _startupDiagnosticsPath = ResolveStartupDiagnosticsPath(args);
+        _startupDiagnosticsPath = ShouldEnableStartupDiagnostics(args)
+            ? ResolveStartupDiagnosticsPath(args)
+            : null;
         WriteStartupDiagnostics(
             _startupDiagnosticsPath,
             $"desktop-startup: exe={Environment.ProcessPath ?? "(unknown)"}, cwd={Environment.CurrentDirectory}, args=[{string.Join(", ", args)}]");
@@ -246,6 +248,34 @@ internal static class Program
         }
 
         return Path.Combine(Path.GetTempPath(), "SlideSmith", "startup-launch-diagnostics.log");
+    }
+
+    private static bool ShouldEnableStartupDiagnostics(IReadOnlyList<string> args)
+    {
+        if (IsDesktopDiagnosticsEnabledByEnvironment())
+        {
+            return true;
+        }
+
+        foreach (var arg in args)
+        {
+            if (TryReadOptionToken(arg, out var optionName, out _) &&
+                optionName.Equals("startup-diagnostics", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsDesktopDiagnosticsEnabledByEnvironment()
+    {
+        var flag = Environment.GetEnvironmentVariable("SLIDESMITH_STARTUP_DIAGNOSTICS");
+        return string.Equals(flag, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(flag, "yes", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(flag, "on", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeDiagnosticsPath(string? value)
